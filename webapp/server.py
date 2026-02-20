@@ -1750,7 +1750,7 @@ async def api_client_create_booking(request: web.Request) -> web.Response:
                             and_(
                                 BookingModel.employee_id == emp.id,
                                 BookingModel.booking_date == selected_date,
-                                BookingModel.status.in_(['pending', 'confirmed'])
+                                BookingModel.status.in_(['pending', 'confirmed', 'pending_prepayment', 'prepayment_sent'])
                             )
                         )
                     )
@@ -2834,6 +2834,18 @@ async def api_analytics_schedule(request: web.Request) -> web.Response:
             employees = await get_business_employees(session, business_id)
             active_employees = [e for e in employees if e.is_active and e.role in ('master', 'master_and_admin')]
 
+            # Сортируем помещения venue_rental так же, как при бронировании клиентом
+            if business.business_type == 'venue_rental':
+                def _room_group_sort(name: str) -> int:
+                    n = name.lower()
+                    if 'красн' in n: return 0
+                    if 'сер' in n: return 1
+                    if 'чёрн' in n or 'черн' in n: return 2
+                    if 'бел' in n: return 3
+                    if 'бежев' in n: return 4
+                    return 5
+                active_employees.sort(key=lambda e: _room_group_sort(e.name))
+
             # Формируем данные для расписания
             # Отмененные записи показываем только в течение 1 минуты после отмены
             # Группируем записи с доп. услугами
@@ -2946,6 +2958,11 @@ async def api_analytics_schedule(request: web.Request) -> web.Response:
                     'phone': cl.phone or '',
                 })
 
+            # Определяем, может ли текущий пользователь создавать записи
+            # (только владельцы могут, администраторы-сотрудники — нет)
+            from database.models import Employee as EmployeeModel
+            can_create_booking = not isinstance(admin, EmployeeModel)
+
             return web.json_response({
                 'bookings': bookings_data,
                 'employees': employees_data,
@@ -2953,6 +2970,7 @@ async def api_analytics_schedule(request: web.Request) -> web.Response:
                 'clients': clients_data,
                 'working_hours': working_hours,
                 'business_type': business.business_type,
+                'can_create_booking': can_create_booking,
             })
 
     except Exception as e:
@@ -3047,7 +3065,7 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
                             and_(
                                 BookingModel.employee_id == emp.id,
                                 BookingModel.booking_date == selected_date,
-                                BookingModel.status.in_(['pending', 'confirmed'])
+                                BookingModel.status.in_(['pending', 'confirmed', 'pending_prepayment', 'prepayment_sent'])
                             )
                         )
                     )
@@ -3081,6 +3099,48 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
             )
 
             service = await get_service_by_id(session, service_id)
+            employee_obj = await get_employee_by_id(session, employee_id)
+
+            # Отправляем уведомления мастеру, администраторам и клиенту
+            try:
+                bot = Bot(token=BOT_TOKEN)
+                booking_with_relations = await get_booking_by_id(session, booking.id)
+
+                services_list = [{
+                    'name': service.name if service else '',
+                    'duration': service.duration_minutes if service else 0,
+                    'price': service.price or 0,
+                    'is_additional': False,
+                    'employee_id': employee_id,
+                    'employee_name': employee_obj.name if employee_obj else '',
+                    'employee_telegram_id': employee_obj.telegram_id if employee_obj else None,
+                }]
+
+                if booking_with_relations:
+                    await notify_master_new_booking(bot, booking_with_relations, services_list)
+                    await notify_administrator_new_booking(bot, booking_with_relations, services_list)
+
+                    # Уведомление клиенту (если есть telegram_id)
+                    if client.telegram_id and client.telegram_id != 0:
+                        try:
+                            weekdays_ru = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+                            formatted_date = selected_date.strftime('%d.%m.%Y') + f" ({weekdays_ru[selected_date.weekday()]})"
+                            price_str = f"\n💰 Стоимость: {service.price}₽" if service and service.price else ""
+                            await bot.send_message(
+                                client.telegram_id,
+                                f"✅ <b>Вас записали!</b>\n\n"
+                                f"🏢 {business.name}\n"
+                                f"📅 {formatted_date} в {selected_time.strftime('%H:%M')}\n"
+                                f"💼 Услуга: {service.name if service else ''}{price_str}\n"
+                                f"🏠 {employee_obj.name if employee_obj else ''}",
+                                parse_mode="HTML"
+                            )
+                        except Exception:
+                            pass
+
+                await bot.session.close()
+            except Exception as notify_err:
+                logger.error(f"Notification error in api_admin_create_booking: {notify_err}")
 
             return web.json_response({
                 'success': True,

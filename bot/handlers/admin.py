@@ -1774,8 +1774,7 @@ async def manage_employees(callback: CallbackQuery, state: FSMContext):
             )
 
     builder.button(text=add_button_text, callback_data=f"add_employee_to:{business_id}")
-    if not is_venue:  # Для аренды помещений не показываем назначение администратора
-        builder.button(text="👔 Назначить администратора", callback_data=f"add_administrator:{business_id}")
+    builder.button(text="👔 Назначить администратора", callback_data=f"add_administrator:{business_id}")
     builder.button(text="◀️ Назад", callback_data=f"admin_business:{business_id}")
     builder.button(text="🏠 Главное меню", callback_data="main_menu")
     builder.adjust(1)
