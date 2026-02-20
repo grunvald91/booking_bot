@@ -3273,7 +3273,14 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
                             pass
 
                     # Отправляем короткое сообщение с номером и кнопками
-                    short_text = f"📱 Перевести на номер: <b>{business.payment_phone}</b>"
+                    _raw_phone = (business.payment_phone or '').replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+                    if _raw_phone.startswith('8') and len(_raw_phone) == 11:
+                        _tel_link = '+7' + _raw_phone[1:]
+                    elif _raw_phone.startswith('+'):
+                        _tel_link = _raw_phone
+                    else:
+                        _tel_link = '+7' + _raw_phone
+                    short_text = f'📱 Перевести на номер: <a href="tel:{_tel_link}"><b>{business.payment_phone}</b></a>'
                     await callback.message.answer(
                         short_text,
                         parse_mode="HTML",

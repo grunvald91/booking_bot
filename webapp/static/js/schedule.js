@@ -748,7 +748,7 @@ function openNewBookingModal(dateStr, timeStr) {
 
     // Clear client fields and suggestions
     document.getElementById('nbClientName').value = '';
-    document.getElementById('nbClientPhone').value = '';
+    document.getElementById('nbClientPhone').value = '+7 9';
     hideSuggestions();
 
     // Reset submit button
@@ -820,7 +820,8 @@ async function submitNewBooking(event) {
     submitBtn.textContent = 'Создание...';
 
     const clientName = document.getElementById('nbClientName').value.trim();
-    const clientPhone = document.getElementById('nbClientPhone').value.trim();
+    const _rawPhone = document.getElementById('nbClientPhone').value.trim();
+    const clientPhone = (_rawPhone === '+7 9' || _rawPhone === '+7') ? '' : _rawPhone;
     const serviceId = document.getElementById('nbService').value;
     const employeeId = document.getElementById('nbEmployee').value;
     const bookingDate = document.getElementById('nbDate').value;
