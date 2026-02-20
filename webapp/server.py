@@ -2912,6 +2912,7 @@ async def api_analytics_schedule(request: web.Request) -> web.Response:
                     'employee_name': main_booking.employee.name if main_booking.employee else 'Не указан',
                     'status': main_booking.status,
                     'prepayment_amount': main_booking.prepayment_amount,
+                    'comment': getattr(main_booking, 'comment', None),
                 })
 
             # Формируем список сотрудников для табов

@@ -121,16 +121,52 @@ body {
     border-color: var(--accent);
 }
 
-/* Week Navigation */
+/* Week/Day Navigation */
 .week-nav {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+/* View mode toggle (День / Неделя) */
+.mode-toggle {
+    display: flex;
+    gap: 4px;
+}
+
+.mode-btn {
+    padding: 5px 20px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-cell);
+    color: var(--text-secondary);
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.mode-btn.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+
+.mode-btn:hover:not(.active) {
+    color: var(--text-primary);
+    border-color: var(--text-secondary);
+}
+
+.nav-row {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 12px;
-    padding: 12px 16px;
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border-color);
-    flex-shrink: 0;
 }
 
 .nav-btn {
@@ -815,4 +851,66 @@ body {
 /* Telegram Theme Support */
 body.tg-theme {
     background: var(--tg-theme-bg-color, var(--bg-dark));
+}
+
+/* ===== Day View ===== */
+.schedule-table.day-view td {
+    height: 24px;
+}
+
+.schedule-table.day-view th.day-emp-col {
+    min-width: 110px;
+    font-size: 11px;
+    padding: 6px 4px;
+}
+
+/* Booking cell spanning multiple rows (day view) */
+.booking-td {
+    padding: 1px;
+    vertical-align: top;
+    position: relative;
+    cursor: pointer;
+}
+
+.day-booking-cell {
+    position: absolute;
+    inset: 1px;
+    border-radius: 3px;
+    padding: 3px 5px;
+    font-size: 10px;
+    color: white;
+    overflow: hidden;
+    cursor: pointer;
+    transition: filter 0.15s;
+}
+
+.day-booking-cell:hover {
+    filter: brightness(1.15);
+    z-index: 5;
+}
+
+.booking-phone {
+    font-size: 9px;
+    opacity: 0.9;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.booking-comment {
+    font-size: 9px;
+    opacity: 0.8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-style: italic;
+    margin-top: 1px;
+}
+
+.day-empty-cell {
+    background: var(--bg-cell);
+}
+
+.schedule-table.day-view tr:nth-child(odd) .day-empty-cell {
+    background: var(--bg-cell-alt);
 }
