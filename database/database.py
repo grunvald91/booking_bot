@@ -50,6 +50,8 @@ async def init_db():
         "ALTER TABLE employees ADD COLUMN photos TEXT",
         "ALTER TABLE employees ADD COLUMN video TEXT",
         "ALTER TABLE businesses ADD COLUMN video TEXT",
+        "ALTER TABLE businesses ADD COLUMN cancellation_policy_photo TEXT",
+        "ALTER TABLE businesses ADD COLUMN require_receipt_for_prepayment BOOLEAN DEFAULT FALSE",
     ]
 
     for migration in migrations:

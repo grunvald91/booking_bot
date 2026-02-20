@@ -142,9 +142,19 @@ def get_businesses_keyboard(businesses: List[Business], page: int = 0, per_page:
 
 
 def get_services_keyboard(services: List[Service], selected_ids: List[int] = None) -> InlineKeyboardMarkup:
-    """Клавиатура для выбора услуг (мультивыбор)"""
+    """Клавиатура для выбора услуг (мультивыбор)
+
+    Услуга "аренда зала для мероприятий" всегда отображается последней.
+    """
     builder = InlineKeyboardBuilder()
     selected_ids = selected_ids or []
+
+    # Сортируем: "аренда зала для мероприятий" опускаем вниз
+    _event_keywords = ['мероприятий', 'мероприятие', 'мероприятия']
+    services = sorted(
+        services,
+        key=lambda s: 1 if any(kw in s.name.lower() for kw in _event_keywords) else 0
+    )
 
     for service in services:
         is_contact_only = hasattr(service, 'tariff_description') and service.tariff_description
@@ -471,11 +481,17 @@ def get_employees_for_service_keyboard(employees: List[Employee], service_id: in
     return builder.as_markup()
 
 
-def get_prepayment_confirmation_keyboard(booking_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура для подтверждения отправки предоплаты клиентом"""
+def get_prepayment_confirmation_keyboard(booking_id: int, require_receipt: bool = False) -> InlineKeyboardMarkup:
+    """Клавиатура для подтверждения отправки предоплаты клиентом
+
+    Args:
+        booking_id: ID бронирования
+        require_receipt: если True, скрывает кнопку "Подтвердить без чека"
+    """
     builder = InlineKeyboardBuilder()
     builder.button(text="📸 Прикрепить чек и подтвердить", callback_data=f"prepay_attach_receipt:{booking_id}")
-    builder.button(text="✅ Подтвердить без чека", callback_data=f"prepay_sent:{booking_id}", style="success")
+    if not require_receipt:
+        builder.button(text="✅ Подтвердить без чека", callback_data=f"prepay_sent:{booking_id}", style="success")
     builder.button(text="❌ Отменить бронирование", callback_data=f"cancel_prepay_booking:{booking_id}", style="danger")
     builder.adjust(1)
     return builder.as_markup()
@@ -489,6 +505,11 @@ def get_venue_room_time_keyboard(
 ) -> InlineKeyboardMarkup:
     """Комбинированная клавиатура: кнопки помещений + слоты времени для выбранного помещения
 
+    Порядок отображения комнат:
+    - Ряд 1: красная, серая, чёрная комнаты (до 3 в ряд)
+    - Ряд 2: белая, бежевая комнаты
+    - Ряды 3-4: танцевальные и прочие комнаты
+
     Args:
         employees: список помещений (объекты Employee)
         selected_employee_id: ID текущего выбранного помещения
@@ -498,13 +519,42 @@ def get_venue_room_time_keyboard(
     builder = InlineKeyboardBuilder()
     occupied_times = occupied_times or []
 
-    # Кнопки помещений (выбранное помечено галочкой)
-    for emp in employees:
-        if emp.id == selected_employee_id:
-            text = f"✅ {emp.name}"
-        else:
-            text = emp.name
-        builder.button(text=text, callback_data=f"venue_room:{emp.id}")
+    def _room_group(name: str) -> int:
+        """Определяет группу комнаты для сортировки по названию"""
+        n = name.lower()
+        if 'красн' in n:
+            return 0
+        if 'сер' in n:
+            return 1
+        if 'чёрн' in n or 'черн' in n:
+            return 2
+        if 'бел' in n:
+            return 3
+        if 'бежев' in n:
+            return 4
+        return 5  # танцевальные и прочие
+
+    # Сортируем помещения по группам
+    sorted_emps = sorted(employees, key=lambda e: _room_group(e.name))
+
+    # Разбиваем на группы для корректной раскладки
+    row1_emps = [e for e in sorted_emps if _room_group(e.name) <= 2]   # красная, серая, чёрная
+    row2_emps = [e for e in sorted_emps if _room_group(e.name) in (3, 4)]  # белая, бежевая
+    other_emps = [e for e in sorted_emps if _room_group(e.name) >= 5]  # танцевальные и прочие
+
+    ordered_emps = row1_emps + row2_emps + other_emps
+
+    # Кнопки помещений
+    for emp in ordered_emps:
+        is_selected = emp.id == selected_employee_id
+        check = "✅ " if is_selected else ""
+        is_red = 'красн' in emp.name.lower()
+        # Красная комната — кнопка красного цвета (Bot API 9.4, style="danger")
+        btn_style = "danger" if is_red else None
+        btn_kwargs = {"text": f"{check}{emp.name}", "callback_data": f"venue_room:{emp.id}"}
+        if btn_style:
+            btn_kwargs["style"] = btn_style
+        builder.button(**btn_kwargs)
 
     # Слоты времени
     all_times = []
@@ -531,24 +581,41 @@ def get_venue_room_time_keyboard(
     builder.button(text="◀️ Назад", callback_data="back_to_dates")
     builder.button(text="🏠 Главное меню", callback_data="client_main_menu")
 
-    # Раскладка: помещения по 2-3 в ряд, время по 3 в ряд, кнопки навигации
-    room_count = len(employees)
-    time_count = len(all_times)
-
+    # Раскладка рядов
     adjust = []
-    # Помещения: до 3 в ряд
-    remaining = room_count
-    while remaining > 0:
-        row_size = min(remaining, 3)
+
+    # Ряд 1: красная, серая, чёрная (все в одном ряду, если есть)
+    if row1_emps:
+        adjust.append(len(row1_emps))
+
+    # Ряд 2: белая, бежевая (все в одном ряду, если есть)
+    if row2_emps:
+        adjust.append(len(row2_emps))
+
+    # Ряды 3-4: танцевальные по 2 в ряд
+    remaining_count = len(other_emps)
+    while remaining_count > 0:
+        row_size = min(remaining_count, 2)
         adjust.append(row_size)
-        remaining -= row_size
+        remaining_count -= row_size
+
+    # Если все комнаты не попали в специальные группы, показываем по 3 в ряд
+    if not row1_emps and not row2_emps and other_emps:
+        # Переопределяем — для нераспознанных комнат по 3 в ряд
+        adjust = []
+        remaining_count = len(other_emps)
+        while remaining_count > 0:
+            row_size = min(remaining_count, 3)
+            adjust.append(row_size)
+            remaining_count -= row_size
 
     # Время: по 3 в ряд
-    remaining = time_count
-    while remaining > 0:
-        row_size = min(remaining, 3)
+    time_count = len(all_times)
+    remaining_count = time_count
+    while remaining_count > 0:
+        row_size = min(remaining_count, 3)
         adjust.append(row_size)
-        remaining -= row_size
+        remaining_count -= row_size
 
     # Навигационные кнопки
     adjust.append(2)
@@ -606,15 +673,18 @@ def get_additional_services_keyboard(
             )
             adjust.append(1)
 
-    # Кнопка "Готово" если что-то выбрано, иначе "Пропустить"
+    # Кнопки навигации: "Пропустить" слева, "Готово" справа (если что-то выбрано)
     if selected_ids:
+        builder.button(text="⏭ Пропустить", callback_data="additional_services_skip")
         builder.button(text="✅ Готово", callback_data="additional_services_done", style="success")
-    builder.button(text="⏭ Пропустить", callback_data="additional_services_skip")
-
-    if selected_ids:
-        adjust.append(2)  # Готово + Пропустить в одном ряду
+        adjust.append(2)  # Пропустить + Готово в одном ряду
     else:
+        builder.button(text="⏭ Пропустить", callback_data="additional_services_skip")
         adjust.append(1)  # Только Пропустить
+
+    builder.button(text="◀️ Назад", callback_data="additional_services_back")
+    adjust.append(1)
+
     builder.adjust(*adjust)
     return builder.as_markup()
 
@@ -634,6 +704,7 @@ def get_notes_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Добавить комментарий", callback_data="booking_add_notes")
     builder.button(text="⏭ Пропустить", callback_data="booking_skip_notes")
+    builder.button(text="◀️ Назад", callback_data="back_from_notes")
     builder.adjust(1)
     return builder.as_markup()
 
