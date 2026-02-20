@@ -4913,7 +4913,7 @@ async def toggle_prepayment(callback: CallbackQuery, state: FSMContext):
             await session.commit()
 
     # Показываем обновленные настройки
-    await show_prepayment_settings.__wrapped__(callback, state)
+    await show_prepayment_settings(callback, state)
 
 
 @router.callback_query(F.data.startswith("prepay_percent:"))
@@ -5108,7 +5108,7 @@ async def toggle_require_receipt(callback: CallbackQuery, state: FSMContext):
         await session.commit()
 
     # Показываем обновленные настройки
-    await show_prepayment_settings.__wrapped__(callback, state)
+    await show_prepayment_settings(callback, state)
 
 
 @router.callback_query(F.data.startswith("prepay_cancel_photo:"))
