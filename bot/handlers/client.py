@@ -1632,8 +1632,16 @@ async def date_chosen(callback: CallbackQuery, state: FSMContext):
             room_order = {rid: i for i, rid in enumerate(venue_room_ids)}
             venue_rooms.sort(key=lambda r: room_order.get(r.id, 0))
 
-        # Выбираем первое помещение по умолчанию
-        first_room = venue_rooms[0]
+        # Выбираем красную комнату по умолчанию (или первую, если красной нет)
+        def _room_default_sort(name: str) -> int:
+            n = name.lower()
+            if 'красн' in n: return 0
+            if 'сер' in n: return 1
+            if 'чёрн' in n or 'черн' in n: return 2
+            if 'бел' in n: return 3
+            if 'бежев' in n: return 4
+            return 5
+        first_room = min(venue_rooms, key=lambda r: _room_default_sort(r.name))
         selected_room_id = first_room.id
         await state.update_data(
             selected_venue_room_id=selected_room_id,

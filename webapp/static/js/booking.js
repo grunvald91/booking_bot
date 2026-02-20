@@ -888,6 +888,12 @@ function renderEmployeeTabs() {
 
     const filteredEmployees = getFilteredEmployees();
 
+    // For venues, pre-select the red room by default instead of 'any'
+    if (state.isVenue && state.selectedEmployee === 'any') {
+        const redRoom = filteredEmployees.find(e => e.name && e.name.toLowerCase().includes('красн'));
+        if (redRoom) state.selectedEmployee = redRoom.id;
+    }
+
     // Show tabs only if more than 1 employee
     if (filteredEmployees.length <= 1) {
         tabsContainer.classList.add('hidden');
