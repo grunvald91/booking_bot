@@ -1,0 +1,1637 @@
+"""
+Обработчики для клиентской части (запись на услуги)
+"""
+from datetime import datetime, timedelta, date, time
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
+
+from sqlalchemy import select
+
+from database import async_session_maker
+from database.models import Employee, Booking, Business
+from database.crud import (
+    get_or_create_user,
+    get_all_active_businesses,
+    get_business_services,
+    get_business_employees,
+    create_booking,
+    get_user_bookings,
+    update_booking_status,
+    get_business_by_id,
+    get_service_by_id,
+    get_user_businesses,
+    get_employee_by_telegram_id
+)
+from bot.states import BookingStates
+from bot.keyboards import client_kb
+from bot.config import ADMIN_IDS
+
+router = Router()
+
+
+async def get_user_roles(telegram_id: int):
+    """Проверка ролей пользователя для кнопок переключения режимов"""
+    async with async_session_maker() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=telegram_id,
+            username=None,
+            full_name=""
+        )
+        businesses = await get_user_businesses(session, user.id)
+        employee = await get_employee_by_telegram_id(session, telegram_id)
+
+    is_admin = telegram_id in ADMIN_IDS
+    show_admin = is_admin or len(businesses) > 0
+    show_master = employee is not None
+
+    return show_admin, show_master
+
+
+# ===== НАЧАЛО ПРОЦЕССА ЗАПИСИ =====
+
+@router.message(F.text == "📅 Записаться")
+async def start_booking(message: Message, state: FSMContext):
+    """Начало процесса записи"""
+    async with async_session_maker() as session:
+        businesses = await get_all_active_businesses(session)
+
+    if not businesses:
+        await message.answer(
+            "К сожалению, сейчас нет доступных бизнесов для записи.\n"
+            "Попробуйте позже."
+        )
+        return
+
+    # Получаем роли пользователя для кнопок переключения
+    show_admin, show_master = await get_user_roles(message.from_user.id)
+
+    # Показываем Reply клавиатуру с кнопками переключения режимов
+    reply_keyboard = client_kb.get_mode_switch_keyboard(show_admin_button=show_admin, show_master_button=show_master)
+
+    # Отправляем сообщение с inline клавиатурой для выбора и reply клавиатурой для переключения режимов
+    await message.answer(
+        "📍 Кнопки переключения режимов внизу ⬇️",
+        reply_markup=reply_keyboard
+    )
+    await message.answer(
+        "Выберите заведение:",
+        reply_markup=client_kb.get_businesses_keyboard(businesses)
+    )
+
+    await state.set_state(BookingStates.choosing_business)
+
+
+# ===== ВЫБОР БИЗНЕСА =====
+
+@router.callback_query(F.data.startswith("business:"), BookingStates.choosing_business)
+async def business_chosen(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора бизнеса"""
+    business_id = int(callback.data.split(":")[1])
+
+    async with async_session_maker() as session:
+        business = await get_business_by_id(session, business_id)
+        services = await get_business_services(session, business_id)
+
+    if not services:
+        await callback.message.answer(
+            f"В бизнесе '{business.name}' пока нет доступных услуг."
+        )
+        await callback.answer()
+        return
+
+    # Сохраняем выбранный бизнес
+    await state.update_data(business_id=business_id, business_name=business.name)
+
+    # Формируем информацию о бизнесе
+    import json
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from urllib.parse import quote
+
+    info_text = f"🏢 <b>{business.name}</b>\n\n"
+
+    if business.description:
+        info_text += f"📝 {business.description}\n\n"
+
+    # Контакты
+    if business.phone:
+        clean_phone = ''.join(c for c in business.phone if c.isdigit() or c == '+')
+        if not clean_phone.startswith('+'):
+            clean_phone = '+7' + clean_phone.lstrip('78')
+        info_text += f'📞 Телефон: {clean_phone}\n'
+
+    if business.address:
+        encoded_address = quote(business.address)
+        yandex_maps_url = f"https://yandex.ru/maps/?text={encoded_address}"
+        info_text += f'📍 Адрес: <a href="{yandex_maps_url}">{business.address}</a>\n'
+
+    # Часы работы
+    if business.working_hours_start and business.working_hours_end:
+        info_text += f"⏰ Часы работы: {business.working_hours_start.strftime('%H:%M')} - {business.working_hours_end.strftime('%H:%M')}\n"
+
+    # Время перерыва
+    if business.break_start and business.break_end:
+        info_text += f"☕ Перерыв: {business.break_start.strftime('%H:%M')} - {business.break_end.strftime('%H:%M')}\n"
+
+    info_text += "\n"
+
+    # Проверяем наличие фото и инструкций
+    has_photos = False
+    has_directions = False
+
+    if business.photos:
+        try:
+            photos_data = json.loads(business.photos)
+            has_photos = len(photos_data) > 0
+        except:
+            pass
+
+    has_directions = business.directions is not None and business.directions.strip() != ""
+
+    # Создаем клавиатуру
+    builder = InlineKeyboardBuilder()
+
+    if has_photos:
+        builder.button(text="📷 Фото заведения", callback_data=f"booking_view_photos:{business_id}")
+    if has_directions:
+        builder.button(text="🗺 Как добраться", callback_data=f"booking_view_directions:{business_id}")
+
+    builder.button(text="➡️ Продолжить запись", callback_data=f"continue_booking:{business_id}")
+    builder.button(text="◀️ Назад к выбору", callback_data="back_to_businesses")
+    builder.adjust(1)
+
+    await callback.message.edit_text(
+        info_text,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=builder.as_markup()
+    )
+    await state.set_state(BookingStates.choosing_business)
+    await callback.answer()
+
+
+# ===== ПРОДОЛЖЕНИЕ ЗАПИСИ ПОСЛЕ ПРОСМОТРА ИНФОРМАЦИИ =====
+
+@router.callback_query(F.data.startswith("continue_booking:"), BookingStates.choosing_business)
+async def continue_booking_after_info(callback: CallbackQuery, state: FSMContext):
+    """Продолжение записи после просмотра информации о бизнесе"""
+    business_id = int(callback.data.split(":")[1])
+
+    async with async_session_maker() as session:
+        business = await get_business_by_id(session, business_id)
+        services = await get_business_services(session, business_id)
+
+    await callback.message.edit_text(
+        f"Выбрано: {business.name}\n\nВыберите услугу:",
+        reply_markup=client_kb.get_services_keyboard(services)
+    )
+    await state.set_state(BookingStates.choosing_service)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("booking_view_photos:"), BookingStates.choosing_business)
+async def booking_view_photos_handler(callback: CallbackQuery, state: FSMContext):
+    """Просмотр фото во время записи"""
+    business_id = int(callback.data.split(":")[1])
+
+    async with async_session_maker() as session:
+        business = await get_business_by_id(session, business_id)
+
+    if not business or not business.photos:
+        await callback.answer("Фотографии не найдены", show_alert=True)
+        return
+
+    import json
+    from aiogram.types import InputMediaPhoto
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    try:
+        photos_data = json.loads(business.photos)
+        if not photos_data:
+            await callback.answer("Фотографии не найдены", show_alert=True)
+            return
+
+        # Отправляем фотографии
+        media_group = []
+        for i, photo_id in enumerate(photos_data[:10]):
+            if i == 0:
+                media_group.append(InputMediaPhoto(
+                    media=photo_id,
+                    caption=f"📷 {business.name}"
+                ))
+            else:
+                media_group.append(InputMediaPhoto(media=photo_id))
+
+        await callback.message.answer_media_group(media_group)
+
+        # Кнопки навигации
+        builder = InlineKeyboardBuilder()
+        builder.button(text="◀️ Назад к информации", callback_data=f"business:{business_id}")
+        builder.adjust(1)
+
+        await callback.message.answer("Вернуться:", reply_markup=builder.as_markup())
+        await callback.answer()
+
+    except Exception as e:
+        await callback.answer("Ошибка при загрузке фотографий", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("booking_view_directions:"), BookingStates.choosing_business)
+async def booking_view_directions_handler(callback: CallbackQuery, state: FSMContext):
+    """Просмотр инструкций во время записи"""
+    business_id = int(callback.data.split(":")[1])
+
+    async with async_session_maker() as session:
+        business = await get_business_by_id(session, business_id)
+
+    if not business or not business.directions:
+        await callback.answer("Инструкция не найдена", show_alert=True)
+        return
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from urllib.parse import quote
+
+    # Формируем текст с адресом
+    address_text = ""
+    if business.address:
+        encoded_address = quote(business.address)
+        yandex_maps_url = f"https://yandex.ru/maps/?text={encoded_address}"
+        gis_url = f"https://2gis.ru/search/{encoded_address}"
+        address_text = f'\n\n📍 <b>Адрес:</b> <a href="{yandex_maps_url}">{business.address}</a>\n\n' \
+                      f'🗺 <a href="{yandex_maps_url}">Яндекс.Карты</a> | ' \
+                      f'<a href="{gis_url}">2ГИС</a>'
+
+    directions_text = f"🗺 <b>Как добраться</b>\n\n{business.directions}{address_text}"
+
+    # Кнопки навигации
+    builder = InlineKeyboardBuilder()
+    builder.button(text="◀️ Назад к информации", callback_data=f"business:{business_id}")
+    builder.adjust(1)
+
+    await callback.message.answer(
+        directions_text,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=builder.as_markup()
+    )
+    await callback.answer()
+
+
+# ===== ВЫБОР УСЛУГИ =====
+
+@router.callback_query(F.data.startswith("service:"), BookingStates.choosing_service)
+async def service_chosen(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора услуги"""
+    service_id = int(callback.data.split(":")[1])
+
+    data = await state.get_data()
+    business_id = data["business_id"]
+
+    async with async_session_maker() as session:
+        service = await get_service_by_id(session, service_id)
+        employees = await get_business_employees(session, business_id)
+
+    # Сохраняем выбранную услугу
+    await state.update_data(
+        service_id=service_id,
+        service_name=service.name,
+        service_duration=service.duration_minutes,
+        service_price=service.price
+    )
+
+    await callback.message.edit_text(
+        f"Услуга: {service.name}\n"
+        f"Длительность: {service.duration_minutes} мин\n"
+        f"{'Цена: ' + str(service.price) + '₽' if service.price else ''}\n\n"
+        "Выберите специалиста:",
+        reply_markup=client_kb.get_employees_keyboard(employees)
+    )
+    await state.set_state(BookingStates.choosing_employee)
+    await callback.answer()
+
+
+# ===== ВЫБОР СОТРУДНИКА =====
+
+@router.callback_query(F.data.startswith("employee:"), BookingStates.choosing_employee)
+async def employee_chosen(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора сотрудника"""
+    employee_data = callback.data.split(":")[1]
+
+    if employee_data == "any":
+        employee_id = None
+        employee_name = "Любой мастер"
+    else:
+        employee_id = int(employee_data)
+        # Получаем имя сотрудника из БД
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(Employee).where(Employee.id == employee_id)
+            )
+            employee = result.scalar_one_or_none()
+            employee_name = employee.name if employee else "Выбранный мастер"
+
+    await state.update_data(employee_id=employee_id, employee_name=employee_name)
+
+    # Генерируем доступные даты (включая сегодня + следующие 7 дней)
+    available_dates = []
+    for i in range(0, 8):  # Начинаем с 0 чтобы включить сегодня
+        future_date = datetime.now().date() + timedelta(days=i)
+        if i == 0:
+            date_str = f"Сегодня ({future_date.strftime('%d.%m')})"
+        elif i == 1:
+            date_str = f"Завтра ({future_date.strftime('%d.%m')})"
+        else:
+            date_str = future_date.strftime("%d.%m.%Y")
+        available_dates.append(date_str)
+
+    await callback.message.edit_text(
+        f"Мастер: {employee_name}\n\nВыберите дату:",
+        reply_markup=client_kb.get_dates_keyboard(available_dates)
+    )
+    await state.set_state(BookingStates.choosing_date)
+    await callback.answer()
+
+
+# ===== ВЫБОР ДАТЫ =====
+
+@router.callback_query(F.data.startswith("date:"), BookingStates.choosing_date)
+async def date_chosen(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора даты"""
+    date_str_raw = callback.data.split(":", 1)[1]
+
+    # Парсим дату из разных форматов
+    if date_str_raw.startswith("Сегодня"):
+        selected_date = datetime.now().date()
+        date_str = selected_date.strftime("%d.%m.%Y")
+    elif date_str_raw.startswith("Завтра"):
+        selected_date = datetime.now().date() + timedelta(days=1)
+        date_str = selected_date.strftime("%d.%m.%Y")
+    else:
+        date_str = date_str_raw
+        selected_date = datetime.strptime(date_str, "%d.%m.%Y").date()
+
+    await state.update_data(booking_date=date_str)
+
+    # Получаем данные о бизнесе, сотруднике и услуге для расчета времени
+    data = await state.get_data()
+    business_id = data['business_id']
+    employee_id = data.get('employee_id')
+    service_id = data.get('service_id')
+
+    async with async_session_maker() as session:
+        business = await get_business_by_id(session, business_id)
+
+        # Получаем услугу для учета длительности
+        service = None
+        service_duration = 60  # По умолчанию 60 минут
+        if service_id:
+            from database.crud import get_service_by_id
+            service = await get_service_by_id(session, service_id)
+            if service:
+                service_duration = service.duration_minutes
+
+        # Определяем шаг записи
+        interval = business.booking_interval_minutes
+        if employee_id:
+            result = await session.execute(
+                select(Employee).where(Employee.id == employee_id)
+            )
+            employee = result.scalar_one_or_none()
+            if employee and employee.booking_interval_minutes:
+                interval = employee.booking_interval_minutes
+
+        # Определяем время работы
+        start_time = business.working_hours_start if business.working_hours_start else datetime.strptime("09:00", "%H:%M").time()
+        end_time = business.working_hours_end if business.working_hours_end else datetime.strptime("18:00", "%H:%M").time()
+
+    # Генерируем доступное время с учетом шага записи
+    available_times = []
+    current_time = datetime.combine(selected_date, start_time)
+    end_datetime = datetime.combine(selected_date, end_time)
+
+    # Если сегодня, начинаем с текущего времени + 1 час
+    if selected_date == datetime.now().date():
+        now_plus_hour = datetime.now() + timedelta(hours=1)
+        if current_time < now_plus_hour:
+            current_time = now_plus_hour
+            # Округляем до ближайшего интервала
+            minutes = (current_time.minute // interval + 1) * interval
+            if minutes >= 60:
+                # Используем timedelta для безопасного добавления часа (избегаем hour=24)
+                current_time = current_time.replace(minute=0) + timedelta(hours=1)
+            else:
+                current_time = current_time.replace(minute=minutes)
+
+    # Проверяем что запись успеет завершиться до конца рабочего дня
+    while current_time + timedelta(minutes=service_duration) <= end_datetime:
+        # Проверяем, не попадает ли время в перерыв
+        is_break = False
+        if business.break_start and business.break_end:
+            if business.break_start <= current_time.time() < business.break_end:
+                is_break = True
+
+        if not is_break:
+            available_times.append(current_time.strftime("%H:%M"))
+
+        current_time += timedelta(minutes=interval)
+
+    await callback.message.edit_text(
+        f"Дата: {date_str}\n\nВыберите время:",
+        reply_markup=client_kb.get_times_keyboard(available_times)
+    )
+    await state.set_state(BookingStates.choosing_time)
+    await callback.answer()
+
+
+# ===== ВЫБОР ВРЕМЕНИ =====
+
+@router.callback_query(F.data.startswith("time:"), BookingStates.choosing_time)
+async def time_chosen(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора времени"""
+    time_str = callback.data.split(":")[1] + ":" + callback.data.split(":")[2]
+    await state.update_data(booking_time=time_str)
+
+    # Проверяем, есть ли у пользователя номер телефона
+    async with async_session_maker() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name
+        )
+
+    if not user.phone:
+        await callback.message.answer(
+            "Для завершения записи, пожалуйста, поделитесь номером телефона:",
+            reply_markup=client_kb.get_phone_request_keyboard()
+        )
+        await state.set_state(BookingStates.entering_phone)
+    else:
+        # Переходим сразу к подтверждению
+        await show_confirmation(callback.message, state)
+
+    await callback.answer()
+
+
+# ===== ВВОД ТЕЛЕФОНА =====
+
+@router.message(F.contact, BookingStates.entering_phone)
+async def phone_received(message: Message, state: FSMContext):
+    """Получение номера телефона"""
+    phone = message.contact.phone_number
+
+    # Сохраняем телефон в БД
+    async with async_session_maker() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            full_name=message.from_user.full_name
+        )
+
+        from database.crud import update_user_phone
+        await update_user_phone(session, user.id, phone)
+
+    await show_confirmation(message, state)
+
+
+async def show_confirmation(message: Message, state: FSMContext):
+    """Показ экрана подтверждения записи"""
+    data = await state.get_data()
+
+    confirmation_text = f"""
+📋 <b>Подтверждение записи</b>
+
+🏢 Заведение: {data['business_name']}
+💼 Услуга: {data['service_name']}
+⏱ Длительность: {data['service_duration']} мин
+{f"💰 Цена: {data['service_price']}₽" if data.get('service_price') else ""}
+👤 Мастер: {data['employee_name']}
+📅 Дата: {data['booking_date']}
+🕐 Время: {data['booking_time']}
+
+Подтверждаете запись?
+"""
+
+    await message.answer(
+        confirmation_text,
+        parse_mode="HTML",
+        reply_markup=client_kb.get_confirmation_keyboard()
+    )
+    await state.set_state(BookingStates.confirming)
+
+
+# ===== ПОДТВЕРЖДЕНИЕ ЗАПИСИ =====
+
+@router.callback_query(F.data == "confirm_booking", BookingStates.confirming)
+async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение и создание записи"""
+    # Сразу отвечаем на callback - защита от двойного клика
+    await callback.answer()
+
+    data = await state.get_data()
+
+    # Парсим дату и время
+    booking_date = datetime.strptime(data['booking_date'], "%d.%m.%Y").date()
+    booking_time = datetime.strptime(data['booking_time'], "%H:%M").time()
+
+    async with async_session_maker() as session:
+        # Получаем пользователя
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name
+        )
+
+        try:
+            # Создаем запись
+            booking = await create_booking(
+                session,
+                business_id=data['business_id'],
+                client_id=user.id,
+                service_id=data['service_id'],
+                booking_date=booking_date,
+                booking_time=booking_time,
+                employee_id=data.get('employee_id')
+            )
+
+            # Подгружаем все необходимые relationships для использования вне сессии
+            from sqlalchemy.orm import selectinload
+            from sqlalchemy import select
+            result = await session.execute(
+                select(Booking)
+                .options(
+                    selectinload(Booking.business).selectinload(Business.owner),
+                    selectinload(Booking.service),
+                    selectinload(Booking.employee),
+                    selectinload(Booking.client)
+                )
+                .where(Booking.id == booking.id)
+            )
+            booking = result.scalar_one()
+
+            # Получаем информацию о бизнесе для ссылок
+            from database.crud import get_business_by_id
+            business = await get_business_by_id(session, data['business_id'])
+
+        except ValueError as e:
+            # Время уже занято или дубликат
+            show_admin, show_master = await get_user_roles(callback.from_user.id)
+            await callback.message.edit_text(
+                f"❌ К сожалению, {str(e)}.\n\nПожалуйста, выберите другое время.",
+                reply_markup=None
+            )
+            await callback.message.answer(
+                "Попробуйте снова:",
+                reply_markup=client_kb.get_main_menu_keyboard(show_admin_button=show_admin, show_master_button=show_master)
+            )
+            await state.clear()
+            return
+
+    # Отправляем уведомления (после закрытия сессии, но с подгруженными данными)
+    from bot.services.notifications import notify_master_new_booking, notify_owner_new_booking
+    await notify_master_new_booking(callback.bot, booking)
+    await notify_owner_new_booking(callback.bot, booking)
+
+    # Формируем кликабельные ссылки
+    phone_text = ""
+    if business.phone:
+        clean_phone = ''.join(c for c in business.phone if c.isdigit() or c == '+')
+        if not clean_phone.startswith('+'):
+            clean_phone = '+7' + clean_phone.lstrip('78')
+        phone_text = f'\n📞 Телефон: <a href="tel:{clean_phone}">{business.phone}</a>'
+
+    address_text = ""
+    if business.address:
+        from urllib.parse import quote
+        encoded_address = quote(business.address)
+        yandex_maps_url = f"https://yandex.ru/maps/?text={encoded_address}"
+        address_text = f'\n📍 Адрес: <a href="{yandex_maps_url}">{business.address}</a>'
+
+    # Определяем текст о напоминании в зависимости от времени до записи
+    booking_datetime = datetime.combine(booking_date, booking_time)
+    now = datetime.now()
+    time_until_booking = booking_datetime - now
+
+    if time_until_booking.total_seconds() < 24 * 3600:  # Меньше 24 часов
+        reminder_text = "Мы отправим вам напоминание за 2 часа до визита."
+    else:
+        reminder_text = "Мы отправим вам напоминание за день и за 2 часа до визита."
+
+    confirmation_text = f"""
+✅ <b>Запись успешно создана!</b>
+
+📅 {data['booking_date']} в {data['booking_time']}
+🏢 {data['business_name']}
+💼 {data['service_name']}
+{address_text}
+{phone_text}
+
+{reminder_text}
+"""
+
+    # Проверяем наличие фото и инструкций для кнопок
+    import json
+    has_photos = False
+    has_directions = False
+
+    if business.photos:
+        try:
+            photos_data = json.loads(business.photos)
+            has_photos = len(photos_data) > 0
+        except:
+            pass
+
+    has_directions = business.directions is not None and business.directions.strip() != ""
+
+    # Создаем клавиатуру с кнопками просмотра информации
+    info_keyboard = None
+    if has_photos or has_directions:
+        info_keyboard = client_kb.get_business_info_keyboard(
+            business_id=business.id,
+            has_photos=has_photos,
+            has_directions=has_directions
+        )
+
+    await callback.message.edit_text(
+        confirmation_text,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=info_keyboard
+    )
+
+    # Отправляем клиентское меню
+    show_admin, show_master = await get_user_roles(callback.from_user.id)
+    await callback.message.answer(
+        "Что хотите сделать дальше?",
+        reply_markup=client_kb.get_main_menu_keyboard(show_admin_button=show_admin, show_master_button=show_master)
+    )
+
+    await state.clear()
+
+
+@router.callback_query(F.data == "cancel_booking", BookingStates.confirming)
+async def booking_cancelled(callback: CallbackQuery, state: FSMContext):
+    """Отмена создания записи"""
+    show_admin, show_master = await get_user_roles(callback.from_user.id)
+    await callback.message.edit_text("Запись отменена.")
+    await callback.message.answer(
+        "Что хотите сделать?",
+        reply_markup=client_kb.get_main_menu_keyboard(show_admin_button=show_admin, show_master_button=show_master)
+    )
+    await state.clear()
+    await callback.answer()
+
+
+# ===== ПРОСМОТР ЗАПИСЕЙ =====
+
+@router.message(F.text == "📋 Мои записи")
+async def show_my_bookings(message: Message):
+    """Показать записи пользователя"""
+    async with async_session_maker() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            full_name=message.from_user.full_name
+        )
+
+        bookings = await get_user_bookings(session, user.id)
+
+    # Получаем роли пользователя для кнопок переключения
+    show_admin, show_master = await get_user_roles(message.from_user.id)
+
+    # Показываем Reply клавиатуру с кнопками переключения режимов
+    reply_keyboard = client_kb.get_mode_switch_keyboard(show_admin_button=show_admin, show_master_button=show_master)
+
+    if not bookings:
+        # Создаем inline клавиатуру для навигации
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
+        builder.adjust(1)
+
+        await message.answer(
+            "У вас пока нет записей.",
+            reply_markup=builder.as_markup()
+        )
+        return
+
+    # Группируем записи по статусу и времени
+    from datetime import datetime
+    now = datetime.now()
+
+    active_bookings = []
+    for b in bookings:
+        if b.status in ["pending", "confirmed"]:
+            # Создаём datetime из даты и времени записи
+            booking_datetime = datetime.combine(b.booking_date, b.booking_time)
+            # Добавляем только будущие записи
+            if booking_datetime > now:
+                active_bookings.append(b)
+
+    past_bookings = [b for b in bookings if b.status in ["completed", "cancelled"]]
+
+    if active_bookings:
+        text = "📅 <b>Активные записи:</b>\n\n"
+        for booking in active_bookings:
+            status_emoji = "⏳" if booking.status == "pending" else "✅"
+            text += f"{status_emoji} <b>{booking.booking_date.strftime('%d.%m.%Y')} в {booking.booking_time.strftime('%H:%M')}</b>\n"
+            text += f"🏢 {booking.business.name}\n"
+            text += f"💼 {booking.service.name}\n"
+            if booking.employee:
+                text += f"👤 {booking.employee.name}\n"
+            text += "\n"
+
+        # Добавляем inline кнопки
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        import json
+        builder = InlineKeyboardBuilder()
+
+        # Группируем записи по бизнесам для кнопок просмотра информации
+        businesses_with_bookings = {}
+        for booking in active_bookings:
+            if booking.business_id not in businesses_with_bookings:
+                businesses_with_bookings[booking.business_id] = booking.business
+
+        # Добавляем кнопки для просмотра информации о каждом бизнесе
+        for business_id, business in businesses_with_bookings.items():
+            # Проверяем наличие фото и инструкций
+            has_photos = False
+            has_directions = False
+            has_contacts = business.phone or business.address
+
+            if business.photos:
+                try:
+                    photos_data = json.loads(business.photos)
+                    has_photos = len(photos_data) > 0
+                except:
+                    pass
+
+            has_directions = business.directions is not None and business.directions.strip() != ""
+
+            # Создаем кнопки для этого бизнеса
+            if has_photos or has_directions or has_contacts:
+                builder.button(
+                    text=f"ℹ️ Информация: {business.name}",
+                    callback_data=f"booking_business_info:{business_id}"
+                )
+
+        # Добавляем кнопки отмены для каждой записи
+        for booking in active_bookings:
+            btn_text = f"❌ Отменить запись от {booking.booking_date.strftime('%d.%m')}"
+            builder.button(text=btn_text, callback_data=f"cancel_booking:{booking.id}")
+
+        # Добавляем кнопку "Назад"
+        builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
+
+        builder.adjust(1)
+
+        # Отправляем сообщение с reply клавиатурой
+        await message.answer(
+            "📍 Кнопки переключения режимов внизу ⬇️",
+            reply_markup=reply_keyboard
+        )
+        await message.answer(text, parse_mode="HTML", reply_markup=builder.as_markup())
+    else:
+        await message.answer("У вас нет активных записей.", reply_markup=reply_keyboard)
+
+
+# ===== НАВИГАЦИЯ НАЗАД =====
+
+@router.callback_query(F.data == "back_to_businesses")
+async def back_to_businesses(callback: CallbackQuery, state: FSMContext):
+    """Вернуться к выбору бизнеса"""
+    async with async_session_maker() as session:
+        businesses = await get_all_active_businesses(session)
+
+    await callback.message.edit_text(
+        "Выберите заведение:",
+        reply_markup=client_kb.get_businesses_keyboard(businesses)
+    )
+    await state.set_state(BookingStates.choosing_business)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_services")
+async def back_to_services(callback: CallbackQuery, state: FSMContext):
+    """Вернуться к выбору услуги"""
+    data = await state.get_data()
+    business_id = data["business_id"]
+
+    async with async_session_maker() as session:
+        services = await get_business_services(session, business_id)
+
+    await callback.message.edit_text(
+        f"Выберите услугу:",
+        reply_markup=client_kb.get_services_keyboard(services)
+    )
+    await state.set_state(BookingStates.choosing_service)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_employees")
+async def back_to_employees(callback: CallbackQuery, state: FSMContext):
+    """Вернуться к выбору сотрудника"""
+    data = await state.get_data()
+    business_id = data["business_id"]
+
+    async with async_session_maker() as session:
+        employees = await get_business_employees(session, business_id)
+
+    await callback.message.edit_text(
+        "Выберите специалиста:",
+        reply_markup=client_kb.get_employees_keyboard(employees)
+    )
+    await state.set_state(BookingStates.choosing_employee)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_dates")
+async def back_to_dates(callback: CallbackQuery, state: FSMContext):
+    """Вернуться к выбору даты"""
+    available_dates = []
+    for i in range(1, 8):
+        future_date = datetime.now().date() + timedelta(days=i)
+        date_str = future_date.strftime("%d.%m.%Y")
+        available_dates.append(date_str)
+
+    await callback.message.edit_text(
+        "Выберите дату:",
+        reply_markup=client_kb.get_dates_keyboard(available_dates)
+    )
+    await state.set_state(BookingStates.choosing_date)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_times")
+async def back_to_times(callback: CallbackQuery, state: FSMContext):
+    """Вернуться к выбору времени"""
+    data = await state.get_data()
+    selected_date = data.get("selected_date")
+    service_id = data.get("service_id")
+    employee_id = data.get("employee_id")
+
+    async with async_session_maker() as session:
+        from database.crud import get_service_by_id, get_business_by_id
+        service = await get_service_by_id(session, service_id)
+
+        if not service:
+            await callback.answer("Ошибка: услуга не найдена", show_alert=True)
+            return
+
+        business = service.business
+        service_duration = service.duration_minutes
+
+        # Определяем шаг записи
+        interval = business.booking_interval_minutes
+        if employee_id:
+            result = await session.execute(
+                select(Employee).where(Employee.id == employee_id)
+            )
+            employee = result.scalar_one_or_none()
+            if employee and employee.booking_interval_minutes:
+                interval = employee.booking_interval_minutes
+
+        # Определяем время работы
+        start_time = business.working_hours_start if business.working_hours_start else datetime.strptime("09:00", "%H:%M").time()
+        end_time = business.working_hours_end if business.working_hours_end else datetime.strptime("18:00", "%H:%M").time()
+
+    # Генерируем доступное время с учетом длительности услуги
+    available_times = []
+    selected_date_obj = datetime.strptime(selected_date, "%d.%m.%Y").date() if isinstance(selected_date, str) else selected_date
+    current_time = datetime.combine(selected_date_obj, start_time)
+    end_datetime = datetime.combine(selected_date_obj, end_time)
+
+    # Если сегодня, начинаем с текущего времени + 1 час
+    if selected_date_obj == datetime.now().date():
+        now_plus_hour = datetime.now() + timedelta(hours=1)
+        if current_time < now_plus_hour:
+            current_time = now_plus_hour
+            # Округляем до ближайшего интервала
+            minutes = (current_time.minute // interval + 1) * interval
+            if minutes >= 60:
+                current_time = current_time.replace(minute=0) + timedelta(hours=1)
+            else:
+                current_time = current_time.replace(minute=minutes)
+
+    # Проверяем что запись успеет завершиться до конца рабочего дня
+    while current_time + timedelta(minutes=service_duration) <= end_datetime:
+        # Проверяем, не попадает ли время в перерыв
+        is_break = False
+        if business.break_start and business.break_end:
+            if business.break_start <= current_time.time() < business.break_end:
+                is_break = True
+
+        if not is_break:
+            available_times.append(current_time.strftime("%H:%M"))
+
+        current_time += timedelta(minutes=interval)
+
+    if not available_times:
+        await callback.message.edit_text(
+            "К сожалению, на эту дату нет свободного времени. Выберите другую дату.",
+            reply_markup=client_kb.get_dates_keyboard([selected_date])
+        )
+        await state.set_state(BookingStates.choosing_date)
+    else:
+        await callback.message.edit_text(
+            f"Дата: {selected_date}\nВыберите удобное время:",
+            reply_markup=client_kb.get_times_keyboard(available_times)
+        )
+        await state.set_state(BookingStates.choosing_time)
+
+    await callback.answer()
+
+
+# ===== ОТМЕНА ЗАПИСИ =====
+
+@router.callback_query(F.data.startswith("cancel_booking:"))
+async def confirm_cancel_booking(callback: CallbackQuery):
+    """Запрос подтверждения отмены записи"""
+    booking_id = int(callback.data.split(":")[1])
+
+    async with async_session_maker() as session:
+        # Получаем информацию о записи
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name
+        )
+
+        user_bookings = await get_user_bookings(session, user.id)
+        booking = None
+        for b in user_bookings:
+            if b.id == booking_id:
+                booking = b
+                break
+
+        if not booking:
+            await callback.answer("❌ Запись не найдена", show_alert=True)
+            return
+
+        if booking.status not in ['pending', 'confirmed']:
+            await callback.answer("❌ Эту запись нельзя отменить", show_alert=True)
+            return
+
+        # Показываем подтверждение
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        builder.button(text="✅ Да, отменить", callback_data=f"do_cancel_booking:{booking_id}")
+        builder.button(text="❌ Нет, оставить", callback_data="back_to_my_bookings")
+        builder.adjust(1)
+
+        await callback.message.edit_text(
+            f"⚠️ <b>Вы уверены, что хотите отменить запись?</b>\n\n"
+            f"📅 <b>{booking.booking_date.strftime('%d.%m.%Y')} в {booking.booking_time.strftime('%H:%M')}</b>\n"
+            f"🏢 {booking.business.name}\n"
+            f"💼 {booking.service.name}",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("do_cancel_booking:"))
+async def cancel_booking_by_client(callback: CallbackQuery):
+    """Финальная отмена записи клиентом после подтверждения"""
+    booking_id = int(callback.data.split(":")[1])
+
+    async with async_session_maker() as session:
+        # Проверяем, принадлежит ли запись этому пользователю
+        from database.crud import get_user_bookings
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name
+        )
+
+        user_bookings = await get_user_bookings(session, user.id)
+        booking = None
+        for b in user_bookings:
+            if b.id == booking_id:
+                booking = b
+                break
+
+        if not booking:
+            await callback.answer("❌ Запись не найдена", show_alert=True)
+            return
+
+        if booking.status not in ['pending', 'confirmed']:
+            await callback.answer("❌ Эту запись нельзя отменить", show_alert=True)
+            return
+
+        # Отменяем запись
+        booking.status = 'cancelled'
+        await session.commit()
+
+        # Уведомляем владельца об отмене
+        from bot.services.notifications import notify_owner_cancelled_booking
+        await notify_owner_cancelled_booking(callback.bot, booking)
+
+    # Создаем inline кнопки для навигации
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📋 Мои записи", callback_data="back_to_my_bookings")
+    builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
+    builder.adjust(1)
+
+    await callback.message.edit_text(
+        f"✅ Запись на {booking.booking_date.strftime('%d.%m.%Y')} в {booking.booking_time.strftime('%H:%M')} отменена.\n\n"
+        f"🏢 {booking.business.name}\n"
+        f"💼 {booking.service.name}",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+
+    await callback.answer("Запись отменена")
+
+
+@router.callback_query(F.data == "back_to_my_bookings")
+async def back_to_my_bookings_handler(callback: CallbackQuery):
+    """Возврат к списку моих записей"""
+    async with async_session_maker() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name
+        )
+
+        bookings = await get_user_bookings(session, user.id)
+
+    if not bookings:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
+        builder.adjust(1)
+
+        await callback.message.edit_text(
+            "У вас пока нет записей.",
+            reply_markup=builder.as_markup()
+        )
+        await callback.answer()
+        return
+
+    # Группируем записи по статусу и времени
+    from datetime import datetime
+    now = datetime.now()
+
+    active_bookings = []
+    for b in bookings:
+        if b.status in ["pending", "confirmed"]:
+            # Создаём datetime из даты и времени записи
+            booking_datetime = datetime.combine(b.booking_date, b.booking_time)
+            # Добавляем только будущие записи
+            if booking_datetime > now:
+                active_bookings.append(b)
+
+    if active_bookings:
+        text = "📅 <b>Активные записи:</b>\n\n"
+        for booking in active_bookings:
+            status_emoji = "⏳" if booking.status == "pending" else "✅"
+            text += f"{status_emoji} <b>{booking.booking_date.strftime('%d.%m.%Y')} в {booking.booking_time.strftime('%H:%M')}</b>\n"
+            text += f"🏢 {booking.business.name}\n"
+            text += f"💼 {booking.service.name}\n"
+            if booking.employee:
+                text += f"👤 {booking.employee.name}\n"
+            text += "\n"
+
+        # Добавляем inline кнопки
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        import json
+        builder = InlineKeyboardBuilder()
+
+        # Группируем записи по бизнесам для кнопок просмотра информации
+        businesses_with_bookings = {}
+        for booking in active_bookings:
+            if booking.business_id not in businesses_with_bookings:
+                businesses_with_bookings[booking.business_id] = booking.business
+
+        # Добавляем кнопки для просмотра информации о каждом бизнесе
+        for business_id, business in businesses_with_bookings.items():
+            # Проверяем наличие фото и инструкций
+            has_photos = False
+            has_directions = False
+            has_contacts = business.phone or business.address
+
+            if business.photos:
+                try:
+                    photos_data = json.loads(business.photos)
+                    has_photos = len(photos_data) > 0
+                except:
+                    pass
+
+            has_directions = business.directions is not None and business.directions.strip() != ""
+
+            # Создаем кнопки для этого бизнеса
+            if has_photos or has_directions or has_contacts:
+                builder.button(
+                    text=f"ℹ️ Информация: {business.name}",
+                    callback_data=f"booking_business_info:{business_id}"
+                )
+
+        # Добавляем кнопки отмены для каждой записи
+        for booking in active_bookings:
+            btn_text = f"❌ Отменить запись от {booking.booking_date.strftime('%d.%m')}"
+            builder.button(text=btn_text, callback_data=f"cancel_booking:{booking.id}")
+
+        # Добавляем кнопку "Назад"
+        builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
+
+        builder.adjust(1)
+
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    else:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
+        builder.adjust(1)
+
+        await callback.message.edit_text(
+            "У вас пока нет активных записей.",
+            reply_markup=builder.as_markup()
+        )
+
+    await callback.answer()
+
+
+# ===== ПРОСМОТР ИНФОРМАЦИИ О БИЗНЕСЕ ИЗ ЗАПИСЕЙ =====
+
+@router.callback_query(F.data.startswith("booking_business_info:"))
+async def show_booking_business_info(callback: CallbackQuery):
+    """Показать информацию о бизнесе из записей"""
+    business_id = int(callback.data.split(":")[1])
+
+    async with async_session_maker() as session:
+        business = await get_business_by_id(session, business_id)
+
+    if not business:
+        await callback.answer("Бизнес не найден", show_alert=True)
+        return
+
+    import json
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    # Формируем информацию о бизнесе
+    info_text = f"ℹ️ <b>Информация о заведении</b>\n\n"
+    info_text += f"🏢 <b>{business.name}</b>\n\n"
+
+    if business.description:
+        info_text += f"📝 {business.description}\n\n"
+
+    # Добавляем контактную информацию
+    if business.phone:
+        # Форматируем телефон в международном формате для кликабельности
+        clean_phone = ''.join(c for c in business.phone if c.isdigit() or c == '+')
+        if not clean_phone.startswith('+'):
+            clean_phone = '+7' + clean_phone.lstrip('78')
+        # Telegram автоматически делает телефоны кликабельными в формате +7...
+        info_text += f'📞 Телефон: {clean_phone}\n'
+
+    if business.address:
+        from urllib.parse import quote
+        encoded_address = quote(business.address)
+        yandex_maps_url = f"https://yandex.ru/maps/?text={encoded_address}"
+        gis_url = f"https://2gis.ru/search/{encoded_address}"
+        info_text += f'📍 Адрес: <a href="{yandex_maps_url}">{business.address}</a>\n'
+        info_text += f'\n🗺 <a href="{yandex_maps_url}">Открыть в Яндекс.Картах</a> | '
+        info_text += f'<a href="{gis_url}">2ГИС</a>\n'
+
+    # Рабочие часы
+    if business.working_hours_start and business.working_hours_end:
+        info_text += f"\n⏰ Часы работы: {business.working_hours_start.strftime('%H:%M')} - {business.working_hours_end.strftime('%H:%M')}\n"
+
+    # Время перерыва
+    if business.break_start and business.break_end:
+        info_text += f"☕ Перерыв: {business.break_start.strftime('%H:%M')} - {business.break_end.strftime('%H:%M')}\n"
+
+    # Создаем кнопки для фото и инструкций
+    builder = InlineKeyboardBuilder()
+
+    has_photos = False
+    if business.photos:
+        try:
+            photos_data = json.loads(business.photos)
+            has_photos = len(photos_data) > 0
+        except:
+            pass
+
+    has_directions = business.directions is not None and business.directions.strip() != ""
+
+    if has_photos:
+        builder.button(text="📷 Посмотреть фото", callback_data=f"view_photos:{business_id}")
+    if has_directions:
+        builder.button(text="🗺 Как добраться", callback_data=f"view_directions:{business_id}")
+
+    builder.button(text="◀️ Назад к записям", callback_data="back_to_bookings")
+    builder.adjust(1)
+
+    await callback.message.answer(
+        info_text,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=builder.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_bookings")
+async def back_to_bookings_handler(callback: CallbackQuery):
+    """Возврат к списку записей"""
+    async with async_session_maker() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name
+        )
+
+        bookings = await get_user_bookings(session, user.id)
+
+    # Получаем роли пользователя для кнопок переключения
+    show_admin, show_master = await get_user_roles(callback.from_user.id)
+
+    # Показываем Reply клавиатуру с кнопками переключения режимов
+    reply_keyboard = client_kb.get_mode_switch_keyboard(show_admin_button=show_admin, show_master_button=show_master)
+
+    if not bookings:
+        await callback.message.answer("У вас пока нет записей.", reply_markup=reply_keyboard)
+        await callback.answer()
+        return
+
+    # Группируем записи по статусу и времени
+    from datetime import datetime
+    now = datetime.now()
+
+    active_bookings = []
+    for b in bookings:
+        if b.status in ["pending", "confirmed"]:
+            # Создаём datetime из даты и времени записи
+            booking_datetime = datetime.combine(b.booking_date, b.booking_time)
+            # Добавляем только будущие записи
+            if booking_datetime > now:
+                active_bookings.append(b)
+
+    if active_bookings:
+        text = "📅 <b>Активные записи:</b>\n\n"
+        for booking in active_bookings:
+            status_emoji = "⏳" if booking.status == "pending" else "✅"
+            text += f"{status_emoji} <b>{booking.booking_date.strftime('%d.%m.%Y')} в {booking.booking_time.strftime('%H:%M')}</b>\n"
+            text += f"🏢 {booking.business.name}\n"
+            text += f"💼 {booking.service.name}\n"
+            if booking.employee:
+                text += f"👤 {booking.employee.name}\n"
+            text += "\n"
+
+        # Добавляем inline кнопки
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        import json
+        builder = InlineKeyboardBuilder()
+
+        # Группируем записи по бизнесам для кнопок просмотра информации
+        businesses_with_bookings = {}
+        for booking in active_bookings:
+            if booking.business_id not in businesses_with_bookings:
+                businesses_with_bookings[booking.business_id] = booking.business
+
+        # Добавляем кнопки для просмотра информации о каждом бизнесе
+        for business_id, business in businesses_with_bookings.items():
+            # Проверяем наличие фото и инструкций
+            has_photos = False
+            has_directions = False
+            has_contacts = business.phone or business.address
+
+            if business.photos:
+                try:
+                    photos_data = json.loads(business.photos)
+                    has_photos = len(photos_data) > 0
+                except:
+                    pass
+
+            has_directions = business.directions is not None and business.directions.strip() != ""
+
+            # Создаем кнопки для этого бизнеса
+            if has_photos or has_directions or has_contacts:
+                builder.button(
+                    text=f"ℹ️ Информация: {business.name}",
+                    callback_data=f"booking_business_info:{business_id}"
+                )
+
+        # Добавляем кнопки отмены для каждой записи
+        for booking in active_bookings:
+            btn_text = f"❌ Отменить запись от {booking.booking_date.strftime('%d.%m')}"
+            builder.button(text=btn_text, callback_data=f"cancel_booking:{booking.id}")
+
+        # Добавляем кнопку "Назад"
+        builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
+
+        builder.adjust(1)
+
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=builder.as_markup())
+    else:
+        await callback.message.answer("У вас нет активных записей.", reply_markup=reply_keyboard)
+
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_main_menu")
+async def back_to_main_menu_handler(callback: CallbackQuery):
+    """Возврат в главное меню"""
+    async with async_session_maker() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name
+        )
+        businesses = await get_user_businesses(session, user.id)
+        employee = await get_employee_by_telegram_id(session, callback.from_user.id)
+
+    is_admin = callback.from_user.id in ADMIN_IDS
+    show_admin = is_admin or len(businesses) > 0
+    show_master = employee is not None
+
+    await callback.message.answer(
+        "🏠 Главное меню",
+        reply_markup=client_kb.get_main_menu_keyboard(show_admin_button=show_admin, show_master_button=show_master)
+    )
+    await callback.answer()
+
+    # Удаляем предыдущее сообщение если возможно
+    try:
+        await callback.message.delete()
+    except:
+        pass
+
+
+# ===== ПРОСМОТР ФОТО И ИНСТРУКЦИЙ =====
+
+@router.callback_query(F.data.startswith("view_photos:"))
+async def view_business_photos(callback: CallbackQuery):
+    """Просмотр фотографий бизнеса"""
+    business_id = int(callback.data.split(":")[1])
+
+    async with async_session_maker() as session:
+        business = await get_business_by_id(session, business_id)
+
+    if not business or not business.photos:
+        await callback.answer("Фотографии не найдены", show_alert=True)
+        return
+
+    import json
+    from aiogram.types import InputMediaPhoto
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    try:
+        photos_data = json.loads(business.photos)
+        if not photos_data:
+            await callback.answer("Фотографии не найдены", show_alert=True)
+            return
+
+        # Отправляем фотографии группой (медиагруппа)
+        media_group = []
+        for i, photo_id in enumerate(photos_data[:10]):  # Максимум 10 фото
+            if i == 0:
+                media_group.append(InputMediaPhoto(
+                    media=photo_id,
+                    caption=f"📷 Фотографии: {business.name}"
+                ))
+            else:
+                media_group.append(InputMediaPhoto(media=photo_id))
+
+        await callback.message.answer_media_group(media_group)
+
+        # Добавляем кнопки навигации
+        builder = InlineKeyboardBuilder()
+        builder.button(text="◀️ Назад к информации", callback_data=f"booking_business_info:{business_id}")
+        builder.button(text="📋 К моим записям", callback_data="back_to_bookings")
+        builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
+        builder.adjust(1)
+
+        await callback.message.answer("Навигация:", reply_markup=builder.as_markup())
+        await callback.answer("✅ Фотографии отправлены")
+
+    except Exception as e:
+        await callback.answer("Ошибка при загрузке фотографий", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("view_directions:"))
+async def view_business_directions(callback: CallbackQuery):
+    """Просмотр инструкции как добраться"""
+    business_id = int(callback.data.split(":")[1])
+
+    async with async_session_maker() as session:
+        business = await get_business_by_id(session, business_id)
+
+    if not business or not business.directions:
+        await callback.answer("Инструкция не найдена", show_alert=True)
+        return
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    # Формируем кликабельный адрес
+    address_text = ""
+    if business.address:
+        from urllib.parse import quote
+        encoded_address = quote(business.address)
+        yandex_maps_url = f"https://yandex.ru/maps/?text={encoded_address}"
+        gis_url = f"https://2gis.ru/search/{encoded_address}"
+        address_text = f'\n\n📍 <b>Адрес:</b> <a href="{yandex_maps_url}">{business.address}</a>\n\n' \
+                      f'🗺 <a href="{yandex_maps_url}">Открыть в Яндекс.Картах</a> | ' \
+                      f'<a href="{gis_url}">2ГИС</a>'
+
+    directions_text = f"""
+🗺 <b>Как добраться</b>
+
+{business.directions}
+{address_text}
+"""
+
+    # Добавляем кнопки навигации
+    builder = InlineKeyboardBuilder()
+    builder.button(text="◀️ Назад к информации", callback_data=f"booking_business_info:{business_id}")
+    builder.button(text="📋 К моим записям", callback_data="back_to_bookings")
+    builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
+    builder.adjust(1)
+
+    await callback.message.answer(
+        directions_text,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=builder.as_markup()
+    )
+    await callback.answer("✅ Инструкция отправлена")
+
+
+# ===== БЫСТРАЯ ПОВТОРНАЯ ЗАПИСЬ =====
+
+@router.message(F.text == "🔄 Повторить запись")
+async def quick_rebooking(message: Message, state: FSMContext):
+    """Быстрая повторная запись на основе истории"""
+    async with async_session_maker() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            full_name=message.from_user.full_name
+        )
+
+        # Получаем последние 5 завершенных записей
+        bookings = await get_user_bookings(session, user.id)
+        completed_bookings = [b for b in bookings if b.status == "completed"][:5]
+
+    # Получаем роли пользователя для кнопок переключения
+    show_admin, show_master = await get_user_roles(message.from_user.id)
+    reply_keyboard = client_kb.get_mode_switch_keyboard(show_admin_button=show_admin, show_master_button=show_master)
+
+    if not completed_bookings:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
+
+        await message.answer(
+            "📍 Кнопки переключения режимов внизу ⬇️",
+            reply_markup=reply_keyboard
+        )
+        await message.answer(
+            "У вас пока нет завершенных записей.\n"
+            "Используйте '📅 Записаться' для первой записи.",
+            reply_markup=builder.as_markup()
+        )
+        return
+
+    # Создаем кнопки для каждой записи
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+
+    for booking in completed_bookings:
+        btn_text = f"{booking.business.name} - {booking.service.name}"
+        if booking.employee:
+            btn_text += f" ({booking.employee.name})"
+
+        builder.button(
+            text=btn_text,
+            callback_data=f"repeat_booking:{booking.id}"
+        )
+
+    # Добавляем кнопку возврата в главное меню
+    builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
+
+    builder.adjust(1)
+
+    await message.answer(
+        "📍 Кнопки переключения режимов внизу ⬇️",
+        reply_markup=reply_keyboard
+    )
+    await message.answer(
+        "🔄 <b>Повторить запись</b>\n\n"
+        "Выберите услугу из ваших прошлых записей:",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+
+
+@router.callback_query(F.data.startswith("repeat_booking:"))
+async def process_repeat_booking(callback: CallbackQuery, state: FSMContext):
+    """Обработка повторной записи"""
+    old_booking_id = int(callback.data.split(":")[1])
+
+    async with async_session_maker() as session:
+        # Получаем старую запись
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name
+        )
+
+        user_bookings = await get_user_bookings(session, user.id)
+        old_booking = None
+        for b in user_bookings:
+            if b.id == old_booking_id:
+                old_booking = b
+                break
+
+        if not old_booking:
+            await callback.answer("❌ Запись не найдена", show_alert=True)
+            return
+
+        # Сохраняем данные из старой записи
+        await state.update_data(
+            business_id=old_booking.business_id,
+            business_name=old_booking.business.name,
+            service_id=old_booking.service_id,
+            service_name=old_booking.service.name,
+            service_duration=old_booking.service.duration_minutes,
+            service_price=old_booking.service.price,
+            employee_id=old_booking.employee_id,
+            employee_name=old_booking.employee.name if old_booking.employee else "Любой мастер"
+        )
+
+    # Переходим сразу к выбору даты
+    available_dates = []
+    for i in range(0, 8):
+        future_date = datetime.now().date() + timedelta(days=i)
+        if i == 0:
+            date_str = f"Сегодня ({future_date.strftime('%d.%m')})"
+        elif i == 1:
+            date_str = f"Завтра ({future_date.strftime('%d.%m')})"
+        else:
+            date_str = future_date.strftime('%d.%m.%Y')
+        available_dates.append(date_str)
+
+    await callback.message.edit_text(
+        f"🔄 Повторная запись\n\n"
+        f"🏢 {old_booking.business.name}\n"
+        f"💼 {old_booking.service.name}\n"
+        f"👤 {old_booking.employee.name if old_booking.employee else 'Любой мастер'}\n\n"
+        f"Выберите дату:",
+        reply_markup=client_kb.get_dates_keyboard(available_dates)
+    )
+    await state.set_state(BookingStates.choosing_date)
+    await callback.answer()
+
+
+# ===== ВОЗВРАТ В ГЛАВНОЕ МЕНЮ =====
+
+@router.callback_query(F.data == "client_main_menu")
+async def back_to_client_main_menu(callback: CallbackQuery, state: FSMContext):
+    """Возврат в главное меню клиента"""
+    await state.clear()
+
+    # Проверяем роли пользователя
+    from database import get_or_create_user, get_user_businesses, get_employee_by_telegram_id
+    async with async_session_maker() as session:
+        user = await get_or_create_user(
+            session,
+            callback.from_user.id,
+            callback.from_user.username,
+            callback.from_user.full_name
+        )
+        businesses = await get_user_businesses(session, user.id)
+        employee = await get_employee_by_telegram_id(session, callback.from_user.id)
+
+    is_admin = callback.from_user.id in ADMIN_IDS
+    show_admin = is_admin or len(businesses) > 0
+    show_master = employee is not None
+
+    # Удаляем сообщение с выбором бизнеса
+    try:
+        await callback.message.delete()
+    except:
+        pass
+
+    # Отправляем новое сообщение с главным меню
+    await callback.bot.send_message(
+        chat_id=callback.from_user.id,
+        text="👤 Вы в режиме клиента\n\nЗдесь вы можете записаться на услуги и управлять своими записями.",
+        reply_markup=client_kb.get_main_menu_keyboard(show_admin_button=show_admin, show_master_button=show_master)
+    )
+    await callback.answer()
+

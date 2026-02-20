@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Расписание</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="/static/css/schedule.css?v=14">
+</head>
+<body>
+    <div id="app">
+        <!-- Loading -->
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Загрузка расписания...</p>
+        </div>
+
+        <!-- Main Content -->
+        <div class="content" id="mainContent" style="display: none;">
+            <!-- Header -->
+            <header class="header">
+                <button class="back-btn" onclick="goBack()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1>Расписание</h1>
+                <select class="business-select" id="businessSelect">
+                    <option value="">Выберите бизнес</option>
+                </select>
+            </header>
+
+            <!-- Week Navigation -->
+            <div class="week-nav">
+                <button class="nav-btn" onclick="navigateWeek(-1)">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </button>
+                <div class="week-label" id="weekLabel">Эта неделя</div>
+                <button class="nav-btn" onclick="navigateWeek(1)">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                        <path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </button>
+                <button class="today-btn" onclick="goToToday()">Сегодня</button>
+            </div>
+
+            <!-- Schedule Table -->
+            <div class="schedule-container">
+                <div class="schedule-wrapper" id="scheduleWrapper">
+                    <table class="schedule-table" id="scheduleTable">
+                        <thead id="scheduleHead"></thead>
+                        <tbody id="scheduleBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Tabs for Employees/Rooms -->
+            <div class="tabs-container" id="tabsContainer">
+                <div class="tabs" id="employeeTabs"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- FAB Add Booking Button -->
+    <button class="fab-add-booking" id="fabAddBooking" onclick="openNewBookingModal()" title="Добавить запись">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+            <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+    </button>
+
+    <!-- Booking Details Modal -->
+    <div class="modal hidden" id="bookingModal">
+        <div class="modal-overlay" onclick="closeModal()"></div>
+        <div class="modal-content" id="modalContent"></div>
+    </div>
+
+    <!-- New Booking Modal -->
+    <div class="modal hidden" id="newBookingModal">
+        <div class="modal-overlay" onclick="closeNewBookingModal()"></div>
+        <div class="modal-content new-booking-form">
+            <div class="modal-header">
+                <div class="modal-title">Новая запись</div>
+                <button class="modal-close" onclick="closeNewBookingModal()">&times;</button>
+            </div>
+            <form id="newBookingForm" onsubmit="submitNewBooking(event)">
+                <div class="form-group">
+                    <label for="nbClientName">Имя клиента *</label>
+                    <input type="text" id="nbClientName" required placeholder="Введите имя" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="nbClientPhone">Телефон</label>
+                    <input type="tel" id="nbClientPhone" placeholder="+7 (999) 123-45-67" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="nbService">Услуга *</label>
+                    <select id="nbService" required>
+                        <option value="">Выберите услугу</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="nbEmployee" id="nbEmployeeLabel">Сотрудник</label>
+                    <select id="nbEmployee">
+                        <option value="">Любой свободный</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="nbDate">Дата *</label>
+                        <input type="date" id="nbDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="nbTime">Время *</label>
+                        <input type="time" id="nbTime" required>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-cancel" onclick="closeNewBookingModal()">Отмена</button>
+                    <button type="submit" class="btn-submit" id="nbSubmitBtn">Создать запись</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/js/schedule.js?v=16"></script>
+</body>
+</html>
