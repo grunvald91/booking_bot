@@ -142,19 +142,9 @@ def get_businesses_keyboard(businesses: List[Business], page: int = 0, per_page:
 
 
 def get_services_keyboard(services: List[Service], selected_ids: List[int] = None) -> InlineKeyboardMarkup:
-    """Клавиатура для выбора услуг (мультивыбор)
-
-    Услуга "аренда зала для мероприятий" всегда отображается последней.
-    """
+    """Клавиатура для выбора услуг (мультивыбор)"""
     builder = InlineKeyboardBuilder()
     selected_ids = selected_ids or []
-
-    # Сортируем: услуги аренды зала и мероприятий опускаем вниз
-    _event_keywords = ['мероприятий', 'мероприятие', 'мероприятия', 'аренда зала']
-    services = sorted(
-        services,
-        key=lambda s: 1 if any(kw in s.name.lower() for kw in _event_keywords) else 0
-    )
 
     for service in services:
         is_contact_only = hasattr(service, 'tariff_description') and service.tariff_description

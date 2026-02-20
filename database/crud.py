@@ -284,7 +284,7 @@ async def get_business_services(session: AsyncSession, business_id: int) -> List
     result = await session.execute(
         select(Service).where(
             and_(Service.business_id == business_id, Service.is_active == True)
-        )
+        ).order_by(Service.sort_order, Service.id)
     )
     return list(result.scalars().all())
 
@@ -306,7 +306,7 @@ async def get_business_main_services(session: AsyncSession, business_id: int) ->
                 Service.is_active == True,
                 Service.is_additional == False
             )
-        )
+        ).order_by(Service.sort_order, Service.id)
     )
     return list(result.scalars().all())
 

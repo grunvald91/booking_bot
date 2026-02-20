@@ -1537,6 +1537,67 @@ async def superadmin_reject_delete(callback: CallbackQuery):
     await callback.answer("Запрос отклонён")
 
 
+async def _show_manage_services(callback: CallbackQuery, business_id: int):
+    """Отображает список услуг для управления (без проверки прав и очистки FSM)"""
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.utils.business_types import is_venue_rental_type
+
+    async with async_session_maker() as session:
+        business = await get_business_by_id(session, business_id)
+        services = await get_business_services(session, business_id)
+
+    builder = InlineKeyboardBuilder()
+
+    is_venue = is_venue_rental_type(business.business_type)
+    service_label = "⏱ Время аренды" if is_venue else "📋 Услуги"
+    service_label_single = "время аренды" if is_venue else "услугу"
+    add_button_text = "➕ Добавить время" if is_venue else "➕ Добавить услугу"
+
+    main_services = [s for s in services if not s.is_additional]
+
+    if not main_services:
+        info_text = f"""
+🏢 <b>{business.name}</b>
+{service_label}
+
+{"Время аренды пока не добавлено" if is_venue else "Услуги пока не добавлены"}
+"""
+    else:
+        info_text = f"""
+🏢 <b>{business.name}</b>
+{service_label}
+
+Выберите {service_label_single} для редактирования или удаления:
+"""
+        for i, service in enumerate(main_services):
+            price_text = f", {service.price} ₽" if service.price else ""
+            if service.duration_minutes and service.duration_minutes > 0:
+                duration_text = f"{service.duration_minutes} мин"
+            else:
+                duration_text = ""
+            if duration_text and price_text:
+                info = f" ({duration_text}{price_text})"
+            elif duration_text:
+                info = f" ({duration_text})"
+            elif price_text:
+                info = f" ({service.price} ₽)"
+            else:
+                info = ""
+            up_cb = f"svc_up:{service.id}:{business_id}" if i > 0 else "noop"
+            dn_cb = f"svc_down:{service.id}:{business_id}" if i < len(main_services) - 1 else "noop"
+            builder.button(text="⬆️", callback_data=up_cb)
+            builder.button(text=f"📋 {service.name}{info}", callback_data=f"edit_service:{service.id}")
+            builder.button(text="⬇️", callback_data=dn_cb)
+
+    builder.button(text=add_button_text, callback_data=f"add_service_to:{business_id}")
+    builder.button(text="◀️ Назад", callback_data=f"admin_business:{business_id}")
+    builder.button(text="🏠 Главное меню", callback_data="main_menu")
+    adjust = [3] * len(main_services) + [1, 1, 1]
+    builder.adjust(*adjust)
+
+    await safe_edit_or_send(callback, info_text, reply_markup=builder.as_markup())
+
+
 @router.callback_query(F.data.startswith("manage_services:"))
 async def manage_services(callback: CallbackQuery, state: FSMContext):
     """Управление услугами бизнеса"""
@@ -1558,68 +1619,72 @@ async def manage_services(callback: CallbackQuery, state: FSMContext):
             await callback.answer("❌ У вас нет прав для управления этим бизнесом", show_alert=True)
             return
 
-        business = await get_business_by_id(session, business_id)
-        services = await get_business_services(session, business_id)
-
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-    from bot.utils.business_types import is_venue_rental_type, get_terminology
-
-    builder = InlineKeyboardBuilder()
-
-    # Определяем терминологию
-    is_venue = is_venue_rental_type(business.business_type)
-    service_label = "⏱ Время аренды" if is_venue else "📋 Услуги"
-    service_label_single = "время аренды" if is_venue else "услугу"
-    add_button_text = "➕ Добавить время" if is_venue else "➕ Добавить услугу"
-
-    # Только основные услуги (доп. услуги — в отдельном разделе)
-    main_services = [s for s in services if not s.is_additional]
-
-    if not main_services:
-        info_text = f"""
-🏢 <b>{business.name}</b>
-{service_label}
-
-{"Время аренды пока не добавлено" if is_venue else "Услуги пока не добавлены"}
-"""
-    else:
-        info_text = f"""
-🏢 <b>{business.name}</b>
-{service_label}
-
-Выберите {service_label_single} для редактирования или удаления:
-"""
-        for service in main_services:
-            price_text = f", {service.price} ₽" if service.price else ""
-            # Для услуг без времени (duration=0) не показываем "0 мин"
-            if service.duration_minutes and service.duration_minutes > 0:
-                duration_text = f"{service.duration_minutes} мин"
-            else:
-                duration_text = ""
-            if duration_text and price_text:
-                info = f" ({duration_text}{price_text})"
-            elif duration_text:
-                info = f" ({duration_text})"
-            elif price_text:
-                info = f" ({service.price} ₽)"
-            else:
-                info = ""
-            builder.button(
-                text=f"📋 {service.name}{info}",
-                callback_data=f"edit_service:{service.id}"
-            )
-
-    builder.button(text=add_button_text, callback_data=f"add_service_to:{business_id}")
-    builder.button(text="◀️ Назад", callback_data=f"admin_business:{business_id}")
-    builder.button(text="🏠 Главное меню", callback_data="main_menu")
-    builder.adjust(1)
-
-    await safe_edit_or_send(
-        callback,
-        info_text,
-        reply_markup=builder.as_markup()
-    )
+    await _show_manage_services(callback, business_id)
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("svc_up:") | F.data.startswith("svc_down:"))
+async def reorder_service(callback: CallbackQuery):
+    """Переместить услугу вверх или вниз в списке"""
+    parts = callback.data.split(":")
+    direction = parts[0]  # "svc_up" или "svc_down"
+    service_id = int(parts[1])
+    business_id = int(parts[2])
+
+    from sqlalchemy import select
+    from database.models import Service
+
+    async with async_session_maker() as session:
+        # Все основные услуги бизнеса (уже отсортированы по sort_order, id)
+        result = await session.execute(
+            select(Service).where(
+                Service.business_id == business_id,
+                Service.is_active == True,
+                Service.is_additional == False
+            ).order_by(Service.sort_order, Service.id)
+        )
+        services = list(result.scalars().all())
+
+        # Инициализируем sort_order если все равны 0
+        if all(s.sort_order == 0 for s in services):
+            for i, s in enumerate(services):
+                s.sort_order = (i + 1) * 10
+            await session.commit()
+            # Перечитываем
+            result = await session.execute(
+                select(Service).where(
+                    Service.business_id == business_id,
+                    Service.is_active == True,
+                    Service.is_additional == False
+                ).order_by(Service.sort_order, Service.id)
+            )
+            services = list(result.scalars().all())
+
+        # Находим индекс текущей услуги
+        idx = next((i for i, s in enumerate(services) if s.id == service_id), None)
+        if idx is None:
+            await callback.answer("Услуга не найдена", show_alert=True)
+            return
+
+        # Меняем sort_order с соседом
+        if direction == "svc_up" and idx > 0:
+            services[idx].sort_order, services[idx - 1].sort_order = (
+                services[idx - 1].sort_order, services[idx].sort_order
+            )
+            await session.commit()
+            await callback.answer("⬆️ Услуга перемещена вверх")
+        elif direction == "svc_down" and idx < len(services) - 1:
+            services[idx].sort_order, services[idx + 1].sort_order = (
+                services[idx + 1].sort_order, services[idx].sort_order
+            )
+            await session.commit()
+            await callback.answer("⬇️ Услуга перемещена вниз")
+        else:
+            await callback.answer()
+            return
+
+    # Перезагружаем список услуг
+    await _show_manage_services(callback, business_id)
 
 
 @router.callback_query(F.data.startswith("manage_additional_services:"))
