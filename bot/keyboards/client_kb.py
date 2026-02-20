@@ -149,8 +149,8 @@ def get_services_keyboard(services: List[Service], selected_ids: List[int] = Non
     builder = InlineKeyboardBuilder()
     selected_ids = selected_ids or []
 
-    # Сортируем: "аренда зала для мероприятий" опускаем вниз
-    _event_keywords = ['мероприятий', 'мероприятие', 'мероприятия']
+    # Сортируем: услуги аренды зала и мероприятий опускаем вниз
+    _event_keywords = ['мероприятий', 'мероприятие', 'мероприятия', 'аренда зала']
     services = sorted(
         services,
         key=lambda s: 1 if any(kw in s.name.lower() for kw in _event_keywords) else 0
