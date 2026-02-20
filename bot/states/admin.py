@@ -85,9 +85,10 @@ class EmployeeServicesStates(StatesGroup):
 
 class PrepaymentSettingsStates(StatesGroup):
     """Состояния для настройки предоплаты"""
-    entering_percent = State()      # Ввод процента предоплаты
-    entering_phone = State()        # Ввод номера для оплаты
-    entering_details = State()      # Ввод реквизитов (карта, СБП и т.д.)
+    entering_percent = State()              # Ввод процента предоплаты
+    entering_phone = State()               # Ввод номера для оплаты
+    entering_details = State()             # Ввод реквизитов (карта, СБП и т.д.)
+    entering_cancellation_photo = State()  # Загрузка фото условий отмены
 
 
 class BusinessOwnerStates(StatesGroup):

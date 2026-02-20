@@ -2269,6 +2269,85 @@ async def booking_skip_notes(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@router.callback_query(F.data == "back_from_notes", BookingStates.entering_notes)
+async def back_from_notes(callback: CallbackQuery, state: FSMContext):
+    """Вернуться назад с экрана комментария"""
+    data = await state.get_data()
+    available_additional = data.get('available_additional_services', [])
+    venue_room_ids = data.get('venue_room_ids', [])
+
+    if available_additional:
+        # Возвращаемся к экрану доп. услуг
+        selected_ids = data.get('selected_additional_service_ids', [])
+        hourly_hours = data.get('additional_service_hours', {})
+        total_duration = data.get('total_duration', 60)
+        total_hours = max(1, total_duration // 60)
+
+        business_id = data['business_id']
+        async with async_session_maker() as session:
+            additional_services = await get_business_additional_services(session, business_id)
+
+        await callback.message.edit_text(
+            "🛎 <b>Дополнительные услуги</b>\n\n"
+            "Выберите дополнительные услуги или пропустите этот шаг:",
+            parse_mode="HTML",
+            reply_markup=client_kb.get_additional_services_keyboard(
+                additional_services, selected_ids,
+                hourly_hours=hourly_hours, total_hours=total_hours
+            )
+        )
+        await state.set_state(BookingStates.choosing_additional_services)
+    elif venue_room_ids:
+        # Возвращаемся к выбору зала и времени
+        room_id = data.get('employee_id') or data.get('selected_venue_room_id')
+        await state.update_data(time_based_price=0, booking_time=None)
+        await state.set_state(BookingStates.choosing_venue_room_time)
+
+        business_id = data['business_id']
+        date_str = data.get('booking_date', '')
+        total_duration = data.get('total_duration', 60)
+
+        try:
+            selected_date = datetime.strptime(date_str, "%d.%m.%Y").date()
+        except (ValueError, TypeError):
+            await callback.answer("Не удалось вернуться назад", show_alert=True)
+            return
+
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(Employee).where(Employee.id.in_(venue_room_ids))
+            )
+            venue_rooms = list(result.scalars().all())
+            room_order = {rid: i for i, rid in enumerate(venue_room_ids)}
+            venue_rooms.sort(key=lambda r: room_order.get(r.id, 0))
+
+        if not room_id and venue_rooms:
+            room_id = venue_rooms[0].id
+
+        if room_id:
+            available_times, occupied_times = await calculate_venue_time_slots(
+                business_id, room_id, selected_date, total_duration
+            )
+        else:
+            available_times, occupied_times = [], []
+
+        await callback.message.edit_text(
+            f"📅 Дата: {date_str}\n\n"
+            f"🏠 Выберите зал и время:\n"
+            f"🔒 - занято",
+            reply_markup=client_kb.get_venue_room_time_keyboard(
+                venue_rooms, room_id, available_times, occupied_times
+            )
+        )
+    else:
+        # Для обычного бронирования возвращаемся к выбору даты
+        await state.set_state(BookingStates.choosing_date)
+        await callback.answer("Используйте кнопку 'Изменить дату и время' на экране подтверждения", show_alert=True)
+        return
+
+    await callback.answer()
+
+
 @router.message(F.text, BookingStates.entering_notes)
 async def booking_notes_received(message: Message, state: FSMContext):
     """Получение текста комментария"""
@@ -2572,6 +2651,59 @@ async def additional_services_skipped(callback: CallbackQuery, state: FSMContext
 
     # Переходим к комментарию
     await _show_notes_step(callback.message, state)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "additional_services_back", BookingStates.choosing_additional_services)
+async def additional_services_back(callback: CallbackQuery, state: FSMContext):
+    """Вернуться с экрана доп. услуг к выбору зала и времени"""
+    data = await state.get_data()
+    room_id = data.get('employee_id') or data.get('selected_venue_room_id')
+
+    # Сбрасываем выбор времени и возвращаемся к choosing_venue_room_time
+    await state.update_data(time_based_price=0, booking_time=None)
+    await state.set_state(BookingStates.choosing_venue_room_time)
+
+    business_id = data['business_id']
+    date_str = data.get('booking_date', '')
+    total_duration = data.get('total_duration', 60)
+    venue_room_ids = data.get('venue_room_ids', [])
+
+    try:
+        selected_date = datetime.strptime(date_str, "%d.%m.%Y").date()
+    except (ValueError, TypeError):
+        # Если дата недоступна, возвращаемся к выбору даты
+        await state.set_state(BookingStates.choosing_date)
+        await callback.message.edit_text("Выберите дату:", reply_markup=None)
+        await callback.answer()
+        return
+
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(Employee).where(Employee.id.in_(venue_room_ids))
+        )
+        venue_rooms = list(result.scalars().all())
+        room_order = {rid: i for i, rid in enumerate(venue_room_ids)}
+        venue_rooms.sort(key=lambda r: room_order.get(r.id, 0))
+
+    if not room_id and venue_rooms:
+        room_id = venue_rooms[0].id
+
+    if room_id:
+        available_times, occupied_times = await calculate_venue_time_slots(
+            business_id, room_id, selected_date, total_duration
+        )
+    else:
+        available_times, occupied_times = [], []
+
+    await callback.message.edit_text(
+        f"📅 Дата: {date_str}\n\n"
+        f"🏠 Выберите зал и время:\n"
+        f"🔒 - занято",
+        reply_markup=client_kb.get_venue_room_time_keyboard(
+            venue_rooms, room_id, available_times, occupied_times
+        )
+    )
     await callback.answer()
 
 
@@ -3103,7 +3235,7 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
                         await session.commit()
                         first_booking_id = booking.id
 
-                    # Формируем сообщение о предоплате
+                    # Формируем основное сообщение о предоплате
                     prepay_text = (
                         f"💳 <b>Требуется предоплата</b>\n\n"
                         f"🏢 {data['business_name']}\n"
@@ -3124,10 +3256,30 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
                         f"Бронирование будет подтверждено после проверки оплаты владельцем."
                     )
 
-                    await callback.message.edit_text(
-                        prepay_text,
+                    require_receipt = getattr(business, 'require_receipt_for_prepayment', False)
+                    cancellation_photo = getattr(business, 'cancellation_policy_photo', None)
+
+                    # Редактируем текущее сообщение (основная информация о предоплате)
+                    await callback.message.edit_text(prepay_text, parse_mode="HTML")
+
+                    # Если есть фото условий отмены — отправляем его
+                    if cancellation_photo:
+                        try:
+                            await callback.message.answer_photo(
+                                photo=cancellation_photo,
+                                caption="📋 Условия отмены бронирования"
+                            )
+                        except Exception:
+                            pass
+
+                    # Отправляем короткое сообщение с номером и кнопками
+                    short_text = f"📱 Перевести на номер: <b>{business.payment_phone}</b>"
+                    await callback.message.answer(
+                        short_text,
                         parse_mode="HTML",
-                        reply_markup=client_kb.get_prepayment_confirmation_keyboard(first_booking_id)
+                        reply_markup=client_kb.get_prepayment_confirmation_keyboard(
+                            first_booking_id, require_receipt=require_receipt
+                        )
                     )
 
                     await state.set_state(BookingStates.waiting_prepayment)

@@ -129,8 +129,20 @@ def get_business_edit_keyboard(business_id: int, show_prepayment: bool = True) -
     return builder.as_markup()
 
 
-def get_prepayment_settings_keyboard(business_id: int, prepayment_enabled: bool) -> InlineKeyboardMarkup:
-    """Клавиатура настроек предоплаты"""
+def get_prepayment_settings_keyboard(
+    business_id: int,
+    prepayment_enabled: bool,
+    require_receipt: bool = False,
+    has_cancellation_photo: bool = False
+) -> InlineKeyboardMarkup:
+    """Клавиатура настроек предоплаты
+
+    Args:
+        business_id: ID бизнеса
+        prepayment_enabled: включена ли предоплата
+        require_receipt: требуется ли чек для подтверждения
+        has_cancellation_photo: загружено ли фото условий отмены
+    """
     builder = InlineKeyboardBuilder()
 
     if prepayment_enabled:
@@ -138,6 +150,18 @@ def get_prepayment_settings_keyboard(business_id: int, prepayment_enabled: bool)
         builder.button(text="💰 Изменить процент", callback_data=f"prepay_percent:{business_id}")
         builder.button(text="📱 Изменить номер для оплаты", callback_data=f"prepay_phone:{business_id}")
         builder.button(text="📝 Изменить реквизиты", callback_data=f"prepay_details:{business_id}")
+
+        # Требовать чек
+        if require_receipt:
+            builder.button(text="✅ Чек: обязателен (нажмите чтобы отключить)", callback_data=f"prepay_require_receipt:{business_id}:off")
+        else:
+            builder.button(text="📸 Чек: не обязателен (нажмите чтобы включить)", callback_data=f"prepay_require_receipt:{business_id}:on")
+
+        # Фото условий отмены
+        if has_cancellation_photo:
+            builder.button(text="🖼 Изменить фото условий отмены", callback_data=f"prepay_cancel_photo:{business_id}")
+        else:
+            builder.button(text="📷 Добавить фото условий отмены", callback_data=f"prepay_cancel_photo:{business_id}")
     else:
         builder.button(text="✅ Включить предоплату", callback_data=f"prepay_toggle:{business_id}:on", style="success")
 

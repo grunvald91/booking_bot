@@ -69,6 +69,8 @@ class Business(Base):
     prepayment_percent: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Процент предоплаты (100 = полная)
     payment_phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # Номер для перевода
     payment_details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Дополнительные реквизиты (карта, СБП и т.д.)
+    cancellation_policy_photo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Telegram file_id фото условий отмены
+    require_receipt_for_prepayment: Mapped[bool] = mapped_column(Boolean, default=False)  # Требовать чек для подтверждения оплаты
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

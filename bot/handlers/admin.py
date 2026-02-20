@@ -4779,6 +4779,9 @@ async def show_prepayment_settings(callback: CallbackQuery, state: FSMContext):
         return
 
     # Формируем текст с текущими настройками
+    require_receipt = getattr(business, 'require_receipt_for_prepayment', False)
+    has_cancellation_photo = bool(getattr(business, 'cancellation_policy_photo', None))
+
     if business.prepayment_enabled:
         settings_text = (
             f"💳 <b>Настройки предоплаты: {business.name}</b>\n\n"
@@ -4788,6 +4791,8 @@ async def show_prepayment_settings(callback: CallbackQuery, state: FSMContext):
         )
         if business.payment_details:
             settings_text += f"📝 Реквизиты: {business.payment_details}\n"
+        settings_text += f"📸 Чек: <b>{'обязателен' if require_receipt else 'не обязателен'}</b>\n"
+        settings_text += f"🖼 Фото условий отмены: <b>{'загружено' if has_cancellation_photo else 'не загружено'}</b>\n"
     else:
         settings_text = (
             f"💳 <b>Настройки предоплаты: {business.name}</b>\n\n"
@@ -4798,7 +4803,11 @@ async def show_prepayment_settings(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         settings_text,
         parse_mode="HTML",
-        reply_markup=admin_kb.get_prepayment_settings_keyboard(business_id, business.prepayment_enabled)
+        reply_markup=admin_kb.get_prepayment_settings_keyboard(
+            business_id, business.prepayment_enabled,
+            require_receipt=require_receipt,
+            has_cancellation_photo=has_cancellation_photo
+        )
     )
     await callback.answer()
 
@@ -5017,6 +5026,84 @@ async def save_payment_details(message: Message, state: FSMContext):
             f"✅ Реквизиты удалены",
             reply_markup=admin_kb.get_prepayment_settings_keyboard(business_id, True)
         )
+
+
+@router.callback_query(F.data.startswith("prepay_require_receipt:"))
+async def toggle_require_receipt(callback: CallbackQuery, state: FSMContext):
+    """Включить/выключить обязательность чека для подтверждения предоплаты"""
+    parts = callback.data.split(":")
+    business_id = int(parts[1])
+    action = parts[2]  # on или off
+
+    async with async_session_maker() as session:
+        business = await get_business_by_id(session, business_id)
+        if not business:
+            await callback.answer("Бизнес не найден", show_alert=True)
+            return
+        business.require_receipt_for_prepayment = (action == "on")
+        await session.commit()
+
+    # Показываем обновленные настройки
+    await show_prepayment_settings.__wrapped__(callback, state)
+
+
+@router.callback_query(F.data.startswith("prepay_cancel_photo:"))
+async def manage_cancellation_photo(callback: CallbackQuery, state: FSMContext):
+    """Управление фото условий отмены бронирования"""
+    business_id = int(callback.data.split(":")[1])
+    await state.update_data(business_id=business_id)
+
+    async with async_session_maker() as session:
+        business = await get_business_by_id(session, business_id)
+        current_photo = getattr(business, 'cancellation_policy_photo', None)
+
+    if current_photo:
+        text = (
+            "🖼 <b>Фото условий отмены бронирования</b>\n\n"
+            "Текущее фото уже загружено.\n\n"
+            "Отправьте новое фото для замены, или '-' чтобы удалить текущее."
+        )
+    else:
+        text = (
+            "📷 <b>Фото условий отмены бронирования</b>\n\n"
+            "Это фото будет отправлено клиентам вместе с информацией о предоплате.\n\n"
+            "Отправьте фото с условиями отмены бронирования."
+        )
+
+    await callback.message.edit_text(text, parse_mode="HTML")
+    await state.set_state(PrepaymentSettingsStates.entering_cancellation_photo)
+    await callback.answer()
+
+
+@router.message(PrepaymentSettingsStates.entering_cancellation_photo)
+async def save_cancellation_photo(message: Message, state: FSMContext):
+    """Сохранение фото условий отмены бронирования"""
+    data = await state.get_data()
+    business_id = data['business_id']
+
+    if message.text == "-":
+        photo_id = None
+    elif message.photo:
+        photo_id = message.photo[-1].file_id
+    else:
+        await message.answer("❌ Отправьте фото или '-' для удаления текущего фото.")
+        return
+
+    async with async_session_maker() as session:
+        business = await get_business_by_id(session, business_id)
+        business.cancellation_policy_photo = photo_id
+        require_receipt = getattr(business, 'require_receipt_for_prepayment', False)
+        await session.commit()
+
+    await state.clear()
+    await message.answer(
+        "✅ Фото условий отмены сохранено." if photo_id else "✅ Фото условий отмены удалено.",
+        reply_markup=admin_kb.get_prepayment_settings_keyboard(
+            business_id, True,
+            require_receipt=require_receipt,
+            has_cancellation_photo=bool(photo_id)
+        )
+    )
 
 
 # ===== ПОДТВЕРЖДЕНИЕ ПРЕДОПЛАТЫ ВЛАДЕЛЬЦЕМ =====
