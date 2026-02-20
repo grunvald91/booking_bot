@@ -1459,7 +1459,7 @@ async def api_client_slots(request: web.Request) -> web.Response:
                             Booking.business_id == business_id,
                             Booking.employee_id == employee_id,
                             date_filter,
-                            Booking.status.in_(["pending", "confirmed"])
+                            Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"])
                         )
                     )
                 )
@@ -1486,7 +1486,7 @@ async def api_client_slots(request: web.Request) -> web.Response:
                         and_(
                             Booking.business_id == business_id,
                             date_filter,
-                            Booking.status.in_(["pending", "confirmed"])
+                            Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"])
                         )
                     )
                 )
