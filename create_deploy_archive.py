@@ -11,6 +11,7 @@ INCLUDE = [
     "bot/",
     "database/",
     "migrations/",
+    "webapp/",
     "requirements.txt"
 ]
 
