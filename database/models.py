@@ -120,6 +120,7 @@ class Service(Base):
     is_hourly_price: Mapped[bool] = mapped_column(Boolean, default=False)  # Цена за час (для доп. услуг venue_rental)
     available_employee_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON список ID сотрудников/залов, где доступна услуга (null = все)
     tariff_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Текст тарифов для контактных услуг (бронь через владельца)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)  # Порядок отображения (меньше = выше в списке)
     version: Mapped[int] = mapped_column(Integer, default=1)  # Для оптимистичной блокировки
 
     # Связи
