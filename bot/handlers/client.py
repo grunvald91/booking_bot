@@ -131,7 +131,7 @@ async def calculate_venue_time_slots(business_id: int, employee_id: int, selecte
         else:
             date_filter = Booking.booking_date == selected_date
 
-        # Существующие записи для этого помещения
+        # Существующие записи для этого помещения (включая ожидающие предоплаты)
         result = await session.execute(
             select(Booking)
             .options(selectinload(Booking.service))
@@ -140,7 +140,7 @@ async def calculate_venue_time_slots(business_id: int, employee_id: int, selecte
                     Booking.business_id == business_id,
                     Booking.employee_id == employee_id,
                     date_filter,
-                    Booking.status.in_(["pending", "confirmed"])
+                    Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"])
                 )
             )
         )
@@ -5225,6 +5225,7 @@ async def _build_prepayment_owner_text(booking: Booking, session, receipt_note: 
     ).where(
         Booking.client_id == booking.client_id,
         Booking.business_id == booking.business_id,
+        Booking.employee_id == booking.employee_id,
         Booking.booking_date == booking.booking_date,
         Booking.booking_time == booking.booking_time,
         Booking.status.in_(["pending_prepayment", "prepayment_sent"])
@@ -5266,10 +5267,11 @@ async def _build_prepayment_owner_text(booking: Booking, session, receipt_note: 
             svc = bk.service
             if svc.is_additional:
                 additional_services.append(svc)
+                # Дополнительные услуги не добавляют длительность к основному слоту
             else:
                 main_services.append(svc)
+                total_duration += svc.duration_minutes or 0
             total_price += svc.price or 0
-            total_duration += svc.duration_minutes or 0
         if bk.employee and not employee_info:
             employee_info = bk.employee
 

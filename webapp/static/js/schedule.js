@@ -132,6 +132,7 @@ async function loadBusinesses() {
                 selectedBusinessId = businesses[0].id;
                 select.value = selectedBusinessId;
                 await loadSchedule();
+                startScheduleAutoRefresh();
             }
         } else {
             showError('Нет доступных бизнесов');
@@ -189,13 +190,25 @@ async function loadSchedule() {
         document.getElementById('loading').style.display = 'none';
         document.getElementById('mainContent').style.display = 'flex';
 
-        // Show FAB button
-        document.getElementById('fabAddBooking').style.display = 'flex';
+        // Show FAB button only if user can create bookings (owners only, not admin-role employees)
+        const canCreate = data.can_create_booking !== false;
+        document.getElementById('fabAddBooking').style.display = canCreate ? 'flex' : 'none';
 
     } catch (error) {
         console.error('Error loading schedule:', error);
         showError('Ошибка загрузки расписания');
     }
+}
+
+// Автообновление расписания каждые 30 секунд (подхватывает записи из бота)
+let _scheduleAutoRefreshTimer = null;
+function startScheduleAutoRefresh() {
+    if (_scheduleAutoRefreshTimer) clearInterval(_scheduleAutoRefreshTimer);
+    _scheduleAutoRefreshTimer = setInterval(() => {
+        if (selectedBusinessId) {
+            loadSchedule();
+        }
+    }, 30000);
 }
 
 function formatDateISO(date) {

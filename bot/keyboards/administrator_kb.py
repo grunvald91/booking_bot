@@ -44,6 +44,12 @@ def get_administrator_menu_keyboard(show_owner_button: bool = False, business_ty
                 web_app=WebAppInfo(url=WEBAPP_URL)
             )
         ])
+        buttons.append([
+            KeyboardButton(
+                text="📅 Расписание",
+                web_app=WebAppInfo(url=f"{WEBAPP_URL}/schedule")
+            )
+        ])
 
     buttons.append([KeyboardButton(text="ℹ️ Помощь")])
 

@@ -392,7 +392,7 @@ async def create_booking(
                 and_(
                     Booking.employee_id == employee_id,
                     Booking.booking_date.in_(check_dates),
-                    Booking.status.in_(['pending', 'confirmed']),
+                    Booking.status.in_(['pending', 'confirmed', 'pending_prepayment', 'prepayment_sent']),
                     Service.is_additional == False,
                     Service.duration_minutes > 0
                 )
