@@ -4,7 +4,10 @@ let businesses = [];
 let selectedBusinessId = null;
 
 // Schedule state
+let viewMode = 'week'; // 'week' | 'day'
 let weekOffset = 0;
+let dayOffset = 0;
+let workingHours = null;
 let scheduleData = [];
 let employees = [];
 let services = [];
@@ -147,22 +150,27 @@ async function loadSchedule() {
     if (!selectedBusinessId) return;
 
     try {
-        // Calculate week dates
-        const today = new Date();
-        const dayOfWeek = today.getDay();
-        const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; // Monday
+        let startDate, endDate, weekStartObj = null;
 
-        const weekStart = new Date(today);
-        weekStart.setDate(today.getDate() + mondayOffset + (weekOffset * 7));
-        weekStart.setHours(0, 0, 0, 0);
-
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 6); // Sunday
-
-        const startDate = formatDateISO(weekStart);
-        const endDate = formatDateISO(weekEnd);
-
-        console.log('Loading schedule:', { startDate, endDate, weekOffset });
+        if (viewMode === 'day') {
+            const today = new Date();
+            const dayDate = new Date(today);
+            dayDate.setDate(today.getDate() + dayOffset);
+            dayDate.setHours(0, 0, 0, 0);
+            startDate = endDate = formatDateISO(dayDate);
+        } else {
+            const today = new Date();
+            const dayOfWeek = today.getDay();
+            const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+            weekStartObj = new Date(today);
+            weekStartObj.setDate(today.getDate() + mondayOffset + (weekOffset * 7));
+            weekStartObj.setHours(0, 0, 0, 0);
+            const weekEnd = new Date(weekStartObj);
+            weekEnd.setDate(weekStartObj.getDate() + 6);
+            startDate = formatDateISO(weekStartObj);
+            endDate = formatDateISO(weekEnd);
+            updateWeekLabel(weekStartObj, weekEnd);
+        }
 
         const data = await apiRequest(`/api/analytics/schedule?business_id=${selectedBusinessId}&start_date=${startDate}&end_date=${endDate}`);
 
@@ -176,23 +184,28 @@ async function loadSchedule() {
         services = data.services || [];
         clients = data.clients || [];
         businessType = data.business_type || '';
+        workingHours = data.working_hours || { start: 8, end: 22 };
 
-        // Update week label
-        updateWeekLabel(weekStart, weekEnd);
+        const tabsContainer = document.getElementById('tabsContainer');
 
-        // Render employee tabs
-        renderTabs();
-
-        // Render schedule table
-        renderSchedule(weekStart);
+        if (viewMode === 'week') {
+            renderTabs();
+            renderSchedule(weekStartObj);
+            if (tabsContainer) tabsContainer.style.display = '';
+        } else {
+            updateDayLabel();
+            if (tabsContainer) tabsContainer.style.display = 'none';
+            renderDayView();
+        }
 
         // Show main content
         document.getElementById('loading').style.display = 'none';
         document.getElementById('mainContent').style.display = 'flex';
 
-        // Show FAB button only if user can create bookings (owners only, not admin-role employees)
+        // FAB only for owners in week mode
         const canCreate = data.can_create_booking !== false;
-        document.getElementById('fabAddBooking').style.display = canCreate ? 'flex' : 'none';
+        document.getElementById('fabAddBooking').style.display =
+            canCreate && viewMode === 'week' ? 'flex' : 'none';
 
     } catch (error) {
         console.error('Error loading schedule:', error);
@@ -245,9 +258,45 @@ function navigateWeek(direction) {
     loadSchedule();
 }
 
+function navigateDay(direction) {
+    dayOffset += direction;
+    loadSchedule();
+}
+
 function goToToday() {
     weekOffset = 0;
+    dayOffset = 0;
     loadSchedule();
+}
+
+function setViewMode(mode) {
+    if (viewMode === mode) return;
+    viewMode = mode;
+    const weekControls = document.getElementById('weekNavControls');
+    const dayControls = document.getElementById('dayNavControls');
+    document.getElementById('toggleWeek').classList.toggle('active', mode === 'week');
+    document.getElementById('toggleDay').classList.toggle('active', mode === 'day');
+    weekControls.style.display = mode === 'week' ? 'flex' : 'none';
+    dayControls.style.display = mode === 'day' ? 'flex' : 'none';
+    loadSchedule();
+}
+
+function updateDayLabel() {
+    const today = new Date();
+    const dayDate = new Date(today);
+    dayDate.setDate(today.getDate() + dayOffset);
+    const label = document.getElementById('dayLabel');
+    if (dayOffset === 0) {
+        label.textContent = 'Сегодня';
+    } else if (dayOffset === 1) {
+        label.textContent = 'Завтра';
+    } else if (dayOffset === -1) {
+        label.textContent = 'Вчера';
+    } else {
+        label.textContent = dayDate.toLocaleDateString('ru-RU', {
+            day: 'numeric', month: 'short', weekday: 'short'
+        });
+    }
 }
 
 function renderTabs() {
@@ -281,6 +330,9 @@ function renderSchedule(weekStartParam) {
     // weekStartParam can be Date or string
     const weekStart = weekStartParam instanceof Date ? weekStartParam :
                       (weekStartParam ? new Date(weekStartParam) : getWeekStart());
+
+    // Reset day-view class
+    document.getElementById('scheduleTable').className = 'schedule-table';
 
     // Render header
     renderHeader(weekStart);
@@ -424,6 +476,91 @@ function renderBody(weekStart) {
     });
 
     tbody.innerHTML = html;
+}
+
+function renderDayView() {
+    const SLOT_MIN = 30;
+    const startHour = workingHours?.start ?? 8;
+    const endHour = workingHours?.end ?? 22;
+
+    // Generate 30-min slots
+    const slots = [];
+    for (let h = startHour; h < endHour; h++) {
+        slots.push(`${h.toString().padStart(2,'0')}:00`);
+        slots.push(`${h.toString().padStart(2,'0')}:30`);
+    }
+
+    // Day date string
+    const today = new Date();
+    const dayDate = new Date(today);
+    dayDate.setDate(today.getDate() + dayOffset);
+    const dayDateStr = formatDateISO(dayDate);
+
+    const dayBookings = scheduleData.filter(b => b.date === dayDateStr);
+    buildColorMap(dayBookings);
+
+    // Build slot map: empId → { "HH:MM": { booking, rowspan } | "skip" }
+    const empSlotMap = {};
+    employees.forEach(emp => {
+        empSlotMap[emp.id] = {};
+        dayBookings.filter(b => b.employee_id === emp.id).forEach(booking => {
+            const startTime = booking.time || '00:00';
+            const duration = booking.duration || 60;
+            const rowspan = Math.max(1, Math.ceil(duration / SLOT_MIN));
+            empSlotMap[emp.id][startTime] = { booking, rowspan };
+
+            // Mark continuation slots as 'skip'
+            const [sh, sm] = startTime.split(':').map(Number);
+            const startSlotIdx = Math.floor(((sh - startHour) * 60 + sm) / SLOT_MIN);
+            for (let i = 1; i < rowspan; i++) {
+                const totalMin = startHour * 60 + (startSlotIdx + i) * SLOT_MIN;
+                const hh = Math.floor(totalMin / 60);
+                const mm = totalMin % 60;
+                empSlotMap[emp.id][`${hh.toString().padStart(2,'0')}:${mm.toString().padStart(2,'0')}`] = 'skip';
+            }
+        });
+    });
+
+    // Mark table as day-view
+    const table = document.getElementById('scheduleTable');
+    table.className = 'schedule-table day-view';
+
+    // Header
+    const thead = document.getElementById('scheduleHead');
+    let hHtml = '<tr><th style="width:50px;min-width:50px"></th>';
+    employees.forEach(emp => {
+        hHtml += `<th class="day-emp-col">${escapeHtml(emp.name)}</th>`;
+    });
+    thead.innerHTML = hHtml + '</tr>';
+
+    // Body
+    const tbody = document.getElementById('scheduleBody');
+    let bHtml = '';
+    slots.forEach(slot => {
+        bHtml += '<tr>';
+        bHtml += `<td style="position:sticky;left:0;z-index:15;background:var(--bg-secondary);color:var(--text-muted);font-size:11px;text-align:center;padding:4px;width:50px">${slot}</td>`;
+        employees.forEach(emp => {
+            const slotData = empSlotMap[emp.id]?.[slot];
+            if (slotData === 'skip') {
+                // covered by rowspan above
+            } else if (slotData) {
+                const b = slotData.booking;
+                const ci = getClientColorIndex(b.client_name || b.client_phone);
+                const sc = b.status ? `status-${b.status}` : '';
+                const phoneHtml = b.client_phone ? `<div class="booking-phone">${escapeHtml(b.client_phone)}</div>` : '';
+                const commentHtml = b.comment ? `<div class="booking-comment">${escapeHtml(b.comment)}</div>` : '';
+                bHtml += `<td rowspan="${slotData.rowspan}" class="booking-td" onclick="showBookingDetails(${b.id})">` +
+                    `<div class="day-booking-cell color-${ci} ${sc}">` +
+                    `<div class="booking-name">${escapeHtml(b.client_name || 'Клиент')}</div>` +
+                    phoneHtml + commentHtml +
+                    `</div></td>`;
+            } else {
+                bHtml += `<td class="day-empty-cell"></td>`;
+            }
+        });
+        bHtml += '</tr>';
+    });
+    tbody.innerHTML = bHtml;
 }
 
 function getDayIndex(date, weekStart) {

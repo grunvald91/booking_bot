@@ -582,22 +582,13 @@ def get_venue_room_time_keyboard(
     if row2_emps:
         adjust.append(len(row2_emps))
 
-    # Ряды 3-4: танцевальные по 2 в ряд
-    remaining_count = len(other_emps)
-    while remaining_count > 0:
-        row_size = min(remaining_count, 2)
-        adjust.append(row_size)
-        remaining_count -= row_size
+    # Ряды 3+: танцевальные и прочие — каждый зал на отдельной строке
+    for _ in other_emps:
+        adjust.append(1)
 
-    # Если все комнаты не попали в специальные группы, показываем по 3 в ряд
+    # Если все комнаты не попали в специальные группы, по 1 в ряд
     if not row1_emps and not row2_emps and other_emps:
-        # Переопределяем — для нераспознанных комнат по 3 в ряд
-        adjust = []
-        remaining_count = len(other_emps)
-        while remaining_count > 0:
-            row_size = min(remaining_count, 3)
-            adjust.append(row_size)
-            remaining_count -= row_size
+        adjust = [1] * len(other_emps)
 
     # Время: по 3 в ряд
     time_count = len(all_times)
