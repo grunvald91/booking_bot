@@ -6,7 +6,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from aiogram import Bot
-from bot.services.notifications import check_and_send_reminders, auto_complete_bookings, check_and_send_subscription_reminders
+from bot.services.notifications import check_and_send_reminders, auto_complete_bookings, check_and_send_subscription_reminders, expire_unpaid_bookings
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,15 @@ class ReminderScheduler:
             replace_existing=True
         )
 
+        # Отменяем неоплаченные брони каждые 2 минуты
+        self.scheduler.add_job(
+            self._expire_unpaid_bookings,
+            trigger=IntervalTrigger(minutes=2),
+            id='expire_unpaid_bookings',
+            name='Expire unpaid bookings',
+            replace_existing=True
+        )
+
         # Проверяем истекающие абонементы каждый час
         self.scheduler.add_job(
             self._check_subscription_expiry,
@@ -48,6 +57,13 @@ class ReminderScheduler:
             await auto_complete_bookings()
         except Exception as e:
             logger.error(f"Error in reminder scheduler: {e}")
+
+    async def _expire_unpaid_bookings(self):
+        """Автоотмена неоплаченных броней старше 10 минут"""
+        try:
+            await expire_unpaid_bookings(self.bot)
+        except Exception as e:
+            logger.error(f"Error in expire_unpaid_bookings: {e}")
 
     async def _check_subscription_expiry(self):
         """Проверка истекающих абонементов"""

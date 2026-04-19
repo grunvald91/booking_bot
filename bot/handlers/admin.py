@@ -5197,6 +5197,26 @@ async def confirm_prepayment_by_owner(callback: CallbackQuery, state: FSMContext
             await callback.answer("Статус бронирования уже изменён", show_alert=True)
             return
 
+        # Проверяем, не занято ли время другим подтверждённым бронированием
+        from datetime import timedelta as _td
+        from sqlalchemy.orm import selectinload as _sil
+        conflict_result = await session.execute(
+            select(Booking).options(_sil(Booking.service)).where(and_(
+                Booking.employee_id == booking.employee_id,
+                Booking.booking_date == booking.booking_date,
+                Booking.booking_time == booking.booking_time,
+                Booking.status.in_(['pending', 'confirmed']),
+                Booking.client_id != booking.client_id,
+            ))
+        )
+        conflict_bookings = conflict_result.scalars().all()
+        if conflict_bookings:
+            await callback.answer(
+                "⚠️ Это время уже занято другой подтверждённой записью! Отмените одну из них.",
+                show_alert=True
+            )
+            return
+
         # Находим все связанные бронирования (то же время — основная + доп. услуги)
         related_result = await session.execute(
             select(Booking).options(

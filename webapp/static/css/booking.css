@@ -1947,6 +1947,18 @@ body {
     color: #856404;
 }
 
+.cancellation-policy-photo {
+    margin-bottom: 16px;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.cancellation-policy-photo img {
+    width: 100%;
+    display: block;
+    cursor: pointer;
+}
+
 /* Empty State */
 .empty-state {
     text-align: center;
@@ -2160,19 +2172,28 @@ body {
 .employee-tabs-list {
     display: flex;
     overflow-x: auto;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-    padding: 0 8px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--tg-theme-button-color) transparent;
+    padding: 0 8px 4px;
 }
 
 .employee-tabs-list::-webkit-scrollbar {
-    display: none;
+    height: 3px;
+}
+
+.employee-tabs-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.employee-tabs-list::-webkit-scrollbar-thumb {
+    background: var(--tg-theme-button-color);
+    border-radius: 2px;
 }
 
 .employee-tab {
     flex-shrink: 0;
-    padding: 10px 16px;
-    font-size: 13px;
+    padding: 10px 18px;
+    font-size: 15px;
     font-weight: 500;
     color: var(--tg-theme-hint-color);
     background: transparent;
@@ -2191,6 +2212,8 @@ body {
 .employee-tab.active {
     color: var(--tg-theme-button-color);
     border-bottom-color: var(--tg-theme-button-color);
+    background: color-mix(in srgb, var(--tg-theme-button-color) 12%, transparent);
+    border-radius: 8px 8px 0 0;
 }
 
 .employee-tab-icon {

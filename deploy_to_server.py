@@ -1,85 +1,88 @@
 #!/usr/bin/env python3
-"""Deploy bot updates to server"""
+"""Upload deploy_update.tar.gz to the configured server and restart the bot."""
+import time
+
 import paramiko
-import os
 
-# Server credentials
-HOST = "155.212.162.47"
-USER = "root"
-PASSWORD = "***REMOVED***"
+from deployment_settings import PROJECT_ROOT, require_deployment_settings
 
-LOCAL_ARCHIVE = r"C:\Users\User\booking_bot\deploy_update.tar.gz"
-REMOTE_PATH = "/opt/booking_bot"
+
+SETTINGS = require_deployment_settings()
+LOCAL_ARCHIVE = PROJECT_ROOT / "deploy_update.tar.gz"
+
 
 def deploy():
-    print(f"Connecting to {HOST}...")
+    print(f"Connecting to {SETTINGS.host}...")
 
-    # Create SSH client
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
     try:
-        ssh.connect(HOST, username=USER, password=PASSWORD, timeout=30)
+        ssh.connect(
+            SETTINGS.host,
+            port=SETTINGS.port,
+            username=SETTINGS.user,
+            password=SETTINGS.password,
+            timeout=30,
+        )
         print("Connected!")
 
-        # Upload archive via SFTP
         print("Uploading archive...")
         sftp = ssh.open_sftp()
-        sftp.put(LOCAL_ARCHIVE, f"{REMOTE_PATH}/deploy_update.tar.gz")
+        sftp.put(str(LOCAL_ARCHIVE), f"{SETTINGS.remote_path}/deploy_update.tar.gz")
         sftp.close()
         print("Archive uploaded!")
 
-        # Stop the bot
         print("\nStopping bot service...")
-        stdin, stdout, stderr = ssh.exec_command("systemctl stop booking-bot")
+        stdin, stdout, stderr = ssh.exec_command(f"systemctl stop {SETTINGS.service_name}")
         stdout.channel.recv_exit_status()
         print("Bot stopped.")
 
-        # Backup current files
         print("Creating backup...")
-        stdin, stdout, stderr = ssh.exec_command(f"cd {REMOTE_PATH} && cp -r bot bot.backup 2>/dev/null || true")
+        stdin, stdout, stderr = ssh.exec_command(
+            f"cd {SETTINGS.remote_path} && cp -r bot bot.backup 2>/dev/null || true"
+        )
         stdout.channel.recv_exit_status()
 
-        # Extract archive
         print("Extracting new files...")
-        stdin, stdout, stderr = ssh.exec_command(f"cd {REMOTE_PATH} && tar -xzvf deploy_update.tar.gz")
+        stdin, stdout, stderr = ssh.exec_command(
+            f"cd {SETTINGS.remote_path} && tar -xzvf deploy_update.tar.gz"
+        )
         output = stdout.read().decode()
         print(output)
 
-        # Clean up archive
-        ssh.exec_command(f"rm {REMOTE_PATH}/deploy_update.tar.gz")
+        ssh.exec_command(f"rm {SETTINGS.remote_path}/deploy_update.tar.gz")
 
-        # Restart bot
         print("\nRestarting bot service...")
-        stdin, stdout, stderr = ssh.exec_command("systemctl start booking-bot")
+        stdin, stdout, stderr = ssh.exec_command(f"systemctl start {SETTINGS.service_name}")
         stdout.channel.recv_exit_status()
 
-        # Wait and check status
-        import time
         time.sleep(2)
 
         print("\nChecking bot status...")
-        stdin, stdout, stderr = ssh.exec_command("systemctl status booking-bot")
+        stdin, stdout, stderr = ssh.exec_command(f"systemctl status {SETTINGS.service_name}")
         print(stdout.read().decode())
 
-        # Check if process is running
         stdin, stdout, stderr = ssh.exec_command("ps aux | grep 'python.*bot.main' | grep -v grep")
         ps_output = stdout.read().decode().strip()
         if ps_output:
-            print("✓ Bot is running!")
+            print("Bot is running!")
         else:
-            print("⚠ Bot may not be running, check logs!")
-            stdin, stdout, stderr = ssh.exec_command("journalctl -u booking-bot -n 20 --no-pager")
+            print("Bot may not be running, check logs!")
+            stdin, stdout, stderr = ssh.exec_command(
+                f"journalctl -u {SETTINGS.service_name} -n 20 --no-pager"
+            )
             print(stdout.read().decode())
 
         print("\n=== Deploy completed! ===")
-
-    except Exception as e:
-        print(f"Error: {e}")
+    except Exception as exc:
+        print(f"Error: {exc}")
         import traceback
+
         traceback.print_exc()
     finally:
         ssh.close()
+
 
 if __name__ == "__main__":
     deploy()

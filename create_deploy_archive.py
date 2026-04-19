@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Create deployment archive without .env file"""
-import tarfile
+"""Create deployment archive without local secrets or scratch files."""
+import fnmatch
 import os
+import tarfile
 
 ARCHIVE_NAME = "deploy_update.tar.gz"
 BASE_DIR = r"C:\Users\User\booking_bot"
@@ -18,19 +19,22 @@ INCLUDE = [
 # Files to exclude
 EXCLUDE = [
     ".env",
-    ".env.example",
+    ".env.*",
     "__pycache__",
     "*.pyc",
     "*.backup",
     "tmpclaude-*",
     "*.tar.gz",
+    "*.b64",
     "venv"
 ]
 
 def should_exclude(name):
-    """Check if file/directory should be excluded"""
+    """Check if file or directory should be excluded."""
+    normalized = name.replace("\\", "/")
+    basename = os.path.basename(normalized)
     for pattern in EXCLUDE:
-        if pattern in name:
+        if fnmatch.fnmatch(normalized, pattern) or fnmatch.fnmatch(basename, pattern):
             return True
     return False
 

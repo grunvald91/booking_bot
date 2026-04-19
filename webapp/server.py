@@ -22,6 +22,7 @@ from bot.services.notifications import (
 from database import async_session_maker
 from database.crud import (
     get_administrator_by_telegram_id,
+    get_administrators_by_telegram_id,
     get_business_bookings,
     get_business_employees,
     get_booking_by_id,
@@ -162,13 +163,7 @@ def validate_webapp_data(init_data: str) -> dict | None:
 async def check_admin_access(telegram_id: int) -> tuple:
     """Проверка доступа администратора, возвращает (admin, business_id)"""
     async with async_session_maker() as session:
-        # Сначала проверяем, является ли пользователь администратором бизнеса (Employee)
-        admin = await get_administrator_by_telegram_id(session, telegram_id)
-        if admin:
-            logger.info(f"User {telegram_id} is administrator of business {admin.business_id}")
-            return admin, admin.business_id
-
-        # Проверяем, является ли пользователь владельцем бизнеса
+        # Сначала проверяем владельца (ADMIN_IDS имеет приоритет над ролью Employee)
         if telegram_id in ADMIN_IDS:
             user = await get_user_by_telegram_id(session, telegram_id)
             if user:
@@ -178,6 +173,12 @@ async def check_admin_access(telegram_id: int) -> tuple:
                     business = businesses[0]
                     logger.info(f"User {telegram_id} is owner of business {business.id}")
                     return user, business.id
+
+        # Затем проверяем, является ли пользователь администратором бизнеса (Employee)
+        admin = await get_administrator_by_telegram_id(session, telegram_id)
+        if admin:
+            logger.info(f"User {telegram_id} is administrator of business {admin.business_id}")
+            return admin, admin.business_id
 
     logger.warning(f"User {telegram_id} has no admin access")
     return None, None
@@ -377,11 +378,33 @@ async def api_update_booking_status(request: web.Request) -> web.Response:
                 logger.warning(f"Access denied for booking {booking_id}")
                 return web.json_response({'error': 'Booking not found'}, status=404)
 
-            # Находим все записи в группе (тот же клиент, дата, время, бизнес)
+            # При подтверждении оплаты — проверяем, не занято ли время другой записью
             from sqlalchemy import select as sa_select
             from database.models import Booking
+            if new_status == 'confirmed' and booking.status in ('pending_prepayment', 'prepayment_sent'):
+                conflict_result = await session.execute(
+                    sa_select(Booking).where(
+                        Booking.employee_id == booking.employee_id,
+                        Booking.booking_date == booking.booking_date,
+                        Booking.booking_time == booking.booking_time,
+                        Booking.status.in_(['pending', 'confirmed']),
+                        Booking.client_id != booking.client_id,
+                    )
+                )
+                if conflict_result.scalars().first():
+                    return web.json_response(
+                        {'error': '⚠️ Это время уже занято другой подтверждённой записью. Отмените одну из них.'},
+                        status=409
+                    )
+
+            # Сохраняем старый статус до обновления
+            old_status = booking.status
+
+            # Находим все записи в группе (тот же клиент, дата, время, бизнес)
             group_result = await session.execute(
-                sa_select(Booking).where(
+                sa_select(Booking)
+                .options(selectinload(Booking.service), selectinload(Booking.employee))
+                .where(
                     Booking.client_id == booking.client_id,
                     Booking.business_id == booking.business_id,
                     Booking.booking_date == booking.booking_date,
@@ -391,6 +414,30 @@ async def api_update_booking_status(request: web.Request) -> web.Response:
             )
             group_bookings = group_result.scalars().all()
 
+            # Собираем данные для уведомлений до коммита (после expire_on_commit не доступны)
+            notify_client_id = booking.client.telegram_id if booking.client else None
+            notify_business_name = booking.business.name if booking.business else ''
+            notify_business_address = booking.business.address if booking.business else None
+            notify_business_phone = booking.business.phone if booking.business else None
+            notify_business_directions = booking.business.directions if booking.business else None
+            notify_business_type = booking.business.business_type if booking.business else None
+            notify_employee_name = booking.employee.name if booking.employee else None
+            notify_date = booking.booking_date
+            notify_time = booking.booking_time
+            notify_prepayment = booking.prepayment_amount
+            notify_services_list = []
+            for b in group_bookings:
+                if b.service:
+                    notify_services_list.append({
+                        'name': b.service.name,
+                        'duration': b.service.duration_minutes,
+                        'price': b.service.price or 0,
+                        'is_additional': getattr(b.service, 'is_additional', False),
+                        'employee_id': booking.employee_id,
+                        'employee_name': booking.employee.name if booking.employee else None,
+                        'employee_telegram_id': booking.employee.telegram_id if booking.employee else None,
+                    })
+
             # Обновляем статус всех записей группы
             updated_ids = []
             for b in group_bookings:
@@ -399,6 +446,73 @@ async def api_update_booking_status(request: web.Request) -> web.Response:
             await session.commit()
 
             logger.info(f"Updated group bookings {updated_ids} to status {new_status}")
+
+            # Отправляем уведомления после коммита
+            try:
+                bot = Bot(token=BOT_TOKEN)
+                from bot.utils.business_types import is_venue_rental_type
+                from urllib.parse import quote as _quote
+
+                if new_status == 'confirmed' and old_status in ('pending_prepayment', 'prepayment_sent'):
+                    # Подтверждение предоплаты — уведомляем клиента, мастера, администратора
+                    if notify_client_id:
+                        is_venue = is_venue_rental_type(notify_business_type or '')
+                        client_text = (
+                            f"✅ <b>Ваше бронирование подтверждено!</b>\n\n"
+                            f"🏢 {notify_business_name}\n"
+                            f"📅 Дата: {notify_date.strftime('%d.%m.%Y')}\n"
+                            f"🕐 Время: {notify_time.strftime('%H:%M')}\n"
+                        )
+                        if notify_employee_name:
+                            label = "🏠 Помещение" if is_venue else "👤 Мастер"
+                            client_text += f"{label}: {notify_employee_name}\n"
+                        if notify_prepayment:
+                            client_text += f"\n💰 Предоплата получена: {notify_prepayment}₽\n"
+                        if notify_business_address:
+                            enc = _quote(notify_business_address)
+                            client_text += f'\n📍 <a href="https://yandex.ru/maps/?text={enc}">{notify_business_address}</a>\n'
+                        if notify_business_phone:
+                            client_text += f"📞 {notify_business_phone}\n"
+                        if notify_business_directions:
+                            client_text += f"\n🚶 {notify_business_directions}\n"
+                        client_text += "\nЖдём вас! 🎉"
+                        try:
+                            await bot.send_message(
+                                chat_id=notify_client_id,
+                                text=client_text,
+                                parse_mode="HTML",
+                                disable_web_page_preview=True,
+                            )
+                        except Exception as e:
+                            logger.error(f"Error notifying client about confirmed booking: {e}")
+
+                    # Уведомления мастеру и администраторам
+                    # Перезагружаем booking с отношениями для notify-функций
+                    async with async_session_maker() as notify_session:
+                        fresh_booking = await get_booking_by_id(notify_session, booking_id)
+                        if fresh_booking:
+                            await notify_master_new_booking(bot, fresh_booking, notify_services_list)
+                            await notify_administrator_new_booking(bot, fresh_booking, notify_services_list)
+
+                elif new_status == 'cancelled' and notify_client_id:
+                    # Отмена записи — уведомляем клиента
+                    cancel_text = (
+                        f"❌ <b>Ваша запись отменена</b>\n\n"
+                        f"🏢 {notify_business_name}\n"
+                        f"📅 {notify_date.strftime('%d.%m.%Y')} в {notify_time.strftime('%H:%M')}\n\n"
+                        f"Если это ошибка, свяжитесь с администратором."
+                    )
+                    try:
+                        await bot.send_message(
+                            chat_id=notify_client_id,
+                            text=cancel_text,
+                            parse_mode="HTML",
+                        )
+                    except Exception as e:
+                        logger.error(f"Error notifying client about cancelled booking: {e}")
+
+            except Exception as notify_err:
+                logger.error(f"Error sending notifications in status update: {notify_err}")
 
             return web.json_response({
                 'success': True,
@@ -652,11 +766,30 @@ async def api_analytics_businesses(request: web.Request) -> web.Response:
         if not user:
             return web.json_response({'error': 'Unauthorized'}, status=401)
 
+        from database.models import Employee as EmployeeModel
         telegram_id = user.get('id')
 
         async with async_session_maker() as session:
-            # Проверяем, является ли пользователь владельцем
-            if telegram_id in ADMIN_IDS:
+            if isinstance(admin, EmployeeModel):
+                # Администратор бизнеса — только бизнесы, в которых назначен
+                admin_employees = await get_administrators_by_telegram_id(session, telegram_id)
+                businesses_list = []
+                seen_ids = set()
+                for ae in admin_employees:
+                    if ae.business_id not in seen_ids:
+                        b = await get_business_by_id(session, ae.business_id)
+                        if b:
+                            businesses_list.append(b)
+                            seen_ids.add(ae.business_id)
+                return web.json_response({
+                    'businesses': [
+                        {'id': b.id, 'name': b.name, 'type': b.business_type}
+                        for b in businesses_list
+                    ],
+                    'is_owner': False,
+                })
+            else:
+                # Владелец — все его бизнесы
                 db_user = await get_user_by_telegram_id(session, telegram_id)
                 if db_user:
                     businesses = await get_user_businesses(session, db_user.id)
@@ -664,20 +797,11 @@ async def api_analytics_businesses(request: web.Request) -> web.Response:
                         'businesses': [
                             {'id': b.id, 'name': b.name, 'type': b.business_type}
                             for b in businesses
-                        ]
+                        ],
+                        'is_owner': True,
                     })
 
-            # Проверяем, является ли администратором бизнеса
-            admin_employee = await get_administrator_by_telegram_id(session, telegram_id)
-            if admin_employee:
-                business = await get_business_by_id(session, admin_employee.business_id)
-                return web.json_response({
-                    'businesses': [
-                        {'id': business.id, 'name': business.name, 'type': business.business_type}
-                    ] if business else []
-                })
-
-        return web.json_response({'businesses': []})
+        return web.json_response({'businesses': [], 'is_owner': False})
 
     except Exception as e:
         logger.error(f"Error in api_analytics_businesses: {e}")
@@ -1230,6 +1354,19 @@ async def api_client_business_details(request: web.Request) -> web.Response:
 
             # Получаем сотрудников (мастеров)
             employees = await get_business_employees(session, business_id)
+
+            # Сортируем помещения venue_rental как в боте
+            if business.business_type == 'venue_rental':
+                def _room_sort_key(e):
+                    n = e.name.lower()
+                    if 'красн' in n: return 0
+                    if 'сер' in n: return 1
+                    if 'чёрн' in n or 'черн' in n: return 2
+                    if 'бел' in n: return 3
+                    if 'бежев' in n: return 4
+                    return 5
+                employees = sorted(employees, key=lambda e: _room_sort_key(e))
+
             employees_list = []
             has_time_pricing = False
             for e in employees:
@@ -1459,7 +1596,7 @@ async def api_client_slots(request: web.Request) -> web.Response:
                             Booking.business_id == business_id,
                             Booking.employee_id == employee_id,
                             date_filter,
-                            Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"])
+                            Booking.status.in_(["pending", "confirmed"])
                         )
                     )
                 )
@@ -1486,7 +1623,7 @@ async def api_client_slots(request: web.Request) -> web.Response:
                         and_(
                             Booking.business_id == business_id,
                             date_filter,
-                            Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"])
+                            Booking.status.in_(["pending", "confirmed"])
                         )
                     )
                 )
@@ -1750,7 +1887,7 @@ async def api_client_create_booking(request: web.Request) -> web.Response:
                             and_(
                                 BookingModel.employee_id == emp.id,
                                 BookingModel.booking_date == selected_date,
-                                BookingModel.status.in_(['pending', 'confirmed', 'pending_prepayment', 'prepayment_sent'])
+                                BookingModel.status.in_(['pending', 'confirmed'])
                             )
                         )
                     )
@@ -1770,6 +1907,37 @@ async def api_client_create_booking(request: web.Request) -> web.Response:
 
                 if not employee_id:
                     return web.json_response({'error': 'Нет свободных специалистов на это время'}, status=400)
+
+            else:
+                # Конкретный сотрудник/комната — проверяем конфликт перед созданием
+                total_duration = 0
+                for sid in service_ids:
+                    svc = await get_service_by_id(session, sid)
+                    if svc:
+                        total_duration += svc.duration_minutes
+                if total_duration == 0:
+                    total_duration = 60
+
+                slot_start = datetime.combine(selected_date, selected_time)
+                slot_end = slot_start + timedelta(minutes=total_duration)
+
+                conflict_result = await session.execute(
+                    select(BookingModel)
+                    .options(selectinload(BookingModel.service))
+                    .where(
+                        and_(
+                            BookingModel.employee_id == employee_id,
+                            BookingModel.booking_date == selected_date,
+                            BookingModel.status.in_(['pending', 'confirmed'])
+                        )
+                    )
+                )
+                conflict_bookings = conflict_result.scalars().all()
+                for b in conflict_bookings:
+                    b_start = datetime.combine(selected_date, b.booking_time)
+                    b_end = b_start + timedelta(minutes=b.service.duration_minutes if b.service else 60)
+                    if not (slot_end <= b_start or slot_start >= b_end):
+                        return web.json_response({'error': 'Это время уже занято, выберите другое'}, status=400)
 
             # Создаем записи для каждой основной услуги
             logger.info(f"Creating booking: business={business_id}, employee={employee_id}, date={selected_date}, time={selected_time}, services={service_ids}, additional={additional_service_ids}")
@@ -1921,6 +2089,7 @@ async def api_client_create_booking(request: web.Request) -> web.Response:
                         'payment_details': business.payment_details,
                         'business_name': business.name,
                         'first_booking_id': created_bookings[0]['id'],
+                        'cancellation_policy_photo': getattr(business, 'cancellation_policy_photo', None),
                     }
 
             # Если требуется предоплата, возвращаем информацию о ней (без уведомлений — рано)
@@ -2931,6 +3100,12 @@ async def api_analytics_schedule(request: web.Request) -> web.Response:
                 'end': business.working_hours_end.hour if business.working_hours_end else 22,
             }
 
+            # Минимальный интервал бронирования (по всем активным сотрудникам)
+            min_interval = business.booking_interval_minutes or 30
+            for emp in active_employees:
+                if emp.booking_interval_minutes:
+                    min_interval = min(min_interval, emp.booking_interval_minutes)
+
             # Получаем услуги для формы создания записи
             services = await get_business_main_services(session, business_id)
             services_data = []
@@ -2970,6 +3145,7 @@ async def api_analytics_schedule(request: web.Request) -> web.Response:
                 'services': services_data,
                 'clients': clients_data,
                 'working_hours': working_hours,
+                'booking_interval': min_interval,
                 'business_type': business.business_type,
                 'can_create_booking': can_create_booking,
             })
@@ -3066,7 +3242,7 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
                             and_(
                                 BookingModel.employee_id == emp.id,
                                 BookingModel.booking_date == selected_date,
-                                BookingModel.status.in_(['pending', 'confirmed', 'pending_prepayment', 'prepayment_sent'])
+                                BookingModel.status.in_(['pending', 'confirmed'])
                             )
                         )
                     )
@@ -3124,16 +3300,22 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
                     # Уведомление клиенту (если есть telegram_id)
                     if client.telegram_id and client.telegram_id != 0:
                         try:
+                            from bot.utils.business_types import is_venue_rental_type
+                            is_venue = is_venue_rental_type(business.business_type)
                             weekdays_ru = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
                             formatted_date = selected_date.strftime('%d.%m.%Y') + f" ({weekdays_ru[selected_date.weekday()]})"
                             price_str = f"\n💰 Стоимость: {service.price}₽" if service and service.price else ""
+                            emp_line = ""
+                            if employee_obj:
+                                emp_label = "🏠 Помещение" if is_venue else "👤 Мастер"
+                                emp_line = f"\n{emp_label}: {employee_obj.name}"
                             await bot.send_message(
                                 client.telegram_id,
                                 f"✅ <b>Вас записали!</b>\n\n"
                                 f"🏢 {business.name}\n"
                                 f"📅 {formatted_date} в {selected_time.strftime('%H:%M')}\n"
-                                f"💼 Услуга: {service.name if service else ''}{price_str}\n"
-                                f"🏠 {employee_obj.name if employee_obj else ''}",
+                                f"💼 Услуга: {service.name if service else ''}{price_str}"
+                                f"{emp_line}",
                                 parse_mode="HTML"
                             )
                         except Exception:

@@ -2818,8 +2818,17 @@ async def show_confirmation(message: Message, state: FSMContext, try_edit: bool 
             services_text = "\n".join(services_lines)
             master_text = ""  # Не показываем отдельную строку мастера
         else:
-            services_text = "\n".join([format_service_line(s['name'], s['duration'], s['price']) for s in main_services])
-            master_text = f"👤 Мастер: {data['employee_name']}\n"
+            # Если цена рассчитана по тарифу — не показываем базовую цену услуги (она неверна для конкретного зала)
+            _time_based_price = data.get('time_based_price', 0)
+            if _time_based_price:
+                services_text = "\n".join([format_service_line(s['name'], s['duration'], None) for s in main_services])
+            else:
+                services_text = "\n".join([format_service_line(s['name'], s['duration'], s['price']) for s in main_services])
+            from bot.utils.business_types import is_venue_rental_type as _is_venue_mt
+            if _is_venue_mt(data.get('business_type')):
+                master_text = f"🏠 Зал: {data['employee_name']}\n"
+            else:
+                master_text = f"👤 Мастер: {data['employee_name']}\n"
 
         # Добавляем доп. услуги отдельным блоком
         if additional_services:
@@ -2846,7 +2855,11 @@ async def show_confirmation(message: Message, state: FSMContext, try_edit: bool 
         total_duration = data['service_duration']
         total_price = data.get('service_price', 0)
         price_text = f"💰 Цена: {total_price}₽\n" if total_price else ""
-        master_text = f"👤 Мастер: {data['employee_name']}\n"
+        from bot.utils.business_types import is_venue_rental_type as _is_venue_mt2
+        if _is_venue_mt2(data.get('business_type')):
+            master_text = f"🏠 Зал: {data['employee_name']}\n"
+        else:
+            master_text = f"👤 Мастер: {data['employee_name']}\n"
 
     # Формируем строку длительности (скрываем если 0)
     duration_text = f"⏱ Длительность: {total_duration} мин\n" if total_duration and total_duration > 0 else ""
@@ -2874,7 +2887,8 @@ async def show_confirmation(message: Message, state: FSMContext, try_edit: bool 
     # Получаем owner_username для venue_rental
     owner_username = None
     from bot.utils.business_types import is_venue_rental_type as _is_venue_conf
-    if _is_venue_conf(data.get('business_type')):
+    _is_venue_business = _is_venue_conf(data.get('business_type'))
+    if _is_venue_business:
         async with async_session_maker() as session:
             business_obj = await get_business_by_id(session, data['business_id'])
             if business_obj and business_obj.owner and business_obj.owner.username:
@@ -2884,11 +2898,13 @@ async def show_confirmation(message: Message, state: FSMContext, try_edit: bool 
     if owner_username:
         contact_text = f'\n💬 <a href="https://t.me/{owner_username}">Связаться с владельцем</a>\n'
 
+    services_label = "⏱ Аренда:" if _is_venue_business else "💼 Услуги:"
+
     confirmation_text = f"""
 📋 <b>Подтверждение записи</b>
 
 🏢 Заведение: {data['business_name']}
-💼 Услуги:
+{services_label}
 {services_text}
 {duration_text}{price_text}{master_text}{format_text}{notes_text}📅 Дата: {data['booking_date']}
 🕐 Время: {time_display}

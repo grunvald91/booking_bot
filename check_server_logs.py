@@ -1,29 +1,32 @@
 #!/usr/bin/env python3
-"""Check bot logs on server"""
+"""Show recent service logs from the configured deployment server."""
 import paramiko
 
-# Server details
-hostname = "155.212.162.47"
-username = "root"
-password = "***REMOVED***"
-port = 22
+from deployment_settings import require_deployment_settings
+
+
+SETTINGS = require_deployment_settings()
+
 
 try:
-    # Create SSH client
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-    print(f"Connecting to {hostname}...")
-    ssh.connect(hostname, port=port, username=username, password=password)
+    print(f"Connecting to {SETTINGS.host}...")
+    ssh.connect(
+        SETTINGS.host,
+        port=SETTINGS.port,
+        username=SETTINGS.user,
+        password=SETTINGS.password,
+    )
 
-    # Check logs
     print("Recent logs:")
-    stdin, stdout, stderr = ssh.exec_command("journalctl -u booking-bot -n 30 --no-pager")
-    logs = stdout.read().decode('utf-8', errors='replace')
-    print(logs)
+    stdin, stdout, stderr = ssh.exec_command(
+        f"journalctl -u {SETTINGS.service_name} -n 30 --no-pager"
+    )
+    print(stdout.read().decode("utf-8", errors="replace"))
 
     ssh.close()
-
-except Exception as e:
-    print(f"Error: {e}")
-    exit(1)
+except Exception as exc:
+    print(f"Error: {exc}")
+    raise SystemExit(1)
