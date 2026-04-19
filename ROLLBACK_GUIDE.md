@@ -59,7 +59,7 @@ python deploy_to_server.py
 
 ```bash
 # Подключиться к серверу по SSH
-ssh root@155.212.162.47
+ssh root@your-server-ip
 
 # Остановить бота
 systemctl stop booking-bot

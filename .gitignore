@@ -25,13 +25,19 @@ wheels/
 
 # Environment
 .env
+.env.*
+!.env.example
+deployment.env
+.env.deploy
 
-# IDE
+# IDE and local tooling
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 *~
+*.code-workspace
 
 # Database
 *.db
@@ -39,3 +45,12 @@ wheels/
 
 # Logs
 *.log
+
+# Archives and backups
+*.tar.gz
+*.b64
+*.backup
+
+# Local scratch files
+tmpclaude-*
+155.212.162.47*

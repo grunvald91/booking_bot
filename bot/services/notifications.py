@@ -815,6 +815,61 @@ async def auto_complete_bookings():
         logger.error(f"Error auto-completing bookings: {e}")
 
 
+async def expire_unpaid_bookings(bot: Bot):
+    """Автоотмена неоплаченных броней (pending_prepayment) старше 10 минут"""
+    try:
+        expiry_threshold = datetime.utcnow() - timedelta(minutes=10)
+
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(Booking)
+                .options(selectinload(Booking.client), selectinload(Booking.business), selectinload(Booking.service))
+                .where(
+                    Booking.status == 'pending_prepayment',
+                    Booking.created_at <= expiry_threshold,
+                )
+            )
+            expired = result.scalars().all()
+
+            if not expired:
+                return
+
+            cancelled_count = 0
+            notified_clients = set()
+
+            for booking in expired:
+                booking.status = 'cancelled'
+                cancelled_count += 1
+
+                # Уведомляем клиента один раз на группу (клиент+дата+время)
+                client_key = (booking.client_id, booking.booking_date, booking.booking_time)
+                if booking.client and booking.client.telegram_id and client_key not in notified_clients:
+                    notified_clients.add(client_key)
+                    try:
+                        business_name = booking.business.name if booking.business else 'бизнес'
+                        date_str = booking.booking_date.strftime('%d.%m.%Y')
+                        time_str = booking.booking_time.strftime('%H:%M')
+                        await bot.send_message(
+                            chat_id=booking.client.telegram_id,
+                            text=(
+                                f"⏰ Ваша бронь в <b>{business_name}</b> "
+                                f"на {date_str} в {time_str} была автоматически отменена, "
+                                f"так как оплата не поступила в течение 10 минут.\n\n"
+                                f"Вы можете забронировать снова."
+                            ),
+                            parse_mode='HTML',
+                        )
+                    except Exception:
+                        pass
+
+            await session.commit()
+            if cancelled_count:
+                logger.info(f"Expired {cancelled_count} unpaid bookings (pending_prepayment)")
+
+    except Exception as e:
+        logger.error(f"Error expiring unpaid bookings: {e}")
+
+
 async def check_and_send_subscription_reminders(bot: Bot):
     """Проверка и отправка напоминаний об истекающих абонементах"""
     try:

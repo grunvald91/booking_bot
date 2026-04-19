@@ -4,10 +4,12 @@ let businesses = [];
 let selectedBusinessId = null;
 
 // Schedule state
-let viewMode = 'week'; // 'week' | 'day'
+let viewMode = 'day'; // 'week' | 'day'
 let weekOffset = 0;
 let dayOffset = 0;
 let workingHours = null;
+let bookingInterval = 30;
+let canCreate = true;
 let scheduleData = [];
 let employees = [];
 let services = [];
@@ -120,6 +122,15 @@ async function loadBusinesses() {
         if (data.businesses && data.businesses.length > 0) {
             businesses = data.businesses;
 
+            // Владелец по умолчанию — неделя, администратор — день
+            if (data.is_owner) {
+                viewMode = 'week';
+                document.getElementById('toggleWeek').classList.add('active');
+                document.getElementById('toggleDay').classList.remove('active');
+                document.getElementById('weekNavControls').style.display = 'flex';
+                document.getElementById('dayNavControls').style.display = 'none';
+            }
+
             const select = document.getElementById('businessSelect');
             select.innerHTML = '<option value="">Выберите бизнес</option>';
 
@@ -185,6 +196,8 @@ async function loadSchedule() {
         clients = data.clients || [];
         businessType = data.business_type || '';
         workingHours = data.working_hours || { start: 8, end: 22 };
+        bookingInterval = data.booking_interval || 30;
+        canCreate = data.can_create_booking !== false;
 
         const tabsContainer = document.getElementById('tabsContainer');
 
@@ -203,7 +216,6 @@ async function loadSchedule() {
         document.getElementById('mainContent').style.display = 'flex';
 
         // FAB only for owners in week mode
-        const canCreate = data.can_create_booking !== false;
         document.getElementById('fabAddBooking').style.display =
             canCreate && viewMode === 'week' ? 'flex' : 'none';
 
@@ -221,7 +233,7 @@ function startScheduleAutoRefresh() {
         if (selectedBusinessId) {
             loadSchedule();
         }
-    }, 30000);
+    }, 15000);
 }
 
 function formatDateISO(date) {
@@ -425,10 +437,14 @@ function renderBody(weekStart) {
             const cellDateStr = formatDateISO(cellDate);
 
             if (cellBookings.length === 0) {
-                // Empty cell - clickable to add booking
-                html += `<td class="empty-cell" onclick="openNewBookingModal('${cellDateStr}', '${timeSlot}')">
-                    <div class="add-booking-hint">+</div>
-                </td>`;
+                // Empty cell - clickable to add booking only for owners
+                if (canCreate) {
+                    html += `<td class="empty-cell" onclick="openNewBookingModal('${cellDateStr}', '${timeSlot}')">
+                        <div class="add-booking-hint">+</div>
+                    </td>`;
+                } else {
+                    html += `<td class="empty-cell"></td>`;
+                }
             } else {
                 html += '<td>';
 
@@ -479,7 +495,7 @@ function renderBody(weekStart) {
 }
 
 function renderDayView() {
-    const SLOT_MIN = 30;
+    const SLOT_MIN = bookingInterval;
     const startHour = workingHours?.start ?? 8;
     const endHour = workingHours?.end ?? 22;
 

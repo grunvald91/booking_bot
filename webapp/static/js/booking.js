@@ -483,8 +483,8 @@ function showStep(step) {
     showElement(`step-${step}`);
     updateBottomAction();
 
-    // Hide employee tabs when not on date step
-    if (step !== 'date') {
+    // Hide employee tabs when not on date or venue-price step
+    if (step !== 'date' && step !== 'venue-price') {
         const tabsContainer = document.getElementById('employee-tabs');
         const bottomAction = document.getElementById('bottom-action');
         if (tabsContainer) tabsContainer.classList.add('hidden');
@@ -1610,11 +1610,25 @@ function showPrepaymentScreen(prepayment) {
         amountText += ` (${prepayment.prepayment_percent}% от ${prepayment.total_price} ₽)`;
     }
 
+    let cancellationPhotoHtml = '';
+    if (prepayment.cancellation_policy_photo) {
+        cancellationPhotoHtml = `
+            <div class="cancellation-policy-photo">
+                <img src="/api/media/${encodeURIComponent(prepayment.cancellation_policy_photo)}"
+                     alt="Правила отмены бронирования"
+                     onclick="openFullscreen(this)"
+                     onerror="this.parentElement.style.display='none'">
+            </div>
+        `;
+    }
+
     container.innerHTML = `
         <div class="payment-card-header">
             <div class="payment-card-title">${escapeHtml(prepayment.business_name)}</div>
             <div class="payment-card-subtitle">${formatDateRu(state.selectedDate)}, ${state.selectedSlot}</div>
         </div>
+
+        ${cancellationPhotoHtml}
 
         <div class="payment-amount-section">
             <div class="payment-amount-label">💰 Сумма предоплаты</div>

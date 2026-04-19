@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Запись на услугу</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <link rel="stylesheet" href="/static/css/booking.css?v=13">
+    <link rel="stylesheet" href="/static/css/booking.css?v=14">
 </head>
 <body>
     <!-- Swipe back animated hint -->
@@ -167,10 +167,11 @@
                     <p class="hint">Попробуйте выбрать другой день</p>
                 </div>
             </div>
-            <!-- Employee/Room tabs (Excel-style) -->
-            <div id="employee-tabs" class="employee-tabs hidden">
-                <div id="employee-tabs-list" class="employee-tabs-list"></div>
-            </div>
+        </div>
+
+        <!-- Employee/Room tabs (Excel-style, fixed — outside step-date so position:fixed works) -->
+        <div id="employee-tabs" class="employee-tabs hidden">
+            <div id="employee-tabs-list" class="employee-tabs-list"></div>
         </div>
 
         <!-- Step 4.5: Venue Price Breakdown -->
@@ -408,6 +409,6 @@
         <button id="action-btn" class="primary-btn">Продолжить</button>
     </div>
 
-    <script src="/static/js/booking.js?v=13"></script>
+    <script src="/static/js/booking.js?v=14"></script>
 </body>
 </html>
