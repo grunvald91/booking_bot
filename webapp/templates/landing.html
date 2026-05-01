@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SochiService — онлайн-запись для малого бизнеса</title>
+    <meta name="description" content="Современный сервис онлайн-записи в Telegram: услуги, расписание, предоплата, напоминания и защита от двойной записи.">
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/static/css/landing.css?v=1">
+</head>
+<body>
+    <header class="topbar">
+        <a class="brand" href="#top" aria-label="SochiService">
+            <span class="brand-mark">S</span>
+            <span>SochiService</span>
+        </a>
+        <nav class="nav-links" aria-label="Главная навигация">
+            <a href="#owners">Владельцу</a>
+            <a href="#clients">Клиентам</a>
+            <a href="#compare">Почему мы</a>
+            <a href="#launch">Запуск</a>
+        </nav>
+        <a class="nav-cta" href="https://t.me/{{BOT_USERNAME}}">Открыть бот</a>
+    </header>
+
+    <main id="top">
+        <section class="hero" aria-labelledby="hero-title">
+            <div class="hero-scene" aria-hidden="true">
+                <div class="scene-board board-left">
+                    <div class="board-header">
+                        <span></span><span></span><span></span>
+                    </div>
+                    <div class="timeline-row row-a"><span>09:00</span><b>Стрижка</b></div>
+                    <div class="timeline-row row-b"><span>10:30</span><b>Свободно</b></div>
+                    <div class="timeline-row row-c"><span>12:00</span><b>Предоплата</b></div>
+                    <div class="timeline-row row-d"><span>14:00</span><b>Массаж</b></div>
+                </div>
+                <div class="scene-phone">
+                    <div class="phone-top"></div>
+                    <div class="phone-title">Запись</div>
+                    <div class="phone-chip">Сегодня</div>
+                    <div class="phone-slot active">11:00</div>
+                    <div class="phone-slot">12:30</div>
+                    <div class="phone-slot accent">15:00</div>
+                    <div class="phone-button">Подтвердить</div>
+                </div>
+                <div class="scene-board board-right">
+                    <div class="metric-card">
+                        <span>Накладки</span>
+                        <strong>0</strong>
+                    </div>
+                    <div class="metric-card coral">
+                        <span>Записи</span>
+                        <strong>24/7</strong>
+                    </div>
+                    <div class="metric-card green">
+                        <span>Запуск</span>
+                        <strong>1 день</strong>
+                    </div>
+                </div>
+            </div>
+
+            <div class="hero-content">
+                <p class="eyebrow">Онлайн-запись без хаоса в чатах</p>
+                <h1 id="hero-title">SochiService помогает бизнесу принимать записи, пока владелец занят делом</h1>
+                <p class="hero-copy">
+                    Клиент выбирает услугу, мастера, дату и время сам. Владелец видит расписание, получает уведомления,
+                    подтверждает предоплату и не держит все в голове.
+                </p>
+                <div class="hero-actions">
+                    <a class="primary-action" href="https://t.me/{{BOT_USERNAME}}">Посмотреть в Telegram</a>
+                    <a class="secondary-action" href="#launch">Как подключить бизнес</a>
+                </div>
+            </div>
+        </section>
+
+        <section class="signal-strip" aria-label="Ключевые преимущества">
+            <div>
+                <strong>Telegram-first</strong>
+                <span>клиенты уже там</span>
+            </div>
+            <div>
+                <strong>Предоплата</strong>
+                <span>меньше пустых окон</span>
+            </div>
+            <div>
+                <strong>Расписание</strong>
+                <span>мастера, залы, услуги</span>
+            </div>
+            <div>
+                <strong>Без обучения CRM</strong>
+                <span>владелец дает данные</span>
+            </div>
+        </section>
+
+        <section class="section band-white" id="owners">
+            <div class="section-heading">
+                <p class="eyebrow">Для владельца</p>
+                <h2>Главная боль уходит: больше не нужно собирать расписание вручную</h2>
+                <p>Сервис закрывает типовые вопросы бизнесмена до того, как они станут проблемой в рабочем дне.</p>
+            </div>
+            <div class="feature-grid">
+                <article class="feature-card">
+                    <span class="feature-icon line-teal"></span>
+                    <h3>Простое управление</h3>
+                    <p>Меню в Telegram и веб-расписание. Не нужно быть программистом или разбираться в сложных CRM.</p>
+                </article>
+                <article class="feature-card">
+                    <span class="feature-icon line-coral"></span>
+                    <h3>Защита от двойной записи</h3>
+                    <p>Система проверяет занятость мастера или зала с учетом длительности услуги и активных броней.</p>
+                </article>
+                <article class="feature-card">
+                    <span class="feature-icon line-green"></span>
+                    <h3>Предоплата и чеки</h3>
+                    <p>Можно включить процент предоплаты, показать реквизиты, запросить чек и подтвердить оплату вручную.</p>
+                </article>
+                <article class="feature-card">
+                    <span class="feature-icon line-blue"></span>
+                    <h3>Роли команды</h3>
+                    <p>Владелец, совладелец, администратор и мастер получают свой уровень доступа и уведомлений.</p>
+                </article>
+            </div>
+        </section>
+
+        <section class="section band-ink" id="clients">
+            <div class="split-layout">
+                <div>
+                    <p class="eyebrow">Для клиентов</p>
+                    <h2>Запись понятна и подростку, и человеку, который с техникой на вы</h2>
+                    <p>
+                        Клиент идет по шагам: заведение, услуга, специалист или зал, дата, время, подтверждение.
+                        Без установки отдельного приложения и без переписки с администратором.
+                    </p>
+                </div>
+                <div class="client-steps" aria-label="Сценарий клиента">
+                    <div><span>1</span><b>Выбрал услугу</b></div>
+                    <div><span>2</span><b>Увидел свободное время</b></div>
+                    <div><span>3</span><b>Подтвердил запись</b></div>
+                    <div><span>4</span><b>Получил напоминание</b></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section band-soft" id="compare">
+            <div class="section-heading">
+                <p class="eyebrow">Почему удобнее тяжелых систем</p>
+                <h2>Не универсальный комбайн, а сервис под быстрый запуск записи</h2>
+                <p>Для малого бизнеса важны не десятки лишних модулей, а понятный старт, меньше ошибок и привычный канал для клиентов.</p>
+            </div>
+            <div class="comparison">
+                <div class="comparison-head">
+                    <span>Критерий</span>
+                    <span>Обычные крупные платформы</span>
+                    <span>SochiService</span>
+                </div>
+                <div class="comparison-row">
+                    <span>Внедрение</span>
+                    <p>Владелец сам разбирается с настройками, ролями и каталогами.</p>
+                    <p>Владелец дает данные, администратор сервиса заводит бизнес.</p>
+                </div>
+                <div class="comparison-row">
+                    <span>Интерфейс</span>
+                    <p>Много разделов, которые нужны не каждому малому бизнесу.</p>
+                    <p>Ключевые действия рядом: записи, услуги, сотрудники, предоплата.</p>
+                </div>
+                <div class="comparison-row">
+                    <span>Клиентский путь</span>
+                    <p>Часто требуется переходить в отдельный внешний интерфейс.</p>
+                    <p>Запись открывается в привычном Telegram или веб-странице.</p>
+                </div>
+                <div class="comparison-row">
+                    <span>Гибкость</span>
+                    <p>Хорошо для больших сетей, но избыточно для простого старта.</p>
+                    <p>Подходит салонам, специалистам, автосервисам, обучению и аренде залов.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="section band-white">
+            <div class="section-heading">
+                <p class="eyebrow">Что уже внутри</p>
+                <h2>Функции, которые владелец обычно просит в первую очередь</h2>
+            </div>
+            <div class="capability-grid">
+                <div>Онлайн-запись 24/7</div>
+                <div>Услуги, цены и длительность</div>
+                <div>Мастера, администраторы и залы</div>
+                <div>Рабочие часы и перерывы</div>
+                <div>Выходные сотрудников</div>
+                <div>Предоплата и чек</div>
+                <div>Напоминания за 24 и 2 часа</div>
+                <div>Календарь и расписание</div>
+                <div>Абонементы</div>
+                <div>QR-ссылка для клиентов</div>
+                <div>Фото, видео, адрес и маршрут</div>
+                <div>Аналитика по записям</div>
+            </div>
+        </section>
+
+        <section class="section band-launch" id="launch">
+            <div class="launch-panel">
+                <div>
+                    <p class="eyebrow">Запуск без лишней нагрузки</p>
+                    <h2>Как подключается новый бизнес</h2>
+                    <p>
+                        Владелец не настраивает сервис сам. Он передает данные о бизнесе, услугах,
+                        сотрудниках, графике и правилах оплаты. Вы заводите карточку, проверяете тестовую запись,
+                        и бизнес получает готовый инструмент.
+                    </p>
+                </div>
+                <ol class="launch-list">
+                    <li><span>01</span><b>Собираем анкету бизнеса</b></li>
+                    <li><span>02</span><b>Заводим услуги, команду и график</b></li>
+                    <li><span>03</span><b>Проверяем запись и предоплату</b></li>
+                    <li><span>04</span><b>Даем ссылку или QR клиентам</b></li>
+                </ol>
+            </div>
+        </section>
+
+        <section class="section band-final">
+            <div class="final-content">
+                <p class="eyebrow">Готово к демонстрации</p>
+                <h2>Покажите владельцу не код, а порядок в его расписании</h2>
+                <p>SochiService продает не “бота”, а спокойный рабочий день: записи на месте, клиенты понимают шаги, а владелец видит, что происходит.</p>
+                <div class="hero-actions">
+                    <a class="primary-action" href="https://t.me/{{BOT_USERNAME}}">Открыть бот</a>
+                    <a class="secondary-action" href="/book">Страница записи</a>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="/static/js/landing.js?v=1"></script>
+</body>
+</html>
