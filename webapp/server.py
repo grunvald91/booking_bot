@@ -12,7 +12,7 @@ from aiohttp import web
 from sqlalchemy.orm import selectinload
 
 from aiogram import Bot
-from bot.config import BOT_TOKEN, ADMIN_IDS
+from bot.config import BOT_TOKEN, ADMIN_IDS, BOT_USERNAME
 from bot.services.notifications import (
     notify_master_new_booking,
     notify_owner_new_booking,
@@ -584,7 +584,17 @@ async def api_day_bookings(request: web.Request) -> web.Response:
 
 
 async def index_handler(request: web.Request) -> web.Response:
-    """Главная страница календаря"""
+    """Публичная главная страница сервиса"""
+    import os
+    template_path = os.path.join(os.path.dirname(__file__), 'templates', 'landing.html')
+    with open(template_path, 'r', encoding='utf-8') as f:
+        html = f.read()
+    html = html.replace("{{BOT_USERNAME}}", BOT_USERNAME)
+    return web.Response(text=html, content_type='text/html')
+
+
+async def calendar_handler(request: web.Request) -> web.Response:
+    """Страница календаря записей"""
     import os
     template_path = os.path.join(os.path.dirname(__file__), 'templates', 'calendar.html')
     with open(template_path, 'r', encoding='utf-8') as f:
@@ -3458,6 +3468,7 @@ def create_webapp() -> web.Application:
 
     # Роуты - Календарь
     app.router.add_get('/', index_handler)
+    app.router.add_get('/calendar', calendar_handler)
     app.router.add_get('/api/calendar', api_calendar_data)
     app.router.add_get('/api/booking/{booking_id}', api_booking_details)
     app.router.add_post('/api/booking/{booking_id}/status', api_update_booking_status)
