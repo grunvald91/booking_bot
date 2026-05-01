@@ -9,7 +9,7 @@ class LandingPageTests(unittest.TestCase):
     def test_landing_mentions_core_business_value(self):
         html = LANDING_HTML.read_text(encoding="utf-8")
 
-        self.assertIn("SochiService", html)
+        self.assertIn("ServGo", html)
         self.assertIn("без хаоса в чатах", html)
         self.assertIn("владелец дает данные", html)
         self.assertIn("защита от двойной записи", html)
