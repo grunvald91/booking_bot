@@ -147,6 +147,7 @@ a {
     position: absolute;
     inset: 94px 0 0;
     z-index: -1;
+    opacity: 0.76;
     pointer-events: none;
 }
 
@@ -154,7 +155,7 @@ a {
 .phone-card {
     position: absolute;
     border: 2px solid rgba(26, 22, 51, 0.14);
-    background: rgba(255, 255, 255, 0.74);
+    background: rgba(255, 255, 255, 0.66);
     box-shadow: var(--shadow);
     backdrop-filter: blur(18px);
 }
@@ -166,17 +167,19 @@ a {
 }
 
 .panel-schedule {
-    left: max(18px, 6vw);
-    top: 12%;
-    transform: rotate(-4deg);
+    left: max(18px, 5vw);
+    top: 15%;
+    transform: rotate(-4deg) scale(0.88);
+    transform-origin: left top;
 }
 
 .panel-stats {
-    right: max(18px, 7vw);
-    bottom: 10%;
+    right: max(18px, 5vw);
+    bottom: 12%;
     display: grid;
     gap: 12px;
-    transform: rotate(4deg);
+    transform: rotate(4deg) scale(0.86);
+    transform-origin: right bottom;
 }
 
 .panel-label {
@@ -220,13 +223,14 @@ a {
 }
 
 .phone-card {
-    left: 59%;
-    top: 10%;
-    width: 250px;
-    min-height: 430px;
-    padding: 20px;
+    top: 12%;
+    right: max(38px, 9vw);
+    width: 230px;
+    min-height: 390px;
+    padding: 18px;
     border-radius: 32px;
-    transform: translateX(-50%) rotate(2deg);
+    transform: rotate(3deg) scale(0.88);
+    transform-origin: right top;
 }
 
 .phone-speaker {
@@ -317,7 +321,9 @@ a {
 }
 
 .hero-content {
-    width: min(980px, 100%);
+    position: relative;
+    z-index: 2;
+    width: min(900px, 100%);
     text-align: center;
 }
 
@@ -343,13 +349,14 @@ p {
 }
 
 h1 {
-    max-width: 930px;
+    max-width: 840px;
     margin-inline: auto;
     margin-bottom: 24px;
     color: var(--ink);
-    font-size: clamp(48px, 8vw, 90px);
-    line-height: 0.96;
+    font-size: clamp(46px, 6.5vw, 78px);
+    line-height: 1.02;
     letter-spacing: 0;
+    text-shadow: 0 2px 34px rgba(255, 255, 255, 0.9);
 }
 
 h2 {
@@ -688,7 +695,14 @@ h3 {
 
     .panel-schedule,
     .panel-stats {
-        opacity: 0.42;
+        opacity: 0.36;
+    }
+
+    .phone-card {
+        top: 10%;
+        right: max(14px, 4vw);
+        opacity: 0.34;
+        transform: rotate(3deg) scale(0.82);
     }
 }
 
@@ -745,6 +759,7 @@ h3 {
     }
 
     .phone-card {
+        right: auto;
         left: 50%;
         top: 14%;
         opacity: 0.32;
