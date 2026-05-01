@@ -1208,11 +1208,13 @@ async def manage_business(callback: CallbackQuery, state: FSMContext):
         subscriptions = await get_business_subscriptions(session, business_id)
 
     from bot.utils.business_types import get_business_type_name, is_venue_rental_type
+    from bot.utils.business_readiness import build_business_readiness_warnings
 
     # Разделяем сотрудников на администраторов и мастеров/помещения
     administrators = [e for e in employees if e.role in ["administrator", "master_and_admin"]]
     workers = [e for e in employees if e.role in ["master", "master_and_admin"]]
     is_venue = is_venue_rental_type(business.business_type)
+    readiness_warnings = build_business_readiness_warnings(business, services, workers)
 
     # Формируем полную информацию о бизнесе
     info_text = f"🏢 <b>{business.name}</b>\n\n"
@@ -1261,6 +1263,13 @@ async def manage_business(callback: CallbackQuery, state: FSMContext):
         info_text += f"📋 Услуг: {len(services)}\n"
         info_text += f"👥 Сотрудников: {len(workers)}\n"
     info_text += f"🎫 Абонементов: {len(subscriptions)}\n"
+
+    if readiness_warnings:
+        info_text += "\n<b>⚠️ До запуска заполните:</b>\n"
+        for warning in readiness_warnings:
+            info_text += f"• {warning}\n"
+    else:
+        info_text += "\n<b>✅ Бизнес готов к записи клиентов</b>\n"
 
     info_text += "\n<i>Выберите действие:</i>"
 

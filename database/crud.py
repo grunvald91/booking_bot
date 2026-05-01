@@ -2,9 +2,9 @@
 CRUD операции для работы с базой данных
 Create, Read, Update, Delete
 """
-from datetime import date, time
+from datetime import date, time, timedelta
 from typing import List, Optional
-from sqlalchemy import select, and_, or_, delete, func
+from sqlalchemy import select, and_, or_, delete, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -19,6 +19,50 @@ from database.models import (
 class OptimisticLockError(Exception):
     """Исключение при конфликте оптимистичной блокировки"""
     pass
+
+
+ACTIVE_BOOKING_STATUSES = ("pending", "confirmed", "pending_prepayment", "prepayment_sent")
+CLIENT_DUPLICATE_STATUSES = ACTIVE_BOOKING_STATUSES
+
+
+def _booking_lock_dates(booking_date: date) -> list[date]:
+    """Dates to lock while checking booking overlap for cross-midnight safety."""
+    return sorted({
+        booking_date - timedelta(days=1),
+        booking_date,
+        booking_date + timedelta(days=1),
+    })
+
+
+def _booking_day_lock_params(employee_id: int, lock_date: date) -> dict:
+    """PostgreSQL advisory lock params for one employee/day booking window."""
+    return {"employee_id": int(employee_id), "day_key": lock_date.toordinal()}
+
+
+async def _lock_employee_booking_window(
+    session: AsyncSession,
+    employee_id: Optional[int],
+    booking_date: date,
+) -> None:
+    """Serialize active booking checks for one employee around the target day.
+
+    The application already checks overlapping durations. On PostgreSQL this
+    transaction-level advisory lock prevents two concurrent requests from both
+    passing that check before either one commits.
+    """
+    if not employee_id:
+        return
+
+    bind = session.get_bind()
+    dialect_name = getattr(getattr(bind, "dialect", None), "name", "")
+    if dialect_name != "postgresql":
+        return
+
+    for lock_date in _booking_lock_dates(booking_date):
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:employee_id, :day_key)"),
+            _booking_day_lock_params(employee_id, lock_date),
+        )
 
 
 # ===== USER CRUD =====
@@ -369,7 +413,7 @@ async def create_booking(
     **kwargs
 ) -> Booking:
     """Создать запись"""
-    from datetime import datetime, timedelta
+    from datetime import datetime
 
     # Получаем длительность текущей услуги
     current_service = await session.execute(
@@ -380,6 +424,8 @@ async def create_booking(
 
     # Проверка на двойное бронирование у мастера (с проверкой пересечения времени)
     if employee_id and current_duration > 0:
+        await _lock_employee_booking_window(session, employee_id, booking_date)
+
         # Cross-midnight: проверяем также предыдущий и следующий день
         prev_day = booking_date - timedelta(days=1)
         next_day = booking_date + timedelta(days=1)
@@ -392,7 +438,7 @@ async def create_booking(
                 and_(
                     Booking.employee_id == employee_id,
                     Booking.booking_date.in_(check_dates),
-                    Booking.status.in_(['pending', 'confirmed', 'pending_prepayment', 'prepayment_sent']),
+                    Booking.status.in_(ACTIVE_BOOKING_STATUSES),
                     Service.is_additional == False,
                     Service.duration_minutes > 0
                 )
@@ -427,7 +473,7 @@ async def create_booking(
                 Booking.service_id == service_id,
                 Booking.booking_date == booking_date,
                 Booking.booking_time == booking_time,
-                Booking.status.in_(['pending', 'confirmed'])
+                Booking.status.in_(CLIENT_DUPLICATE_STATUSES)
             )
         )
     )

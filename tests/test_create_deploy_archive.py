@@ -1,6 +1,6 @@
 import unittest
 
-from create_deploy_archive import should_exclude
+from create_deploy_archive import INCLUDE, should_exclude
 
 
 class ShouldExcludeTests(unittest.TestCase):
@@ -15,6 +15,9 @@ class ShouldExcludeTests(unittest.TestCase):
 
     def test_keeps_regular_source_files(self):
         self.assertFalse(should_exclude("bot/main.py"))
+
+    def test_includes_project_documentation(self):
+        self.assertIn("docs/", INCLUDE)
 
 
 if __name__ == "__main__":
