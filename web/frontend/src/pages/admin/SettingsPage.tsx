@@ -818,14 +818,29 @@ export function SettingsPage() {
                       </div>
                     )}
                     {src && (
-                      <a
-                        href={src}
-                        download={filename}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Programmatic click avoids Telegram webview swallowing
+                          // the <a download> attribute. Fallback to opening the
+                          // blob in a new tab if the click is also blocked.
+                          try {
+                            const link = document.createElement('a')
+                            link.href = src
+                            link.download = filename
+                            link.rel = 'noopener'
+                            document.body.appendChild(link)
+                            link.click()
+                            document.body.removeChild(link)
+                          } catch {
+                            window.open(src, '_blank', 'noopener')
+                          }
+                        }}
                         className="flex items-center gap-1.5 mt-3 text-sm text-apple-blue hover:underline"
                       >
                         <Download size={14} />
                         Скачать
-                      </a>
+                      </button>
                     )}
                   </div>
                 ))}
