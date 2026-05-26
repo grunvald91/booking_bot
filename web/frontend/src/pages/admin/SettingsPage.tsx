@@ -11,8 +11,22 @@ import {
   Download,
   Check,
   Loader2,
+  DoorOpen,
+  User as UserIcon,
+  ImagePlus,
 } from 'lucide-react'
-import { api, type BusinessUpdateData, type OwnerInfo } from '../../api/client'
+import { api, type BusinessUpdateData, type OwnerInfo, type Employee } from '../../api/client'
+
+function parsePhotos(raw?: string | null): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return parsed.filter((v): v is string => typeof v === 'string')
+  } catch {
+    if (typeof raw === 'string' && raw.length > 0) return [raw]
+  }
+  return []
+}
 
 async function fetchQrBlob(url: string): Promise<string> {
   const token = localStorage.getItem('token')
@@ -73,6 +87,15 @@ export function SettingsPage() {
   const [ownerModalOpen, setOwnerModalOpen] = useState(false)
   const [ownerField, setOwnerField] = useState('')
 
+  // Employees / rooms with photos
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [employeesLoading, setEmployeesLoading] = useState(false)
+  const [empPhotoUploadingId, setEmpPhotoUploadingId] = useState<number | null>(null)
+  const empFileInputs = useRef<Record<number, HTMLInputElement | null>>({})
+
+  const selectedBusiness = businesses.find((b) => b.id === businessId)
+  const isVenueRental = selectedBusiness?.business_type === 'venue_rental'
+
   const fileInputRef = useRef<HTMLInputElement>(null)
   const toastTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -81,6 +104,20 @@ export function SettingsPage() {
     if (toastTimeout.current) clearTimeout(toastTimeout.current)
     toastTimeout.current = setTimeout(() => setToast(null), 3000)
   }
+
+  // Load employees / rooms for the "Фото сотрудников/залов" section
+  useEffect(() => {
+    if (!businessId) {
+      setEmployees([])
+      return
+    }
+    setEmployeesLoading(true)
+    api
+      .getEmployees(businessId)
+      .then((list) => setEmployees(list))
+      .catch(() => setEmployees([]))
+      .finally(() => setEmployeesLoading(false))
+  }, [businessId])
 
   // Load business detail
   useEffect(() => {
@@ -205,6 +242,44 @@ export function SettingsPage() {
     try {
       const result = await api.deleteBusinessPhoto(businessId, index)
       setPhotos(result.photos)
+      showToast('Фото удалено')
+    } catch (e) {
+      alert('Ошибка удаления фото: ' + (e instanceof Error ? e.message : String(e)))
+    }
+  }
+
+  // Per-employee/room photo upload
+  const handleEmpPhotoUpload = async (empId: number, file: File) => {
+    if (!businessId) return
+    setEmpPhotoUploadingId(empId)
+    try {
+      const res = await api.uploadEmployeePhoto(businessId, empId, file)
+      setEmployees((prev) =>
+        prev.map((e) =>
+          e.id === empId ? { ...e, photos: JSON.stringify(res.photos) } : e
+        )
+      )
+      showToast('Фото загружено')
+    } catch (err) {
+      alert('Ошибка загрузки фото: ' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setEmpPhotoUploadingId(null)
+      const input = empFileInputs.current[empId]
+      if (input) input.value = ''
+    }
+  }
+
+  const handleEmpPhotoDelete = async (empId: number, index: number) => {
+    if (!businessId || !confirm('Удалить фото?')) return
+    try {
+      const res = await api.deleteEmployeePhoto(businessId, empId, index)
+      setEmployees((prev) =>
+        prev.map((e) =>
+          e.id === empId
+            ? { ...e, photos: res.photos.length > 0 ? JSON.stringify(res.photos) : undefined }
+            : e
+        )
+      )
       showToast('Фото удалено')
     } catch (e) {
       alert('Ошибка удаления фото: ' + (e instanceof Error ? e.message : String(e)))
@@ -445,6 +520,109 @@ export function SettingsPage() {
             onChange={handlePhotoUpload}
             className="hidden"
           />
+        </section>
+
+        {/* === 2.5. Employee / Room Photos === */}
+        <section className="bg-white rounded-2xl shadow-sm border border-apple-border/50 p-5">
+          <h2 className="text-lg font-semibold text-apple-text flex items-center gap-2 mb-1">
+            {isVenueRental ? <DoorOpen size={20} /> : <UserIcon size={20} />}
+            {isVenueRental ? 'Фото залов' : 'Фото сотрудников'}
+          </h2>
+          <p className="text-xs text-apple-gray mb-4">
+            Прикрепите фото для каждого {isVenueRental ? 'зала' : 'сотрудника'} — оно появится в карточке при выборе клиентом.
+          </p>
+
+          {employeesLoading ? (
+            <div className="space-y-2">
+              {[1, 2].map((i) => (
+                <div key={i} className="h-24 skeleton rounded-2xl" />
+              ))}
+            </div>
+          ) : employees.length === 0 ? (
+            <p className="text-sm text-apple-gray py-2">
+              {isVenueRental ? 'Залы не добавлены.' : 'Сотрудники не добавлены.'} Откройте раздел «{isVenueRental ? 'Сотрудники' : 'Сотрудники'}», чтобы добавить.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {employees.map((emp) => {
+                const empPhotos = parsePhotos(emp.photos)
+                const isUploading = empPhotoUploadingId === emp.id
+                return (
+                  <div
+                    key={emp.id}
+                    className="border border-apple-border/40 rounded-xl p-3"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="min-w-0">
+                        <h3 className="font-medium text-sm text-apple-text truncate">
+                          {emp.name}
+                        </h3>
+                        {emp.specialization && (
+                          <p className="text-[11px] text-apple-gray truncate">
+                            {emp.specialization}
+                          </p>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-apple-gray shrink-0 ml-2">
+                        {empPhotos.length} фото
+                      </span>
+                    </div>
+
+                    <input
+                      ref={(el) => {
+                        empFileInputs.current[emp.id] = el
+                      }}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        if (f) handleEmpPhotoUpload(emp.id, f)
+                      }}
+                    />
+
+                    <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+                      {empPhotos.map((fid, idx) => (
+                        <div
+                          key={`${fid}-${idx}`}
+                          className="relative group aspect-square rounded-lg overflow-hidden bg-apple-bg"
+                        >
+                          <img
+                            src={`/api/telegram-photo/${encodeURIComponent(fid)}`}
+                            alt={`${emp.name} ${idx + 1}`}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                          <button
+                            onClick={() => handleEmpPhotoDelete(emp.id, idx)}
+                            className="absolute top-1 right-1 p-1 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:bg-black/80"
+                            aria-label="Удалить"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      ))}
+
+                      <button
+                        onClick={() => empFileInputs.current[emp.id]?.click()}
+                        disabled={isUploading}
+                        className="aspect-square rounded-lg border-2 border-dashed border-apple-border/50 flex flex-col items-center justify-center text-apple-gray hover:border-apple-blue hover:text-apple-blue transition-all duration-200 disabled:opacity-50"
+                      >
+                        {isUploading ? (
+                          <Loader2 size={16} className="animate-spin" />
+                        ) : (
+                          <>
+                            <ImagePlus size={16} />
+                            <span className="text-[9px] mt-0.5 font-medium">Добавить</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </section>
 
         {/* === 3. Prepayment Settings === */}
