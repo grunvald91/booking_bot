@@ -501,12 +501,22 @@ async def get_business_bookings(
     return list(result.scalars().all())
 
 
+VALID_BOOKING_STATUSES = {"pending", "confirmed", "cancelled", "completed"}
+
+
+VALID_BOOKING_STATUSES = {"pending", "confirmed", "cancelled", "completed"}
+
+
 async def update_booking_status(
     session: AsyncSession,
     booking_id: int,
     status: str
 ) -> Booking:
     """Обновить статус записи"""
+    if status not in VALID_BOOKING_STATUSES:
+        raise ValueError(f"Недопустимый статус: {status}. Допустимые: {VALID_BOOKING_STATUSES}")
+    if status not in VALID_BOOKING_STATUSES:
+        raise ValueError(f"Недопустимый статус: {status}")
     result = await session.execute(
         select(Booking).where(Booking.id == booking_id)
     )

@@ -24,6 +24,8 @@ class ServiceCreationStates(StatesGroup):
     entering_duration = State()
     entering_price = State()
     choosing_hourly = State()  # Цена за час? (для доп. услуг venue_rental)
+    choosing_pricing_type = State()  # Фиксированная / По кол-ву человек
+    entering_group_tier = State()  # Ввод тарифа: мин-макс чел, цена
 
 
 class EmployeeCreationStates(StatesGroup):
@@ -55,6 +57,8 @@ class ServiceEditStates(StatesGroup):
     editing_description = State()
     editing_duration = State()
     editing_price = State()
+    choosing_pricing_type = State()  # Выбор типа ценообразования
+    entering_group_tier = State()  # Ввод тарифа группы
 
 
 class EmployeeEditStates(StatesGroup):
@@ -89,6 +93,7 @@ class PrepaymentSettingsStates(StatesGroup):
     entering_phone = State()               # Ввод номера для оплаты
     entering_details = State()             # Ввод реквизитов (карта, СБП и т.д.)
     entering_cancellation_photo = State()  # Загрузка фото условий отмены
+    entering_cancellation_text = State()   # Ввод текста условий отмены
 
 
 class BusinessOwnerStates(StatesGroup):

@@ -540,9 +540,12 @@ async def my_subscription_details(callback: CallbackQuery, state: FSMContext):
         f"📅 Куплен: {cs.purchased_at.strftime('%d.%m.%Y')}\n"
     )
 
-    if cs.status == "active":
+    if cs.status == "active" and cs.expires_at:
         days_left = (cs.expires_at - datetime.utcnow()).days
-        text += f"⏰ Истекает: {cs.expires_at.strftime('%d.%m.%Y')} ({days_left} дн.)\n"
+        if days_left >= 0:
+            text += f"⏰ Истекает: {cs.expires_at.strftime('%d.%m.%Y')} (осталось {days_left} дн.)\n"
+        else:
+            text += f"⌛ Истёк: {cs.expires_at.strftime('%d.%m.%Y')} ({abs(days_left)} дн. назад)\n"
 
     if remaining_text:
         text += f"\n📋 Остаток услуг:\n{remaining_text}"

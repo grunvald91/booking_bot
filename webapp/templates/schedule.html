@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Расписание</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <link rel="stylesheet" href="/static/css/schedule.css?v=16">
+    <link rel="stylesheet" href="/static/css/schedule.css?v=17">
 </head>
 <body>
     <div id="app">
@@ -138,6 +138,18 @@
                         <input type="time" id="nbTime" required>
                     </div>
                 </div>
+                <!-- Доп. услуги (для venue_rental) -->
+                <div class="form-group" id="nbAdditionalServicesGroup" style="display:none">
+                    <label>Доп. услуги</label>
+                    <div id="nbAdditionalServices" class="additional-services-list"></div>
+                </div>
+                <!-- Блок расчёта стоимости -->
+                <div id="nbPriceInfo" class="price-info-block" style="display:none"></div>
+                <!-- Комментарий -->
+                <div class="form-group">
+                    <label for="nbComment">Комментарий</label>
+                    <textarea id="nbComment" placeholder="Комментарий к записи..." rows="2" style="resize:vertical;min-height:56px"></textarea>
+                </div>
                 <div class="form-actions">
                     <button type="button" class="btn-cancel" onclick="closeNewBookingModal()">Отмена</button>
                     <button type="submit" class="btn-submit" id="nbSubmitBtn">Создать запись</button>
@@ -146,6 +158,6 @@
         </div>
     </div>
 
-    <script src="/static/js/schedule.js?v=19"></script>
+    <script src="/static/js/schedule.js?v=20"></script>
 </body>
 </html>

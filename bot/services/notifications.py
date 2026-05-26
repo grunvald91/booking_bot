@@ -467,10 +467,15 @@ async def notify_owner_new_booking(bot: Bot, booking: Booking, services_list: Op
 
         logger.info(f"Sending notification to owner {owner.telegram_id}: {message[:200]}")
 
+        # Add confirm/cancel buttons
+        from bot.keyboards.admin_kb import get_booking_admin_actions_keyboard
+        keyboard = get_booking_admin_actions_keyboard(booking.id)
+
         await bot.send_message(
             chat_id=owner.telegram_id,
             text=message,
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=keyboard,
         )
 
         logger.info(f"Notified owner {owner.telegram_id} about booking {booking.id}")
@@ -614,6 +619,17 @@ async def notify_administrator_new_booking(bot: Bot, booking: Booking, services_
         if not administrators:
             logger.info(f"No administrators with telegram_id for business {business.id}")
             return
+
+        # Фильтр: если запись на сегодня — отправляем только дежурным администраторам
+        from datetime import date as date_cls
+        today = date_cls.today()
+        if booking.booking_date == today:
+            duty_admins = [a for a in administrators if a.on_duty_date == today]
+            if duty_admins:
+                administrators = duty_admins
+            # если никто не дежурит — остаёмся полный список (все админы)
+        else:
+            return  # запись не на сегодня — не уведомляем
 
         # Формируем ссылку на Telegram профиль клиента
         if client.telegram_id and client.telegram_id > 0:

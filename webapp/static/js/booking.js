@@ -249,6 +249,16 @@ async function loadBusinesses() {
         renderBusinesses();
         showStep('business');
 
+        // Автовыбор бизнеса из URL-параметра (?business_id=N)
+        const urlBusinessId = new URLSearchParams(window.location.search).get('business_id');
+        if (urlBusinessId) {
+            const bId = parseInt(urlBusinessId);
+            if (state.businesses.find(b => b.id === bId)) {
+                await selectBusiness(bId);
+                return;
+            }
+        }
+
         // Check for last booking after businesses are loaded
         await checkLastBooking();
     } catch (error) {

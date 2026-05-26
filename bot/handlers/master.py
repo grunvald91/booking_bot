@@ -1,6 +1,7 @@
 """
 Обработчики для панели мастеров
 """
+import logging
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -8,6 +9,8 @@ from aiogram.filters import BaseFilter
 from datetime import datetime, date, time, timedelta
 
 from sqlalchemy import select
+
+logger = logging.getLogger(__name__)
 
 from database import async_session_maker
 from database.crud import (
@@ -503,7 +506,7 @@ async def confirm_manual_booking(callback: CallbackQuery, state: FSMContext):
     # Удаляем сообщение с подтверждением
     try:
         await callback.message.delete()
-    except:
+    except Exception:
         pass
 
     # Формируем текст с услугами
@@ -551,7 +554,7 @@ async def cancel_manual_booking(callback: CallbackQuery, state: FSMContext):
     # Удаляем сообщение
     try:
         await callback.message.delete()
-    except:
+    except Exception:
         pass
 
     # Отправляем новое сообщение
@@ -584,7 +587,7 @@ async def cancel_booking_flow(callback: CallbackQuery, state: FSMContext):
     # Удаляем сообщение
     try:
         await callback.message.delete()
-    except:
+    except Exception:
         pass
 
     # Отправляем новое сообщение
@@ -971,11 +974,36 @@ async def complete_booking(callback: CallbackQuery):
     """Завершить запись"""
     await callback.answer()
 
-    booking_id = int(callback.data.split(":")[1])
+    try:
+        booking_id = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        await callback.message.answer("❌ Ошибка данных")
+        return
 
     async with async_session_maker() as session:
         try:
-            booking = await update_booking_status(session, booking_id, "completed")
+            # Проверка принадлежности записи мастеру
+            employee = await get_employee_by_telegram_id(session, callback.from_user.id)
+            if not employee:
+                await callback.message.answer("❌ Вы не зарегистрированы как мастер")
+                return
+
+            from sqlalchemy import select as sa_select
+            from sqlalchemy.orm import selectinload
+            from database.models import Booking as BookingModel
+            result = await session.execute(
+                sa_select(BookingModel)
+                .options(selectinload(BookingModel.client), selectinload(BookingModel.service))
+                .where(BookingModel.id == booking_id)
+            )
+            booking = result.scalar_one_or_none()
+            if not booking or booking.employee_id != employee.id:
+                await callback.message.answer("❌ Запись не найдена или нет доступа")
+                return
+
+            booking.status = "completed"
+            await session.commit()
+
 
             await callback.message.edit_text(
                 f"✔️ <b>Запись #{booking_id} завершена!</b>\n\n"
@@ -1000,11 +1028,35 @@ async def cancel_booking(callback: CallbackQuery):
     """Отменить запись"""
     await callback.answer()
 
-    booking_id = int(callback.data.split(":")[1])
+    try:
+        booking_id = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        await callback.message.answer("❌ Ошибка данных")
+        return
 
     async with async_session_maker() as session:
         try:
-            booking = await update_booking_status(session, booking_id, "cancelled")
+            employee = await get_employee_by_telegram_id(session, callback.from_user.id)
+            if not employee:
+                await callback.message.answer("❌ Вы не зарегистрированы как мастер")
+                return
+
+            from sqlalchemy import select as sa_select
+            from sqlalchemy.orm import selectinload
+            from database.models import Booking as BookingModel
+            result = await session.execute(
+                sa_select(BookingModel)
+                .options(selectinload(BookingModel.client), selectinload(BookingModel.service))
+                .where(BookingModel.id == booking_id)
+            )
+            booking = result.scalar_one_or_none()
+            if not booking or booking.employee_id != employee.id:
+                await callback.message.answer("❌ Запись не найдена или нет доступа")
+                return
+
+            booking.status = "cancelled"
+            await session.commit()
+
 
             await callback.message.edit_text(
                 f"❌ <b>Запись #{booking_id} отменена</b>\n\n"

@@ -25,7 +25,7 @@ def get_admin_menu_keyboard(show_employee_button: bool = False, is_super_admin: 
     # Кнопка расписания с WebApp
     schedule_button = KeyboardButton(
         text="📅 Расписание",
-        web_app=WebAppInfo(url=f"{WEBAPP_URL}/schedule") if WEBAPP_URL else None
+        web_app=WebAppInfo(url=f"{WEBAPP_URL}/schedule?role=owner") if WEBAPP_URL else None
     )
 
     buttons = [
@@ -93,7 +93,10 @@ def get_business_management_keyboard(business_id: int, business_type: str = None
 
     builder.button(text="🎫 Абонементы", callback_data=f"manage_subscriptions:{business_id}")
     builder.button(text="👥 Совладельцы", callback_data=f"manage_owners:{business_id}")
-    builder.button(text="📲 QR-код для клиентов", callback_data=f"show_qr:{business_id}")
+    builder.button(text="📋 Дежурные сегодня", callback_data=f"duty_admins:{business_id}")
+    builder.button(text="📅 График дежурств", callback_data=f"duty_schedule:{business_id}")
+    builder.button(text="📲 QR-код (Telegram)", callback_data=f"show_qr:{business_id}")
+    builder.button(text="🌐 QR-код (WebApp)", callback_data=f"show_webapp_qr:{business_id}")
     builder.button(text="🗑 Удалить бизнес", callback_data=f"delete_business:{business_id}", style="danger")
     builder.button(text="◀️ Назад", callback_data="admin_back_to_list")
     builder.button(text="🏠 Главное меню", callback_data="main_menu")
@@ -133,16 +136,10 @@ def get_prepayment_settings_keyboard(
     business_id: int,
     prepayment_enabled: bool,
     require_receipt: bool = False,
-    has_cancellation_photo: bool = False
+    has_cancellation_photo: bool = False,
+    has_cancellation_text: bool = False,
 ) -> InlineKeyboardMarkup:
-    """Клавиатура настроек предоплаты
-
-    Args:
-        business_id: ID бизнеса
-        prepayment_enabled: включена ли предоплата
-        require_receipt: требуется ли чек для подтверждения
-        has_cancellation_photo: загружено ли фото условий отмены
-    """
+    """Клавиатура настроек предоплаты"""
     builder = InlineKeyboardBuilder()
 
     if prepayment_enabled:
@@ -162,6 +159,12 @@ def get_prepayment_settings_keyboard(
             builder.button(text="🖼 Изменить фото условий отмены", callback_data=f"prepay_cancel_photo:{business_id}")
         else:
             builder.button(text="📷 Добавить фото условий отмены", callback_data=f"prepay_cancel_photo:{business_id}")
+
+        # Текст условий отмены
+        if has_cancellation_text:
+            builder.button(text="📝 Изменить текст условий отмены", callback_data=f"prepay_cancel_text:{business_id}")
+        else:
+            builder.button(text="✏️ Добавить текст условий отмены", callback_data=f"prepay_cancel_text:{business_id}")
     else:
         builder.button(text="✅ Включить предоплату", callback_data=f"prepay_toggle:{business_id}:on", style="success")
 
