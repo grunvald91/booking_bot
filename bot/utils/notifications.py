@@ -7,7 +7,6 @@ from aiogram import Bot
 
 from database import async_session_maker
 from database.crud import get_pending_reminders, mark_reminder_sent
-from bot.utils.validators import format_date_with_weekday, format_phone
 
 
 async def send_reminder(bot: Bot, booking):
@@ -16,9 +15,12 @@ async def send_reminder(bot: Bot, booking):
         # Формируем кликабельный телефон (Telegram автоматически делает его ссылкой)
         phone_text = ""
         if booking.business.phone:
-            formatted_phone = format_phone(booking.business.phone)
-            tel_link = formatted_phone if formatted_phone.startswith('+') else '+7' + formatted_phone[1:]
-            phone_text = f'📞 Телефон: <a href="tel:{tel_link}">{formatted_phone}</a>'
+            # Убираем все символы кроме цифр и +
+            clean_phone = ''.join(c for c in booking.business.phone if c.isdigit() or c == '+')
+            # Если номер не начинается с +, добавляем +7 для России
+            if not clean_phone.startswith('+'):
+                clean_phone = '+7' + clean_phone.lstrip('78')
+            phone_text = f'📞 Телефон: <a href="tel:{clean_phone}">{booking.business.phone}</a>'
 
         # Формируем кликабельный адрес (ссылка на Яндекс.Карты)
         address_text = ""
@@ -34,7 +36,7 @@ async def send_reminder(bot: Bot, booking):
 🔔 <b>Напоминание о записи</b>
 
 Завтра у вас запись:
-📅 Дата: {format_date_with_weekday(booking.booking_date)}
+📅 Дата: {booking.booking_date.strftime('%d.%m.%Y')}
 🕐 Время: {booking.booking_time.strftime('%H:%M')}
 🏢 Заведение: {booking.business.name}
 💼 Услуга: {booking.service.name}

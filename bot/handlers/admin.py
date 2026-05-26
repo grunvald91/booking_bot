@@ -144,10 +144,10 @@ async def admin_back_to_businesses(callback: CallbackQuery, state: FSMContext):
                 "Используйте '➕ Добавить бизнес' чтобы создать.",
                 reply_markup=builder.as_markup()
             )
-        except:
+        except Exception:
             try:
                 await callback.message.delete()
-            except:
+            except Exception:
                 pass
             await callback.message.answer(
                 "У вас пока нет ни одного бизнеса.\n"
@@ -162,10 +162,10 @@ async def admin_back_to_businesses(callback: CallbackQuery, state: FSMContext):
             "Ваши бизнесы:",
             reply_markup=admin_kb.get_businesses_admin_keyboard(businesses)
         )
-    except:
+    except Exception:
         try:
             await callback.message.delete()
-        except:
+        except Exception:
             pass
         await callback.message.answer(
             "Ваши бизнесы:",
@@ -806,15 +806,21 @@ async def service_price_entered(message: Message, state: FSMContext):
         )
         return
 
-    # Стандартное создание услуги
-    await _finish_service_creation(message, state, price, is_hourly=False)
+    # Спрашиваем тип ценообразования
+    await state.update_data(service_price=price)
+    await _ask_pricing_type(message, state)
 
 
-async def _finish_service_creation(message_or_callback, state: FSMContext, price: int, is_hourly: bool = False):
+async def _finish_service_creation(message_or_callback, state: FSMContext, price: int, is_hourly: bool = False, pricing_type: str = 'fixed', group_pricing: list = None):
     """Завершение создания услуги (общий код)"""
+    import json as _json
     data = await state.get_data()
     business_id = data['business_id']
     is_additional = data.get('is_additional_service', False)
+    if group_pricing is None:
+        group_pricing = data.get('group_pricing', [])
+    if pricing_type == 'fixed':
+        pricing_type = data.get('pricing_type', 'fixed')
 
     async with async_session_maker() as session:
         service = await create_service(
@@ -827,6 +833,12 @@ async def _finish_service_creation(message_or_callback, state: FSMContext, price
             is_additional=is_additional,
             is_hourly_price=is_hourly
         )
+        # Save pricing_type and group_pricing
+        service.pricing_type = pricing_type
+        if group_pricing:
+            service.group_pricing = _json.dumps(group_pricing)
+        await session.commit()
+        await session.refresh(service)
 
     # Формируем информацию об услуге
     svc_type_label = "🛎 Доп. услуга" if is_additional else "📋"
@@ -840,6 +852,10 @@ async def _finish_service_creation(message_or_callback, state: FSMContext, price
         info_text += f"⏱ Длительность: {service.duration_minutes} мин\n"
     if service.price:
         info_text += f"💰 Цена: {price_label}\n"
+    if pricing_type == 'per_person' and group_pricing:
+        info_text += "👥 Тарифы по кол-ву:\n"
+        for t in group_pricing:
+            info_text += f"  {t['min_people']}–{t['max_people']} чел: {t['price']}₽\n"
     if service.description:
         info_text += f"\n📝 {service.description}"
 
@@ -868,10 +884,101 @@ async def _finish_service_creation(message_or_callback, state: FSMContext, price
 async def service_hourly_price_chosen(callback: CallbackQuery, state: FSMContext):
     """Выбор: цена за час или фиксированная"""
     is_hourly = callback.data.split(":")[1] == "yes"
-    data = await state.get_data()
-    price = data.get('service_price')
-    await _finish_service_creation(callback, state, price, is_hourly=is_hourly)
+    await state.update_data(is_hourly=is_hourly)
+    await _ask_pricing_type(callback.message, state)
     await callback.answer()
+
+
+async def _ask_pricing_type(msg, state: FSMContext):
+    """Спросить тип ценообразования: фиксированная / по кол-ву человек"""
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💰 Фиксированная цена", callback_data="pricing_type:fixed")
+    builder.button(text="👥 По количеству человек", callback_data="pricing_type:per_person")
+    builder.adjust(1)
+    await state.set_state(ServiceCreationStates.choosing_pricing_type)
+    await msg.answer(
+        "📊 <b>Тип ценообразования:</b>\n\n"
+        "💰 <b>Фиксированная</b> — одна цена для всех\n"
+        "👥 <b>По количеству человек</b> — разные тарифы в зависимости от размера группы",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+
+
+@router.callback_query(F.data.startswith("pricing_type:"), ServiceCreationStates.choosing_pricing_type)
+async def service_pricing_type_chosen(callback: CallbackQuery, state: FSMContext):
+    """Выбор типа ценообразования"""
+    pricing_type = callback.data.split(":")[1]
+    await state.update_data(pricing_type=pricing_type, group_pricing=[])
+
+    if pricing_type == "per_person":
+        await state.set_state(ServiceCreationStates.entering_group_tier)
+        await callback.message.edit_text(
+            "👥 <b>Тарифы по количеству человек</b>\n\n"
+            "Введите тариф в формате:\n"
+            "<code>мин-макс цена</code>\n\n"
+            "Например: <code>1-3 500</code> (1–3 чел. = 500₽)\n"
+            "Или: <code>4-10 400</code> (4–10 чел. = 400₽)\n\n"
+            "Когда закончите, отправьте <b>Готово</b>",
+            parse_mode="HTML"
+        )
+    else:
+        data = await state.get_data()
+        price = data.get('service_price')
+        is_hourly = data.get('is_hourly', False)
+        await _finish_service_creation(callback, state, price, is_hourly=is_hourly, pricing_type='fixed')
+
+    await callback.answer()
+
+
+@router.message(ServiceCreationStates.entering_group_tier)
+async def service_group_tier_entered(message: Message, state: FSMContext):
+    """Ввод тарифа по количеству человек"""
+    import json as _json
+
+    if message.text and message.text.strip().lower() in ("готово", "done", "ok"):
+        data = await state.get_data()
+        tiers = data.get('group_pricing', [])
+        price = data.get('service_price')
+        is_hourly = data.get('is_hourly', False)
+
+        if not tiers:
+            await message.answer("⚠️ Добавьте хотя бы один тариф или отправьте тариф в формате: <code>мин-макс цена</code>", parse_mode="HTML")
+            return
+
+        await _finish_service_creation(message, state, price, is_hourly=is_hourly, pricing_type='per_person', group_pricing=tiers)
+        return
+
+    # Parse tier: "1-3 500" or "1 3 500"
+    text = message.text.strip()
+    import re
+    match = re.match(r'(\d+)\s*[-–—]\s*(\d+)\s+(\d+)', text)
+    if not match:
+        await message.answer(
+            "❌ Неверный формат. Используйте: <code>мин-макс цена</code>\n"
+            "Например: <code>1-3 500</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    min_p, max_p, price_val = int(match.group(1)), int(match.group(2)), int(match.group(3))
+    if min_p > max_p or min_p < 1:
+        await message.answer("❌ Минимум должен быть <= максимума и >= 1")
+        return
+
+    data = await state.get_data()
+    tiers = data.get('group_pricing', [])
+    tiers.append({"min_people": min_p, "max_people": max_p, "price": price_val})
+    await state.update_data(group_pricing=tiers)
+
+    tiers_text = "\n".join([f"  {t['min_people']}–{t['max_people']} чел: {t['price']}₽" for t in tiers])
+    await message.answer(
+        f"✅ Тариф добавлен: {min_p}–{max_p} чел = {price_val}₽\n\n"
+        f"<b>Текущие тарифы:</b>\n{tiers_text}\n\n"
+        "Добавьте ещё тариф или отправьте <b>Готово</b>",
+        parse_mode="HTML"
+    )
 
 
 # ===== СОЗДАНИЕ СОТРУДНИКА =====
@@ -1271,7 +1378,7 @@ async def manage_business(callback: CallbackQuery, state: FSMContext):
             photos_data = json.loads(business.photos)
             if photos_data and len(photos_data) > 0:
                 first_photo_id = photos_data[0]
-        except:
+        except Exception:
             pass
 
     keyboard = admin_kb.get_business_management_keyboard(business_id, business.business_type)
@@ -1282,7 +1389,7 @@ async def manage_business(callback: CallbackQuery, state: FSMContext):
         # Удаляем старое сообщение и отправляем новое с фото
         try:
             await callback.message.delete()
-        except:
+        except Exception:
             pass
         try:
             await callback.message.answer_photo(
@@ -1305,10 +1412,10 @@ async def manage_business(callback: CallbackQuery, state: FSMContext):
                 disable_web_page_preview=True,
                 reply_markup=keyboard
             )
-        except:
+        except Exception:
             try:
                 await callback.message.delete()
-            except:
+            except Exception:
                 pass
             await callback.message.answer(
                 info_text,
@@ -1862,9 +1969,26 @@ async def edit_service_menu(callback: CallbackQuery):
         service = await get_service_by_id(session, service_id)
         business = await get_business_by_id(session, service.business_id)
 
+    import json as _json_edit
     # Длительность: показываем "без времени" для 0
     duration_text = f"{service.duration_minutes} мин" if service.duration_minutes and service.duration_minutes > 0 else "без времени"
     price_text = f"{service.price} ₽" if service.price else "(не указана)"
+
+    pricing_type = getattr(service, 'pricing_type', 'fixed') or 'fixed'
+    pricing_label = "👥 По кол-ву человек" if pricing_type == 'per_person' else "💰 Фиксированная"
+
+    # Parse group pricing
+    group_pricing_text = ""
+    gp_raw = getattr(service, 'group_pricing', None)
+    if gp_raw and pricing_type == 'per_person':
+        try:
+            tiers = _json_edit.loads(gp_raw) if isinstance(gp_raw, str) else gp_raw
+            if tiers:
+                group_pricing_text = "\n👥 Тарифы:\n"
+                for t in tiers:
+                    group_pricing_text += f"  {t['min_people']}–{t['max_people']} чел: {t['price']}₽\n"
+        except (ValueError, TypeError, KeyError):
+            pass
 
     svc_icon = "🛎" if service.is_additional else "📋"
     info_text = f"""
@@ -1873,6 +1997,7 @@ async def edit_service_menu(callback: CallbackQuery):
 🏢 Бизнес: {business.name}
 ⏱ Длительность: {duration_text}
 💰 Цена: {price_text}
+📊 Тип цены: {pricing_label}{group_pricing_text}
 📝 Описание: {service.description if service.description else '(не указано)'}
 
 Выберите действие:
@@ -1883,6 +2008,7 @@ async def edit_service_menu(callback: CallbackQuery):
     builder.button(text="✏️ Редактировать название", callback_data=f"edit_service_name:{service_id}")
     builder.button(text="⏱ Редактировать длительность", callback_data=f"edit_service_duration:{service_id}")
     builder.button(text="💰 Редактировать цену", callback_data=f"edit_service_price:{service_id}")
+    builder.button(text="📊 Тип ценообразования", callback_data=f"edit_service_pricing:{service_id}")
     builder.button(text="📝 Редактировать описание", callback_data=f"edit_service_description:{service_id}")
     builder.button(text="🗑 Удалить услугу", callback_data=f"delete_service:{service_id}", style="danger")
     if service.is_additional:
@@ -2555,6 +2681,130 @@ async def edit_service_description_save(message: Message, state: FSMContext):
 
     await message.answer(info_text, parse_mode="HTML", reply_markup=builder.as_markup())
     await state.clear()
+
+
+# ===== ТАРИФЫ ПО КОЛ-ВУ ЧЕЛОВЕК (РЕДАКТИРОВАНИЕ) =====
+
+@router.callback_query(F.data.startswith("edit_service_pricing:"))
+async def edit_service_pricing_start(callback: CallbackQuery, state: FSMContext):
+    """Начало редактирования типа ценообразования"""
+    service_id = int(callback.data.split(":")[1])
+    await state.update_data(service_id=service_id)
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💰 Фиксированная цена", callback_data=f"set_pricing_type:fixed:{service_id}")
+    builder.button(text="👥 По количеству человек", callback_data=f"set_pricing_type:per_person:{service_id}")
+    builder.button(text="◀️ Назад", callback_data=f"edit_service:{service_id}")
+    builder.adjust(1)
+
+    await callback.message.edit_text(
+        "📊 <b>Выберите тип ценообразования:</b>\n\n"
+        "💰 <b>Фиксированная</b> — одна цена для всех\n"
+        "👥 <b>По количеству человек</b> — разные тарифы для разного кол-ва гостей",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("set_pricing_type:"))
+async def set_pricing_type(callback: CallbackQuery, state: FSMContext):
+    """Установить тип ценообразования"""
+    import json as _json_pt
+    parts = callback.data.split(":")
+    pricing_type = parts[1]
+    service_id = int(parts[2])
+
+    from database.crud import get_service_by_id
+    async with async_session_maker() as session:
+        service = await get_service_by_id(session, service_id)
+        service.pricing_type = pricing_type
+        if pricing_type == 'fixed':
+            service.group_pricing = None
+        await session.commit()
+
+    if pricing_type == 'per_person':
+        await state.update_data(service_id=service_id, group_pricing=[])
+        await state.set_state(ServiceEditStates.entering_group_tier)
+        await callback.message.edit_text(
+            "👥 <b>Тарифы по количеству человек</b>\n\n"
+            "Введите тариф в формате:\n"
+            "<code>мин-макс цена</code>\n\n"
+            "Например: <code>1-3 500</code> (1–3 чел. = 500₽)\n\n"
+            "Когда закончите, отправьте <b>Готово</b>",
+            parse_mode="HTML"
+        )
+    else:
+        await callback.answer("✅ Тип установлен: Фиксированная цена")
+        # Return to edit menu
+        await edit_service_menu.__wrapped__(callback) if hasattr(edit_service_menu, '__wrapped__') else None
+        # Simulate re-entering the edit menu
+        callback.data = f"edit_service:{service_id}"
+        await edit_service_menu(callback)
+
+    await callback.answer()
+
+
+@router.message(ServiceEditStates.entering_group_tier)
+async def edit_service_group_tier_entered(message: Message, state: FSMContext):
+    """Ввод тарифа при редактировании услуги"""
+    import json as _json_gt
+    import re
+
+    if message.text and message.text.strip().lower() in ("готово", "done", "ok"):
+        data = await state.get_data()
+        service_id = data['service_id']
+        tiers = data.get('group_pricing', [])
+
+        from database.crud import get_service_by_id
+        async with async_session_maker() as session:
+            service = await get_service_by_id(session, service_id)
+            service.group_pricing = _json_gt.dumps(tiers) if tiers else None
+            await session.commit()
+
+        if tiers:
+            tiers_text = "\n".join([f"  {t['min_people']}–{t['max_people']} чел: {t['price']}₽" for t in tiers])
+            await message.answer(f"✅ Тарифы сохранены:\n{tiers_text}")
+        else:
+            await message.answer("✅ Тарифы очищены")
+
+        await state.clear()
+
+        # Show edit menu again
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        builder.button(text="◀️ К услуге", callback_data=f"edit_service:{service_id}")
+        builder.adjust(1)
+        await message.answer("Вернуться к редактированию?", reply_markup=builder.as_markup())
+        return
+
+    text = message.text.strip()
+    match = re.match(r'(\d+)\s*[-–—]\s*(\d+)\s+(\d+)', text)
+    if not match:
+        await message.answer(
+            "❌ Неверный формат. Используйте: <code>мин-макс цена</code>\nНапример: <code>1-3 500</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    min_p, max_p, price_val = int(match.group(1)), int(match.group(2)), int(match.group(3))
+    if min_p > max_p or min_p < 1:
+        await message.answer("❌ Минимум должен быть <= максимума и >= 1")
+        return
+
+    data = await state.get_data()
+    tiers = data.get('group_pricing', [])
+    tiers.append({"min_people": min_p, "max_people": max_p, "price": price_val})
+    await state.update_data(group_pricing=tiers)
+
+    tiers_text = "\n".join([f"  {t['min_people']}–{t['max_people']} чел: {t['price']}₽" for t in tiers])
+    await message.answer(
+        f"✅ Тариф добавлен: {min_p}–{max_p} чел = {price_val}₽\n\n"
+        f"<b>Текущие тарифы:</b>\n{tiers_text}\n\n"
+        "Добавьте ещё тариф или отправьте <b>Готово</b>",
+        parse_mode="HTML"
+    )
 
 
 # ===== РЕДАКТИРОВАНИЕ СОТРУДНИКОВ =====
@@ -3744,10 +3994,10 @@ async def start_business_edit(callback: CallbackQuery, state: FSMContext):
             parse_mode="HTML",
             reply_markup=keyboard
         )
-    except:
+    except Exception:
         try:
             await callback.message.delete()
-        except:
+        except Exception:
             pass
         await callback.message.answer(
             info_text,
@@ -4273,7 +4523,7 @@ async def edit_photos_start(callback: CallbackQuery, state: FSMContext):
         for photo_id in photos:
             try:
                 await callback.message.answer_photo(photo_id)
-            except:
+            except Exception:
                 pass
 
     has_photos = len(photos) > 0
@@ -4613,7 +4863,7 @@ async def back_to_main_menu(callback: CallbackQuery, state: FSMContext):
     # Удаляем предыдущее сообщение
     try:
         await callback.message.delete()
-    except:
+    except Exception:
         pass
 
     # Отправляем новое сообщение с главным меню владельца
@@ -4793,7 +5043,7 @@ async def cancel_add_administrator(callback: CallbackQuery, state: FSMContext):
     # Удаляем текущее сообщение (с кнопкой отмены)
     try:
         await callback.message.delete()
-    except:
+    except Exception:
         pass
 
     await state.clear()
@@ -4845,6 +5095,7 @@ async def show_prepayment_settings(callback: CallbackQuery, state: FSMContext):
     # Формируем текст с текущими настройками
     require_receipt = getattr(business, 'require_receipt_for_prepayment', False)
     has_cancellation_photo = bool(getattr(business, 'cancellation_policy_photo', None))
+    has_cancellation_text = bool(getattr(business, 'cancellation_policy_text', None))
 
     if business.prepayment_enabled:
         settings_text = (
@@ -4857,6 +5108,12 @@ async def show_prepayment_settings(callback: CallbackQuery, state: FSMContext):
             settings_text += f"📝 Реквизиты: {business.payment_details}\n"
         settings_text += f"📸 Чек: <b>{'обязателен' if require_receipt else 'не обязателен'}</b>\n"
         settings_text += f"🖼 Фото условий отмены: <b>{'загружено' if has_cancellation_photo else 'не загружено'}</b>\n"
+        settings_text += f"📝 Текст условий отмены: <b>{'задан' if has_cancellation_text else 'не задан'}</b>\n"
+        if has_cancellation_text:
+            text_preview = getattr(business, 'cancellation_policy_text', '')
+            if len(text_preview) > 100:
+                text_preview = text_preview[:100] + "..."
+            settings_text += f"\n<i>{text_preview}</i>\n"
     else:
         settings_text = (
             f"💳 <b>Настройки предоплаты: {business.name}</b>\n\n"
@@ -4870,7 +5127,8 @@ async def show_prepayment_settings(callback: CallbackQuery, state: FSMContext):
         reply_markup=admin_kb.get_prepayment_settings_keyboard(
             business_id, business.prepayment_enabled,
             require_receipt=require_receipt,
-            has_cancellation_photo=has_cancellation_photo
+            has_cancellation_photo=has_cancellation_photo,
+            has_cancellation_text=has_cancellation_text,
         )
     )
     await callback.answer()
@@ -5160,12 +5418,70 @@ async def save_cancellation_photo(message: Message, state: FSMContext):
         await session.commit()
 
     await state.clear()
+    has_cancellation_text = bool(getattr(business, 'cancellation_policy_text', None))
     await message.answer(
         "✅ Фото условий отмены сохранено." if photo_id else "✅ Фото условий отмены удалено.",
         reply_markup=admin_kb.get_prepayment_settings_keyboard(
             business_id, True,
             require_receipt=require_receipt,
-            has_cancellation_photo=bool(photo_id)
+            has_cancellation_photo=bool(photo_id),
+            has_cancellation_text=has_cancellation_text,
+        )
+    )
+
+
+@router.callback_query(F.data.startswith("prepay_cancel_text:"))
+async def manage_cancellation_text(callback: CallbackQuery, state: FSMContext):
+    """Управление текстом условий отмены бронирования"""
+    business_id = int(callback.data.split(":")[1])
+    await state.update_data(business_id=business_id)
+
+    async with async_session_maker() as session:
+        business = await get_business_by_id(session, business_id)
+        current_text = getattr(business, 'cancellation_policy_text', None)
+
+    if current_text:
+        text = (
+            "📝 <b>Текст условий отмены бронирования</b>\n\n"
+            f"Текущий текст:\n<i>{current_text}</i>\n\n"
+            "Введите новый текст для замены, или '-' чтобы удалить текущий.\n\n"
+            "Этот текст будет показан клиентам в красной рамке при бронировании."
+        )
+    else:
+        text = (
+            "✏️ <b>Текст условий отмены бронирования</b>\n\n"
+            "Этот текст будет показан клиентам в красной рамке при бронировании через веб-версию.\n\n"
+            "Введите текст условий отмены бронирования:"
+        )
+
+    await callback.message.edit_text(text, parse_mode="HTML")
+    await state.set_state(PrepaymentSettingsStates.entering_cancellation_text)
+    await callback.answer()
+
+
+@router.message(PrepaymentSettingsStates.entering_cancellation_text)
+async def save_cancellation_text(message: Message, state: FSMContext):
+    """Сохранение текста условий отмены бронирования"""
+    data = await state.get_data()
+    business_id = data['business_id']
+
+    cancel_text = None if message.text == "-" else message.text
+
+    async with async_session_maker() as session:
+        business = await get_business_by_id(session, business_id)
+        business.cancellation_policy_text = cancel_text
+        require_receipt = getattr(business, 'require_receipt_for_prepayment', False)
+        has_cancellation_photo = bool(getattr(business, 'cancellation_policy_photo', None))
+        await session.commit()
+
+    await state.clear()
+    await message.answer(
+        "✅ Текст условий отмены сохранён." if cancel_text else "✅ Текст условий отмены удалён.",
+        reply_markup=admin_kb.get_prepayment_settings_keyboard(
+            business_id, True,
+            require_receipt=require_receipt,
+            has_cancellation_photo=has_cancellation_photo,
+            has_cancellation_text=bool(cancel_text),
         )
     )
 
@@ -5882,6 +6198,74 @@ async def show_business_qr_code(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+
+
+# ===== QR-КОД ДЛЯ WEBAPP =====
+
+@router.callback_query(F.data.startswith("show_webapp_qr:"))
+async def show_business_webapp_qr_code(callback: CallbackQuery, state: FSMContext):
+    """Показать QR-код для записи через WebApp"""
+    business_id = int(callback.data.split(":")[1])
+
+    async with async_session_maker() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name
+        )
+
+        if not await is_business_owner(session, business_id, user.id):
+            await callback.answer("У вас нет доступа к этому бизнесу", show_alert=True)
+            return
+
+        business = await get_business_by_id(session, business_id)
+        if not business:
+            await callback.answer("Бизнес не найден", show_alert=True)
+            return
+
+    from bot.config import WEBAPP_URL
+    if not WEBAPP_URL:
+        await callback.answer("WebApp URL не настроен", show_alert=True)
+        return
+
+    import qrcode
+    from io import BytesIO
+    from aiogram.types import BufferedInputFile
+
+    webapp_link = f"{WEBAPP_URL}/book?business_id={business_id}"
+
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(webapp_link)
+    qr.make(fit=True)
+
+    img = qr.make_image(fill_color="black", back_color="white")
+
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+
+    photo = BufferedInputFile(buffer.read(), filename="qr_webapp.png")
+
+    caption = (
+        "🌐 <b>QR-код для онлайн-записи «" + business.name + "»</b>\n\n"
+        "Клиенты сканируют код и сразу попадают на страницу записи.\n\n"
+        "🔗 Ссылка: " + webapp_link
+    )
+
+    await callback.message.answer_photo(
+        photo=photo,
+        caption=caption,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
 # ===== VENUE RENTAL: ПАРАМЕТРЫ ЗАЛА (ВМЕСТИМОСТЬ, ПЛОЩАДЬ, ОПИСАНИЕ, МИН. ВРЕМЯ) =====
 
 @router.callback_query(F.data.startswith("edit_emp_capacity:"))
@@ -6595,3 +6979,309 @@ async def venue_time_pricing_delete(callback: CallbackQuery):
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
     await callback.answer()
+
+
+# ===== ДЕЖУРНЫЕ АДМИНИСТРАТОРЫ =====
+
+@router.callback_query(F.data.startswith("duty_admins:"))
+async def show_duty_admins(callback: CallbackQuery, state: FSMContext):
+    """Показать список дежурных администраторов"""
+    business_id = int(callback.data.split(":")[1])
+
+    async with async_session_maker() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name
+        )
+
+        if not await is_business_owner(session, business_id, user.id):
+            await callback.answer("Недостаточно прав", show_alert=True)
+            return
+
+        employees = await get_business_employees(session, business_id)
+        admins = [e for e in employees if e.role in ("administrator", "master_and_admin") and e.telegram_id]
+
+        from datetime import date as date_cls
+        today = date_cls.today()
+
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+
+        text = "📋 <b>Дежурные администраторы сегодня</b>\n\n"
+        if admins:
+            text += "Нажмите на сотрудника, чтобы отметить/снять дежурство:\n"
+            for admin in admins:
+                is_on_duty = (admin.on_duty_date == today)
+                status = "✅" if is_on_duty else "◻️"
+                builder.button(
+                    text=f"{status} {admin.name}",
+                    callback_data=f"toggle_duty:{admin.id}:{business_id}"
+                )
+        else:
+            text += "Администраторы с Telegram не найдены"
+
+        builder.button(text="◀️ Назад", callback_data=f"admin_business:{business_id}")
+        builder.adjust(1)
+
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+        await callback.answer()
+
+
+@router.callback_query(F.data.startswith("toggle_duty:"))
+async def toggle_duty_admin(callback: CallbackQuery, state: FSMContext):
+    """Переключить дежурство администратора"""
+    parts = callback.data.split(":")
+    employee_id = int(parts[1])
+    business_id = int(parts[2])
+
+    async with async_session_maker() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name
+        )
+
+        if not await is_business_owner(session, business_id, user.id):
+            await callback.answer("Недостаточно прав", show_alert=True)
+            return
+
+        from sqlalchemy import select as sa_select_duty
+        from database.models import Employee as EmployeeModelDuty
+        from datetime import date as date_cls_duty
+        today = date_cls_duty.today()
+
+        result = await session.execute(
+            sa_select_duty(EmployeeModelDuty).where(EmployeeModelDuty.id == employee_id)
+        )
+        employee = result.scalar_one_or_none()
+
+        if not employee:
+            await callback.answer("Сотрудник не найден", show_alert=True)
+            return
+
+        if employee.on_duty_date == today:
+            employee.on_duty_date = None
+            status_msg = f"{employee.name}: дежурство снято"
+        else:
+            employee.on_duty_date = today
+            status_msg = f"{employee.name}: дежурит сегодня"
+
+        await session.commit()
+        await callback.answer(status_msg)
+
+        # Refresh list
+        employees = await get_business_employees(session, business_id)
+        admins = [e for e in employees if e.role in ("administrator", "master_and_admin") and e.telegram_id]
+
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+
+        text = "📋 <b>Дежурные администраторы сегодня</b>\n\n"
+        if admins:
+            text += "Нажмите на сотрудника, чтобы отметить/снять дежурство:\n"
+            for admin in admins:
+                is_on_duty = (admin.on_duty_date == today)
+                status = "✅" if is_on_duty else "◻️"
+                builder.button(
+                    text=f"{status} {admin.name}",
+                    callback_data=f"toggle_duty:{admin.id}:{business_id}"
+                )
+        else:
+            text += "Администраторы с Telegram не найдены"
+
+        builder.button(text="◀️ Назад", callback_data=f"admin_business:{business_id}")
+        builder.adjust(1)
+
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+
+# ===== ГРАФИК ДЕЖУРСТВ (МНОГОДНЕВНЫЙ) =====
+
+@router.callback_query(F.data.startswith("duty_schedule:"))
+async def show_duty_schedule(callback: CallbackQuery, state: FSMContext):
+    """Показать список сотрудников для настройки графика дежурств"""
+    business_id = int(callback.data.split(":")[1])
+
+    async with async_session_maker() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name
+        )
+
+        if not await is_business_owner(session, business_id, user.id):
+            await callback.answer("Недостаточно прав", show_alert=True)
+            return
+
+        employees = await get_business_employees(session, business_id)
+        admins = [e for e in employees if e.role in ("administrator", "master_and_admin") and e.telegram_id]
+
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+
+        text = "📅 <b>График дежурств</b>\n\nВыберите сотрудника для настройки графика:\n"
+
+        if admins:
+            for admin in admins:
+                duty_count = 0
+                ds = getattr(admin, 'duty_schedule', None)
+                if ds:
+                    try:
+                        import json as _json_ds
+                        dates = _json_ds.loads(ds) if isinstance(ds, str) else ds
+                        from datetime import date as _d_ds
+                        today_ds = _d_ds.today()
+                        duty_count = len([d for d in dates if d >= today_ds.isoformat()])
+                    except Exception:
+                        pass
+                suffix = f" ({duty_count} дн.)" if duty_count > 0 else ""
+                builder.button(
+                    text=f"📅 {admin.name}{suffix}",
+                    callback_data=f"duty_cal:{admin.id}:{business_id}:0"
+                )
+        else:
+            text += "\nАдминистраторы с Telegram не найдены"
+
+        builder.button(text="◀️ Назад", callback_data=f"admin_business:{business_id}")
+        builder.adjust(1)
+
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+        await callback.answer()
+
+
+@router.callback_query(F.data.startswith("duty_cal:"))
+async def show_duty_calendar(callback: CallbackQuery, state: FSMContext):
+    """Показать календарь дежурств для конкретного сотрудника"""
+    parts = callback.data.split(":")
+    employee_id = int(parts[1])
+    business_id = int(parts[2])
+    week_offset = int(parts[3])
+
+    async with async_session_maker() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name
+        )
+
+        if not await is_business_owner(session, business_id, user.id):
+            await callback.answer("Недостаточно прав", show_alert=True)
+            return
+
+        from sqlalchemy import select as sa_sel_cal
+        from database.models import Employee as EmpModelCal
+        result = await session.execute(sa_sel_cal(EmpModelCal).where(EmpModelCal.id == employee_id))
+        employee = result.scalar_one_or_none()
+
+        if not employee:
+            await callback.answer("Сотрудник не найден", show_alert=True)
+            return
+
+        import json as _json_cal
+        from datetime import date as _date_cal, timedelta as _td_cal
+
+        duty_dates = set()
+        ds = getattr(employee, 'duty_schedule', None)
+        if ds:
+            try:
+                parsed = _json_cal.loads(ds) if isinstance(ds, str) else ds
+                duty_dates = set(parsed) if parsed else set()
+            except Exception:
+                pass
+
+        today = _date_cal.today()
+        week_start = today - _td_cal(days=today.weekday()) + _td_cal(weeks=week_offset)
+        days = [week_start + _td_cal(days=i) for i in range(14)]
+
+        DAY_NAMES = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+
+        text = f"📅 <b>График дежурств: {employee.name}</b>\n\n"
+        text += f"📆 {days[0].strftime('%d.%m')} — {days[13].strftime('%d.%m.%Y')}\n"
+        text += "Нажмите на день чтобы вкл/выкл дежурство:\n"
+
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+
+        for day in days:
+            day_str = day.isoformat()
+            is_duty = day_str in duty_dates
+            day_name = DAY_NAMES[day.weekday()]
+            icon = "✅" if is_duty else "◻️"
+            label = f"{icon} {day_name} {day.strftime('%d.%m')}"
+            builder.button(
+                text=label,
+                callback_data=f"duty_tog:{employee_id}:{business_id}:{week_offset}:{day_str}"
+            )
+
+        if week_offset > 0:
+            builder.button(text="⬅️ Пред. 2 нед.", callback_data=f"duty_cal:{employee_id}:{business_id}:{week_offset - 2}")
+        builder.button(text="➡️ След. 2 нед.", callback_data=f"duty_cal:{employee_id}:{business_id}:{week_offset + 2}")
+
+        builder.button(text="◀️ К списку", callback_data=f"duty_schedule:{business_id}")
+        if week_offset > 0:
+            builder.adjust(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1)
+        else:
+            builder.adjust(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1)
+
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+        await callback.answer()
+
+
+@router.callback_query(F.data.startswith("duty_tog:"))
+async def toggle_duty_date(callback: CallbackQuery, state: FSMContext):
+    """Переключить дежурство на конкретную дату"""
+    parts = callback.data.split(":")
+    employee_id = int(parts[1])
+    business_id = int(parts[2])
+    week_offset = int(parts[3])
+    date_str = parts[4]
+
+    async with async_session_maker() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name
+        )
+
+        if not await is_business_owner(session, business_id, user.id):
+            await callback.answer("Недостаточно прав", show_alert=True)
+            return
+
+        from sqlalchemy import select as sa_sel_tog
+        from database.models import Employee as EmpModelTog
+        result = await session.execute(sa_sel_tog(EmpModelTog).where(EmpModelTog.id == employee_id))
+        employee = result.scalar_one_or_none()
+
+        if not employee:
+            await callback.answer("Сотрудник не найден", show_alert=True)
+            return
+
+        import json as _json_tog
+        duty_dates = set()
+        ds = getattr(employee, 'duty_schedule', None)
+        if ds:
+            try:
+                parsed = _json_tog.loads(ds) if isinstance(ds, str) else ds
+                duty_dates = set(parsed) if parsed else set()
+            except Exception:
+                pass
+
+        if date_str in duty_dates:
+            duty_dates.discard(date_str)
+            status_msg = f"❌ {date_str}: дежурство снято"
+        else:
+            duty_dates.add(date_str)
+            status_msg = f"✅ {date_str}: дежурство добавлено"
+
+        employee.duty_schedule = _json_tog.dumps(sorted(list(duty_dates)))
+        await session.commit()
+        await callback.answer(status_msg)
+
+    callback.data = f"duty_cal:{employee_id}:{business_id}:{week_offset}"
+    await show_duty_calendar(callback, state)

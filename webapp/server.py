@@ -631,7 +631,7 @@ async def auth_token_handler(request: web.Request) -> web.Response:
                 biz_result = await session.execute(
                     select(Business).where(Business.owner_id == user.id)
                 )
-                if biz_result.scalar_one_or_none():
+                if biz_result.scalars().first():
                     # Нашли - это главный владелец бизнеса
                     cookie = create_session_cookie(user.telegram_id)
                     response = web.HTTPFound(redirect_to)
@@ -642,7 +642,7 @@ async def auth_token_handler(request: web.Request) -> web.Response:
                 co_owner_result = await session.execute(
                     select(BusinessOwner).where(BusinessOwner.user_id == user.id)
                 )
-                if co_owner_result.scalar_one_or_none():
+                if co_owner_result.scalars().first():
                     # Нашли - это совладелец бизнеса
                     cookie = create_session_cookie(user.telegram_id)
                     response = web.HTTPFound(redirect_to)
@@ -691,7 +691,7 @@ async def api_auth_login(request: web.Request) -> web.Response:
                         biz_result = await session.execute(
                             select(Business).where(Business.owner_id == user.id)
                         )
-                        business = biz_result.scalar_one_or_none()
+                        business = biz_result.scalars().first()
                         if business:
                             cookie = create_session_cookie(user.telegram_id)
                             response = web.json_response({
@@ -706,7 +706,7 @@ async def api_auth_login(request: web.Request) -> web.Response:
                         co_owner_result = await session.execute(
                             select(BusinessOwner).where(BusinessOwner.user_id == user.id)
                         )
-                        co_owner = co_owner_result.scalar_one_or_none()
+                        co_owner = co_owner_result.scalars().first()
                         if co_owner:
                             # Получаем информацию о бизнесе для ответа
                             co_business = await session.execute(
@@ -1822,18 +1822,33 @@ async def api_client_create_booking(request: web.Request) -> web.Response:
                 from database.models import User as UserModel
 
                 db_user = None
+                clean_phone_web = None
                 if client_phone:
-                    clean_phone = client_phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+                    clean_phone_web = client_phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+                    phones_to_try_web = [clean_phone_web]
+                    if clean_phone_web.startswith('+7') and len(clean_phone_web) == 12:
+                        phones_to_try_web.append(clean_phone_web[1:])
+                        phones_to_try_web.append('8' + clean_phone_web[2:])
+                    elif clean_phone_web.startswith('7') and len(clean_phone_web) == 11:
+                        phones_to_try_web.append('+' + clean_phone_web)
+                        phones_to_try_web.append('8' + clean_phone_web[1:])
+                    elif clean_phone_web.startswith('8') and len(clean_phone_web) == 11:
+                        phones_to_try_web.append('7' + clean_phone_web[1:])
+                        phones_to_try_web.append('+7' + clean_phone_web[1:])
                     result = await session.execute(
-                        sa_select(UserModel).where(UserModel.phone == clean_phone)
+                        sa_select(UserModel).where(UserModel.phone.in_(phones_to_try_web))
                     )
-                    db_user = result.scalar_one_or_none()
+                    db_user = result.scalars().first()
 
                 if not db_user:
+                    from sqlalchemy import func as sqlfunc2
+                    min_id_result2 = await session.execute(sa_select(sqlfunc2.min(UserModel.telegram_id)))
+                    min_id2 = min_id_result2.scalar() or 0
+                    fake_tg_id2 = min(min_id2 - 1, -1)
                     db_user = UserModel(
-                        telegram_id=0,
+                        telegram_id=fake_tg_id2,
                         full_name=client_name,
-                        phone=client_phone if client_phone else None,
+                        phone=clean_phone_web if clean_phone_web else None,
                     )
                     session.add(db_user)
                     await session.flush()
@@ -3081,7 +3096,7 @@ async def api_analytics_schedule(request: web.Request) -> web.Response:
                     'employee_name': main_booking.employee.name if main_booking.employee else 'Не указан',
                     'status': main_booking.status,
                     'prepayment_amount': main_booking.prepayment_amount,
-                    'comment': getattr(main_booking, 'comment', None),
+                    'comment': main_booking.notes,
                 })
 
             # Формируем список сотрудников для табов
@@ -3124,6 +3139,18 @@ async def api_analytics_schedule(request: web.Request) -> web.Response:
                     'employee_ids': emp_ids,
                 })
 
+            # Доп. услуги для формы
+            all_services_for_additional = await get_business_services(session, business_id)
+            additional_services_data = []
+            for svc in all_services_for_additional:
+                if svc.is_active and svc.is_additional:
+                    additional_services_data.append({
+                        'id': svc.id,
+                        'name': svc.name,
+                        'price': svc.price,
+                        'is_hourly_price': getattr(svc, 'is_hourly_price', False),
+                    })
+
             # Получаем клиентов бизнеса для автокомплита
             clients = await get_business_clients(session, business_id, limit=200)
             clients_data = []
@@ -3143,6 +3170,7 @@ async def api_analytics_schedule(request: web.Request) -> web.Response:
                 'bookings': bookings_data,
                 'employees': employees_data,
                 'services': services_data,
+                'additional_services': additional_services_data,
                 'clients': clients_data,
                 'working_hours': working_hours,
                 'booking_interval': min_interval,
@@ -3173,6 +3201,8 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
         booking_time_str = data.get('time')
         client_name = data.get('client_name', '').strip()
         client_phone = data.get('client_phone', '').strip()
+        additional_service_ids = data.get('additional_service_ids', [])
+        notes = data.get('notes', '').strip()
 
         if not all([business_id, service_id, booking_date_str, booking_time_str, client_name]):
             return web.json_response({'error': 'Заполните все обязательные поля'}, status=400)
@@ -3200,20 +3230,36 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
             from database.models import User as UserModel
 
             client = None
+            clean_phone = None
             if client_phone:
                 # Нормализуем телефон
                 clean_phone = client_phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+                # Пробуем разные форматы: +79..., 79..., 89...
+                phones_to_try = [clean_phone]
+                if clean_phone.startswith('+7') and len(clean_phone) == 12:
+                    phones_to_try.append(clean_phone[1:])   # 79...
+                    phones_to_try.append('8' + clean_phone[2:])  # 89...
+                elif clean_phone.startswith('7') and len(clean_phone) == 11:
+                    phones_to_try.append('+' + clean_phone)  # +79...
+                    phones_to_try.append('8' + clean_phone[1:])  # 89...
+                elif clean_phone.startswith('8') and len(clean_phone) == 11:
+                    phones_to_try.append('7' + clean_phone[1:])  # 79...
+                    phones_to_try.append('+7' + clean_phone[1:])  # +79...
                 result = await session.execute(
-                    select(UserModel).where(UserModel.phone == clean_phone)
+                    select(UserModel).where(UserModel.phone.in_(phones_to_try))
                 )
-                client = result.scalar_one_or_none()
+                client = result.scalars().first()
 
             if not client:
-                # Создаём нового пользователя-клиента
+                # Создаём нового пользователя-клиента с уникальным отрицательным telegram_id
+                from sqlalchemy import func as sqlfunc
+                min_id_result = await session.execute(select(sqlfunc.min(UserModel.telegram_id)))
+                min_id = min_id_result.scalar() or 0
+                fake_telegram_id = min(min_id - 1, -1)
                 client = UserModel(
-                    telegram_id=0,  # Нет telegram аккаунта
+                    telegram_id=fake_telegram_id,
                     full_name=client_name,
-                    phone=client_phone if client_phone else None,
+                    phone=clean_phone if clean_phone else None,
                 )
                 session.add(client)
                 await session.flush()
@@ -3273,7 +3319,24 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
                 booking_date=selected_date,
                 booking_time=selected_time,
                 status='confirmed',
+                notes=notes if notes else None,
             )
+
+            # Создаём доп. услуги
+            for add_svc_id in additional_service_ids:
+                try:
+                    await create_booking(
+                        session,
+                        business_id=business_id,
+                        client_id=client.id,
+                        service_id=int(add_svc_id),
+                        employee_id=employee_id,
+                        booking_date=selected_date,
+                        booking_time=selected_time,
+                        status='confirmed',
+                    )
+                except Exception as add_err:
+                    logger.warning(f"Could not create additional service booking {add_svc_id}: {add_err}")
 
             service = await get_service_by_id(session, service_id)
             employee_obj = await get_employee_by_id(session, employee_id)
@@ -3292,6 +3355,22 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
                     'employee_name': employee_obj.name if employee_obj else '',
                     'employee_telegram_id': employee_obj.telegram_id if employee_obj else None,
                 }]
+                # Добавляем доп. услуги в список для уведомления
+                for add_svc_id in additional_service_ids:
+                    try:
+                        add_svc = await get_service_by_id(session, int(add_svc_id))
+                        if add_svc:
+                            services_list.append({
+                                'name': add_svc.name,
+                                'duration': add_svc.duration_minutes if add_svc.duration_minutes else 0,
+                                'price': add_svc.price or 0,
+                                'is_additional': True,
+                                'employee_id': employee_id,
+                                'employee_name': employee_obj.name if employee_obj else '',
+                                'employee_telegram_id': employee_obj.telegram_id if employee_obj else None,
+                            })
+                    except Exception:
+                        pass
 
                 if booking_with_relations:
                     await notify_master_new_booking(bot, booking_with_relations, services_list)
@@ -3304,17 +3383,49 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
                             is_venue = is_venue_rental_type(business.business_type)
                             weekdays_ru = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
                             formatted_date = selected_date.strftime('%d.%m.%Y') + f" ({weekdays_ru[selected_date.weekday()]})"
-                            price_str = f"\n💰 Стоимость: {service.price}₽" if service and service.price else ""
-                            emp_line = ""
-                            if employee_obj:
-                                emp_label = "🏠 Помещение" if is_venue else "👤 Мастер"
-                                emp_line = f"\n{emp_label}: {employee_obj.name}"
+                            price_str = None  # replaced below
+                            # Собираем все записи (основные + доп.)
+                            from sqlalchemy import select as sa_sel_notif
+                            from database.models import Booking as BkNotif
+                            bk_result = await session.execute(
+                                sa_sel_notif(BkNotif).options(selectinload(BkNotif.service))
+                                .where(
+                                    BkNotif.client_id == client.id,
+                                    BkNotif.employee_id == employee_id,
+                                    BkNotif.booking_date == selected_date,
+                                    BkNotif.booking_time == selected_time,
+                                    BkNotif.status == 'confirmed'
+                                )
+                            )
+                            all_bk = bk_result.scalars().all()
+                            main_bk = [b for b in all_bk if b.service and not b.service.is_additional]
+                            add_bk  = [b for b in all_bk if b.service and b.service.is_additional]
+                            total_price = 0
+                            if add_bk:
+                                svc_text = "\n💼 Услуги:\n"
+                                for b in main_bk:
+                                    p = b.service.price or 0; total_price += p
+                                    pstr = f" — {p}₽" if p else ""
+                                    svc_text += f"  • {b.service.name}{pstr}\n"
+                                for b in add_bk:
+                                    p = b.service.price or 0; total_price += p
+                                    pstr = f" — {p}₽" if p else ""
+                                    svc_text += f"  • {b.service.name}{pstr}\n"
+                                if total_price > 0:
+                                    svc_text += f"\n💰 Итого: {total_price}₽"
+                            else:
+                                p = service.price or 0 if service else 0
+                                total_price = p
+                                pstr = f"\n💰 Стоимость: {p}₽" if p else ""
+                                svc_text = f"\n💼 Услуга: {service.name if service else ''}{pstr}"
+                            emp_label = "🏠 Помещение" if is_venue else "👤 Мастер"
+                            emp_line = f"\n{emp_label}: {employee_obj.name}" if employee_obj else ""
                             await bot.send_message(
                                 client.telegram_id,
                                 f"✅ <b>Вас записали!</b>\n\n"
                                 f"🏢 {business.name}\n"
-                                f"📅 {formatted_date} в {selected_time.strftime('%H:%M')}\n"
-                                f"💼 Услуга: {service.name if service else ''}{price_str}"
+                                f"📅 {formatted_date} в {selected_time.strftime('%H:%M')}"
+                                f"{svc_text}"
                                 f"{emp_line}",
                                 parse_mode="HTML"
                             )

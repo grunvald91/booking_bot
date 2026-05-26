@@ -18,6 +18,7 @@ let businessType = '';
 let selectedEmployeeId = null;
 let clientColorMap = {};
 let colorIndex = 0;
+let additionalServices = [];
 
 // Time slots (8:00 - 22:00)
 const TIME_SLOTS = [];
@@ -61,6 +62,21 @@ async function initApp() {
             backBtn.setAttribute('onclick', 'webLogout()');
             backBtn.setAttribute('title', 'Выйти');
         }
+    }
+
+    // Режим из URL (?role=owner или ?role=admin)
+    const urlRole = new URLSearchParams(window.location.search).get('role');
+    if (urlRole === 'owner') {
+        viewMode = 'week';
+        document.getElementById('toggleWeek').classList.add('active');
+        document.getElementById('toggleDay').classList.remove('active');
+        document.getElementById('weekNavControls').style.display = 'flex';
+        document.getElementById('dayNavControls').style.display = 'none';
+        const modeToggle = document.querySelector('.mode-toggle');
+        if (modeToggle) modeToggle.style.display = 'none';
+    } else if (urlRole === 'admin') {
+        viewMode = 'day';
+        canCreate = false;
     }
 
     // Load businesses (authentication via X-Telegram-Init-Data header or cookie)
@@ -193,11 +209,23 @@ async function loadSchedule() {
         scheduleData = data.bookings || [];
         employees = data.employees || [];
         services = data.services || [];
+        additionalServices = data.additional_services || [];
         clients = data.clients || [];
         businessType = data.business_type || '';
         workingHours = data.working_hours || { start: 8, end: 22 };
         bookingInterval = data.booking_interval || 30;
         canCreate = data.can_create_booking !== false;
+
+        // Владелец: только недельный режим, скрываем переключатель
+        if (canCreate) {
+            viewMode = 'week';
+            document.getElementById('toggleWeek').classList.add('active');
+            document.getElementById('toggleDay').classList.remove('active');
+            document.getElementById('weekNavControls').style.display = 'flex';
+            document.getElementById('dayNavControls').style.display = 'none';
+        }
+        const modeToggle = document.querySelector('.mode-toggle');
+        if (modeToggle) modeToggle.style.display = canCreate ? 'none' : '';
 
         const tabsContainer = document.getElementById('tabsContainer');
 
@@ -215,9 +243,9 @@ async function loadSchedule() {
         document.getElementById('loading').style.display = 'none';
         document.getElementById('mainContent').style.display = 'flex';
 
-        // FAB only for owners in week mode
+        // FAB for owners only
         document.getElementById('fabAddBooking').style.display =
-            canCreate && viewMode === 'week' ? 'flex' : 'none';
+            canCreate ? 'flex' : 'none';
 
     } catch (error) {
         console.error('Error loading schedule:', error);
@@ -686,6 +714,15 @@ function showBookingDetails(bookingId) {
                 <div class="modal-value">${escapeHtml(booking.client_phone || '-')}</div>
             </div>
         </div>
+        ${booking.comment ? `
+        <div class="modal-row">
+            <div class="modal-icon">💬</div>
+            <div>
+                <div class="modal-label">Комментарий</div>
+                <div class="modal-value">${escapeHtml(booking.comment)}</div>
+            </div>
+        </div>
+        ` : ''}
         ${booking.price ? `
         <div class="modal-row">
             <div class="modal-icon">💰</div>
@@ -867,7 +904,8 @@ function openNewBookingModal(dateStr, timeStr) {
     const serviceSelect = document.getElementById('nbService');
     serviceSelect.innerHTML = '<option value="">Выберите услугу</option>';
     services.forEach(svc => {
-        const priceStr = svc.price ? ` - ${svc.price} ₽` : '';
+        // Для venue_rental цена зависит от тарифа
+        const priceStr = (!isVenue && svc.price) ? ` - ${svc.price} ₽` : '';
         const durationStr = svc.duration ? ` (${svc.duration} мин)` : '';
         const option = document.createElement('option');
         option.value = svc.id;
@@ -875,8 +913,28 @@ function openNewBookingModal(dateStr, timeStr) {
         serviceSelect.appendChild(option);
     });
 
+    // Доп. услуги (venue_rental)
+    const addServicesGroup = document.getElementById('nbAdditionalServicesGroup');
+    const addServicesContainer = document.getElementById('nbAdditionalServices');
+    if (isVenue && additionalServices.length > 0) {
+        addServicesContainer.innerHTML = '';
+        additionalServices.forEach(svc => {
+            const addPriceStr = svc.price ? ' — ' + svc.price + ' ₽' : '';
+            const label = document.createElement('label');
+            label.className = 'additional-service-item';
+            label.innerHTML = '<input type="checkbox" class="nb-additional-svc" value="' + svc.id + '"> ' + escapeHtml(svc.name) + addPriceStr;
+            addServicesContainer.appendChild(label);
+        });
+        addServicesGroup.style.display = '';
+    } else {
+        addServicesGroup.style.display = 'none';
+    }
+
     // Filter employees when service changes
-    serviceSelect.onchange = () => updateEmployeeOptions(isVenue);
+    serviceSelect.onchange = () => {
+        updateEmployeeOptions(isVenue);
+        if (isVenue) calculateAndShowPrice();
+    };
 
     // Populate all employees initially
     updateEmployeeOptions(isVenue);
@@ -898,6 +956,22 @@ function openNewBookingModal(dateStr, timeStr) {
     if (selectedEmployeeId) {
         document.getElementById('nbEmployee').value = selectedEmployeeId;
     }
+
+    // Обработчики расчёта стоимости (venue_rental)
+    const nbEmployee = document.getElementById('nbEmployee');
+    const nbTime = document.getElementById('nbTime');
+    const nbDate = document.getElementById('nbDate');
+    nbEmployee.addEventListener('change', () => { if (isVenue) calculateAndShowPrice(); });
+    nbTime.addEventListener('input', () => { if (isVenue) calculateAndShowPrice(); });
+    nbDate.addEventListener('input', () => { if (isVenue) calculateAndShowPrice(); });
+
+    // Сбросить цену
+    const priceInfoBlock = document.getElementById('nbPriceInfo');
+    priceInfoBlock.style.display = 'none';
+    if (isVenue) setTimeout(calculateAndShowPrice, 50);
+
+    // Очистить комментарий
+    document.getElementById('nbComment').value = '';
 
     // Clear client fields and suggestions
     document.getElementById('nbClientName').value = '';
@@ -965,6 +1039,57 @@ function closeNewBookingModal() {
     document.getElementById('newBookingModal').classList.add('hidden');
 }
 
+async function calculateAndShowPrice() {
+    if (businessType !== 'venue_rental') return;
+
+    const employeeId = document.getElementById('nbEmployee').value;
+    const timeVal = document.getElementById('nbTime').value;
+    const dateVal = document.getElementById('nbDate').value;
+    const serviceId = document.getElementById('nbService').value;
+    const priceInfo = document.getElementById('nbPriceInfo');
+
+    if (!employeeId || !timeVal || !dateVal || !serviceId) {
+        priceInfo.style.display = 'none';
+        return;
+    }
+
+    const svc = services.find(s => s.id === parseInt(serviceId));
+    if (!svc) { priceInfo.style.display = 'none'; return; }
+
+    try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (tg && tg.initData) headers['X-Telegram-Init-Data'] = tg.initData;
+        const resp = await fetch(
+            '/api/client/business/' + selectedBusinessId + '/calculate-price?employee_id=' + employeeId + '&time=' + timeVal + '&duration=' + svc.duration + '&date=' + dateVal,
+            { headers: headers, credentials: 'same-origin' }
+        );
+        const data = await resp.json();
+
+        if (data.has_time_price && data.total > 0) {
+            priceInfo.style.display = '';
+            if (data.segments && data.segments.length > 1) {
+                let html = '<div class="price-info-title">Стоимость:</div>';
+                data.segments.forEach(function(seg) {
+                    html += '<div class="price-info-row">' + seg.time_from + '–' + seg.time_to + ' (' + seg.hours_str + '): <strong>' + seg.price_per_hour + ' ₽/ч = ' + seg.subtotal + ' ₽</strong></div>';
+                });
+                html += '<div class="price-info-total">Итого: <strong>' + data.total + ' ₽</strong></div>';
+                priceInfo.innerHTML = html;
+            } else {
+                const rate = (data.segments && data.segments.length > 0) ? data.segments[0].price_per_hour : null;
+                const rateStr = rate ? ' (' + rate + ' ₽/ч)' : '';
+                priceInfo.innerHTML = '<div class="price-info-total">Стоимость: <strong>' + data.total + ' ₽</strong>' + rateStr + '</div>';
+            }
+        } else if (svc.price) {
+            priceInfo.style.display = '';
+            priceInfo.innerHTML = '<div class="price-info-total">Стоимость: <strong>' + svc.price + ' ₽</strong></div>';
+        } else {
+            priceInfo.style.display = 'none';
+        }
+    } catch (e) {
+        priceInfo.style.display = 'none';
+    }
+}
+
 async function submitNewBooking(event) {
     event.preventDefault();
 
@@ -979,6 +1104,13 @@ async function submitNewBooking(event) {
     const employeeId = document.getElementById('nbEmployee').value;
     const bookingDate = document.getElementById('nbDate').value;
     const bookingTime = document.getElementById('nbTime').value;
+    const comment = document.getElementById('nbComment').value.trim();
+
+    // Доп. услуги
+    const additionalServiceIds = [];
+    document.querySelectorAll('.nb-additional-svc:checked').forEach(function(cb) {
+        additionalServiceIds.push(parseInt(cb.value));
+    });
 
     if (!clientName || !serviceId || !bookingDate || !bookingTime) {
         alert('Заполните все обязательные поля');
@@ -1003,6 +1135,8 @@ async function submitNewBooking(event) {
                 time: bookingTime,
                 client_name: clientName,
                 client_phone: clientPhone,
+                additional_service_ids: additionalServiceIds,
+                notes: comment || null,
             })
         });
 

@@ -70,7 +70,9 @@ class Business(Base):
     payment_phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # Номер для перевода
     payment_details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Дополнительные реквизиты (карта, СБП и т.д.)
     cancellation_policy_photo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Telegram file_id фото условий отмены
+    cancellation_policy_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Текст условий отмены
     require_receipt_for_prepayment: Mapped[bool] = mapped_column(Boolean, default=False)  # Требовать чек для подтверждения оплаты
+    ai_instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # AI-инструкция для бизнеса
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -121,7 +123,10 @@ class Service(Base):
     available_employee_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON список ID сотрудников/залов, где доступна услуга (null = все)
     tariff_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Текст тарифов для контактных услуг (бронь через владельца)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)  # Порядок отображения (меньше = выше в списке)
+    ai_instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # AI-инструкция
     version: Mapped[int] = mapped_column(Integer, default=1)  # Для оптимистичной блокировки
+    pricing_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default='fixed')  # 'fixed' | 'per_person' — тип ценообразования
+    group_pricing: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON: [{"min_people":1,"max_people":3,"price":500}, ...] — тарифы по кол-ву человек
 
     # Связи
     business: Mapped["Business"] = relationship(back_populates="services")
@@ -152,12 +157,16 @@ class Employee(Base):
     solo_price_per_hour: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Спецтариф соло (₽/час)
     photos: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON список file_id фото
     video: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # file_id видео
+    on_duty_date: Mapped[Optional[datetime.date]] = mapped_column(Date, nullable=True)  # Дата дежурства
+    duty_schedule: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON: ["2026-03-25","2026-03-26",...] — график дежурств
+    ai_instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # AI-инструкция
+    services_text: Mapped[Optional[str]] = mapped_column("services", Text, nullable=True)  # JSON услуги (колонка "services", атрибут services_text чтобы не конфликтовать с relationship)
 
     # Связи
     business: Mapped["Business"] = relationship(back_populates="employees")
     bookings: Mapped[List["Booking"]] = relationship(back_populates="employee", cascade="all, delete-orphan")
     days_off: Mapped[List["EmployeeDayOff"]] = relationship(back_populates="employee", cascade="all, delete-orphan")
-    services: Mapped[List["EmployeeService"]] = relationship(back_populates="employee", cascade="all, delete-orphan")
+    employee_services: Mapped[List["EmployeeService"]] = relationship(back_populates="employee", cascade="all, delete-orphan")
     time_pricing: Mapped[List["VenueTimePricing"]] = relationship(back_populates="employee", cascade="all, delete-orphan")
 
 
@@ -242,7 +251,7 @@ class EmployeeService(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Связи
-    employee: Mapped["Employee"] = relationship(back_populates="services")
+    employee: Mapped["Employee"] = relationship(back_populates="employee_services")
     service: Mapped["Service"] = relationship(back_populates="employees")
 
 
