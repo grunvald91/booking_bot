@@ -90,6 +90,7 @@ export function SettingsPage() {
   // Employees / rooms with photos
   const [employees, setEmployees] = useState<Employee[]>([])
   const [employeesLoading, setEmployeesLoading] = useState(false)
+  const [employeesError, setEmployeesError] = useState<string | null>(null)
   const [empPhotoUploadingId, setEmpPhotoUploadingId] = useState<number | null>(null)
   const empFileInputs = useRef<Record<number, HTMLInputElement | null>>({})
 
@@ -105,17 +106,26 @@ export function SettingsPage() {
     toastTimeout.current = setTimeout(() => setToast(null), 3000)
   }
 
-  // Load employees / rooms for the "Фото сотрудников/залов" section
+  // Load employees / rooms for the "Фото сотрудников/залов" section.
+  // include_inactive=true so we can manage photos even for disabled employees/rooms.
   useEffect(() => {
     if (!businessId) {
       setEmployees([])
+      setEmployeesError(null)
       return
     }
     setEmployeesLoading(true)
+    setEmployeesError(null)
     api
-      .getEmployees(businessId)
-      .then((list) => setEmployees(list))
-      .catch(() => setEmployees([]))
+      .getEmployees(businessId, true)
+      .then((list) => {
+        setEmployees(list)
+        setEmployeesError(null)
+      })
+      .catch((err) => {
+        setEmployees([])
+        setEmployeesError(err instanceof Error ? err.message : String(err))
+      })
       .finally(() => setEmployeesLoading(false))
   }, [businessId])
 
@@ -538,10 +548,17 @@ export function SettingsPage() {
                 <div key={i} className="h-24 skeleton rounded-2xl" />
               ))}
             </div>
+          ) : employeesError ? (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">
+              Не удалось загрузить список: {employeesError}
+            </div>
           ) : employees.length === 0 ? (
-            <p className="text-sm text-apple-gray py-2">
-              {isVenueRental ? 'Залы не добавлены.' : 'Сотрудники не добавлены.'} Откройте раздел «{isVenueRental ? 'Сотрудники' : 'Сотрудники'}», чтобы добавить.
-            </p>
+            <div className="bg-apple-bg rounded-xl p-3 text-sm text-apple-gray">
+              В бизнесе <span className="font-medium text-apple-text">«{selectedBusiness?.name ?? '—'}»</span>{' '}
+              пока нет {isVenueRental ? 'залов' : 'сотрудников'}. Добавьте их в разделе{' '}
+              <a href="/admin/employees" className="text-apple-blue underline">Сотрудники</a>{' '}
+              или через бота. Если вы уверены, что они есть — проверьте, что выбран правильный бизнес выше.
+            </div>
           ) : (
             <div className="space-y-4">
               {employees.map((emp) => {

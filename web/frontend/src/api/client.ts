@@ -471,8 +471,10 @@ export const api = {
     request<void>(`/admin/businesses/${bizId}/services/${serviceId}`, {
       method: 'DELETE',
     }),
-  getEmployees: (bizId: number) =>
-    request<Employee[]>(`/admin/businesses/${bizId}/employees`),
+  getEmployees: (bizId: number, includeInactive: boolean = false) =>
+    request<Employee[]>(
+      `/admin/businesses/${bizId}/employees${includeInactive ? '?include_inactive=true' : ''}`
+    ),
   createEmployee: (bizId: number, data: Partial<Employee>) =>
     request<Employee>(`/admin/businesses/${bizId}/employees`, { method: 'POST', body: JSON.stringify(data) }),
   updateEmployee: (bizId: number, empId: number, data: Partial<Employee>) =>
