@@ -212,7 +212,9 @@ def _employee_to_out(e: Employee, pricing_rules: list = None) -> EmployeeOut:
         specialization=e.specialization,
         description=getattr(e, 'description', None),
         capacity=getattr(e, 'capacity', None),
+        area_sqm=getattr(e, 'area_sqm', None),
         solo_price_per_hour=getattr(e, 'solo_price_per_hour', None),
+        photos=getattr(e, 'photos', None),
         venue_time_pricing=tp_list,
     )
 
