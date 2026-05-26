@@ -32,7 +32,7 @@ def get_admin_menu_keyboard(show_employee_button: bool = False, is_super_admin: 
         [KeyboardButton(text="🏢 Мои бизнесы")],
         [KeyboardButton(text="➕ Добавить бизнес"), KeyboardButton(text="📊 Записи")],
         [analytics_button, schedule_button],
-        [KeyboardButton(text="ℹ️ Помощь")],
+        [KeyboardButton(text="🔐 Веб-админка"), KeyboardButton(text="ℹ️ Помощь")],
     ]
 
     # Добавляем кнопку управления владельцами для супер-админа

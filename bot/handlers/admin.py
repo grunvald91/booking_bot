@@ -4,14 +4,19 @@
 """
 import os
 import hashlib
+import logging
 from datetime import datetime, timedelta
+import httpx
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from database import async_session_maker, Booking
+from bot.config import WEBAPP_URL
+
+logger = logging.getLogger(__name__)
 from database.crud import (
     get_or_create_user,
     get_user_businesses,
@@ -77,6 +82,64 @@ async def _save_photo_to_cache(bot, file_id: str) -> bool:
 
 
 router = Router()
+
+
+# ===== ВЕБ-АДМИНКА: ПОЛУЧЕНИЕ КОДА =====
+
+@router.message(F.text == "🔐 Веб-админка")
+async def web_admin_get_code(message: Message):
+    """Отправить владельцу код для входа в веб-админку через браузер.
+
+    Telegram-WebApp вход работает автоматически (в TG нажми «Аналитика»/«Расписание»),
+    а вход с обычного браузера требует ввод телефона + 6-значного кода. Эта кнопка
+    запускает существующий /auth/phone флоу — код приходит сюда же в Telegram.
+    Роль admin определится автоматически по владению бизнесом.
+    """
+    tg_id = message.from_user.id
+    async with async_session_maker() as session:
+        user = await get_user_by_telegram_id(session, tg_id)
+
+    if not user or not user.phone:
+        await message.answer(
+            "🔐 <b>Вход в веб-админку через браузер</b>\n\n"
+            "У вас не привязан номер телефона — поэтому код выслать некуда.\n\n"
+            "Откройте веб-админку <b>прямо из Telegram</b> — там вход выполняется автоматически:\n"
+            "• Нажмите «📈 Аналитика» или «📅 Расписание» в меню\n\n"
+            "Либо привяжите телефон через бота и попробуйте снова.",
+            parse_mode="HTML"
+        )
+        return
+
+    if not WEBAPP_URL:
+        await message.answer("WEBAPP_URL не настроен в конфигурации сервера.")
+        return
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                f"{WEBAPP_URL}/api/auth/phone",
+                json={"phone": user.phone},
+            )
+        if resp.status_code != 200:
+            raise RuntimeError(f"API вернул {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        logger.warning("web-admin code request failed: %s", e)
+        await message.answer(
+            "Не удалось запросить код. Попробуйте позже или войдите через Telegram WebApp."
+        )
+        return
+
+    await message.answer(
+        "🔐 <b>Веб-админка — вход через браузер</b>\n\n"
+        "Я уже отправил вам 6-значный код отдельным сообщением (если оно не пришло — "
+        "проверьте, что номер привязан правильно).\n\n"
+        f"1. Откройте: {WEBAPP_URL}/login\n"
+        f"2. Введите телефон: <code>{user.phone}</code>\n"
+        "3. Введите код из сообщения\n\n"
+        "Роль администратора определится автоматически по вашему доступу к бизнесам.",
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
 
 
 # ===== ПРОСМОТР БИЗНЕСОВ =====
