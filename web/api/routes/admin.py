@@ -247,13 +247,13 @@ async def list_employees(
     result = await db.execute(
         select(Employee)
         .where(and_(*filters))
-        .options(selectinload(Employee.employee_services))
+        .options(selectinload(Employee.services))
     )
     employees = result.scalars().all()
     out = []
     for e in employees:
         d = EmployeeOut.model_validate(e)
-        d.service_ids = [es.service_id for es in e.employee_services]
+        d.service_ids = [es.service_id for es in e.services]
         out.append(d)
     return out
 
