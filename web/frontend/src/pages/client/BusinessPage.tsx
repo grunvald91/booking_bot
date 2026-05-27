@@ -228,11 +228,11 @@ export function BusinessPage() {
       {/* Employee / Room detail modal */}
       {selectedEmp && (
         <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-end sm:items-center justify-center px-3 pt-3 pb-[calc(4.5rem+env(safe-area-inset-bottom))] sm:p-4 animate-fade-in"
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-start justify-center overflow-y-auto px-3 pt-[max(1rem,env(safe-area-inset-top))] pb-[calc(5rem+env(safe-area-inset-bottom))] sm:items-center sm:p-4 animate-fade-in"
           onClick={() => setSelectedEmp(null)}
         >
           <div
-            className="bg-white rounded-3xl shadow-xl w-full max-w-md max-h-[calc(100vh-6rem)] sm:max-h-[90vh] overflow-y-auto"
+            className="bg-white rounded-3xl shadow-xl w-full max-w-md sm:max-h-[90vh] sm:overflow-y-auto my-auto"
             onClick={(e) => e.stopPropagation()}
           >
             {(() => {
