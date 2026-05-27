@@ -319,7 +319,7 @@ export function BusinessPage() {
                     )}
 
                     <Link
-                      to={`/book/${business.id}`}
+                      to={`/book/${business.id}?employee=${selectedEmp.id}`}
                       onClick={() => setSelectedEmp(null)}
                       className="block w-full text-center bg-apple-blue text-white font-semibold py-3.5 rounded-2xl hover:bg-apple-blue-hover transition-all duration-200 mt-5 shadow-lg shadow-apple-blue/20 active:scale-[0.98]"
                     >
