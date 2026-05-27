@@ -6,6 +6,7 @@ import {
   CheckCircle,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Scissors,
   User,
   Plus,
@@ -224,6 +225,9 @@ export function BookingPage() {
   const preselectedServiceId = searchParams.get('service')
     ? Number(searchParams.get('service'))
     : null
+  const preselectedEmployeeId = searchParams.get('employee')
+    ? Number(searchParams.get('employee'))
+    : null
 
   // Business data
   const [business, setBusiness] = useState<BusinessDetail | null>(null)
@@ -315,9 +319,19 @@ export function BookingPage() {
             }
           }
         }
+        if (preselectedEmployeeId) {
+          const emp = (biz.employees || []).find((e) => e.id === preselectedEmployeeId)
+          if (emp) {
+            if (biz.business_type === 'venue_rental') {
+              setSelectedRoom(emp)
+            } else {
+              setSelectedEmployee(emp)
+            }
+          }
+        }
       })
       .catch(() => {})
-  }, [businessId, preselectedServiceId])
+  }, [businessId, preselectedServiceId, preselectedEmployeeId])
 
   // Total duration
   const totalDuration = useMemo(() => {
@@ -488,6 +502,24 @@ export function BookingPage() {
   const showConfirmSection = isVenue
     ? (!!selectedRoom && selectedServices.length > 0 && !!selectedDate && !!selectedTime)
     : (!!selectedService && !!selectedDate && !!selectedTime)
+
+  // Next ref for the floating "Далее" button: the next required step that's
+  // not satisfied yet. Returns null when nothing is selected (button hidden)
+  // and when the user is already at the confirmation section.
+  const nextRef = (() => {
+    if (isVenue) {
+      if (selectedServices.length === 0) return null
+      if (!selectedDate) return refDate
+      if (!selectedRoom) return refRoom
+      if (!selectedTime) return refTime
+      if (selectedRoom?.solo_price_per_hour && !showConfirmSection) return refFormat
+      return null  // confirm already visible — sticky inline button handles it
+    }
+    if (!selectedService) return null
+    if (!selectedDate) return refDate
+    if (!selectedTime) return refTime
+    return null
+  })()
 
   // ── Success screen ──
 
@@ -1588,6 +1620,18 @@ export function BookingPage() {
             {submitting ? 'Записываем...' : 'Записаться'}
           </button>
         </div>
+      )}
+
+      {/* Floating "Далее" — appears once user makes a selection and points to the next required step */}
+      {nextRef && (
+        <button
+          type="button"
+          onClick={() => scrollToRef(nextRef, 0)}
+          className="fixed right-4 bottom-[calc(5rem+env(safe-area-inset-bottom))] md:bottom-6 z-40 flex items-center gap-1.5 bg-apple-blue text-white text-sm font-semibold pl-4 pr-3 py-2.5 rounded-full shadow-lg shadow-apple-blue/30 active:scale-95 animate-fade-in"
+        >
+          Далее
+          <ChevronDown size={16} strokeWidth={2.5} />
+        </button>
       )}
     </div>
   )
