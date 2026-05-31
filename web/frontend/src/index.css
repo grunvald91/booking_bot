@@ -1,19 +1,43 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap');
 
 @theme {
-  --color-apple-blue: #0071E3;
-  --color-apple-blue-hover: #0077ED;
-  --color-apple-bg: #F5F5F7;
-  --color-apple-text: #1D1D1F;
-  --color-apple-gray: #6E6E73;
-  --color-apple-border: #D2D2D7;
-  --color-apple-success: #30D158;
-  --color-apple-warning: #FF9F0A;
-  --color-apple-danger: #FF3B30;
+  /* ServGo brand palette (aliased onto existing apple-* tokens so all
+     pre-existing class names switch styles without code changes). */
+  --color-apple-blue: #2F5BEB;          /* ServGo blue */
+  --color-apple-blue-hover: #244BD6;    /* ServGo blue darker */
+  --color-apple-bg: #F2F4F7;            /* ServGo background */
+  --color-apple-text: #0D1B2A;          /* ServGo navy */
+  --color-apple-gray: #6B7280;          /* ServGo body grey */
+  --color-apple-border: #E6E9EF;        /* ServGo light line */
+  --color-apple-success: #1B9E54;       /* ServGo success */
+  --color-apple-warning: #C56A12;       /* ServGo warm */
+  --color-apple-danger: #D6463E;        /* ServGo danger */
   --color-apple-card: #FFFFFF;
-  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+
+  /* New ServGo-specific tokens, available as bg-servgo-navy, text-servgo-purple, etc. */
+  --color-servgo-navy: #0D1B2A;
+  --color-servgo-blue: #2F5BEB;
+  --color-servgo-blue-dk: #244BD6;
+  --color-servgo-purple: #7C3AED;
+  --color-servgo-gray-lt: #9AA3B2;
+  --color-servgo-line-dk: #D7DCE6;
+
+  --font-sans: 'Montserrat', system-ui, sans-serif;
 }
+
+/* ServGo brand gradient — use as `background: var(--servgo-grad)` */
+:root {
+  --servgo-grad: linear-gradient(135deg, #2F5BEB 0%, #7C3AED 100%);
+  --servgo-grad-soft: linear-gradient(135deg, rgba(47,91,235,.10), rgba(124,58,237,.10));
+  --servgo-shadow: 0 1px 2px rgba(13,27,42,.04), 0 6px 20px rgba(13,27,42,.06);
+  --servgo-shadow-lg: 0 20px 60px rgba(13,27,42,.14);
+}
+
+.bg-servgo-grad { background-image: var(--servgo-grad); }
+.bg-servgo-grad-soft { background-image: var(--servgo-grad-soft); }
+.shadow-servgo { box-shadow: var(--servgo-shadow); }
+.shadow-servgo-lg { box-shadow: var(--servgo-shadow-lg); }
 
 *,
 *::before,
