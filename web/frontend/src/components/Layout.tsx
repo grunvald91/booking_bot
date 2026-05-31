@@ -15,6 +15,7 @@ import {
   Settings,
   ExternalLink,
 } from 'lucide-react'
+import { Logo } from './Logo'
 
 const clientNav = [
   { to: '/', label: 'Главная', icon: Home },
@@ -85,11 +86,8 @@ export function Layout() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <div className="flex items-center justify-between h-14">
             {/* Logo */}
-            <Link
-              to="/"
-              className="text-xl font-bold text-apple-text tracking-tight"
-            >
-              Sochi<span className="text-apple-blue">Service</span>
+            <Link to="/" className="flex items-center">
+              <Logo size={28} />
             </Link>
 
             {/* Desktop nav */}
