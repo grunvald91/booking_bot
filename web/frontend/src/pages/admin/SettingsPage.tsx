@@ -473,7 +473,7 @@ export function SettingsPage() {
           <button
             onClick={handleSaveProfile}
             disabled={saving}
-            className="mt-5 w-full bg-apple-blue text-white font-medium py-3 rounded-xl hover:bg-apple-blue-hover transition-all duration-200 disabled:opacity-50"
+            className="mt-5 w-full btn-grad text-white py-3 disabled:opacity-50"
           >
             {saving ? 'Сохранение...' : 'Сохранить профиль'}
           </button>
@@ -725,7 +725,7 @@ export function SettingsPage() {
           <button
             onClick={handleSavePrepayment}
             disabled={saving}
-            className="mt-5 w-full bg-apple-blue text-white font-medium py-3 rounded-xl hover:bg-apple-blue-hover transition-all duration-200 disabled:opacity-50"
+            className="mt-5 w-full btn-grad text-white py-3 disabled:opacity-50"
           >
             {saving ? 'Сохранение...' : 'Сохранить настройки предоплаты'}
           </button>
@@ -890,7 +890,7 @@ export function SettingsPage() {
               <button
                 onClick={handleAddOwner}
                 disabled={!ownerField.trim()}
-                className="flex-1 bg-apple-blue text-white font-medium py-3 rounded-xl hover:bg-apple-blue-hover transition-all duration-200 disabled:opacity-50"
+                className="flex-1 btn-grad text-white py-3 disabled:opacity-50"
               >
                 Добавить
               </button>
