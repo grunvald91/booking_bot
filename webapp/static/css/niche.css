@@ -1,0 +1,12 @@
+/* Niche-specific overlay on top of landing.css.
+   After the ServGo redesign, all heavy styles live in landing.css;
+   this file keeps a couple of small layout safety nets. */
+
+/* Client-steps wrapping (prevent narrow text from collapsing the row). */
+.client-steps .step-text { min-width: 0; }
+.client-steps .step-text b,
+.client-steps .step-text small {
+    display: block;
+    overflow-wrap: anywhere;
+    word-break: normal;
+}
