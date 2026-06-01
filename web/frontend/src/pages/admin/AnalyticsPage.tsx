@@ -351,16 +351,12 @@ export function AnalyticsPage() {
           <BarChart3 size={20} />
           Аналитика
         </h1>
-        <div className="flex bg-apple-bg rounded-full p-0.5">
+        <div className="tabs-pill">
           {periods.map(p => (
             <button
               key={p.value}
               onClick={() => setPeriod(p.value)}
-              className={`text-xs font-medium px-3 py-1 rounded-full transition-all ${
-                period === p.value
-                  ? 'bg-white text-apple-text shadow-sm'
-                  : 'text-apple-gray'
-              }`}
+              className={period === p.value ? 'tab-active' : ''}
             >
               {p.label}
             </button>

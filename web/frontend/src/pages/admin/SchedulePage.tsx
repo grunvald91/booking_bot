@@ -483,13 +483,13 @@ export function SchedulePage() {
       {/* Row 1: Business selector + View mode toggle */}
       <div className="flex items-center justify-between gap-2 shrink-0">
         <BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />
-        <div className="flex gap-1 bg-apple-bg rounded-full p-0.5 shrink-0">
+        <div className="tabs-pill shrink-0">
           <button onClick={() => setViewMode('week')}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${viewMode === 'week' ? 'bg-white text-apple-text shadow-sm' : 'text-apple-gray'}`}>
+            className={viewMode === 'week' ? 'tab-active' : ''}>
             Неделя
           </button>
           <button onClick={() => setViewMode('day')}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${viewMode === 'day' ? 'bg-white text-apple-text shadow-sm' : 'text-apple-gray'}`}>
+            className={viewMode === 'day' ? 'tab-active' : ''}>
             День
           </button>
         </div>
