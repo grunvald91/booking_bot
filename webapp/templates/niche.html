@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ niche.meta.title }}</title>
+    <meta name="description" content="{{ niche.meta.description }}">
+    {% if niche.meta.og_image %}
+    <meta property="og:title" content="{{ niche.meta.title }}">
+    <meta property="og:description" content="{{ niche.meta.description }}">
+    <meta property="og:image" content="{{ niche.meta.og_image }}">
+    <meta property="og:type" content="website">
+    {% endif %}
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=1">
+    <link rel="alternate icon" href="/static/favicon.ico?v=1">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png?v=1">
+    <link rel="manifest" href="/static/site.webmanifest?v=1">
+    <link rel="stylesheet" href="/static/css/landing.css?v=9">
+    <link rel="stylesheet" href="/static/css/niche.css?v=2">
+</head>
+<body data-niche="{{ niche.slug }}">
+    <header class="topbar">
+        <a class="brand" href="#top" aria-label="ServGo">
+            <span class="brand-mark">SG</span>
+            <span class="brand-name">ServGo</span>
+        </a>
+        <nav class="nav-links" aria-label="Главная навигация">
+            {% if niche.pains and niche.pains.entries %}<a href="#pains">Боли</a>{% endif %}
+            <a href="#owners">Владельцу</a>
+            <a href="#clients">Клиентам</a>
+            <a href="#compare">Почему мы</a>
+            {% if niche.faq and niche.faq.entries %}<a href="#faq">Вопросы</a>{% endif %}
+        </nav>
+        <a class="nav-cta" href="https://t.me/{{ bot_username }}" data-desktop-href="/book">Открыть бот</a>
+    </header>
+
+    <main id="top">
+        <section class="hero" aria-labelledby="hero-title">
+            <div class="hero-stage" aria-hidden="true">
+                <div class="color-panel panel-schedule">
+                    <div class="panel-label">Живое расписание</div>
+                    {% set stage_colors = ['mint', 'peach', 'sky', 'lemon'] %}
+                    {% for slot in niche.hero.stage_services %}
+                    <div class="schedule-line {{ stage_colors[loop.index0 % 4] }}"><span>{{ slot.time }}</span><b>{{ slot.label }}</b></div>
+                    {% endfor %}
+                </div>
+                <div class="phone-card">
+                    <div class="phone-speaker"></div>
+                    <div class="phone-caption">ServGo</div>
+                    <div class="phone-title">Выберите время</div>
+                    <div class="slot-grid">
+                        {% for slot in niche.hero.slots %}
+                        <span{% if loop.index == 2 %} class="selected"{% endif %}>{{ slot }}</span>
+                        {% endfor %}
+                    </div>
+                    <div class="phone-submit">Записаться</div>
+                </div>
+                <div class="color-panel panel-stats">
+                    <div class="stat-row violet"><span>Записи</span><b>24/7</b></div>
+                    <div class="stat-row green"><span>Накладки</span><b>0</b></div>
+                    <div class="stat-row coral"><span>Запуск</span><b>1 день</b></div>
+                </div>
+            </div>
+
+            <div class="hero-content">
+                <p class="eyebrow">{{ niche.hero.eyebrow }}</p>
+                <h1 id="hero-title">{{ niche.hero.h1 }}</h1>
+                <p class="hero-copy">{{ niche.hero['copy'] }}</p>
+                <div class="hero-actions hero-main-actions">
+                    <a class="secondary-action" href="https://t.me/{{ bot_username }}">Посмотреть в Telegram</a>
+                    <a class="secondary-action" href="{{ niche.demo_site_url }}">Посмотреть на сайте</a>
+                    <a class="primary-action hero-connect-action" href="{{ niche.connect_bot_url }}">Подключить бизнес</a>
+                </div>
+            </div>
+        </section>
+
+        {% if niche.signal_strip %}
+        <section class="signal-strip" aria-label="Ключевые преимущества">
+            {% for card in niche.signal_strip %}
+            <div class="signal-card {{ card.color | default('mint') }}">
+                <strong>{{ card.title }}</strong>
+                <span>{{ card.sub }}</span>
+            </div>
+            {% endfor %}
+        </section>
+        {% endif %}
+
+        {% if niche.pains and niche.pains.entries %}
+        <section class="section band-cream pains-section" id="pains">
+            <div class="section-heading">
+                <p class="eyebrow">{{ niche.pains.intro | default('Знакомо?') }}</p>
+                <h2>{{ niche.pains.h2 | default('Боли, которые ServGo закрывает с первого дня') }}</h2>
+            </div>
+            <ul class="pains-list">
+                {% for pain in niche.pains.entries %}
+                <li class="pain-item"><span class="pain-bullet">{{ '%02d' % loop.index }}</span><span class="pain-text">{{ pain }}</span></li>
+                {% endfor %}
+            </ul>
+        </section>
+        {% endif %}
+
+        {% if niche.owners %}
+        <section class="section band-cream" id="owners">
+            <div class="section-heading">
+                <p class="eyebrow">Для владельца</p>
+                <h2>{{ niche.owners.h2 }}</h2>
+                <p>{{ niche.owners['copy'] }}</p>
+            </div>
+            {% if niche.owners.cards %}
+            <div class="feature-grid">
+                {% for card in niche.owners.cards %}
+                <article class="feature-card card-{{ card.color | default('mint') }}">
+                    <span class="feature-icon">{{ card.icon }}</span>
+                    <h3>{{ card.title }}</h3>
+                    <p>{{ card.text }}</p>
+                </article>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </section>
+        {% endif %}
+
+        {% if niche.clients %}
+        <section class="section band-blue" id="clients">
+            <div class="split-layout">
+                <div>
+                    <p class="eyebrow">Для клиентов</p>
+                    <h2>{{ niche.clients.h2 }}</h2>
+                    <p>{{ niche.clients['copy'] }}</p>
+                </div>
+                {% if niche.clients.steps %}
+                <div class="client-steps" aria-label="Сценарий клиента">
+                    {% for step in niche.clients.steps %}
+                    <div><span>{{ step.num }}</span><div class="step-text"><b>{{ step.title }}</b><small>{{ step.sub }}</small></div></div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </section>
+        {% endif %}
+
+        {% if niche.compare %}
+        <section class="section band-pink" id="compare">
+            <div class="section-heading">
+                <p class="eyebrow">{{ niche.compare.eyebrow | default('Почему удобнее тяжелых платформ') }}</p>
+                <h2>{{ niche.compare.h2 }}</h2>
+                <p>{{ niche.compare['copy'] }}</p>
+            </div>
+            {% if niche.compare.rows %}
+            <div class="comparison">
+                <div class="comparison-head">
+                    <span>Критерий</span>
+                    <span>{{ niche.compare.competitor_label | default('Крупные платформы') }}</span>
+                    <span>ServGo</span>
+                </div>
+                {% for row in niche.compare.rows %}
+                <div class="comparison-row">
+                    <span>{{ row.criteria }}</span>
+                    <p>{{ row.them }}</p>
+                    <p>{{ row.us }}</p>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </section>
+        {% endif %}
+
+        <section class="section band-white">
+            <div class="section-heading">
+                <p class="eyebrow">Что уже внутри</p>
+                <h2>Функции, которые владелец обычно просит первыми</h2>
+            </div>
+            <div class="capability-grid">
+                {% for cap in niche.capability_grid %}
+                <div><span></span>{{ cap }}</div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="section band-pricing" id="pricing">
+            <div class="pricing-panel">
+                <div class="pricing-copy">
+                    <p class="eyebrow">{{ niche.pricing.eyebrow }}</p>
+                    <h2>{{ niche.pricing.h2 }}</h2>
+                    <p>{{ niche.pricing['copy'] }}</p>
+                </div>
+                <div class="pricing-card" aria-label="Стартовые условия ServGo">
+                    <span class="pricing-label">{{ niche.pricing.card_label }}</span>
+                    <strong class="pricing-amount">{{ niche.pricing.card_amount }}</strong>
+                    <span class="pricing-period">{{ niche.pricing.card_period }}</span>
+                    <p>{{ niche.pricing.card_note }}</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="section band-launch" id="launch">
+            <div class="launch-panel">
+                <div>
+                    <p class="eyebrow">{{ niche.launch.eyebrow }}</p>
+                    <h2>{{ niche.launch.h2 }}</h2>
+                    <p>{{ niche.launch['copy'] }}</p>
+                    <div class="hero-actions launch-actions">
+                        <button class="primary-action" type="button" data-open-connect-form>Подать заявку на подключение бизнеса</button>
+                        <a class="secondary-action" href="{{ niche.connect_bot_url }}" target="_blank" rel="noopener">Хочу сделать сам</a>
+                    </div>
+                </div>
+                <ol class="launch-list">
+                    {% for step in niche.launch.steps %}
+                    <li><span>{{ '%02d' % loop.index }}</span><b>{{ step }}</b></li>
+                    {% endfor %}
+                </ol>
+            </div>
+        </section>
+
+        {% if niche.faq and niche.faq.entries %}
+        <section class="section band-white faq-section" id="faq">
+            <div class="section-heading">
+                <p class="eyebrow">Частые вопросы</p>
+                <h2>{{ niche.faq.h2 | default('Что обычно спрашивают') }}</h2>
+            </div>
+            <div class="faq-list">
+                {% for item in niche.faq.entries %}
+                <details class="faq-item"{% if loop.first %} open{% endif %}>
+                    <summary>{{ item.q }}</summary>
+                    <p>{{ item.a }}</p>
+                </details>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
+        <section class="section band-final">
+            <div class="final-content">
+                <p class="eyebrow">{{ niche.final.eyebrow }}</p>
+                <h2>{{ niche.final.h2 }}</h2>
+                <p>{{ niche.final['copy'] }}</p>
+                <div class="hero-actions">
+                    <a class="primary-action" href="https://t.me/{{ bot_username }}" target="_blank" rel="noopener">Демонстрация в Telegram</a>
+                    <a class="secondary-action" href="{{ niche.demo_site_url }}">Демонстрация на сайте</a>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div class="modal-backdrop" data-connect-modal hidden>
+        <div class="connect-modal" role="dialog" aria-modal="true" aria-labelledby="connect-form-title">
+            <button class="modal-close" type="button" data-close-connect-form aria-label="Закрыть форму">×</button>
+            <p class="eyebrow">Заявка на подключение</p>
+            <h2 id="connect-form-title">Расскажите, как с вами связаться</h2>
+            <form class="connect-form" data-connect-form novalidate>
+                <input type="hidden" name="niche" value="{{ niche.slug }}">
+                <label>
+                    <span>Имя</span>
+                    <input type="text" name="name" autocomplete="name" required>
+                </label>
+                <div class="form-grid">
+                    <label>
+                        <span>Телефон</span>
+                        <input type="tel" name="phone" autocomplete="tel">
+                    </label>
+                    <label>
+                        <span>Email</span>
+                        <input type="email" name="email" autocomplete="email">
+                    </label>
+                </div>
+                <label>
+                    <span>Комментарий</span>
+                    <textarea name="comment" rows="4" placeholder="Коротко о бизнесе или удобном времени для связи"></textarea>
+                </label>
+                <p class="form-hint">Обязательно укажите имя и телефон или email.</p>
+                <div class="form-status" data-connect-form-status role="status" aria-live="polite"></div>
+                <div class="form-actions">
+                    <button class="primary-action" type="submit">Отправить заявку</button>
+                    <button class="secondary-action" type="button" data-close-connect-form>Отмена</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/js/landing.js?v=6"></script>
+</body>
+</html>
