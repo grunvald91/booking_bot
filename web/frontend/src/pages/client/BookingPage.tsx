@@ -214,7 +214,7 @@ function CalendarPicker({
                 isPast
                   ? 'text-apple-border cursor-not-allowed'
                   : isSelected
-                    ? 'bg-apple-blue text-white shadow-sm'
+                    ? 'bg-servgo-grad text-white shadow-md'
                     : isToday
                       ? 'bg-apple-blue/10 text-apple-blue hover:bg-apple-blue/20'
                       : 'text-apple-text hover:bg-apple-bg'
@@ -1327,7 +1327,7 @@ function BookingPageInner() {
                         }}
                         className={`py-3.5 min-h-[44px] rounded-xl text-sm font-semibold transition-all duration-200 active:scale-95 ${
                           selectedTime === time
-                            ? 'bg-apple-blue text-white shadow-sm'
+                            ? 'bg-servgo-grad text-white shadow-md'
                             : 'bg-white shadow-sm text-apple-text hover:shadow-md'
                         }`}
                       >
@@ -1609,7 +1609,7 @@ function BookingPageInner() {
                       }}
                       className={`py-3.5 min-h-[44px] rounded-xl text-sm font-semibold transition-all duration-200 active:scale-95 ${
                         selectedTime === time
-                          ? 'bg-apple-blue text-white shadow-sm'
+                          ? 'bg-servgo-grad text-white shadow-md'
                           : 'bg-white shadow-sm text-apple-text hover:shadow-md'
                       }`}
                     >
@@ -2000,7 +2000,7 @@ function BookingPageInner() {
           <button
             onClick={handleSubmit}
             disabled={submitting}
-            className="w-full bg-apple-blue text-white font-semibold py-4 rounded-2xl hover:bg-apple-blue-hover transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-apple-blue/20 active:scale-[0.98]"
+            className="btn-grad w-full py-4 text-base rounded-2xl disabled:cursor-not-allowed"
           >
             {submitting ? 'Записываем...' : 'Записаться'}
           </button>
@@ -2013,7 +2013,7 @@ function BookingPageInner() {
           type="button"
           onClick={() => scrollToRef(nextRef, 0)}
           style={{ bottom: 'max(5rem, calc(4rem + env(safe-area-inset-bottom)))' }}
-          className="fixed right-4 z-50 flex items-center gap-1.5 bg-apple-blue text-white text-sm font-semibold pl-4 pr-3 py-2.5 rounded-full shadow-lg shadow-apple-blue/30 active:scale-95 animate-fade-in"
+          className="btn-grad fixed right-4 z-50 flex items-center gap-1.5 text-sm pl-4 pr-3 py-2.5 rounded-full animate-fade-in"
         >
           Далее
           <ChevronDown size={16} strokeWidth={2.5} />
