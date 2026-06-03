@@ -3,10 +3,63 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ServGo - онлайн-запись для бизнеса</title>
-    <meta name="description" content="ServGo помогает бизнесу принимать онлайн-записи в Telegram: расписание, услуги, сотрудники, предоплата, напоминания и защита от двойной записи.">
+    <title>Онлайн запись и бронирование для бизнеса — ServGo</title>
+    <meta name="description" content="Онлайн запись для салонов красоты, барбершопов, бань, фотостудий, психологов и шиномонтажа. Telegram-бот и сайт. Предоплата, напоминания. От 0 ₽/мес.">
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+    <link rel="canonical" href="https://promo.servgo.ru/">
+    <meta property="og:title" content="Онлайн запись и бронирование для бизнеса — ServGo">
+    <meta property="og:description" content="Онлайн запись для салонов красоты, барбершопов, бань, фотостудий, психологов и шиномонтажа. Telegram-бот и сайт. От 0 ₽/мес.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://promo.servgo.ru/">
+    <meta property="og:locale" content="ru_RU">
+    <meta property="og:site_name" content="ServGo">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Онлайн запись и бронирование для бизнеса — ServGo">
+    <meta name="twitter:description" content="Онлайн запись для салонов красоты, барбершопов, бань, фотостудий, психологов и шиномонтажа.">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=1">
-    <link rel="stylesheet" href="/static/css/landing.css?v=4">
+    <link rel="alternate icon" href="/static/favicon.ico?v=1">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png?v=1">
+    <link rel="manifest" href="/static/site.webmanifest?v=1">
+    <link rel="stylesheet" href="/static/css/landing.css?v=9">
+    <link rel="stylesheet" href="/static/css/niche.css?v=3">
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "ServGo",
+        "url": "https://promo.servgo.ru/",
+        "logo": "https://promo.servgo.ru/static/favicon.svg",
+        "description": "Сервис онлайн-записи и бронирования для малого бизнеса через Telegram-бот и веб-приложение.",
+        "areaServed": "RU"
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "ServGo",
+        "url": "https://promo.servgo.ru/",
+        "inLanguage": "ru-RU",
+        "publisher": {"@type": "Organization", "name": "ServGo"}
+    }
+    </script>
+    {% if niches %}
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "name": "ServGo для разных ниш",
+        "itemListElement": [
+            {% for n in niches %}{
+                "@type": "ListItem",
+                "position": {{ loop.index }},
+                "name": {{ n.label | tojson }},
+                "url": {{ ("https://promo.servgo.ru/" + n.slug) | tojson }}
+            }{% if not loop.last %},{% endif %}{% endfor %}
+        ]
+    }
+    </script>
+    {% endif %}
 </head>
 <body>
     <header class="topbar">
@@ -20,7 +73,7 @@
             <a href="#compare">Почему мы</a>
             <a href="#launch">Запуск</a>
         </nav>
-        <a class="nav-cta" href="https://t.me/cityservice_bot">Открыть бот</a>
+        <a class="nav-cta" href="https://t.me/{{BOT_USERNAME}}" data-desktop-href="/book">Открыть бот</a>
     </header>
 
     <main id="top">
@@ -59,9 +112,10 @@
                     Клиент сам выбирает услугу, специалиста, дату и время. Владелец видит записи,
                     подтверждает предоплату и больше не ловит клиентов по разным мессенджерам.
                 </p>
-                <div class="hero-actions">
-                    <a class="primary-action" href="https://t.me/cityservice_bot">Посмотреть в Telegram</a>
-                    <a class="secondary-action" href="https://t.me/CityService_MLM_Bot">Подключить бизнес</a>
+                <div class="hero-actions hero-main-actions">
+                    <a class="secondary-action" href="https://t.me/{{BOT_USERNAME}}">Посмотреть в Telegram</a>
+                    <a class="secondary-action" href="https://servgo.ru/">Посмотреть на сайте</a>
+                    <a class="primary-action hero-connect-action" href="https://t.me/cityservice_mlm_bot">Подключить бизнес</a>
                 </div>
             </div>
         </section>
@@ -84,6 +138,24 @@
                 <span>владелец дает данные, вы запускаете</span>
             </div>
         </section>
+
+        {% if niches %}
+        <section class="section band-related" id="segments" aria-label="ServGo для разных ниш">
+            <div class="section-heading">
+                <p class="eyebrow">Выберите свой сегмент</p>
+                <h2>ServGo для конкретной ниши — со своими словами и кейсами</h2>
+                <p>Каждая страница ниже отвечает на боли конкретного сегмента и показывает, как ServGo их закрывает.</p>
+            </div>
+            <div class="related-grid">
+                {% for n in niches %}
+                <a class="related-card" href="/{{ n.slug }}">
+                    <span class="related-label">{{ n.label }}</span>
+                    <span class="related-arrow" aria-hidden="true">→</span>
+                </a>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
 
         <section class="section band-cream" id="owners">
             <div class="section-heading">
@@ -190,6 +262,25 @@
             </div>
         </section>
 
+        <section class="section band-pricing" id="pricing">
+            <div class="pricing-panel">
+                <div class="pricing-copy">
+                    <p class="eyebrow">Стоимость</p>
+                    <h2>От 0 до 2 000 ₽ в месяц</h2>
+                    <p>
+                        Стоимость для первых подключений - от нуля до двух тысяч рублей в месяц.
+                        Это уникальные условия, доступные ограниченное количество времени, но после подключения они будут применены навсегда.
+                    </p>
+                </div>
+                <div class="pricing-card" aria-label="Стартовые условия ServGo">
+                    <span class="pricing-label">Стартовые условия</span>
+                    <strong class="pricing-amount">0-2 000 ₽</strong>
+                    <span class="pricing-period">в месяц</span>
+                    <p>Фиксируем эти условия на весь срок работы бизнеса в ServGo.</p>
+                </div>
+            </div>
+        </section>
+
         <section class="section band-launch" id="launch">
             <div class="launch-panel">
                 <div>
@@ -199,6 +290,10 @@
                         Он передает данные о бизнесе, услугах, сотрудниках, графике и оплате.
                         Вы заводите карточку, проверяете тестовую запись и отдаете готовую ссылку клиентам.
                     </p>
+                    <div class="hero-actions launch-actions">
+                        <button class="primary-action" type="button" data-open-connect-form>Подать заявку на подключение бизнеса</button>
+                        <a class="secondary-action" href="https://t.me/cityservice_mlm_bot" target="_blank" rel="noopener">Хочу сделать сам</a>
+                    </div>
                 </div>
                 <ol class="launch-list">
                     <li><span>01</span><b>Собираем анкету бизнеса</b></li>
@@ -215,13 +310,47 @@
                 <h2>Покажите владельцу не технологию, а спокойный рабочий день</h2>
                 <p>Записи на месте, клиенты понимают шаги, команда получает уведомления, а владелец видит расписание без ручного журнала.</p>
                 <div class="hero-actions">
-                    <a class="primary-action" href="https://t.me/cityservice_bot">Открыть бот</a>
-                    <a class="secondary-action" href="https://servgo.ru/book">Страница записи</a>
+                    <a class="primary-action" href="https://t.me/{{BOT_USERNAME}}" target="_blank" rel="noopener">Демонстрация в Telegram</a>
+                    <a class="secondary-action" href="https://servgo.ru/">Демонстрация на сайте</a>
                 </div>
             </div>
         </section>
     </main>
 
-    <script src="/static/js/landing.js?v=4"></script>
+    <div class="modal-backdrop" data-connect-modal hidden>
+        <div class="connect-modal" role="dialog" aria-modal="true" aria-labelledby="connect-form-title">
+            <button class="modal-close" type="button" data-close-connect-form aria-label="Закрыть форму">×</button>
+            <p class="eyebrow">Заявка на подключение</p>
+            <h2 id="connect-form-title">Расскажите, как с вами связаться</h2>
+            <form class="connect-form" data-connect-form novalidate>
+                <label>
+                    <span>Имя</span>
+                    <input type="text" name="name" autocomplete="name" required>
+                </label>
+                <div class="form-grid">
+                    <label>
+                        <span>Телефон</span>
+                        <input type="tel" name="phone" autocomplete="tel">
+                    </label>
+                    <label>
+                        <span>Email</span>
+                        <input type="email" name="email" autocomplete="email">
+                    </label>
+                </div>
+                <label>
+                    <span>Комментарий</span>
+                    <textarea name="comment" rows="4" placeholder="Коротко о бизнесе или удобном времени для связи"></textarea>
+                </label>
+                <p class="form-hint">Обязательно укажите имя и телефон или email.</p>
+                <div class="form-status" data-connect-form-status role="status" aria-live="polite"></div>
+                <div class="form-actions">
+                    <button class="primary-action" type="submit">Отправить заявку</button>
+                    <button class="secondary-action" type="button" data-close-connect-form>Отмена</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/js/landing.js?v=6"></script>
 </body>
 </html>
