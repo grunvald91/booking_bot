@@ -1010,12 +1010,16 @@ async def update_business(
         raise HTTPException(status_code=404, detail="Business not found")
 
     updates = data.model_dump(exclude_unset=True)
-    # Convert time strings to time objects
+    # Convert time strings to time objects. Accept both "HH:MM" and "HH:MM:SS"
+    # (the API serializes Time columns as "HH:MM:SS", and an unedited <input type="time">
+    # round-trips that exact string back to us).
     for time_field in ("working_hours_start", "working_hours_end", "break_start", "break_end"):
         if time_field in updates:
             val = updates[time_field]
             if val:
-                h, m = map(int, val.split(":"))
+                parts = val.split(":")
+                h = int(parts[0])
+                m = int(parts[1]) if len(parts) > 1 else 0
                 updates[time_field] = dt_time(h, m)
             else:
                 updates[time_field] = None
