@@ -818,12 +818,21 @@ async def api_day_bookings(request: web.Request) -> web.Response:
 
 
 async def index_handler(request: web.Request) -> web.Response:
-    """Публичная главная страница сервиса"""
-    import os
-    template_path = os.path.join(os.path.dirname(__file__), 'templates', 'landing.html')
-    with open(template_path, 'r', encoding='utf-8') as f:
-        html = f.read()
-    html = html.replace("{{BOT_USERNAME}}", BOT_USERNAME)
+    """Публичная главная страница сервиса — рендерится Jinja2 чтобы
+    подтянуть динамический список ниш для блока «выберите сегмент» и
+    JSON-LD ItemList."""
+    from webapp.niches import get_niche, list_niches
+
+    niches = []
+    for slug in list_niches():
+        n = get_niche(slug)
+        if not n:
+            continue
+        label = (n.get('meta') or {}).get('short_label') or slug
+        niches.append({'slug': slug, 'label': label})
+
+    template = _niche_jinja_env.get_template('landing.html')
+    html = template.render(BOT_USERNAME=BOT_USERNAME, niches=niches)
     return web.Response(text=html, content_type='text/html')
 
 
