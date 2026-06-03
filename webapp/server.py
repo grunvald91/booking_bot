@@ -1,18 +1,36 @@
 """
 Веб-сервер для Telegram Mini App календаря администратора
 """
+import asyncio
 import json
 import hashlib
 import hmac
 import logging
-from datetime import date, datetime, timedelta
+import os
+import re
+import smtplib
+from datetime import UTC, date, datetime, timedelta
+from email.message import EmailMessage
 from urllib.parse import parse_qs, unquote
 
+import jinja2
 from aiohttp import web
 from sqlalchemy.orm import selectinload
 
 from aiogram import Bot
-from bot.config import BOT_TOKEN, ADMIN_IDS
+from bot.config import BOT_TOKEN, ADMIN_IDS, BOT_USERNAME
+from servgo_auth import (
+    AUTH_COOKIE_NAME,
+    auth_cookie_kwargs,
+    auth_dict_from_payload,
+    clear_cookie_kwargs,
+    create_or_update_user as shared_create_or_update_user,
+    create_session as shared_create_session,
+    expire_session as shared_expire_session,
+    get_session as shared_get_session,
+    init_tables as init_shared_auth_tables,
+    verify_telegram_login,
+)
 from bot.services.notifications import (
     notify_master_new_booking,
     notify_owner_new_booking,
@@ -58,6 +76,188 @@ from database.crud import (
 )
 
 logger = logging.getLogger(__name__)
+
+LANDING_REQUEST_RECIPIENT = "artur_grunvald@mail.ru"
+LANDING_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _clean_landing_field(value, limit: int) -> str:
+    return str(value or "").strip()[:limit]
+
+
+def validate_landing_request_payload(data: dict) -> dict:
+    """Validate and normalize a public landing-page connection request."""
+    name = _clean_landing_field(data.get("name"), 120)
+    phone = _clean_landing_field(data.get("phone"), 80)
+    email = _clean_landing_field(data.get("email"), 160)
+    comment = _clean_landing_field(data.get("comment"), 1200)
+
+    if not name:
+        raise ValueError("Укажите имя")
+    if not phone and not email:
+        raise ValueError("Укажите телефон или email")
+    if email and not LANDING_EMAIL_RE.match(email):
+        raise ValueError("Проверьте email")
+
+    return {
+        "name": name,
+        "phone": phone,
+        "email": email,
+        "comment": comment,
+        "recipient": os.getenv("LANDING_REQUEST_EMAIL", LANDING_REQUEST_RECIPIENT),
+        "created_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC"),
+    }
+
+
+def format_landing_request_message(payload: dict) -> str:
+    lines = [
+        "Новая заявка на подключение бизнеса",
+        "",
+        f"Имя: {payload['name']}",
+        f"Телефон: {payload['phone'] or 'не указан'}",
+        f"Email: {payload['email'] or 'не указан'}",
+        f"Комментарий: {payload['comment'] or 'не указан'}",
+        "",
+        f"Получатель email: {payload['recipient']}",
+        f"Время: {payload['created_at']}",
+    ]
+    return "\n".join(lines)
+
+
+def send_landing_request_email(payload: dict) -> bool:
+    """Send request email when SMTP settings are configured."""
+    host = os.getenv("LANDING_SMTP_HOST") or os.getenv("SMTP_HOST")
+    if not host:
+        logger.warning("Landing request email skipped: SMTP host is not configured")
+        return False
+
+    port = int(os.getenv("LANDING_SMTP_PORT") or os.getenv("SMTP_PORT") or "587")
+    username = os.getenv("LANDING_SMTP_USER") or os.getenv("SMTP_USER")
+    password = os.getenv("LANDING_SMTP_PASSWORD") or os.getenv("SMTP_PASSWORD")
+    use_ssl = (os.getenv("LANDING_SMTP_SSL") or os.getenv("SMTP_SSL") or "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    use_tls = (os.getenv("LANDING_SMTP_TLS") or os.getenv("SMTP_TLS") or "true").lower() not in (
+        "0",
+        "false",
+        "no",
+    )
+    sender = os.getenv("LANDING_SMTP_FROM") or os.getenv("SMTP_FROM") or username or payload["recipient"]
+
+    message = EmailMessage()
+    message["Subject"] = "Заявка на подключение бизнеса ServGo"
+    message["From"] = sender
+    message["To"] = payload["recipient"]
+    if payload.get("email"):
+        message["Reply-To"] = payload["email"]
+    message.set_content(format_landing_request_message(payload))
+
+    smtp_cls = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+    with smtp_cls(host, port, timeout=15) as smtp:
+        if use_tls and not use_ssl:
+            smtp.starttls()
+        if username and password:
+            smtp.login(username, password)
+        smtp.send_message(message)
+    return True
+
+
+def _landing_env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def get_landing_request_bot_token() -> str | None:
+    """Return the bot token that should send promo landing requests."""
+    token = os.getenv("LANDING_NOTIFY_BOT_TOKEN") or os.getenv("MLM_BOT_TOKEN")
+    if token:
+        return token
+    if _landing_env_flag("LANDING_NOTIFY_ALLOW_BOOKING_BOT_FALLBACK", False):
+        return BOT_TOKEN
+    return None
+
+
+def is_landing_request_telegram_required() -> bool:
+    return _landing_env_flag("LANDING_NOTIFY_REQUIRE_TELEGRAM", True)
+
+
+async def send_landing_request_telegram(payload: dict) -> bool:
+    """Send request details to configured Telegram admin chats."""
+    token = get_landing_request_bot_token()
+    raw_chat_ids = os.getenv("LANDING_NOTIFY_CHAT_IDS") or ",".join(str(chat_id) for chat_id in ADMIN_IDS)
+    chat_ids = [chat_id.strip() for chat_id in raw_chat_ids.split(",") if chat_id.strip()]
+
+    if not token or not chat_ids:
+        logger.warning(
+            "Landing request Telegram notification skipped: set MLM_BOT_TOKEN "
+            "or LANDING_NOTIFY_BOT_TOKEN and LANDING_NOTIFY_CHAT_IDS"
+        )
+        return False
+
+    bot = Bot(token=token)
+    try:
+        sent = 0
+        message = format_landing_request_message(payload)
+        for chat_id in chat_ids:
+            try:
+                await bot.send_message(chat_id=chat_id, text=message)
+                sent += 1
+            except Exception as exc:
+                logger.error(f"Landing request Telegram notification failed for {chat_id}: {exc}")
+        return sent > 0
+    finally:
+        await bot.session.close()
+
+
+async def api_landing_connect_request(request: web.Request) -> web.Response:
+    """Receive a public connection request from the promo landing page."""
+    try:
+        payload = validate_landing_request_payload(await request.json())
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    except Exception:
+        return web.json_response({"error": "Некорректные данные заявки"}, status=400)
+
+    email_sent = False
+    telegram_sent = False
+
+    try:
+        email_sent = await asyncio.to_thread(send_landing_request_email, payload)
+    except Exception as exc:
+        logger.error(f"Landing request email notification failed: {exc}")
+
+    try:
+        telegram_sent = await send_landing_request_telegram(payload)
+    except Exception as exc:
+        logger.error(f"Landing request Telegram notification failed: {exc}")
+
+    if is_landing_request_telegram_required() and not telegram_sent:
+        return web.json_response(
+            {
+                "error": "Не удалось отправить заявку в Telegram. Попробуйте написать в Telegram.",
+                "email_sent": email_sent,
+                "telegram_sent": telegram_sent,
+            },
+            status=502,
+        )
+
+    if not email_sent and not telegram_sent:
+        return web.json_response(
+            {"error": "Не удалось отправить заявку. Попробуйте написать в Telegram."},
+            status=502,
+        )
+
+    return web.json_response(
+        {
+            "success": True,
+            "email_sent": email_sent,
+            "telegram_sent": telegram_sent,
+        }
+    )
 
 # === Web Auth (без Telegram) ===
 
@@ -160,6 +360,41 @@ def validate_webapp_data(init_data: str) -> dict | None:
         return None
 
 
+async def get_authenticated_telegram_user(request: web.Request) -> dict | None:
+    """Return Telegram identity from WebApp initData or shared Servgo session."""
+    init_data = request.headers.get('X-Telegram-Init-Data', '')
+    user = validate_webapp_data(init_data)
+    if user:
+        return user
+
+    shared_token = request.cookies.get(AUTH_COOKIE_NAME)
+    session = shared_get_session(shared_token)
+    if not session:
+        return None
+
+    return {
+        'id': session['telegram_id'],
+        'first_name': session.get('first_name', '') or '',
+        'last_name': session.get('last_name', '') or '',
+        'username': session.get('username', '') or '',
+        'photo_url': session.get('photo_url', '') or '',
+    }
+
+
+async def get_or_create_booking_user_from_auth(session, auth_user: dict):
+    telegram_id = int(auth_user['id'])
+    first_name = auth_user.get('first_name', '') or ''
+    last_name = auth_user.get('last_name', '') or ''
+    username = auth_user.get('username', '') or ''
+    full_name = f"{first_name} {last_name}".strip() or username or f"User {telegram_id}"
+    return await get_or_create_user(
+        session,
+        telegram_id=telegram_id,
+        username=username,
+        full_name=full_name,
+    )
+
+
 async def check_admin_access(telegram_id: int) -> tuple:
     """Проверка доступа администратора, возвращает (admin, business_id)"""
     async with async_session_maker() as session:
@@ -260,8 +495,7 @@ async def api_calendar_data(request: web.Request) -> web.Response:
 
 async def get_user_from_request(request: web.Request):
     """Получить пользователя из запроса (Telegram initData или web session cookie)"""
-    init_data = request.headers.get('X-Telegram-Init-Data', '')
-    user = validate_webapp_data(init_data)
+    user = await get_authenticated_telegram_user(request)
 
     # Fallback: проверяем web session cookie
     if not user:
@@ -584,7 +818,94 @@ async def api_day_bookings(request: web.Request) -> web.Response:
 
 
 async def index_handler(request: web.Request) -> web.Response:
-    """Главная страница календаря"""
+    """Публичная главная страница сервиса"""
+    import os
+    template_path = os.path.join(os.path.dirname(__file__), 'templates', 'landing.html')
+    with open(template_path, 'r', encoding='utf-8') as f:
+        html = f.read()
+    html = html.replace("{{BOT_USERNAME}}", BOT_USERNAME)
+    return web.Response(text=html, content_type='text/html')
+
+
+_NICHE_TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
+_niche_jinja_env = jinja2.Environment(
+    loader=jinja2.FileSystemLoader(_NICHE_TEMPLATES_DIR),
+    autoescape=jinja2.select_autoescape(['html']),
+    trim_blocks=True,
+    lstrip_blocks=True,
+)
+
+
+async def serve_niche_landing(request: web.Request) -> web.Response:
+    """Render promo.servgo.ru/<slug> from a YAML config in webapp/niches/."""
+    from webapp.niches import get_niche, list_niches
+
+    slug = request.match_info.get('slug', '')
+    niche = get_niche(slug)
+    if niche is None:
+        raise web.HTTPNotFound()
+
+    other_niches = []
+    for other_slug in list_niches():
+        if other_slug == slug:
+            continue
+        other = get_niche(other_slug)
+        if not other:
+            continue
+        label = (other.get('meta') or {}).get('short_label') or other_slug
+        other_niches.append({'slug': other_slug, 'label': label})
+
+    template = _niche_jinja_env.get_template('niche.html')
+    html = template.render(
+        niche=niche,
+        bot_username=BOT_USERNAME,
+        other_niches=other_niches,
+    )
+    return web.Response(text=html, content_type='text/html')
+
+
+async def sitemap_handler(request: web.Request) -> web.Response:
+    """Dynamic /sitemap.xml — enumerates all niche landings."""
+    from webapp.niches import list_niches
+    from datetime import datetime
+
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    base = 'https://promo.servgo.ru'
+
+    urls = [
+        f'  <url><loc>{base}/</loc><lastmod>{today}</lastmod>'
+        f'<changefreq>weekly</changefreq><priority>1.0</priority></url>'
+    ]
+    for slug in list_niches():
+        urls.append(
+            f'  <url><loc>{base}/{slug}</loc><lastmod>{today}</lastmod>'
+            f'<changefreq>weekly</changefreq><priority>0.9</priority></url>'
+        )
+
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + '\n'.join(urls)
+        + '\n</urlset>\n'
+    )
+    return web.Response(text=xml, content_type='application/xml')
+
+
+async def robots_handler(request: web.Request) -> web.Response:
+    """Static /robots.txt — allow everything except internal API/auth."""
+    text = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "Disallow: /auth/\n"
+        "\n"
+        "Sitemap: https://promo.servgo.ru/sitemap.xml\n"
+    )
+    return web.Response(text=text, content_type='text/plain')
+
+
+async def calendar_handler(request: web.Request) -> web.Response:
+    """Страница календаря записей"""
     import os
     template_path = os.path.join(os.path.dirname(__file__), 'templates', 'calendar.html')
     with open(template_path, 'r', encoding='utf-8') as f:
@@ -631,7 +952,7 @@ async def auth_token_handler(request: web.Request) -> web.Response:
                 biz_result = await session.execute(
                     select(Business).where(Business.owner_id == user.id)
                 )
-                if biz_result.scalars().first():
+                if biz_result.scalar_one_or_none():
                     # Нашли - это главный владелец бизнеса
                     cookie = create_session_cookie(user.telegram_id)
                     response = web.HTTPFound(redirect_to)
@@ -642,7 +963,7 @@ async def auth_token_handler(request: web.Request) -> web.Response:
                 co_owner_result = await session.execute(
                     select(BusinessOwner).where(BusinessOwner.user_id == user.id)
                 )
-                if co_owner_result.scalars().first():
+                if co_owner_result.scalar_one_or_none():
                     # Нашли - это совладелец бизнеса
                     cookie = create_session_cookie(user.telegram_id)
                     response = web.HTTPFound(redirect_to)
@@ -691,7 +1012,7 @@ async def api_auth_login(request: web.Request) -> web.Response:
                         biz_result = await session.execute(
                             select(Business).where(Business.owner_id == user.id)
                         )
-                        business = biz_result.scalars().first()
+                        business = biz_result.scalar_one_or_none()
                         if business:
                             cookie = create_session_cookie(user.telegram_id)
                             response = web.json_response({
@@ -706,7 +1027,7 @@ async def api_auth_login(request: web.Request) -> web.Response:
                         co_owner_result = await session.execute(
                             select(BusinessOwner).where(BusinessOwner.user_id == user.id)
                         )
-                        co_owner = co_owner_result.scalars().first()
+                        co_owner = co_owner_result.scalar_one_or_none()
                         if co_owner:
                             # Получаем информацию о бизнесе для ответа
                             co_business = await session.execute(
@@ -730,10 +1051,61 @@ async def api_auth_login(request: web.Request) -> web.Response:
         return web.json_response({'error': str(e)}, status=500)
 
 
+async def api_auth_telegram(request: web.Request) -> web.Response:
+    """Authenticate browser users via Telegram Login Widget."""
+    try:
+        payload = await request.json()
+        auth_dict = auth_dict_from_payload(payload)
+
+        if not verify_telegram_login(auth_dict, [BOT_TOKEN]):
+            return web.json_response({'error': 'Invalid auth data'}, status=401)
+
+        shared_user = shared_create_or_update_user(auth_dict)
+        token = shared_create_session(int(auth_dict['id']), source_service='booking')
+
+        response = web.json_response({
+            'success': True,
+            'user': {
+                'telegram_id': shared_user['telegram_id'],
+                'first_name': shared_user.get('first_name', ''),
+                'last_name': shared_user.get('last_name', ''),
+                'username': shared_user.get('username', ''),
+                'photo_url': shared_user.get('photo_url', ''),
+            },
+        })
+        response.set_cookie(AUTH_COOKIE_NAME, token, **auth_cookie_kwargs())
+        return response
+    except Exception as e:
+        logger.error(f"Error in api_auth_telegram: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+async def api_auth_me(request: web.Request) -> web.Response:
+    """Return current shared web user."""
+    user = await get_authenticated_telegram_user(request)
+    if not user:
+        return web.json_response({'error': 'Not authenticated'}, status=401)
+
+    return web.json_response({
+        'user': {
+            'telegram_id': user['id'],
+            'first_name': user.get('first_name', ''),
+            'last_name': user.get('last_name', ''),
+            'username': user.get('username', ''),
+            'photo_url': user.get('photo_url', ''),
+        },
+    })
+
+
 async def api_auth_logout(request: web.Request) -> web.Response:
     """Выход из веб-сессии"""
+    shared_token = request.cookies.get(AUTH_COOKIE_NAME)
+    if shared_token:
+        shared_expire_session(shared_token)
+
     response = web.json_response({'success': True})
     response.del_cookie('owner_session')
+    response.del_cookie(AUTH_COOKIE_NAME, **clear_cookie_kwargs())
     return response
 
 
@@ -745,7 +1117,14 @@ async def api_auth_check(request: web.Request) -> web.Response:
         if telegram_id:
             admin, business_id = await check_admin_access(telegram_id)
             if admin:
-                return web.json_response({'authenticated': True, 'telegram_id': telegram_id})
+                return web.json_response({'authenticated': True, 'telegram_id': telegram_id, 'kind': 'owner'})
+    shared = shared_get_session(request.cookies.get(AUTH_COOKIE_NAME))
+    if shared:
+        return web.json_response({
+            'authenticated': True,
+            'telegram_id': shared['telegram_id'],
+            'kind': 'shared',
+        })
     return web.json_response({'authenticated': False}, status=401)
 
 
@@ -1138,6 +1517,7 @@ async def booking_handler(request: web.Request) -> web.Response:
     template_path = os.path.join(os.path.dirname(__file__), 'templates', 'booking.html')
     with open(template_path, 'r', encoding='utf-8') as f:
         html = f.read()
+    html = html.replace("{{BOT_USERNAME}}", BOT_USERNAME)
     return web.Response(text=html, content_type='text/html')
 
 
@@ -1432,8 +1812,7 @@ async def api_client_last_bookings(request: web.Request) -> web.Response:
     """Получить последние записи пользователя для повторного бронирования"""
     try:
         # Получаем данные пользователя из Telegram WebApp
-        init_data = request.headers.get('X-Telegram-Init-Data', '')
-        user = validate_webapp_data(init_data)
+        user = await get_authenticated_telegram_user(request)
 
         if not user:
             return web.json_response({'bookings': []})
@@ -1776,8 +2155,7 @@ async def api_client_create_booking(request: web.Request) -> web.Response:
     """Создать новую запись от клиента"""
     try:
         # Получаем данные пользователя из Telegram WebApp
-        init_data = request.headers.get('X-Telegram-Init-Data', '')
-        user = validate_webapp_data(init_data)
+        user = await get_authenticated_telegram_user(request)
 
         data = await request.json()
         business_id = data.get('business_id')
@@ -1822,33 +2200,18 @@ async def api_client_create_booking(request: web.Request) -> web.Response:
                 from database.models import User as UserModel
 
                 db_user = None
-                clean_phone_web = None
                 if client_phone:
-                    clean_phone_web = client_phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
-                    phones_to_try_web = [clean_phone_web]
-                    if clean_phone_web.startswith('+7') and len(clean_phone_web) == 12:
-                        phones_to_try_web.append(clean_phone_web[1:])
-                        phones_to_try_web.append('8' + clean_phone_web[2:])
-                    elif clean_phone_web.startswith('7') and len(clean_phone_web) == 11:
-                        phones_to_try_web.append('+' + clean_phone_web)
-                        phones_to_try_web.append('8' + clean_phone_web[1:])
-                    elif clean_phone_web.startswith('8') and len(clean_phone_web) == 11:
-                        phones_to_try_web.append('7' + clean_phone_web[1:])
-                        phones_to_try_web.append('+7' + clean_phone_web[1:])
+                    clean_phone = client_phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
                     result = await session.execute(
-                        sa_select(UserModel).where(UserModel.phone.in_(phones_to_try_web))
+                        sa_select(UserModel).where(UserModel.phone == clean_phone)
                     )
-                    db_user = result.scalars().first()
+                    db_user = result.scalar_one_or_none()
 
                 if not db_user:
-                    from sqlalchemy import func as sqlfunc2
-                    min_id_result2 = await session.execute(sa_select(sqlfunc2.min(UserModel.telegram_id)))
-                    min_id2 = min_id_result2.scalar() or 0
-                    fake_tg_id2 = min(min_id2 - 1, -1)
                     db_user = UserModel(
-                        telegram_id=fake_tg_id2,
+                        telegram_id=0,
                         full_name=client_name,
-                        phone=clean_phone_web if clean_phone_web else None,
+                        phone=client_phone if client_phone else None,
                     )
                     session.add(db_user)
                     await session.flush()
@@ -2246,8 +2609,7 @@ async def api_client_create_booking(request: web.Request) -> web.Response:
 
 async def get_client_from_request(request: web.Request):
     """Получить клиента из запроса WebApp"""
-    init_data = request.headers.get('X-Telegram-Init-Data', '')
-    user = validate_webapp_data(init_data)
+    user = await get_authenticated_telegram_user(request)
 
     if not user:
         return None, None
@@ -2261,8 +2623,7 @@ async def get_client_from_request(request: web.Request):
 async def api_client_my_bookings(request: web.Request) -> web.Response:
     """Получить активные записи клиента"""
     try:
-        init_data = request.headers.get('X-Telegram-Init-Data', '')
-        user = validate_webapp_data(init_data)
+        user = await get_authenticated_telegram_user(request)
 
         if not user:
             return web.json_response({'error': 'Unauthorized'}, status=401)
@@ -2322,8 +2683,7 @@ async def api_client_my_bookings(request: web.Request) -> web.Response:
 async def api_client_cancel_booking(request: web.Request) -> web.Response:
     """Отменить запись клиента"""
     try:
-        init_data = request.headers.get('X-Telegram-Init-Data', '')
-        user = validate_webapp_data(init_data)
+        user = await get_authenticated_telegram_user(request)
 
         if not user:
             return web.json_response({'error': 'Unauthorized'}, status=401)
@@ -2364,8 +2724,7 @@ async def api_client_cancel_booking(request: web.Request) -> web.Response:
 async def api_client_reschedule_booking(request: web.Request) -> web.Response:
     """Перенести запись клиента на новую дату/время"""
     try:
-        init_data = request.headers.get('X-Telegram-Init-Data', '')
-        user = validate_webapp_data(init_data)
+        user = await get_authenticated_telegram_user(request)
 
         if not user:
             return web.json_response({'error': 'Unauthorized'}, status=401)
@@ -2649,8 +3008,7 @@ async def api_client_all_subscriptions(request: web.Request) -> web.Response:
 async def api_client_my_subscriptions(request: web.Request) -> web.Response:
     """Получить абонементы клиента"""
     try:
-        init_data = request.headers.get('X-Telegram-Init-Data', '')
-        user = validate_webapp_data(init_data)
+        user = await get_authenticated_telegram_user(request)
 
         if not user:
             return web.json_response({'error': 'Unauthorized'}, status=401)
@@ -2758,8 +3116,7 @@ async def api_client_subscription_details(request: web.Request) -> web.Response:
 async def api_client_buy_subscription(request: web.Request) -> web.Response:
     """Инициировать покупку абонемента"""
     try:
-        init_data = request.headers.get('X-Telegram-Init-Data', '')
-        user = validate_webapp_data(init_data)
+        user = await get_authenticated_telegram_user(request)
 
         if not user:
             return web.json_response({'error': 'Unauthorized'}, status=401)
@@ -2834,8 +3191,7 @@ async def api_client_buy_subscription(request: web.Request) -> web.Response:
 async def api_client_subscription_payment_sent(request: web.Request) -> web.Response:
     """Подтвердить отправку оплаты (без чека)"""
     try:
-        init_data = request.headers.get('X-Telegram-Init-Data', '')
-        user = validate_webapp_data(init_data)
+        user = await get_authenticated_telegram_user(request)
 
         if not user:
             return web.json_response({'error': 'Unauthorized'}, status=401)
@@ -2895,8 +3251,7 @@ async def api_client_subscription_payment_sent(request: web.Request) -> web.Resp
 async def api_client_subscription_upload_receipt(request: web.Request) -> web.Response:
     """Загрузить фото чека"""
     try:
-        init_data = request.headers.get('X-Telegram-Init-Data', '')
-        user = validate_webapp_data(init_data)
+        user = await get_authenticated_telegram_user(request)
 
         if not user:
             return web.json_response({'error': 'Unauthorized'}, status=401)
@@ -3096,7 +3451,7 @@ async def api_analytics_schedule(request: web.Request) -> web.Response:
                     'employee_name': main_booking.employee.name if main_booking.employee else 'Не указан',
                     'status': main_booking.status,
                     'prepayment_amount': main_booking.prepayment_amount,
-                    'comment': main_booking.notes,
+                    'comment': getattr(main_booking, 'comment', None),
                 })
 
             # Формируем список сотрудников для табов
@@ -3139,18 +3494,6 @@ async def api_analytics_schedule(request: web.Request) -> web.Response:
                     'employee_ids': emp_ids,
                 })
 
-            # Доп. услуги для формы
-            all_services_for_additional = await get_business_services(session, business_id)
-            additional_services_data = []
-            for svc in all_services_for_additional:
-                if svc.is_active and svc.is_additional:
-                    additional_services_data.append({
-                        'id': svc.id,
-                        'name': svc.name,
-                        'price': svc.price,
-                        'is_hourly_price': getattr(svc, 'is_hourly_price', False),
-                    })
-
             # Получаем клиентов бизнеса для автокомплита
             clients = await get_business_clients(session, business_id, limit=200)
             clients_data = []
@@ -3170,7 +3513,6 @@ async def api_analytics_schedule(request: web.Request) -> web.Response:
                 'bookings': bookings_data,
                 'employees': employees_data,
                 'services': services_data,
-                'additional_services': additional_services_data,
                 'clients': clients_data,
                 'working_hours': working_hours,
                 'booking_interval': min_interval,
@@ -3201,8 +3543,6 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
         booking_time_str = data.get('time')
         client_name = data.get('client_name', '').strip()
         client_phone = data.get('client_phone', '').strip()
-        additional_service_ids = data.get('additional_service_ids', [])
-        notes = data.get('notes', '').strip()
 
         if not all([business_id, service_id, booking_date_str, booking_time_str, client_name]):
             return web.json_response({'error': 'Заполните все обязательные поля'}, status=400)
@@ -3230,36 +3570,20 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
             from database.models import User as UserModel
 
             client = None
-            clean_phone = None
             if client_phone:
                 # Нормализуем телефон
                 clean_phone = client_phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
-                # Пробуем разные форматы: +79..., 79..., 89...
-                phones_to_try = [clean_phone]
-                if clean_phone.startswith('+7') and len(clean_phone) == 12:
-                    phones_to_try.append(clean_phone[1:])   # 79...
-                    phones_to_try.append('8' + clean_phone[2:])  # 89...
-                elif clean_phone.startswith('7') and len(clean_phone) == 11:
-                    phones_to_try.append('+' + clean_phone)  # +79...
-                    phones_to_try.append('8' + clean_phone[1:])  # 89...
-                elif clean_phone.startswith('8') and len(clean_phone) == 11:
-                    phones_to_try.append('7' + clean_phone[1:])  # 79...
-                    phones_to_try.append('+7' + clean_phone[1:])  # +79...
                 result = await session.execute(
-                    select(UserModel).where(UserModel.phone.in_(phones_to_try))
+                    select(UserModel).where(UserModel.phone == clean_phone)
                 )
-                client = result.scalars().first()
+                client = result.scalar_one_or_none()
 
             if not client:
-                # Создаём нового пользователя-клиента с уникальным отрицательным telegram_id
-                from sqlalchemy import func as sqlfunc
-                min_id_result = await session.execute(select(sqlfunc.min(UserModel.telegram_id)))
-                min_id = min_id_result.scalar() or 0
-                fake_telegram_id = min(min_id - 1, -1)
+                # Создаём нового пользователя-клиента
                 client = UserModel(
-                    telegram_id=fake_telegram_id,
+                    telegram_id=0,  # Нет telegram аккаунта
                     full_name=client_name,
-                    phone=clean_phone if clean_phone else None,
+                    phone=client_phone if client_phone else None,
                 )
                 session.add(client)
                 await session.flush()
@@ -3319,24 +3643,7 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
                 booking_date=selected_date,
                 booking_time=selected_time,
                 status='confirmed',
-                notes=notes if notes else None,
             )
-
-            # Создаём доп. услуги
-            for add_svc_id in additional_service_ids:
-                try:
-                    await create_booking(
-                        session,
-                        business_id=business_id,
-                        client_id=client.id,
-                        service_id=int(add_svc_id),
-                        employee_id=employee_id,
-                        booking_date=selected_date,
-                        booking_time=selected_time,
-                        status='confirmed',
-                    )
-                except Exception as add_err:
-                    logger.warning(f"Could not create additional service booking {add_svc_id}: {add_err}")
 
             service = await get_service_by_id(session, service_id)
             employee_obj = await get_employee_by_id(session, employee_id)
@@ -3355,22 +3662,6 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
                     'employee_name': employee_obj.name if employee_obj else '',
                     'employee_telegram_id': employee_obj.telegram_id if employee_obj else None,
                 }]
-                # Добавляем доп. услуги в список для уведомления
-                for add_svc_id in additional_service_ids:
-                    try:
-                        add_svc = await get_service_by_id(session, int(add_svc_id))
-                        if add_svc:
-                            services_list.append({
-                                'name': add_svc.name,
-                                'duration': add_svc.duration_minutes if add_svc.duration_minutes else 0,
-                                'price': add_svc.price or 0,
-                                'is_additional': True,
-                                'employee_id': employee_id,
-                                'employee_name': employee_obj.name if employee_obj else '',
-                                'employee_telegram_id': employee_obj.telegram_id if employee_obj else None,
-                            })
-                    except Exception:
-                        pass
 
                 if booking_with_relations:
                     await notify_master_new_booking(bot, booking_with_relations, services_list)
@@ -3383,49 +3674,17 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
                             is_venue = is_venue_rental_type(business.business_type)
                             weekdays_ru = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
                             formatted_date = selected_date.strftime('%d.%m.%Y') + f" ({weekdays_ru[selected_date.weekday()]})"
-                            price_str = None  # replaced below
-                            # Собираем все записи (основные + доп.)
-                            from sqlalchemy import select as sa_sel_notif
-                            from database.models import Booking as BkNotif
-                            bk_result = await session.execute(
-                                sa_sel_notif(BkNotif).options(selectinload(BkNotif.service))
-                                .where(
-                                    BkNotif.client_id == client.id,
-                                    BkNotif.employee_id == employee_id,
-                                    BkNotif.booking_date == selected_date,
-                                    BkNotif.booking_time == selected_time,
-                                    BkNotif.status == 'confirmed'
-                                )
-                            )
-                            all_bk = bk_result.scalars().all()
-                            main_bk = [b for b in all_bk if b.service and not b.service.is_additional]
-                            add_bk  = [b for b in all_bk if b.service and b.service.is_additional]
-                            total_price = 0
-                            if add_bk:
-                                svc_text = "\n💼 Услуги:\n"
-                                for b in main_bk:
-                                    p = b.service.price or 0; total_price += p
-                                    pstr = f" — {p}₽" if p else ""
-                                    svc_text += f"  • {b.service.name}{pstr}\n"
-                                for b in add_bk:
-                                    p = b.service.price or 0; total_price += p
-                                    pstr = f" — {p}₽" if p else ""
-                                    svc_text += f"  • {b.service.name}{pstr}\n"
-                                if total_price > 0:
-                                    svc_text += f"\n💰 Итого: {total_price}₽"
-                            else:
-                                p = service.price or 0 if service else 0
-                                total_price = p
-                                pstr = f"\n💰 Стоимость: {p}₽" if p else ""
-                                svc_text = f"\n💼 Услуга: {service.name if service else ''}{pstr}"
-                            emp_label = "🏠 Помещение" if is_venue else "👤 Мастер"
-                            emp_line = f"\n{emp_label}: {employee_obj.name}" if employee_obj else ""
+                            price_str = f"\n💰 Стоимость: {service.price}₽" if service and service.price else ""
+                            emp_line = ""
+                            if employee_obj:
+                                emp_label = "🏠 Помещение" if is_venue else "👤 Мастер"
+                                emp_line = f"\n{emp_label}: {employee_obj.name}"
                             await bot.send_message(
                                 client.telegram_id,
                                 f"✅ <b>Вас записали!</b>\n\n"
                                 f"🏢 {business.name}\n"
-                                f"📅 {formatted_date} в {selected_time.strftime('%H:%M')}"
-                                f"{svc_text}"
+                                f"📅 {formatted_date} в {selected_time.strftime('%H:%M')}\n"
+                                f"💼 Услуга: {service.name if service else ''}{price_str}"
                                 f"{emp_line}",
                                 parse_mode="HTML"
                             )
@@ -3460,8 +3719,7 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
 async def api_client_prepayment_sent(request: web.Request) -> web.Response:
     """Клиент подтверждает отправку предоплаты за бронирование"""
     try:
-        init_data = request.headers.get('X-Telegram-Init-Data', '')
-        user = validate_webapp_data(init_data)
+        user = await get_authenticated_telegram_user(request)
 
         if not user:
             return web.json_response({'error': 'Unauthorized'}, status=401)
@@ -3563,12 +3821,17 @@ def create_webapp() -> web.Application:
     import os
 
     app = web.Application()
+    try:
+        init_shared_auth_tables()
+    except Exception as e:
+        logger.error(f"Shared auth table initialization failed: {e}")
 
     # Статические файлы
     static_path = os.path.join(os.path.dirname(__file__), 'static')
 
     # Роуты - Календарь
     app.router.add_get('/', index_handler)
+    app.router.add_get('/calendar', calendar_handler)
     app.router.add_get('/api/calendar', api_calendar_data)
     app.router.add_get('/api/booking/{booking_id}', api_booking_details)
     app.router.add_post('/api/booking/{booking_id}/status', api_update_booking_status)
@@ -3583,7 +3846,10 @@ def create_webapp() -> web.Application:
     # Роуты - Авторизация владельцев (веб)
     app.router.add_get('/login', login_handler)
     app.router.add_get('/auth/token/{token}', auth_token_handler)
+    app.router.add_post('/api/landing/connect-request', api_landing_connect_request)
     app.router.add_post('/api/auth/login', api_auth_login)
+    app.router.add_post('/api/auth/telegram', api_auth_telegram)
+    app.router.add_get('/api/auth/me', api_auth_me)
     app.router.add_post('/api/auth/logout', api_auth_logout)
     app.router.add_get('/api/auth/check', api_auth_check)
 
@@ -3617,6 +3883,16 @@ def create_webapp() -> web.Application:
 
     # Статические файлы
     app.router.add_static('/static', static_path)
+
+    # SEO / индексация — регистрируем до catch-all /{slug}, иначе
+    # serve_niche_landing поймает /sitemap.xml и /robots.txt и вернёт 404.
+    app.router.add_get('/sitemap.xml', sitemap_handler)
+    app.router.add_get('/robots.txt', robots_handler)
+
+    # Нишевые лендинги promo.servgo.ru/<slug> — регистрируется последним,
+    # чтобы конкретные роуты выше (/calendar, /book, /login и т.д.) ловили
+    # свой запрос раньше, а сюда попадали только остаточные слаги.
+    app.router.add_get('/{slug:[a-z][a-z0-9-]*}', serve_niche_landing)
 
     return app
 

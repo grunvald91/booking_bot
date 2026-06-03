@@ -10,3 +10,35 @@
     overflow-wrap: anywhere;
     word-break: normal;
 }
+
+/* Inter-niche footer — internal links for SEO crawl + page authority. */
+.band-related .related-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin-top: 28px;
+}
+.band-related .related-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 18px 22px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    color: inherit;
+    text-decoration: none;
+    font-weight: 500;
+    transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+.band-related .related-card:hover,
+.band-related .related-card:focus-visible {
+    transform: translateY(-2px);
+    background: #fff;
+    box-shadow: 0 10px 30px -16px rgba(0, 0, 0, 0.25);
+}
+.band-related .related-arrow {
+    opacity: 0.5;
+    font-size: 1.1em;
+}

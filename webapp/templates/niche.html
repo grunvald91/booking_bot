@@ -5,18 +5,77 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ niche.meta.title }}</title>
     <meta name="description" content="{{ niche.meta.description }}">
-    {% if niche.meta.og_image %}
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+    <link rel="canonical" href="https://promo.servgo.ru/{{ niche.slug }}">
     <meta property="og:title" content="{{ niche.meta.title }}">
     <meta property="og:description" content="{{ niche.meta.description }}">
-    <meta property="og:image" content="{{ niche.meta.og_image }}">
     <meta property="og:type" content="website">
+    <meta property="og:url" content="https://promo.servgo.ru/{{ niche.slug }}">
+    <meta property="og:locale" content="ru_RU">
+    <meta property="og:site_name" content="ServGo">
+    {% if niche.meta.og_image %}
+    <meta property="og:image" content="{{ niche.meta.og_image }}">
+    {% endif %}
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ niche.meta.title }}">
+    <meta name="twitter:description" content="{{ niche.meta.description }}">
+    {% if niche.meta.og_image %}
+    <meta name="twitter:image" content="{{ niche.meta.og_image }}">
     {% endif %}
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=2">
     <link rel="alternate icon" href="/static/favicon.svg?v=2">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon.svg?v=2">
     <link rel="manifest" href="/static/site.webmanifest?v=1">
     <link rel="stylesheet" href="/static/css/landing.css?v=9">
-    <link rel="stylesheet" href="/static/css/niche.css?v=2">
+    <link rel="stylesheet" href="/static/css/niche.css?v=3">
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": {{ niche.meta.title | tojson }},
+        "description": {{ niche.meta.description | tojson }},
+        "url": {{ ("https://promo.servgo.ru/" + niche.slug) | tojson }},
+        "inLanguage": "ru-RU",
+        "isPartOf": {
+            "@type": "WebSite",
+            "name": "ServGo",
+            "url": "https://servgo.ru"
+        },
+        "publisher": {
+            "@type": "Organization",
+            "name": "ServGo",
+            "url": "https://servgo.ru",
+            "logo": "https://promo.servgo.ru/static/favicon.svg"
+        },
+        "mainEntity": {
+            "@type": "Service",
+            "name": {{ niche.hero.h1 | tojson }},
+            "description": {{ niche.hero['copy'] | tojson }},
+            "provider": {
+                "@type": "Organization",
+                "name": "ServGo",
+                "url": "https://servgo.ru"
+            },
+            "areaServed": "RU",
+            "serviceType": "Онлайн-запись и бронирование"
+        }
+    }
+    </script>
+    {% if niche.faq and niche.faq.entries %}
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {% for item in niche.faq.entries %}{
+                "@type": "Question",
+                "name": {{ item.q | tojson }},
+                "acceptedAnswer": {"@type": "Answer", "text": {{ item.a | tojson }}}
+            }{% if not loop.last %},{% endif %}{% endfor %}
+        ]
+    }
+    </script>
+    {% endif %}
 </head>
 <body data-niche="{{ niche.slug }}">
     <header class="topbar">
@@ -240,6 +299,23 @@
                 </div>
             </div>
         </section>
+
+        {% if other_niches %}
+        <section class="section band-related" aria-label="Другие ниши ServGo">
+            <div class="section-heading">
+                <p class="eyebrow">ServGo для других ниш</p>
+                <h2>Онлайн-запись и бронирование для вашего сегмента</h2>
+            </div>
+            <div class="related-grid">
+                {% for other in other_niches %}
+                <a class="related-card" href="/{{ other.slug }}">
+                    <span class="related-label">{{ other.label }}</span>
+                    <span class="related-arrow" aria-hidden="true">→</span>
+                </a>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
     </main>
 
     <div class="modal-backdrop" data-connect-modal hidden>
