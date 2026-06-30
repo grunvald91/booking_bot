@@ -1,0 +1,40 @@
+name: Deploy to server
+
+# Деплой расписания (и всего webapp) на боевой сервер.
+# Раннер GitHub заходит на сервер по SSH (его IP отличается от локального),
+# делает git pull в /opt/booking_bot и перезапускает сервис booking-bot.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH (git pull + restart)
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ vars.SERVER_HOST || '55.212.162.47' }}
+          username: ${{ vars.SERVER_USER || 'root' }}
+          password: ${{ secrets.SERVER_SSH_PASSWORD }}
+          port: ${{ vars.SERVER_PORT || 22 }}
+          command_timeout: 5m
+          script: |
+            set -e
+            cd /opt/booking_bot
+            echo "== before =="
+            git rev-parse --short HEAD
+            git fetch origin main
+            git reset --hard origin/main
+            echo "== after =="
+            git rev-parse --short HEAD
+            systemctl restart booking-bot
+            sleep 3
+            systemctl is-active booking-bot
+            systemctl --no-pager --lines=15 status booking-bot || true
