@@ -1,0 +1,223 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Расписание (admin) — скоупленные токены и таймлайн.
+   Тема переключается через [data-theme] на .sched-root; по умолчанию светлая.
+   Скоуп .sched-* не задевает остальные страницы SPA.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.sched-root {
+  --s-bg: #f4f6fa;
+  --s-surface: #ffffff;
+  --s-surface-2: #eef1f6;
+  --s-text: #0d1b2a;
+  --s-muted: #6b7280;
+  --s-line: #e6e9ef;
+  --s-accent: #2f5beb;
+  --s-accent-soft: rgba(47, 91, 235, 0.12);
+  --s-now: #ef4444;
+
+  /* Статусы (совпадают с легендой) */
+  --st-pending: #c98a16;
+  --st-pending-bg: #fdf4e3;
+  --st-confirmed: #2f5beb;
+  --st-confirmed-bg: #e8eefe;
+  --st-completed: #1b9e54;
+  --st-completed-bg: #e6f6ec;
+  --st-cancelled: #d6463e;
+  --st-cancelled-bg: #fdeceb;
+  --st-prepay: #7c3aed;
+  --st-prepay-bg: #f1e9fe;
+
+  color: var(--s-text);
+  background: var(--s-bg);
+}
+
+.sched-root[data-theme='dark'] {
+  --s-bg: #0f141b;
+  --s-surface: #1a212b;
+  --s-surface-2: #232c38;
+  --s-text: #e8edf4;
+  --s-muted: #93a0b2;
+  --s-line: #2b3543;
+  --s-accent: #4f8cff;
+  --s-accent-soft: rgba(79, 140, 255, 0.18);
+  --s-now: #ff5a5a;
+
+  --st-pending: #e0a93a;
+  --st-pending-bg: #3a2f17;
+  --st-confirmed: #4f8cff;
+  --st-confirmed-bg: #18283f;
+  --st-completed: #34c878;
+  --st-completed-bg: #14301f;
+  --st-cancelled: #ff6b62;
+  --st-cancelled-bg: #3a1d1b;
+  --st-prepay: #a877f5;
+  --st-prepay-bg: #271a3d;
+}
+
+/* ── Таймлайн-сетка ── */
+.sched-grid {
+  position: relative;
+  display: grid;
+  /* columns set inline: [time] + N */
+  background: var(--s-surface);
+  border-radius: 12px;
+  border: 1px solid var(--s-line);
+  overflow: hidden;
+}
+
+.sched-colhead {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: var(--s-surface);
+  border-bottom: 1px solid var(--s-line);
+  padding: 6px 4px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--s-muted);
+}
+.sched-colhead.is-today {
+  color: #fff;
+  background: var(--s-accent);
+  border-radius: 8px 8px 0 0;
+}
+.sched-colhead small { display: block; font-size: 10px; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.04em; }
+
+/* Левая ось времени */
+.sched-axis {
+  position: relative;
+  border-right: 1px solid var(--s-line);
+  background: var(--s-surface);
+}
+.sched-axis-tick {
+  position: absolute;
+  left: 0; right: 0;
+  transform: translateY(-50%);
+  text-align: right;
+  padding-right: 6px;
+  font-size: 10px;
+  color: var(--s-muted);
+}
+
+/* Колонка дня/мастера — холст для абсолютных карточек */
+.sched-col {
+  position: relative;
+  border-right: 1px solid var(--s-line);
+}
+.sched-col:last-child { border-right: none; }
+.sched-hourline {
+  position: absolute;
+  left: 0; right: 0;
+  border-top: 1px solid var(--s-line);
+  pointer-events: none;
+}
+.sched-halfline {
+  position: absolute;
+  left: 0; right: 0;
+  border-top: 1px dashed var(--s-line);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Линия «сейчас» */
+.sched-now {
+  position: absolute;
+  left: 0; right: 0;
+  height: 0;
+  border-top: 2px solid var(--s-now);
+  z-index: 7;
+  pointer-events: none;
+}
+.sched-now::before {
+  content: '';
+  position: absolute;
+  left: -3px; top: -4px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--s-now);
+}
+
+/* Карточка записи */
+.sched-card {
+  position: absolute;
+  border-radius: 8px;
+  padding: 4px 6px;
+  overflow: hidden;
+  cursor: pointer;
+  color: var(--s-text);
+  border-left: 3px solid var(--card-accent, var(--s-accent));
+  background: var(--card-bg, var(--s-accent-soft));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  font-size: 11px;
+  line-height: 1.25;
+}
+.sched-card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16); z-index: 8; }
+.sched-card.is-cancelled { opacity: 0.5; text-decoration: line-through; }
+.sched-card.is-pending { border-left-style: dashed; }
+.sched-card.is-dragging { opacity: 0.4; }
+.sched-card .c-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched-card .c-sub { color: var(--s-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* «N записей» — свёрнутый перегруженный день (неделя) */
+.sched-more {
+  position: absolute;
+  left: 2px; right: 2px;
+  border-radius: 8px;
+  background: var(--s-accent-soft);
+  border: 1px dashed var(--s-accent);
+  color: var(--s-accent);
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+/* Drop-цель при drag&drop */
+.sched-col.drop-active { background: var(--s-accent-soft); }
+
+/* Легенда + сводка */
+.sched-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.sched-legend .item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--s-muted); }
+.sched-legend .dot { width: 10px; height: 10px; border-radius: 3px; }
+
+.sched-summary { display: flex; gap: 10px; }
+.sched-summary .cell {
+  flex: 1;
+  background: var(--s-surface-2);
+  border-radius: 10px;
+  padding: 8px 10px;
+  text-align: center;
+}
+.sched-summary .cell .v { font-size: 16px; font-weight: 800; color: var(--s-text); }
+.sched-summary .cell .l { font-size: 11px; color: var(--s-muted); }
+
+/* Бар инструментов */
+.sched-input {
+  background: var(--s-surface-2);
+  border: 1px solid var(--s-line);
+  border-radius: 10px;
+  color: var(--s-text);
+  font-size: 13px;
+  padding: 7px 10px;
+}
+.sched-input::placeholder { color: var(--s-muted); }
+
+.sched-iconbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 9px;
+  background: var(--s-surface-2); color: var(--s-muted);
+  border: 1px solid var(--s-line); cursor: pointer;
+}
+.sched-iconbtn:hover { color: var(--s-text); }
+
+.sched-chip {
+  flex-shrink: 0; padding: 5px 13px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; cursor: pointer;
+  background: var(--s-surface-2); color: var(--s-muted);
+  border: 1px solid var(--s-line); white-space: nowrap;
+}
+.sched-chip.active { background: var(--s-accent); color: #fff; border-color: var(--s-accent); }

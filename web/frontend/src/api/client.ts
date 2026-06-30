@@ -170,6 +170,7 @@ export interface AdminBooking {
   client_phone?: string;
   service_name: string;
   service_duration?: number;
+  price?: number;
   employee_name?: string;
   employee_id?: number;
   date: string;
@@ -454,6 +455,11 @@ export const api = {
     request<AdminBooking>(`/admin/bookings/${bookingId}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
+    }),
+  adminReschedule: (bookingId: number, date: string, time: string, employeeId?: number) =>
+    request<AdminBooking>(`/admin/bookings/${bookingId}/reschedule`, {
+      method: 'POST',
+      body: JSON.stringify({ date, time, employee_id: employeeId }),
     }),
   getServices: (bizId: number) =>
     request<Service[]>(`/admin/businesses/${bizId}/services`),
