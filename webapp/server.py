@@ -1137,15 +1137,6 @@ async def api_auth_check(request: web.Request) -> web.Response:
     return web.json_response({'authenticated': False}, status=401)
 
 
-async def schedule_handler(request: web.Request) -> web.Response:
-    """Страница расписания"""
-    import os
-    template_path = os.path.join(os.path.dirname(__file__), 'templates', 'schedule.html')
-    with open(template_path, 'r', encoding='utf-8') as f:
-        html = f.read()
-    return web.Response(text=html, content_type='text/html')
-
-
 async def api_analytics_businesses(request: web.Request) -> web.Response:
     """Получить список бизнесов пользователя для аналитики"""
     try:
@@ -3725,103 +3716,6 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
         return web.json_response({'error': str(e)}, status=500)
 
 
-async def api_admin_reschedule_booking(request: web.Request) -> web.Response:
-    """Перенос записи владельцем/админом из расписания (drag&drop или кнопка «Перенести»)."""
-    try:
-        user, admin, _ = await get_user_from_request(request)
-        if not user:
-            return web.json_response({'error': 'Unauthorized'}, status=401)
-
-        booking_id = int(request.match_info['booking_id'])
-        data = await request.json()
-        new_date_str = data.get('date')
-        new_time_str = data.get('time')
-        new_employee_id = data.get('employee_id')  # необязательно
-
-        if not new_date_str or not new_time_str:
-            return web.json_response({'error': 'date and time are required'}, status=400)
-
-        new_date = datetime.strptime(new_date_str, '%Y-%m-%d').date()
-        new_time = datetime.strptime(new_time_str, '%H:%M').time()
-
-        async with async_session_maker() as session:
-            telegram_id = user.get('id')
-            db_user = await get_user_by_telegram_id(session, telegram_id)
-            if not db_user:
-                return web.json_response({'error': 'User not found'}, status=404)
-
-            booking = await get_booking_by_id(session, booking_id)
-            if not booking:
-                return web.json_response({'error': 'Booking not found'}, status=404)
-
-            # Права: пользователь должен быть владельцем бизнеса этой записи
-            if not await is_business_owner(session, booking.business_id, db_user.id):
-                return web.json_response({'error': 'Access denied'}, status=403)
-
-            if booking.status not in ('pending', 'confirmed'):
-                return web.json_response({'error': 'Эту запись нельзя перенести'}, status=400)
-
-            old_date = booking.booking_date
-            old_time = booking.booking_time
-
-            duration = booking.service.duration_minutes if booking.service else 30
-            slot_start = datetime.combine(new_date, new_time)
-            slot_end = slot_start + timedelta(minutes=duration)
-
-            target_employee_id = int(new_employee_id) if new_employee_id else booking.employee_id
-
-            # Проверка пересечений с другими записями этого сотрудника
-            from sqlalchemy import select, and_
-            from database.models import Booking as BookingModel
-            if target_employee_id:
-                result = await session.execute(
-                    select(BookingModel)
-                    .where(
-                        and_(
-                            BookingModel.business_id == booking.business_id,
-                            BookingModel.employee_id == target_employee_id,
-                            BookingModel.booking_date == new_date,
-                            BookingModel.status.in_(['pending', 'confirmed']),
-                            BookingModel.id != booking.id,
-                        )
-                    )
-                )
-                for eb in result.scalars().all():
-                    eb_start = datetime.combine(new_date, eb.booking_time)
-                    eb_dur = eb.service.duration_minutes if eb.service else 30
-                    eb_end = eb_start + timedelta(minutes=eb_dur)
-                    if not (slot_end <= eb_start or slot_start >= eb_end):
-                        return web.json_response({'error': 'На это время уже есть запись'}, status=409)
-
-            booking.booking_date = new_date
-            booking.booking_time = new_time
-            if new_employee_id:
-                booking.employee_id = target_employee_id
-            await session.commit()
-            await session.refresh(booking)
-
-            # Уведомление владельца (как в клиентском переносе) — по желанию
-            try:
-                from aiogram import Bot
-                bot = Bot(token=BOT_TOKEN)
-                await notify_owner_rescheduled_booking(bot, booking, old_date, old_time)
-                await bot.session.close()
-            except Exception as notify_error:
-                logger.error(f"reschedule notify error: {notify_error}")
-
-            return web.json_response({
-                'success': True,
-                'new_date': new_date.isoformat(),
-                'new_time': new_time.strftime('%H:%M'),
-            })
-
-    except Exception as e:
-        logger.error(f"Error in api_admin_reschedule_booking: {e}")
-        import traceback
-        traceback.print_exc()
-        return web.json_response({'error': str(e)}, status=500)
-
-
 async def api_client_prepayment_sent(request: web.Request) -> web.Response:
     """Клиент подтверждает отправку предоплаты за бронирование"""
     try:
@@ -3959,10 +3853,8 @@ def create_webapp() -> web.Application:
     app.router.add_post('/api/auth/logout', api_auth_logout)
     app.router.add_get('/api/auth/check', api_auth_check)
 
-    # Роуты - Расписание
-    app.router.add_get('/schedule', schedule_handler)
+    # Роуты - Расписание (страница расписания перенесена в React SPA web/frontend)
     app.router.add_post('/api/admin/booking', api_admin_create_booking)
-    app.router.add_post('/api/admin/booking/{booking_id}/reschedule', api_admin_reschedule_booking)
 
     # Роуты - Клиентское бронирование
     app.router.add_get('/book', booking_handler)
