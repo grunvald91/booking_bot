@@ -429,6 +429,22 @@ export const api = {
     }
     return res.json();
   },
+  // QR/guest flow (no auth): identify the booking by its notify-token.
+  prepaymentSentByToken: (notifyToken: string) =>
+    request<{ message: string }>(`/bookings/by-token/${notifyToken}/prepayment-sent`, { method: 'POST' }),
+  uploadReceiptByToken: async (notifyToken: string, file: File): Promise<{ message: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API}/bookings/by-token/${notifyToken}/receipt`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    return res.json();
+  },
 
   // Subscriptions
   getSubscriptions: (businessId: number) =>
