@@ -11,6 +11,7 @@ import {
 import { api, type DashboardData } from '../../api/client'
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
 import { BusinessSelector } from '../../components/BusinessSelector'
+import { AdminShell } from '../../components/AdminShell'
 
 export function AdminDashboard() {
   const { businesses, selectedId: businessId, selectBusiness } = useAdminBusiness()
@@ -28,7 +29,6 @@ export function AdminDashboard() {
       .finally(() => setLoading(false))
   }, [])
 
-  // Load business photos when selected business changes
   useEffect(() => {
     if (!businessId) return
     const biz = businesses.find((b) => b.id === businessId)
@@ -68,94 +68,65 @@ export function AdminDashboard() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-2 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-28 skeleton rounded-2xl" />
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  if (!data) return null
-
-  const stats = [
-    {
-      label: 'Записей сегодня',
-      value: data.today_bookings,
-      icon: Calendar,
-      color: 'bg-blue-50 text-apple-blue',
-    },
-    {
-      label: 'Выручка',
-      value: `${new Intl.NumberFormat('ru-RU').format(data.total_revenue)} ₽`,
-      icon: DollarSign,
-      color: 'bg-green-50 text-apple-success',
-    },
-    {
-      label: 'Подтверждено',
-      value: data.confirmed_count,
-      icon: CheckCircle,
-      color: 'bg-emerald-50 text-emerald-600',
-    },
-    {
-      label: 'Ожидает',
-      value: data.pending_count,
-      icon: AlertCircle,
-      color: 'bg-amber-50 text-amber-600',
-    },
-  ]
+  const stats = data
+    ? [
+        { label: 'Записей сегодня', value: data.today_bookings, Icon: Calendar, color: 'var(--s-accent)' },
+        { label: 'Выручка', value: `${new Intl.NumberFormat('ru-RU').format(data.total_revenue)} ₽`, Icon: DollarSign, color: 'var(--s-success)' },
+        { label: 'Подтверждено', value: data.confirmed_count, Icon: CheckCircle, color: 'var(--st-completed)' },
+        { label: 'Ожидает', value: data.pending_count, Icon: AlertCircle, color: 'var(--s-warning)' },
+      ]
+    : []
 
   return (
-    <div>
-      <BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} vertical />
-      <h1 className="text-lg font-bold text-apple-text mb-3">Панель управления</h1>
-
-      {/* Stats cards */}
-      <div className="grid grid-cols-2 gap-3">
-        {stats.map((stat) => {
-          const Icon = stat.icon
-          return (
-            <div
-              key={stat.label}
-              className="bg-white rounded-2xl shadow-sm border border-apple-border/50 p-4"
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <div
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center ${stat.color}`}
-                >
-                  <Icon size={16} />
+    <AdminShell
+      title="Панель управления"
+      headerExtra={<BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />}
+    >
+      {/* Статистика */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 4 }}>
+        {loading
+          ? [1, 2, 3, 4].map((i) => <div key={i} className="skeleton" style={{ height: 92, borderRadius: 14 }} />)
+          : stats.map(({ label, value, Icon, color }) => (
+              <div key={label} className="ds-card" style={{ padding: '12px 14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span
+                    style={{
+                      width: 32, height: 32, borderRadius: 9, flexShrink: 0,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      background: 'var(--s-accent-soft)', color,
+                    }}
+                  >
+                    <Icon size={16} />
+                  </span>
+                  <span className="ds-sub">{label}</span>
                 </div>
-                <span className="text-xs text-apple-gray">{stat.label}</span>
+                <div style={{ fontSize: 22, fontWeight: 750, color: 'var(--s-text)', lineHeight: 1 }}>{value}</div>
               </div>
-              <p className="text-xl font-bold text-apple-text">{stat.value}</p>
-            </div>
-          )
-        })}
+            ))}
       </div>
 
-      {/* Business Photo Management */}
+      {/* Фото бизнеса */}
       {businessId && (
-        <div className="mt-4">
-          <h2 className="text-sm font-semibold text-apple-text mb-2 flex items-center gap-2">
-            <Camera size={16} />
-            Фото бизнеса
+        <div style={{ marginTop: 18 }}>
+          <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 9 }}>
+            <Camera size={16} /> Фото бизнеса
           </h2>
-          <div className="bg-white rounded-2xl shadow-sm border border-apple-border/50 p-4">
-            <div className="flex flex-wrap gap-2">
+          <div className="ds-card" style={{ padding: 14 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {bizPhotos.map((fileId, i) => (
-                <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden group">
+                <div key={i} style={{ position: 'relative', width: 80, height: 80, borderRadius: 12, overflow: 'hidden' }}>
                   <img
                     src={`/api/telegram-photo/${encodeURIComponent(fileId)}`}
                     alt={`Фото ${i + 1}`}
-                    className="w-full h-full object-cover"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
                   <button
                     onClick={() => handlePhotoDelete(i)}
-                    className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{
+                      position: 'absolute', top: 4, right: 4, width: 20, height: 20,
+                      background: 'var(--s-danger)', color: '#fff', borderRadius: '50%', border: 'none',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                    }}
                   >
                     <Trash2 size={10} />
                   </button>
@@ -164,28 +135,24 @@ export function AdminDashboard() {
               <button
                 onClick={() => photoInputRef.current?.click()}
                 disabled={photoUploading}
-                className="w-20 h-20 rounded-xl border-2 border-dashed border-apple-border flex items-center justify-center text-apple-gray hover:border-apple-blue hover:text-apple-blue transition-all disabled:opacity-50"
+                style={{
+                  width: 80, height: 80, borderRadius: 12, cursor: 'pointer',
+                  border: '2px dashed var(--s-line-2)', background: 'transparent', color: 'var(--s-muted)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
               >
                 {photoUploading ? (
-                  <div className="w-5 h-5 border-2 border-apple-blue border-t-transparent rounded-full animate-spin" />
+                  <div className="animate-spin" style={{ width: 20, height: 20, border: '2px solid var(--s-accent)', borderTopColor: 'transparent', borderRadius: '50%' }} />
                 ) : (
                   <Plus size={24} />
                 )}
               </button>
             </div>
-            <input
-              ref={photoInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handlePhotoUpload}
-            />
-            <p className="text-xs text-apple-gray mt-2">
-              Первое фото будет показано на главной странице
-            </p>
+            <input ref={photoInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhotoUpload} />
+            <p className="ds-hint">Первое фото будет показано на главной странице</p>
           </div>
         </div>
       )}
-    </div>
+    </AdminShell>
   )
 }

@@ -1,0 +1,292 @@
+/* ═════════════════════════════════════════════════════════════════════════
+   ServGo · DESIGN SYSTEM (единый источник дизайна)
+   ─────────────────────────────────────────────────────────────────────────
+   Эталон — экран «Расписание». Этот файл задаёт ОДНУ палитру, тему
+   (свет/тёмная + Telegram) и набор базовых компонентов, на которых строятся
+   ВСЕ остальные страницы админки.
+
+   Подключение (один раз, глобально): import './styles/design-system.css'
+   Тема: повесь data-theme="light|dark" на корень страницы (или на <html>).
+         Значение берётся из useTheme() — он следит за Telegram colorScheme,
+         системной темой и сохраняет выбор в localStorage.
+
+   Использование на новой странице:
+     <div className="ds-screen" data-theme={theme}> … </div>
+   и дальше классы ds-* / переменные var(--s-*) ниже.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+/* ─────────────────────────── 1. ТОКЕНЫ ─────────────────────────── */
+/* Светлая — дефолт (если data-theme не задан) */
+:root,
+[data-theme='light'] {
+  /* Поверхности / текст */
+  --s-bg: #f5f7fa;
+  --s-surface: #ffffff;
+  --s-surface-2: #eef1f6;
+  --s-surface-3: #e8edf3;
+  --s-text: #0f1722;
+  --s-text-2: #2b3742;
+  --s-muted: #66727f;
+  --s-muted-2: #8a96a3;
+  --s-line: #e4e8ee;
+  --s-line-2: #d8dee7;
+  --s-grid: #eceff4;
+
+  /* Акцент */
+  --s-accent: #2ea6ff;
+  --s-accent-press: #2a7cf0;
+  --s-accent-ink: #04121f;            /* текст на акценте */
+  --s-accent-soft: rgba(46, 166, 255, 0.12);
+
+  /* Семантика */
+  --s-success: #1f9e4e;
+  --s-warning: #c98314;
+  --s-danger: #d6463e;
+  --s-now: #ff5a5f;
+
+  /* Статусы записи (бейджи / карточки) */
+  --st-pending: #c98314;   --st-pending-bg: #fbf1dc;
+  --st-confirmed: #1f8be0; --st-confirmed-bg: #e4f2fd;
+  --st-completed: #1f9e4e; --st-completed-bg: #e3f6ea;
+  --st-cancelled: #6b7889; --st-cancelled-bg: #ecedf1;
+  --st-prepay: #7c5cf0;    --st-prepay-bg: #efe9fe;
+
+  /* Радиусы */
+  --r-xs: 7px;
+  --r-sm: 9px;
+  --r-md: 11px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-pill: 999px;
+
+  /* Тени */
+  --sh-1: 0 1px 2px rgba(13, 27, 42, 0.06);
+  --sh-2: 0 6px 16px -6px rgba(13, 27, 42, 0.18);
+  --sh-pop: 0 12px 30px -8px rgba(13, 27, 42, 0.28);
+
+  /* Типографика */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+}
+
+/* Тёмная (для Telegram / тёмной системы — дефолт мини-аппа) */
+[data-theme='dark'] {
+  --s-bg: #0e1621;
+  --s-surface: #141d29;
+  --s-surface-2: #18222f;
+  --s-surface-3: #1a2431;
+  --s-text: #f2f6fb;
+  --s-text-2: #cdd7e3;
+  --s-muted: #8a98a8;
+  --s-muted-2: #6b7889;
+  --s-line: #1f2a38;
+  --s-line-2: #243043;
+  --s-grid: #18222f;
+
+  --s-accent: #2ea6ff;
+  --s-accent-press: #2a7cf0;
+  --s-accent-ink: #04121f;
+  --s-accent-soft: rgba(46, 166, 255, 0.16);
+
+  --s-success: #30d158;
+  --s-warning: #f5a623;
+  --s-danger: #ff6b62;
+  --s-now: #ff5a5f;
+
+  --st-pending: #f5a623;   --st-pending-bg: rgba(245, 166, 35, 0.15);
+  --st-confirmed: #2ea6ff; --st-confirmed-bg: rgba(46, 166, 255, 0.15);
+  --st-completed: #30d158; --st-completed-bg: rgba(48, 209, 88, 0.15);
+  --st-cancelled: #8d99a8; --st-cancelled-bg: rgba(141, 153, 168, 0.15);
+  --st-prepay: #a78bfa;    --st-prepay-bg: rgba(167, 139, 250, 0.16);
+
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.18);
+  --sh-2: 0 6px 16px rgba(0, 0, 0, 0.28);
+  --sh-pop: 0 12px 30px -6px rgba(0, 0, 0, 0.5);
+}
+
+/* ─────────────────────────── 2. БАЗА ─────────────────────────── */
+.ds-scope, .ds-screen { font-family: var(--font-sans); color: var(--s-text); -webkit-font-smoothing: antialiased; font-feature-settings: 'tnum'; }
+.ds-scope *, .ds-scope *::before, .ds-scope *::after,
+.ds-screen *, .ds-screen *::before, .ds-screen *::after { box-sizing: border-box; }
+
+.ds-scope ::-webkit-scrollbar, .ds-screen ::-webkit-scrollbar { width: 6px; height: 6px; }
+.ds-scope ::-webkit-scrollbar-thumb, .ds-screen ::-webkit-scrollbar-thumb { background: var(--s-line-2); border-radius: 6px; }
+.ds-scope ::-webkit-scrollbar-track, .ds-screen ::-webkit-scrollbar-track { background: transparent; }
+
+/* Полноэкранный «mini-app» каркас (как у Расписания) */
+.ds-screen {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--s-bg);
+}
+
+/* ─────────────────────────── 3. ТИПОГРАФИКА ─────────────────────────── */
+.ds-h1 { font-size: 19px; font-weight: 750; line-height: 1.1; color: var(--s-text); margin: 0; }
+.ds-h2 { font-size: 17px; font-weight: 700; line-height: 1.15; color: var(--s-text); margin: 0; }
+.ds-h3 { font-size: 15px; font-weight: 700; color: var(--s-text); margin: 0; }
+.ds-text { font-size: 14px; color: var(--s-text); }
+.ds-sub { font-size: 13px; color: var(--s-muted); }
+.ds-caption { font-size: 11px; color: var(--s-muted-2); }
+.ds-accent { color: var(--s-accent); }
+
+/* ─────────────────────────── 4. КНОПКИ ─────────────────────────── */
+.ds-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 16px; border: 1px solid transparent; border-radius: var(--r-lg);
+  font-family: inherit; font-size: 15px; font-weight: 700; cursor: pointer;
+  transition: transform 0.1s ease, background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.ds-btn:active { transform: scale(0.98); }
+.ds-btn:disabled { opacity: 0.5; cursor: default; }
+.ds-btn--primary { background: var(--s-accent); color: var(--s-accent-ink); }
+.ds-btn--primary:hover { background: var(--s-accent-press); }
+.ds-btn--ghost { background: var(--s-surface-2); color: var(--s-text-2); border-color: var(--s-line); }
+.ds-btn--ghost:hover { color: var(--s-text); }
+.ds-btn--danger { background: var(--s-danger); color: #fff; }
+.ds-btn--block { width: 100%; }
+.ds-btn--sm { padding: 8px 12px; font-size: 13px; border-radius: var(--r-md); }
+
+/* Иконочная кнопка */
+.ds-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; flex-shrink: 0;
+  border: none; border-radius: var(--r-md);
+  background: var(--s-surface-2); color: var(--s-text-2); cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.ds-icon-btn.bordered { border: 1px solid var(--s-line-2); }
+.ds-icon-btn:hover { color: var(--s-text); }
+.ds-icon-btn.is-on { color: var(--s-accent); border-color: var(--s-accent); background: var(--s-accent-soft); }
+
+/* Плавающая кнопка */
+.ds-fab {
+  position: absolute; right: 18px; bottom: 86px; z-index: 30;
+  width: 54px; height: 54px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  border: none; cursor: pointer; color: #fff;
+  background: linear-gradient(150deg, #37b0ff, var(--s-accent-press));
+  box-shadow: 0 14px 28px -8px rgba(46, 166, 255, 0.55);
+  transition: transform 0.12s ease;
+}
+.ds-fab:hover { transform: translateY(-2px); }
+.ds-fab:active { transform: scale(0.94); }
+
+/* ─────────────────────────── 5. ФОРМЫ ─────────────────────────── */
+.ds-field { margin-bottom: 13px; }
+.ds-field > label, .ds-label { display: block; font-size: 12px; font-weight: 650; color: var(--s-muted); margin-bottom: 6px; }
+.ds-field-row { display: flex; gap: 10px; }
+.ds-field-row > * { flex: 1; min-width: 0; }
+
+.ds-input {
+  width: 100%; padding: 11px 13px; border-radius: var(--r-md);
+  border: 1px solid var(--s-line); background: var(--s-surface-2);
+  color: var(--s-text); font-size: 14px; outline: none; font-family: inherit;
+}
+.ds-input:focus { border-color: var(--s-accent); }
+.ds-input::placeholder { color: var(--s-muted-2); }
+textarea.ds-input { resize: none; min-height: 54px; }
+
+/* Поиск */
+.ds-search {
+  display: flex; align-items: center; gap: 9px;
+  background: var(--s-surface-2); border: 1px solid var(--s-line);
+  border-radius: var(--r-lg); padding: 9px 12px;
+}
+.ds-search svg { flex-shrink: 0; color: var(--s-muted-2); }
+.ds-search input { flex: 1; border: none; background: transparent; color: var(--s-text); font-size: 14px; outline: none; font-family: inherit; }
+.ds-search input::placeholder { color: var(--s-muted-2); }
+
+/* ─────────────────────────── 6. СЕГМЕНТЫ / ЧИПЫ ─────────────────────────── */
+.ds-seg { display: inline-flex; flex-shrink: 0; background: var(--s-surface); border: 1px solid var(--s-line); border-radius: var(--r-sm); padding: 2px; gap: 2px; }
+.ds-seg button {
+  padding: 5px 13px; border: none; border-radius: var(--r-xs); font-family: inherit;
+  font-size: 13px; font-weight: 650; cursor: pointer; white-space: nowrap;
+  background: transparent; color: var(--s-muted);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.ds-seg button.active { background: var(--s-accent); color: var(--s-accent-ink); }
+.ds-seg--full { display: flex; gap: 6px; }
+.ds-seg--full button {
+  flex: 1; padding: 9px 4px; border-radius: var(--r-md); cursor: pointer; font-family: inherit;
+  border: 1px solid var(--s-line); background: var(--s-surface-2); color: var(--s-text-2);
+  font-size: 13px; font-weight: 650;
+}
+.ds-seg--full button.on { background: var(--s-accent); color: var(--s-accent-ink); border-color: var(--s-accent); }
+
+.ds-chip {
+  display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0;
+  padding: 7px 14px; border-radius: var(--r-pill); font-size: 13px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; font-family: inherit;
+  background: var(--s-surface-2); color: var(--s-muted); border: 1px solid var(--s-line);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.ds-chip.active { background: var(--s-accent); color: var(--s-accent-ink); border-color: var(--s-accent); }
+.ds-chip .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* ─────────────────────────── 7. БЕЙДЖИ СТАТУСОВ ─────────────────────────── */
+.ds-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: var(--r-pill); white-space: nowrap;
+}
+.ds-badge--pending   { color: var(--st-pending);   background: var(--st-pending-bg); }
+.ds-badge--confirmed { color: var(--st-confirmed); background: var(--st-confirmed-bg); }
+.ds-badge--completed { color: var(--st-completed); background: var(--st-completed-bg); }
+.ds-badge--cancelled { color: var(--st-cancelled); background: var(--st-cancelled-bg); }
+.ds-badge--prepay    { color: var(--st-prepay);    background: var(--st-prepay-bg); }
+
+/* ─────────────────────────── 8. КАРТОЧКИ / ПЛИТКИ / СПИСКИ ─────────────────────────── */
+.ds-card { background: var(--s-surface); border: 1px solid var(--s-line); border-radius: var(--r-lg); box-shadow: var(--sh-1); }
+
+.ds-tile { background: var(--s-surface); border: 1px solid var(--s-line); border-radius: 13px; padding: 9px 12px; }
+.ds-tile .num { font-size: 19px; font-weight: 750; color: var(--s-text); line-height: 1; }
+.ds-tile .lbl { font-size: 11px; color: var(--s-muted); margin-top: 3px; }
+
+/* Строка-элемент списка (клиент / запись / пункт) */
+.ds-row {
+  display: flex; align-items: stretch; gap: 11px; text-align: left; width: 100%;
+  padding: 11px 12px; border-radius: 13px; cursor: pointer; font-family: inherit;
+  background: var(--s-surface-2); border: 1px solid var(--s-line); border-left-width: 3px;
+  transition: background 0.15s ease;
+}
+.ds-row:hover { background: var(--s-surface-3); }
+.ds-row .row-lead { display: flex; flex-direction: column; align-items: flex-start; min-width: 46px; }
+.ds-row .row-lead .t1 { font-size: 14px; font-weight: 700; color: var(--s-text); line-height: 1.1; }
+.ds-row .row-lead .t2 { font-size: 10px; color: var(--s-muted-2); margin-top: 2px; }
+.ds-row .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ds-row .row-title { font-size: 14px; font-weight: 650; color: var(--s-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ds-row .row-sub { font-size: 12px; color: var(--s-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+
+/* ─────────────────────────── 9. БОТТОМ-ШИТ / ДИАЛОГ ─────────────────────────── */
+.ds-sheet-ov { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-end; justify-content: center; background: rgba(4, 9, 16, 0.55); }
+.ds-center-ov { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(4, 9, 16, 0.6); }
+.ds-sheet {
+  position: relative; width: 100%; max-width: 480px;
+  background: var(--s-surface); border-top: 1px solid var(--s-line-2);
+  border-radius: var(--r-xl) var(--r-xl) 0 0; max-height: 92vh; overflow-y: auto;
+  padding: 14px 18px calc(20px + env(safe-area-inset-bottom, 0px));
+}
+.ds-sheet-grip { width: 38px; height: 4px; border-radius: 3px; background: var(--s-line-2); margin: 0 auto 12px; }
+.ds-sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.ds-sheet-head h3 { font-size: 19px; font-weight: 750; color: var(--s-text); margin: 0; }
+.ds-sheet-head p { font-size: 13px; color: var(--s-muted); margin: 2px 0 0; }
+
+.ds-dialog { position: relative; width: 100%; max-width: 420px; background: var(--s-surface); border: 1px solid var(--s-line-2); border-radius: var(--r-xl); padding: 20px; }
+.ds-dialog h3 { font-size: 18px; font-weight: 750; color: var(--s-text); margin: 0 0 4px; }
+.ds-dialog > p { font-size: 14px; color: var(--s-text-2); margin: 0 0 12px; }
+.ds-dialog-actions { display: flex; gap: 10px; }
+.ds-dialog-actions .ds-btn { flex: 1; padding: 12px; border-radius: 13px; font-size: 14px; }
+
+.ds-hint { font-size: 12px; color: var(--s-muted); margin: 7px 2px 0; line-height: 1.35; }
+.ds-error { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--s-danger); margin-bottom: 10px; }
+
+/* ─────────────────────────── 10. НИЖНЯЯ НАВИГАЦИЯ ─────────────────────────── */
+.ds-bottomnav {
+  display: flex; align-items: stretch; flex-shrink: 0;
+  border-top: 1px solid var(--s-line); background: var(--s-bg);
+  padding: 6px 4px calc(9px + env(safe-area-inset-bottom, 0px));
+}
+.ds-bn {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 4px 2px; cursor: pointer; text-decoration: none;
+  color: var(--s-muted); font-size: 10px; font-weight: 600;
+}
+.ds-bn.active { color: var(--s-accent); font-weight: 700; }
