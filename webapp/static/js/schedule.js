@@ -1,1361 +1,714 @@
-// Schedule Page JavaScript
+// =====================================================================
+//  Расписание · ServGo — новый рендер (день/неделя, now-линия,
+//  лист быстрых действий, drag&drop переноса, светлая/тёмная тема).
+//  Использует существующие эндпоинты:
+//    GET  /api/analytics/businesses
+//    GET  /api/analytics/schedule?business_id&start_date&end_date
+//    POST /api/booking/{id}/status            { status }
+//    POST /api/admin/booking                  (создание)
+//    POST /api/admin/booking/{id}/reschedule  { date, time, employee_id }  <-- НОВЫЙ (см. server_patch.py)
+//    GET  /api/client/business/{id}/calculate-price (venue_rental)
+// =====================================================================
+
 let tg = null;
 let businesses = [];
 let selectedBusinessId = null;
 
-// Schedule state
-let viewMode = 'day'; // 'week' | 'day'
-let weekOffset = 0;
+let viewMode = 'day';        // 'day' | 'week'
 let dayOffset = 0;
-let workingHours = null;
+let weekOffset = 0;
+
+let workingHours = { start: 8, end: 22 };
 let bookingInterval = 30;
 let canCreate = true;
 let scheduleData = [];
 let employees = [];
 let services = [];
+let additionalServices = [];
 let clients = [];
 let businessType = '';
-let selectedEmployeeId = null;
-let clientColorMap = {};
-let colorIndex = 0;
-let additionalServices = [];
+let activeEmp = 'all';       // 'all' | employee_id
+let searchQuery = '';
+let selectedBookingId = null;
+let moveMode = false;
 
-// Time slots (8:00 - 22:00)
-const TIME_SLOTS = [];
-for (let h = 8; h <= 22; h++) {
-    TIME_SLOTS.push(`${h.toString().padStart(2, '0')}:00`);
-}
+const PXH = () => parseInt(getComputedStyle(document.documentElement).getPropertyValue('--pxh')) || 56;
 
-// Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    // Wait a bit for Telegram SDK to initialize
-    setTimeout(initApp, 100);
-});
+const STATUS = {
+  confirmed:  { label: 'Подтверждено', color: 'var(--st-confirmed)' },
+  pending:    { label: 'Ожидание',     color: 'var(--st-pending)' },
+  completed:  { label: 'Завершено',    color: 'var(--st-completed)' },
+  cancelled:  { label: 'Отменено',     color: 'var(--st-cancelled)' },
+  pending_prepayment: { label: 'Предоплата', color: 'var(--st-prepayment)' },
+  prepayment_sent:    { label: 'Оплата отправлена', color: 'var(--st-prepayment)' },
+};
+const STATUS_HEX = {
+  confirmed: '#2ea6ff', pending: '#f5a623', completed: '#30d158',
+  cancelled: '#8d99a8', pending_prepayment: '#a78bfa', prepayment_sent: '#a78bfa',
+};
+const MONTHS = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+const WDAYS = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
+const DNAMES = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+
+/* ---------- helpers ---------- */
+function toMin(t) { const [h, m] = (t || '0:0').split(':').map(Number); return h * 60 + m; }
+function fmtMin(min) { const h = Math.floor(min / 60), m = min % 60; return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0'); }
+function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; }
+function isoDate(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function esc(t) { if (!t) return ''; const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+function statusHex(s) { return STATUS_HEX[s] || '#2ea6ff'; }
+
+/* =====================================================================
+   Init
+   ===================================================================== */
+document.addEventListener('DOMContentLoaded', () => setTimeout(initApp, 100));
 
 async function initApp() {
-    // Try to get Telegram WebApp
-    tg = window.Telegram?.WebApp;
+  tg = window.Telegram?.WebApp;
+  if (tg) {
+    tg.ready(); tg.expand();
+    applyTheme(tg.colorScheme === 'light' ? 'light' : 'dark');
+  } else {
+    applyTheme(localStorage.getItem('schedule_theme') || 'dark');
+  }
 
-    console.log('Schedule init:', {
-        hasTelegram: !!window.Telegram,
-        hasWebApp: !!tg,
-        hasInitData: !!tg?.initData,
-        initDataLength: tg?.initData?.length || 0
-    });
+  if (!tg?.initData) {
+    const b = document.getElementById('backBtn');
+    if (b) { b.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; b.setAttribute('onclick', 'webLogout()'); b.title = 'Выйти'; }
+  }
 
-    // Initialize Telegram WebApp
-    if (tg) {
-        tg.ready();
-        tg.expand();
+  const urlRole = new URLSearchParams(location.search).get('role');
+  if (urlRole === 'admin') { viewMode = 'day'; canCreate = false; }
 
-        // Apply Telegram theme
-        if (tg.colorScheme === 'dark') {
-            document.body.classList.add('tg-theme');
-        }
-    }
+  document.getElementById('searchInput').addEventListener('input', (e) => {
+    searchQuery = e.target.value;
+    document.getElementById('searchClear').style.display = searchQuery ? '' : 'none';
+    render();
+  });
 
-    // Если нет Telegram — показываем кнопку выхода вместо кнопки назад
-    if (!tg?.initData) {
-        const backBtn = document.querySelector('.back-btn');
-        if (backBtn) {
-            backBtn.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-            backBtn.setAttribute('onclick', 'webLogout()');
-            backBtn.setAttribute('title', 'Выйти');
-        }
-    }
+  document.getElementById('businessSelect').addEventListener('change', (e) => {
+    selectedBusinessId = e.target.value;
+    if (selectedBusinessId) loadSchedule();
+  });
 
-    // Режим из URL (?role=owner или ?role=admin)
-    const urlRole = new URLSearchParams(window.location.search).get('role');
-    if (urlRole === 'owner') {
-        viewMode = 'week';
-        document.getElementById('toggleWeek').classList.add('active');
-        document.getElementById('toggleDay').classList.remove('active');
-        document.getElementById('weekNavControls').style.display = 'flex';
-        document.getElementById('dayNavControls').style.display = 'none';
-        const modeToggle = document.querySelector('.mode-toggle');
-        if (modeToggle) modeToggle.style.display = 'none';
-    } else if (urlRole === 'admin') {
-        viewMode = 'day';
-        canCreate = false;
-    }
-
-    // Load businesses (authentication via X-Telegram-Init-Data header or cookie)
-    await loadBusinesses();
-
-    // Setup business select
-    const businessSelect = document.getElementById('businessSelect');
-    businessSelect.addEventListener('change', (e) => {
-        selectedBusinessId = e.target.value;
-        if (selectedBusinessId) {
-            loadSchedule();
-        }
-    });
+  initDrag();
+  initClientAutocomplete();
+  await loadBusinesses();
 }
 
+/* ---------- theme ---------- */
+function applyTheme(theme) {
+  document.body.setAttribute('data-theme', theme);
+  localStorage.setItem('schedule_theme', theme);
+  document.getElementById('themeIconDark').style.display = theme === 'dark' ? '' : 'none';
+  document.getElementById('themeIconLight').style.display = theme === 'light' ? '' : 'none';
+}
+function toggleTheme() {
+  applyTheme(document.body.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+}
+
+/* =====================================================================
+   API
+   ===================================================================== */
 async function apiRequest(endpoint) {
-    const headers = {
-        'Content-Type': 'application/json'
-    };
-
-    // Add Telegram init data for authentication
-    if (tg?.initData) {
-        headers['X-Telegram-Init-Data'] = tg.initData;
-    }
-    // Без Telegram — cookie отправляется автоматически
-
-    console.log('API Request:', endpoint, 'Has initData:', !!tg?.initData);
-
-    const response = await fetch(endpoint, { method: 'GET', headers, credentials: 'same-origin' });
-    const data = await response.json();
-
-    if (!response.ok) {
-        // Если 401 и нет Telegram — перенаправляем на логин
-        if (response.status === 401 && !tg?.initData) {
-            window.location.href = '/login?to=/schedule';
-            return { error: 'redirect' };
-        }
-        console.error('API Error:', response.status, data);
-        return { error: data.error || `HTTP ${response.status}` };
-    }
-
-    return data;
+  const headers = { 'Content-Type': 'application/json' };
+  if (tg?.initData) headers['X-Telegram-Init-Data'] = tg.initData;
+  const resp = await fetch(endpoint, { method: 'GET', headers, credentials: 'same-origin' });
+  const data = await resp.json();
+  if (!resp.ok) {
+    if (resp.status === 401 && !tg?.initData) { location.href = '/login?to=/schedule'; return { error: 'redirect' }; }
+    return { error: data.error || `HTTP ${resp.status}` };
+  }
+  return data;
 }
 
 async function loadBusinesses() {
-    try {
-        const data = await apiRequest('/api/analytics/businesses');
+  try {
+    const data = await apiRequest('/api/analytics/businesses');
+    if (data.error) { if (data.error !== 'redirect') showError(data.error === 'Unauthorized' ? 'Не удалось авторизоваться. Войдите через /login или откройте через Telegram.' : data.error); return; }
+    if (data.businesses && data.businesses.length) {
+      businesses = data.businesses;
+      if (data.is_owner) viewMode = 'day';
+      const sel = document.getElementById('businessSelect');
+      sel.innerHTML = '<option value="">Бизнес</option>';
+      businesses.forEach(b => { const o = document.createElement('option'); o.value = b.id; o.textContent = b.name; sel.appendChild(o); });
+      selectedBusinessId = businesses[0].id; sel.value = selectedBusinessId;
+      document.getElementById('businessName').textContent = businesses[0].name;
+      await loadSchedule();
+      startAutoRefresh();
+    } else showError('Нет доступных бизнесов');
+  } catch (e) { console.error(e); showError('Ошибка загрузки данных'); }
+}
 
-        if (data.error) {
-            if (data.error === 'redirect') return;
-            if (data.error === 'Unauthorized') {
-                showError('Не удалось авторизоваться. Войдите через /login или откройте через Telegram.');
-            } else {
-                showError(data.error);
-            }
-            return;
-        }
-
-        if (data.businesses && data.businesses.length > 0) {
-            businesses = data.businesses;
-
-            // Владелец по умолчанию — неделя, администратор — день
-            if (data.is_owner) {
-                viewMode = 'week';
-                document.getElementById('toggleWeek').classList.add('active');
-                document.getElementById('toggleDay').classList.remove('active');
-                document.getElementById('weekNavControls').style.display = 'flex';
-                document.getElementById('dayNavControls').style.display = 'none';
-            }
-
-            const select = document.getElementById('businessSelect');
-            select.innerHTML = '<option value="">Выберите бизнес</option>';
-
-            businesses.forEach(b => {
-                const option = document.createElement('option');
-                option.value = b.id;
-                option.textContent = b.name;
-                select.appendChild(option);
-            });
-
-            // Auto-select first business
-            if (businesses.length > 0) {
-                selectedBusinessId = businesses[0].id;
-                select.value = selectedBusinessId;
-                await loadSchedule();
-                startScheduleAutoRefresh();
-            }
-        } else {
-            showError('Нет доступных бизнесов');
-        }
-    } catch (error) {
-        console.error('Error loading businesses:', error);
-        showError('Ошибка загрузки данных');
-    }
+function currentRange() {
+  const today = new Date();
+  if (viewMode === 'day') {
+    const d = new Date(today); d.setDate(today.getDate() + dayOffset); d.setHours(0,0,0,0);
+    return { start: isoDate(d), end: isoDate(d) };
+  }
+  const dow = today.getDay(); const mondayOff = dow === 0 ? -6 : 1 - dow;
+  const ws = new Date(today); ws.setDate(today.getDate() + mondayOff + weekOffset * 7); ws.setHours(0,0,0,0);
+  const we = new Date(ws); we.setDate(ws.getDate() + 6);
+  return { start: isoDate(ws), end: isoDate(we) };
 }
 
 async function loadSchedule() {
-    if (!selectedBusinessId) return;
+  if (!selectedBusinessId) return;
+  try {
+    const { start, end } = currentRange();
+    const data = await apiRequest(`/api/analytics/schedule?business_id=${selectedBusinessId}&start_date=${start}&end_date=${end}`);
+    if (data.error) { showError(data.error); return; }
+    scheduleData = data.bookings || [];
+    employees = data.employees || [];
+    services = data.services || [];
+    additionalServices = data.additional_services || [];
+    clients = data.clients || [];
+    businessType = data.business_type || '';
+    workingHours = data.working_hours || { start: 8, end: 22 };
+    bookingInterval = data.booking_interval || 30;
+    canCreate = data.can_create_booking !== false;
+    const biz = businesses.find(b => String(b.id) === String(selectedBusinessId));
+    if (biz) document.getElementById('businessName').textContent = biz.name;
 
-    try {
-        let startDate, endDate, weekStartObj = null;
-
-        if (viewMode === 'day') {
-            const today = new Date();
-            const dayDate = new Date(today);
-            dayDate.setDate(today.getDate() + dayOffset);
-            dayDate.setHours(0, 0, 0, 0);
-            startDate = endDate = formatDateISO(dayDate);
-        } else {
-            const today = new Date();
-            const dayOfWeek = today.getDay();
-            const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-            weekStartObj = new Date(today);
-            weekStartObj.setDate(today.getDate() + mondayOffset + (weekOffset * 7));
-            weekStartObj.setHours(0, 0, 0, 0);
-            const weekEnd = new Date(weekStartObj);
-            weekEnd.setDate(weekStartObj.getDate() + 6);
-            startDate = formatDateISO(weekStartObj);
-            endDate = formatDateISO(weekEnd);
-            updateWeekLabel(weekStartObj, weekEnd);
-        }
-
-        const data = await apiRequest(`/api/analytics/schedule?business_id=${selectedBusinessId}&start_date=${startDate}&end_date=${endDate}`);
-
-        if (data.error) {
-            showError(data.error);
-            return;
-        }
-
-        scheduleData = data.bookings || [];
-        employees = data.employees || [];
-        services = data.services || [];
-        additionalServices = data.additional_services || [];
-        clients = data.clients || [];
-        businessType = data.business_type || '';
-        workingHours = data.working_hours || { start: 8, end: 22 };
-        bookingInterval = data.booking_interval || 30;
-        canCreate = data.can_create_booking !== false;
-
-        // Владелец: только недельный режим, скрываем переключатель
-        if (canCreate) {
-            viewMode = 'week';
-            document.getElementById('toggleWeek').classList.add('active');
-            document.getElementById('toggleDay').classList.remove('active');
-            document.getElementById('weekNavControls').style.display = 'flex';
-            document.getElementById('dayNavControls').style.display = 'none';
-        }
-        const modeToggle = document.querySelector('.mode-toggle');
-        if (modeToggle) modeToggle.style.display = canCreate ? 'none' : '';
-
-        const tabsContainer = document.getElementById('tabsContainer');
-
-        if (viewMode === 'week') {
-            renderTabs();
-            renderSchedule(weekStartObj);
-            if (tabsContainer) tabsContainer.style.display = '';
-        } else {
-            updateDayLabel();
-            if (tabsContainer) tabsContainer.style.display = 'none';
-            renderDayView();
-        }
-
-        // Show main content
-        document.getElementById('loading').style.display = 'none';
-        document.getElementById('mainContent').style.display = 'flex';
-
-        // FAB for owners only
-        document.getElementById('fabAddBooking').style.display =
-            canCreate ? 'flex' : 'none';
-
-    } catch (error) {
-        console.error('Error loading schedule:', error);
-        showError('Ошибка загрузки расписания');
-    }
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('mainContent').style.display = 'flex';
+    document.getElementById('fabAdd').style.display = canCreate ? 'flex' : 'none';
+    render();
+  } catch (e) { console.error(e); showError('Ошибка загрузки расписания'); }
 }
 
-// Автообновление расписания каждые 30 секунд (подхватывает записи из бота)
-let _scheduleAutoRefreshTimer = null;
-function startScheduleAutoRefresh() {
-    if (_scheduleAutoRefreshTimer) clearInterval(_scheduleAutoRefreshTimer);
-    _scheduleAutoRefreshTimer = setInterval(() => {
-        if (selectedBusinessId) {
-            loadSchedule();
-        }
-    }, 15000);
-}
+let _refreshTimer = null;
+function startAutoRefresh() { if (_refreshTimer) clearInterval(_refreshTimer); _refreshTimer = setInterval(() => { if (selectedBusinessId && !moveMode && !selectedBookingId && document.getElementById('newBookingModal').classList.contains('hidden')) loadSchedule(); }, 20000); }
 
-function formatDateISO(date) {
-    const year = date.getFullYear();
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    return `${year}-${month}-${day}`;
-}
-
-function updateWeekLabel(weekStart, weekEnd) {
-    // weekStart and weekEnd are Date objects
-    const start = weekStart instanceof Date ? weekStart : new Date(weekStart);
-    const end = weekEnd instanceof Date ? weekEnd : new Date(weekEnd);
-
-    const formatDateShort = (d) => {
-        return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
-    };
-
-    const label = document.getElementById('weekLabel');
-
-    if (weekOffset === 0) {
-        label.textContent = 'Эта неделя';
-    } else if (weekOffset === 1) {
-        label.textContent = 'След. неделя';
-    } else if (weekOffset === -1) {
-        label.textContent = 'Прош. неделя';
-    } else {
-        label.textContent = `${formatDateShort(start)} - ${formatDateShort(end)}`;
-    }
-}
-
-function navigateWeek(direction) {
-    weekOffset += direction;
-    loadSchedule();
-}
-
-function navigateDay(direction) {
-    dayOffset += direction;
-    loadSchedule();
-}
-
-function goToToday() {
-    weekOffset = 0;
-    dayOffset = 0;
-    loadSchedule();
-}
-
+/* =====================================================================
+   Navigation / view
+   ===================================================================== */
 function setViewMode(mode) {
-    if (viewMode === mode) return;
-    viewMode = mode;
-    const weekControls = document.getElementById('weekNavControls');
-    const dayControls = document.getElementById('dayNavControls');
-    document.getElementById('toggleWeek').classList.toggle('active', mode === 'week');
-    document.getElementById('toggleDay').classList.toggle('active', mode === 'day');
-    weekControls.style.display = mode === 'week' ? 'flex' : 'none';
-    dayControls.style.display = mode === 'day' ? 'flex' : 'none';
-    loadSchedule();
+  if (viewMode === mode) return;
+  viewMode = mode;
+  document.getElementById('segDay').classList.toggle('active', mode === 'day');
+  document.getElementById('segWeek').classList.toggle('active', mode === 'week');
+  loadSchedule();
+}
+function navigate(dir) { if (viewMode === 'day') dayOffset += dir; else weekOffset += dir; loadSchedule(); }
+function goToToday() { dayOffset = 0; weekOffset = 0; loadSchedule(); }
+function clearSearch() { searchQuery = ''; document.getElementById('searchInput').value = ''; document.getElementById('searchClear').style.display = 'none'; render(); }
+
+function workStart() { return workingHours?.start ?? 8; }
+function workEnd() { return workingHours?.end ?? 22; }
+
+function matchesSearch(b) {
+  const q = searchQuery.trim().toLowerCase(); if (!q) return true;
+  const qd = q.replace(/\D/g, '');
+  return (b.client_name || '').toLowerCase().includes(q)
+    || (b.service_name || '').toLowerCase().includes(q)
+    || (qd.length > 0 && (b.client_phone || '').replace(/\D/g, '').includes(qd));
 }
 
-function updateDayLabel() {
-    const today = new Date();
-    const dayDate = new Date(today);
-    dayDate.setDate(today.getDate() + dayOffset);
-    const label = document.getElementById('dayLabel');
-    if (dayOffset === 0) {
-        label.textContent = 'Сегодня';
-    } else if (dayOffset === 1) {
-        label.textContent = 'Завтра';
-    } else if (dayOffset === -1) {
-        label.textContent = 'Вчера';
-    } else {
-        label.textContent = dayDate.toLocaleDateString('ru-RU', {
-            day: 'numeric', month: 'short', weekday: 'short'
-        });
+/* =====================================================================
+   Render
+   ===================================================================== */
+function render() {
+  document.getElementById('segDay').classList.toggle('active', viewMode === 'day');
+  document.getElementById('segWeek').classList.toggle('active', viewMode === 'week');
+  renderChips();
+  renderNav();
+  renderLegend();
+  renderSummary();
+  if (viewMode === 'day') renderDay(); else renderWeek();
+}
+
+function renderChips() {
+  const c = document.getElementById('empChips');
+  const items = [{ id: 'all', name: 'Все', color: null }, ...employees.map(e => ({ id: e.id, name: e.name, color: empColor(e.id) }))];
+  c.innerHTML = items.map(it => {
+    const active = activeEmp === it.id;
+    const idArg = it.id === 'all' ? "'all'" : it.id;
+    if (it.color) {
+      const style = active ? `background:${it.color};border-color:${it.color};color:#04121f;` : '';
+      const dot = active ? '' : `<span class="chip-dot" style="background:${it.color}"></span>`;
+      return `<button class="chip${active ? ' active' : ''}" style="${style}" onclick="selectEmp(${idArg})">${dot}${esc(it.name)}</button>`;
     }
+    return `<button class="chip${active ? ' active' : ''}" onclick="selectEmp(${idArg})">${esc(it.name)}</button>`;
+  }).join('');
+}
+function selectEmp(id) { activeEmp = (activeEmp === id) ? 'all' : id; render(); }
+
+function renderNav() {
+  const main = document.getElementById('navMain'), sub = document.getElementById('navSub');
+  const today = new Date();
+  if (viewMode === 'day') {
+    const d = new Date(today); d.setDate(today.getDate() + dayOffset);
+    main.textContent = dayOffset === 0 ? 'Сегодня' : dayOffset === 1 ? 'Завтра' : dayOffset === -1 ? 'Вчера' : `${d.getDate()} ${MONTHS[d.getMonth()].slice(0,3)}`;
+    sub.textContent = `${d.getDate()} ${MONTHS[d.getMonth()].slice(0,3)}`;        // компактная подпись в одну строку
+    sub.style.display = '';
+  } else {
+    const { start, end } = currentRange();
+    const ws = new Date(start), we = new Date(end);
+    main.textContent = weekOffset === 0 ? 'Эта неделя' : weekOffset === 1 ? 'След. неделя' : weekOffset === -1 ? 'Прош. неделя' : `${ws.getDate()} ${MONTHS[ws.getMonth()].slice(0,3)} – ${we.getDate()} ${MONTHS[we.getMonth()].slice(0,3)}`;
+    sub.textContent = '';                                                          // диапазон недели слишком длинный для второй строки
+    sub.style.display = 'none';
+  }
 }
 
-function renderTabs() {
-    const container = document.getElementById('employeeTabs');
-    container.innerHTML = '';
+let detailsOpen = false;
+function toggleDetails() {
+  detailsOpen = !detailsOpen;
+  document.getElementById('detailsPanel').hidden = !detailsOpen;
+  document.getElementById('detailsToggle').classList.toggle('open', detailsOpen);
+}
 
-    // All employees tab
-    const allTab = document.createElement('button');
-    allTab.className = 'tab' + (selectedEmployeeId === null ? ' active' : '');
-    allTab.innerHTML = '<span class="tab-icon">👥</span>Все';
-    allTab.onclick = () => selectEmployee(null);
-    container.appendChild(allTab);
+function renderLegend() {
+  const used = ['confirmed', 'pending', 'completed', 'cancelled', 'pending_prepayment'];
+  document.getElementById('legend').innerHTML = used.map(s =>
+    `<div class="item"><span class="swatch" style="background:${statusHex(s)}"></span><span>${STATUS[s].label}</span></div>`
+  ).join('');
+}
 
-    // Individual employee tabs
-    employees.forEach(emp => {
-        const tab = document.createElement('button');
-        tab.className = 'tab' + (selectedEmployeeId === emp.id ? ' active' : '');
-        tab.innerHTML = `<span class="tab-icon">👤</span>${emp.name}`;
-        tab.onclick = () => selectEmployee(emp.id);
-        container.appendChild(tab);
+function renderSummary() {
+  let scope = scheduleData.filter(b => activeEmp === 'all' || b.employee_id === activeEmp);
+  const active = scope.filter(b => b.status !== 'cancelled');
+  const revenue = active.reduce((s, b) => s + (b.price || 0), 0);
+  const bookedMin = active.reduce((s, b) => s + (b.duration || 60), 0);
+  const days = viewMode === 'week' ? 7 : 1;
+  const cap = (workEnd() - workStart()) * 60 * (activeEmp === 'all' ? Math.max(1, employees.length) : 1) * days;
+  const load = cap ? Math.round(bookedMin / cap * 100) : 0;
+  document.getElementById('summary').innerHTML = `
+    <div class="tile"><div class="num">${active.length}</div><div class="lbl">записей</div></div>
+    <div class="tile"><div class="num">${revenue.toLocaleString('ru-RU')}</div><div class="lbl">выручка ₽</div></div>
+    <div class="tile"><div class="num">${load}%</div><div class="lbl">загрузка</div></div>`;
+}
+
+function hoursMarkup() {
+  let h = '';
+  for (let i = workStart(); i <= workEnd(); i++) h += `<div class="tl-hour" style="top:${(i - workStart()) * PXH()}px">${i}:00</div>`;
+  return h;
+}
+function totalHeight() { return (workEnd() - workStart()) * PXH(); }
+
+function emptyMarkup() {
+  return `<div class="empty-state">
+    <div class="ico"><svg width="30" height="30" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="3" stroke="currentColor" stroke-width="2"/><path d="M3 9h18M8 3v4M16 3v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div>
+    <div><div class="t1">Нет записей</div><div class="t2">На этот период записей пока нет</div></div>
+    ${canCreate ? '<button class="add" onclick="openNewBookingModal()">+ Добавить запись</button>' : ''}
+  </div>`;
+}
+
+/* ---------- DAY ---------- */
+function renderDay() {
+  const head = document.getElementById('colHeader');
+  const tl = document.getElementById('timeline');
+  const emps = employees;
+  head.style.gridTemplateColumns = `var(--gutter) repeat(${Math.max(1, emps.length)}, 1fr)`;
+  head.innerHTML = `<div class="gutter-cell"></div>` + emps.map(e => {
+    const dim = activeEmp !== 'all' && activeEmp !== e.id;
+    return `<div class="emp-cap" style="opacity:${dim ? .35 : 1}" onclick="selectEmp(${e.id})">
+      <span class="cap" style="background:${empColor(e.id)}"></span></div>`;
+  }).join('');
+
+  const dayBookings = scheduleData;
+  if (!dayBookings.length) { tl.innerHTML = emptyMarkup(); return; }
+
+  let cols = emps.map(e => {
+    const dim = activeEmp !== 'all' && activeEmp !== e.id;
+    const cards = dayBookings.filter(b => b.employee_id === e.id).map(b => dayCard(b)).join('');
+    return `<div class="tl-col" style="opacity:${dim ? .32 : 1}">${cards}</div>`;
+  }).join('');
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const curDay = new Date(today); curDay.setDate(today.getDate() + dayOffset);
+  const showNow = isoDate(curDay) === isoDate(new Date());
+  const nowLine = showNow ? nowLineMarkup() : '';
+
+  tl.innerHTML = `<div class="tl-inner" style="height:${totalHeight()}px">
+    <div class="tl-gutter">${hoursMarkup()}</div>
+    <div class="tl-cols" id="dayCols" style="grid-template-columns:repeat(${Math.max(1, emps.length)},1fr)">${cols}</div>
+    ${nowLine}
+  </div>`;
+}
+
+function dayCard(b) {
+  const sm = toMin(b.time || b.time_start || '0:0');
+  const dur = b.duration || 60;
+  const top = (sm - workStart() * 60) / 60 * PXH();
+  const height = Math.max(26, dur / 60 * PXH() - 3);
+  const hex = statusHex(b.status);
+  const cancelled = b.status === 'cancelled';
+  const faded = searchQuery && !matchesSearch(b);
+  const op = faded ? .22 : (cancelled ? .6 : 1);
+  const showSvc = height >= 44, showTime = height >= 58;
+  return `<div class="tl-card ${cancelled ? 'cancelled' : ''}" data-id="${b.id}"
+      style="top:${top}px;height:${height}px;opacity:${op};background:${hexA(hex,.16)};border:1px solid ${hexA(hex,.5)};border-left:3px solid ${hex}">
+    <div class="c-name">${esc(b.client_name || 'Клиент')}</div>
+    ${showSvc ? `<div class="c-svc">${esc(b.service_name || '')}</div>` : ''}
+    ${showTime ? `<div class="c-time">${b.time || ''}–${fmtMin(sm + dur)}</div>` : ''}
+  </div>`;
+}
+
+/* ---------- WEEK ---------- */
+function renderWeek() {
+  const head = document.getElementById('colHeader');
+  const tl = document.getElementById('timeline');
+  const { start } = currentRange();
+  const ws = new Date(start);
+  const today = new Date();
+  head.style.gridTemplateColumns = `var(--gutter) repeat(7, 1fr)`;
+  let headHtml = `<div class="gutter-cell"></div>`;
+  const days = [];
+  for (let d = 0; d < 7; d++) {
+    const cd = new Date(ws); cd.setDate(ws.getDate() + d);
+    const isToday = isoDate(cd) === isoDate(today);
+    days.push({ date: cd, isToday });
+    headHtml += `<div class="wday-head ${isToday ? 'today' : ''}"><span class="wd">${DNAMES[d]}</span><span class="dt">${cd.getDate()}</span></div>`;
+  }
+  head.innerHTML = headHtml;
+
+  const inWeek = scheduleData.filter(b => activeEmp === 'all' || b.employee_id === activeEmp);
+  if (!inWeek.filter(b => b.status !== 'cancelled').length) { tl.innerHTML = emptyMarkup(); return; }
+
+  let cols = days.map(({ date, isToday }) => {
+    let db = inWeek.filter(b => b.date === isoDate(date) && matchesSearch(b));
+    db.sort((a, b) => toMin(a.time) - toMin(b.time));
+    // группируем пересекающиеся записи в кластеры
+    const clusters = [];
+    db.forEach(b => { const s = toMin(b.time), e = s + (b.duration || 60); const last = clusters[clusters.length - 1];
+      if (last && s < last.end) { last.end = Math.max(last.end, e); last.items.push(b); }
+      else clusters.push({ start: s, end: e, items: [b] }); });
+    let cards = '';
+    clusters.forEach(cl => {
+      const lEnds = [];
+      cl.items.forEach(b => { const s = toMin(b.time), e = s + (b.duration || 60); let l = lEnds.findIndex(end => end <= s); if (l === -1) { l = lEnds.length; lEnds.push(e); } else lEnds[l] = e; b._lane = l; });
+      const clLanes = Math.max(1, lEnds.length);
+      if (clLanes >= 3) {
+        cards += weekCountBlock(cl, isoDate(date));
+      } else {
+        cards += cl.items.map(b => weekCard(b, clLanes)).join('');
+      }
     });
+    return `<div class="tl-col ${isToday ? 'today' : ''}">${cards}</div>`;
+  }).join('');
+
+  const showNow = weekOffset === 0;
+  tl.innerHTML = `<div class="tl-inner" style="height:${totalHeight()}px">
+    <div class="tl-gutter">${hoursMarkup()}</div>
+    <div class="tl-cols" style="grid-template-columns:repeat(7,1fr)">${cols}</div>
+    ${showNow ? nowLineMarkup(true) : ''}
+  </div>`;
 }
 
-function selectEmployee(empId) {
-    selectedEmployeeId = empId;
-    renderTabs();
-    renderSchedule();
+function weekCard(b, lanes) {
+  const sm = toMin(b.time);
+  const dur = b.duration || 60;
+  const top = (sm - workStart() * 60) / 60 * PXH();
+  const height = Math.max(16, dur / 60 * PXH() - 2);
+  const hex = statusHex(b.status);
+  const w = 100 / lanes, left = b._lane * w;
+  const cancelled = b.status === 'cancelled';
+  const showLabel = w > 32 && height >= 22;
+  return `<div class="wk-card" data-id="${b.id}" onclick="showBookingDetails(${b.id})"
+      style="top:${top}px;height:${height}px;left:calc(${left}% + 1px);width:calc(${w}% - 2px);background:${hexA(hex,.9)};opacity:${cancelled ? .45 : 1}">
+    ${showLabel ? esc((b.client_name || 'Клиент').split(' ')[0]) : ''}</div>`;
 }
 
-function renderSchedule(weekStartParam) {
-    // weekStartParam can be Date or string
-    const weekStart = weekStartParam instanceof Date ? weekStartParam :
-                      (weekStartParam ? new Date(weekStartParam) : getWeekStart());
-
-    // Reset day-view class
-    document.getElementById('scheduleTable').className = 'schedule-table';
-
-    // Render header
-    renderHeader(weekStart);
-
-    // Render body
-    renderBody(weekStart);
+// агрегированный блок «N записей» для перегруженного времени (3+ одновременно)
+function weekCountBlock(cl, dateStr) {
+  const top = (cl.start - workStart() * 60) / 60 * PXH();
+  const height = Math.max(30, (cl.end - cl.start) / 60 * PXH() - 2);
+  const n = cl.items.length;
+  return `<div class="wk-count" onclick="drillToDay('${dateStr}')"
+      style="top:${top}px;height:${height}px">
+    <span class="num">${n}</span><span class="lbl">записей</span></div>`;
 }
 
-function getWeekStart() {
-    const now = new Date();
-    now.setDate(now.getDate() - now.getDay() + 1 + (weekOffset * 7));
-    now.setHours(0, 0, 0, 0);
-    return now;
+// переход из недели в день по тапу на счётчик
+function drillToDay(dateStr) {
+  const target = new Date(dateStr + 'T00:00:00');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  dayOffset = Math.round((target - today) / 86400000);
+  viewMode = 'day';
+  document.getElementById('segDay').classList.add('active');
+  document.getElementById('segWeek').classList.remove('active');
+  loadSchedule();
 }
 
-function renderHeader(weekStart) {
-    const thead = document.getElementById('scheduleHead');
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+function nowLineMarkup(week) {
+  const now = new Date();
+  const min = now.getHours() * 60 + now.getMinutes();
+  if (min < workStart() * 60 || min > workEnd() * 60) return '';
+  const top = (min - workStart() * 60) / 60 * PXH();
+  return `<div class="now-line" style="top:${top}px">
+    <div class="bar"></div><div class="knob"></div>
+    ${week ? '' : `<div class="lbl">${fmtMin(min)}</div>`}
+  </div>`;
+}
 
-    const dayNames = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+function empColor(id) {
+  const palette = ['#ff6b9d', '#4dd4ff', '#ffd166', '#b388ff', '#30d158', '#ff9f6b', '#7cc4ff', '#f59ed4'];
+  const idx = employees.findIndex(e => e.id === id);
+  return palette[(idx < 0 ? 0 : idx) % palette.length];
+}
 
-    let html = '<tr><th></th>';
+/* =====================================================================
+   Booking details / quick actions (bottom sheet)
+   ===================================================================== */
+function showBookingDetails(id) {
+  const b = scheduleData.find(x => x.id === id);
+  if (!b) return;
+  selectedBookingId = id;
+  moveMode = false; renderMoveHint();
+  const emp = employees.find(e => e.id === b.employee_id);
+  const meta = STATUS[b.status] || STATUS.confirmed;
+  const sm = toMin(b.time || '0:0'), dur = b.duration || 60;
+  const hex = statusHex(b.status);
+  const actions = statusActions(b);
+  document.getElementById('sheetRoot').innerHTML = `
+    <div class="scrim" onclick="closeSheet()"></div>
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head">
+        <span class="sheet-ava" style="background:${empColor(b.employee_id)}">${esc((b.client_name||'?')[0])}</span>
+        <div style="flex:1;min-width:0;"><div class="nm">${esc(b.client_name || 'Клиент')}</div><div class="svc">${esc(b.service_name || '')}</div></div>
+        <span class="status-badge" style="background:${hexA(hex,.18)};color:${hex}">${meta.label}</span>
+      </div>
+      <div class="sheet-grid">
+        <div class="f"><div class="k">Время</div><div class="v">${b.time || ''}–${fmtMin(sm + dur)}</div></div>
+        <div class="f"><div class="k">Мастер</div><div class="v">${esc(emp ? emp.name : '—')}</div></div>
+        <div class="f"><div class="k">Телефон</div><div class="v">${esc(b.client_phone || '—')}</div></div>
+        <div class="f"><div class="k">Стоимость</div><div class="v">${b.price ? b.price.toLocaleString('ru-RU') + ' ₽' : '—'}</div></div>
+        ${b.comment ? `<div class="f" style="min-width:100%"><div class="k">Комментарий</div><div class="v">${esc(b.comment)}</div></div>` : ''}
+      </div>
+      <div class="sheet-actions">${actions}</div>
+    </div>`;
+}
 
-    for (let i = 0; i < 7; i++) {
-        const day = new Date(weekStart);
-        day.setDate(day.getDate() + i);
+function statusActions(b) {
+  const s = b.status;
+  let html = '';
+  if (s === 'pending_prepayment' || s === 'prepayment_sent') {
+    html = `<button class="act confirm" onclick="updateStatus(${b.id},'confirmed')">✓ Подтвердить оплату</button>
+            <button class="act move" onclick="startMove(${b.id})">⇅ Перенести</button>
+            <button class="act cancel" style="grid-column:1/-1" onclick="updateStatus(${b.id},'cancelled')">✕ Отменить</button>`;
+  } else if (s === 'pending' || s === 'confirmed') {
+    html = `${s === 'pending' ? `<button class="act confirm" onclick="updateStatus(${b.id},'confirmed')">✓ Подтвердить</button>` : ''}
+            <button class="act complete" onclick="updateStatus(${b.id},'completed')">✓ Завершить</button>
+            <button class="act move" onclick="startMove(${b.id})">⇅ Перенести</button>
+            <button class="act cancel" onclick="updateStatus(${b.id},'cancelled')">✕ Отменить</button>`;
+  } else if (s === 'cancelled') {
+    html = `<button class="act confirm" style="grid-column:1/-1" onclick="updateStatus(${b.id},'confirmed')">↩ Восстановить</button>`;
+  }
+  return html;
+}
 
-        const isToday = day.getTime() === today.getTime();
+function closeSheet() { selectedBookingId = null; document.getElementById('sheetRoot').innerHTML = ''; }
 
-        html += `<th class="${isToday ? 'today' : ''}">
-            <div class="day-name">${dayNames[i]}</div>
-            <div class="day-date">${day.getDate()}</div>
-        </th>`;
+async function updateStatus(id, status) {
+  const labels = { confirmed: 'подтвердить', completed: 'завершить', cancelled: 'отменить' };
+  if (!confirm(`Вы уверены, что хотите ${labels[status] || 'изменить'} эту запись?`)) return;
+  try {
+    const resp = await fetch(`/api/booking/${id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': tg?.initData || '' }, credentials: 'same-origin', body: JSON.stringify({ status }) });
+    const data = await resp.json();
+    if (data.success) { closeSheet(); await loadSchedule(); notify('Статус записи изменён'); }
+    else alert(data.error || 'Ошибка при изменении статуса');
+  } catch (e) { console.error(e); alert('Ошибка при изменении статуса'); }
+}
+
+/* =====================================================================
+   Move / drag&drop → POST /api/admin/booking/{id}/reschedule
+   ===================================================================== */
+function startMove(id) { selectedBookingId = id; closeSheet(); selectedBookingId = id; moveMode = true; renderMoveHint(); }
+function cancelMove() { moveMode = false; selectedBookingId = null; renderMoveHint(); }
+function renderMoveHint() {
+  document.getElementById('moveHintRoot').innerHTML = moveMode
+    ? `<div class="move-hint">Перетащите карточку на новое время · <a onclick="cancelMove()">отмена</a></div>` : '';
+}
+
+let drag = null;
+function initDrag() {
+  document.addEventListener('pointerdown', (e) => {
+    const card = e.target.closest('.tl-card');
+    if (!card || viewMode !== 'day' || !canCreate) return;
+    const id = parseInt(card.dataset.id);
+    const b = scheduleData.find(x => x.id === id);
+    if (!b || b.status === 'cancelled' || b.status === 'completed') return;
+    drag = { id, card, startX: e.clientX, startY: e.clientY,
+      origTop: (toMin(b.time) - workStart() * 60) / 60 * PXH(), moved: false,
+      cols: card.closest('.tl-cols') };
+    card.style.transition = 'none';
+  });
+  document.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
+    if (!drag.moved && Math.abs(dx) + Math.abs(dy) > 6) drag.moved = true;
+    if (drag.moved) {
+      e.preventDefault();
+      drag.card.style.transform = `translate(${dx}px,${dy}px)`;
+      drag.card.style.zIndex = '50';
+      drag.card.style.boxShadow = '0 18px 32px -10px rgba(0,0,0,.5)';
+      drag.card.style.opacity = '.95';
     }
-
-    html += '</tr>';
-    thead.innerHTML = html;
-}
-
-function renderBody(weekStart) {
-    const tbody = document.getElementById('scheduleBody');
-
-    // Filter bookings by selected employee
-    let filteredBookings = scheduleData;
-    if (selectedEmployeeId !== null) {
-        filteredBookings = scheduleData.filter(b => b.employee_id === selectedEmployeeId);
+  }, { passive: false });
+  document.addEventListener('pointerup', (e) => {
+    if (!drag) return;
+    const d = drag; drag = null;
+    if (!d.moved) { showBookingDetails(d.id); return; }
+    const dy = e.clientY - d.startY;
+    // целевой мастер по X
+    let empId = null;
+    const cols = d.cols ? [...d.cols.children] : [];
+    if (cols.length) {
+      const r = d.cols.getBoundingClientRect();
+      const idx = Math.max(0, Math.min(employees.length - 1, Math.floor((e.clientX - r.left) / (r.width / employees.length))));
+      empId = employees[idx]?.id ?? null;
     }
-
-    console.log('Rendering bookings:', filteredBookings.length, 'weekStart:', weekStart);
-
-    // Build color map for clients
-    buildColorMap(filteredBookings);
-
-    // Group bookings by day and time
-    const bookingsByCell = {};
-
-    filteredBookings.forEach(booking => {
-        const bookingDate = new Date(booking.date);
-        const dayIndex = getDayIndex(bookingDate, weekStart);
-
-        // API returns 'time' field, not 'time_start'
-        const timeStr = booking.time || booking.time_start;
-        if (dayIndex >= 0 && dayIndex < 7 && timeStr) {
-            const startHour = parseInt(timeStr.split(':')[0]);
-            const key = `${dayIndex}-${startHour}`;
-
-            if (!bookingsByCell[key]) {
-                bookingsByCell[key] = [];
-            }
-            bookingsByCell[key].push(booking);
-        }
-    });
-
-    let html = '';
-
-    TIME_SLOTS.forEach((timeSlot) => {
-        const hour = parseInt(timeSlot.split(':')[0]);
-
-        html += '<tr>';
-        html += `<td>${timeSlot}</td>`;
-
-        for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-            const key = `${dayIndex}-${hour}`;
-            const cellBookings = bookingsByCell[key] || [];
-
-            // Calculate date for this cell
-            const cellDate = new Date(weekStart);
-            cellDate.setDate(cellDate.getDate() + dayIndex);
-            const cellDateStr = formatDateISO(cellDate);
-
-            if (cellBookings.length === 0) {
-                // Empty cell - clickable to add booking only for owners
-                if (canCreate) {
-                    html += `<td class="empty-cell" onclick="openNewBookingModal('${cellDateStr}', '${timeSlot}')">
-                        <div class="add-booking-hint">+</div>
-                    </td>`;
-                } else {
-                    html += `<td class="empty-cell"></td>`;
-                }
-            } else {
-                html += '<td>';
-
-                // Отслеживаем использованные цвета в ячейке чтобы избежать повторений
-                const usedColorsInCell = new Set();
-
-                cellBookings.forEach(booking => {
-                    let colorIndex = getClientColorIndex(booking.client_name || booking.client_phone);
-
-                    // Если цвет уже использован в этой ячейке, выбираем другой
-                    let attempts = 0;
-                    while (usedColorsInCell.has(colorIndex) && attempts < 10) {
-                        colorIndex = (colorIndex + 1) % 10;
-                        attempts++;
-                    }
-                    usedColorsInCell.add(colorIndex);
-
-                    const colorClass = `color-${colorIndex}`;
-                    // Calculate end time from duration
-                    const timeStr = booking.time || booking.time_start || '00:00';
-                    const duration = booking.duration || 60;
-                    const endTime = calculateEndTime(timeStr, duration);
-                    const height = calculateHeightFromDuration(duration);
-                    const statusClass = booking.status ? `status-${booking.status}` : '';
-
-                    // Показываем название зала/сотрудника в режиме "Все"
-                    const showEmployee = selectedEmployeeId === null && booking.employee_name;
-                    const employeeLabel = showEmployee ? `<div class="booking-employee">${escapeHtml(booking.employee_name)}</div>` : '';
-
-                    html += `<div class="booking-cell ${colorClass} ${statusClass}"
-                        style="height: ${height}px;"
-                        onclick="showBookingDetails(${booking.id})">
-                        <div class="booking-name">${escapeHtml(booking.client_name || 'Клиент')}</div>
-                        ${employeeLabel}
-                        <div class="booking-service">${escapeHtml(booking.service_name || '')}</div>
-                        <div class="booking-time">${timeStr} - ${endTime}</div>
-                    </div>`;
-                });
-
-                html += '</td>';
-            }
-        }
-
-        html += '</tr>';
-    });
-
-    tbody.innerHTML = html;
+    let startMin = workStart() * 60 + (d.origTop + dy) / PXH() * 60;
+    startMin = Math.round(startMin / 15) * 15;
+    startMin = Math.max(workStart() * 60, Math.min(workEnd() * 60 - 15, startMin));
+    d.card.style.transform = ''; d.card.style.zIndex = ''; d.card.style.boxShadow = ''; d.card.style.opacity = '';
+    reschedule(d.id, startMin, empId);
+  });
 }
 
-function renderDayView() {
-    const SLOT_MIN = bookingInterval;
-    const startHour = workingHours?.start ?? 8;
-    const endHour = workingHours?.end ?? 22;
-
-    // Generate 30-min slots
-    const slots = [];
-    for (let h = startHour; h < endHour; h++) {
-        slots.push(`${h.toString().padStart(2,'0')}:00`);
-        slots.push(`${h.toString().padStart(2,'0')}:30`);
-    }
-
-    // Day date string
-    const today = new Date();
-    const dayDate = new Date(today);
-    dayDate.setDate(today.getDate() + dayOffset);
-    const dayDateStr = formatDateISO(dayDate);
-
-    const dayBookings = scheduleData.filter(b => b.date === dayDateStr);
-    buildColorMap(dayBookings);
-
-    // Build slot map: empId → { "HH:MM": { booking, rowspan } | "skip" }
-    const empSlotMap = {};
-    employees.forEach(emp => {
-        empSlotMap[emp.id] = {};
-        dayBookings.filter(b => b.employee_id === emp.id).forEach(booking => {
-            const startTime = booking.time || '00:00';
-            const duration = booking.duration || 60;
-            const rowspan = Math.max(1, Math.ceil(duration / SLOT_MIN));
-            empSlotMap[emp.id][startTime] = { booking, rowspan };
-
-            // Mark continuation slots as 'skip'
-            const [sh, sm] = startTime.split(':').map(Number);
-            const startSlotIdx = Math.floor(((sh - startHour) * 60 + sm) / SLOT_MIN);
-            for (let i = 1; i < rowspan; i++) {
-                const totalMin = startHour * 60 + (startSlotIdx + i) * SLOT_MIN;
-                const hh = Math.floor(totalMin / 60);
-                const mm = totalMin % 60;
-                empSlotMap[emp.id][`${hh.toString().padStart(2,'0')}:${mm.toString().padStart(2,'0')}`] = 'skip';
-            }
-        });
-    });
-
-    // Mark table as day-view
-    const table = document.getElementById('scheduleTable');
-    table.className = 'schedule-table day-view';
-
-    // Header
-    const thead = document.getElementById('scheduleHead');
-    let hHtml = '<tr><th style="width:50px;min-width:50px"></th>';
-    employees.forEach(emp => {
-        hHtml += `<th class="day-emp-col">${escapeHtml(emp.name)}</th>`;
-    });
-    thead.innerHTML = hHtml + '</tr>';
-
-    // Body
-    const tbody = document.getElementById('scheduleBody');
-    let bHtml = '';
-    slots.forEach(slot => {
-        bHtml += '<tr>';
-        bHtml += `<td style="position:sticky;left:0;z-index:15;background:var(--bg-secondary);color:var(--text-muted);font-size:11px;text-align:center;padding:4px;width:50px">${slot}</td>`;
-        employees.forEach(emp => {
-            const slotData = empSlotMap[emp.id]?.[slot];
-            if (slotData === 'skip') {
-                // covered by rowspan above
-            } else if (slotData) {
-                const b = slotData.booking;
-                const ci = getClientColorIndex(b.client_name || b.client_phone);
-                const sc = b.status ? `status-${b.status}` : '';
-                const phoneHtml = b.client_phone ? `<div class="booking-phone">${escapeHtml(b.client_phone)}</div>` : '';
-                const commentHtml = b.comment ? `<div class="booking-comment">${escapeHtml(b.comment)}</div>` : '';
-                bHtml += `<td rowspan="${slotData.rowspan}" class="booking-td" onclick="showBookingDetails(${b.id})">` +
-                    `<div class="day-booking-cell color-${ci} ${sc}">` +
-                    `<div class="booking-name">${escapeHtml(b.client_name || 'Клиент')}</div>` +
-                    phoneHtml + commentHtml +
-                    `</div></td>`;
-            } else {
-                bHtml += `<td class="day-empty-cell"></td>`;
-            }
-        });
-        bHtml += '</tr>';
-    });
-    tbody.innerHTML = bHtml;
+async function reschedule(id, startMin, empId) {
+  const b = scheduleData.find(x => x.id === id); if (!b) return;
+  const today = new Date(); const d = new Date(today); d.setDate(today.getDate() + dayOffset);
+  const payload = { date: isoDate(d), time: fmtMin(startMin) };
+  if (empId != null && empId !== b.employee_id) payload.employee_id = empId;
+  // оптимистично
+  b.time = fmtMin(startMin); if (payload.employee_id != null) b.employee_id = empId;
+  render();
+  try {
+    const resp = await fetch(`/api/admin/booking/${id}/reschedule`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': tg?.initData || '' }, credentials: 'same-origin', body: JSON.stringify(payload) });
+    const data = await resp.json();
+    moveMode = false; renderMoveHint();
+    if (!data.success) { alert(data.error || 'Не удалось перенести запись'); await loadSchedule(); }
+    else { await loadSchedule(); notify('Запись перенесена'); }
+  } catch (e) { console.error(e); alert('Ошибка переноса'); await loadSchedule(); }
 }
 
-function getDayIndex(date, weekStart) {
-    const diff = date.getTime() - weekStart.getTime();
-    return Math.floor(diff / (1000 * 60 * 60 * 24));
-}
+function notify(msg) { if (tg) tg.showPopup({ title: 'Готово', message: msg, buttons: [{ type: 'ok' }] }); }
 
-function buildColorMap(bookings) {
-    bookings.forEach(booking => {
-        const clientKey = booking.client_name || booking.client_phone;
-        if (clientKey && !clientColorMap[clientKey]) {
-            clientColorMap[clientKey] = colorIndex % 10;
-            colorIndex++;
-        }
-    });
-}
-
-function getClientColor(clientKey) {
-    if (!clientKey) return 'color-0';
-    const idx = clientColorMap[clientKey] ?? 0;
-    return `color-${idx}`;
-}
-
-function getClientColorIndex(clientKey) {
-    if (!clientKey) return 0;
-    return clientColorMap[clientKey] ?? 0;
-}
-
-function calculateHeight(timeStart, timeEnd) {
-    const [startH, startM] = timeStart.split(':').map(Number);
-    const [endH, endM] = timeEnd.split(':').map(Number);
-
-    const startMinutes = startH * 60 + startM;
-    const endMinutes = endH * 60 + endM;
-    const durationMinutes = endMinutes - startMinutes;
-
-    // 48px per hour, so each minute is 0.8px
-    return Math.max(44, (durationMinutes / 60) * 48 - 4);
-}
-
-function calculateHeightFromDuration(durationMinutes) {
-    // 48px per hour
-    return Math.max(44, (durationMinutes / 60) * 48 - 4);
-}
-
-function calculateEndTime(startTime, durationMinutes) {
-    const [hours, minutes] = startTime.split(':').map(Number);
-    const totalMinutes = hours * 60 + minutes + durationMinutes;
-    const endHours = Math.floor(totalMinutes / 60) % 24;
-    const endMinutes = totalMinutes % 60;
-    return `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}`;
-}
-
-function showBookingDetails(bookingId) {
-    const booking = scheduleData.find(b => b.id === bookingId);
-    if (!booking) return;
-
-    const statusLabels = {
-        'confirmed': 'Подтверждено',
-        'completed': 'Завершено',
-        'pending': 'Ожидание',
-        'cancelled': 'Отменено',
-        'pending_prepayment': 'Ожидает предоплату',
-        'prepayment_sent': 'Оплата отправлена'
-    };
-
-    // Get time and calculate end time
-    const timeStr = booking.time || booking.time_start || '00:00';
-    const duration = booking.duration || 60;
-    const endTime = calculateEndTime(timeStr, duration);
-
-    const modal = document.getElementById('bookingModal');
-    const content = document.getElementById('modalContent');
-
-    content.innerHTML = `
-        <div class="modal-header">
-            <div class="modal-title">${escapeHtml(booking.client_name || 'Клиент')}</div>
-            <button class="modal-close" onclick="closeModal()">&times;</button>
-        </div>
-        <div class="modal-row">
-            <div class="modal-icon">📅</div>
-            <div>
-                <div class="modal-label">Дата и время</div>
-                <div class="modal-value">${formatDate(booking.date)}, ${timeStr} - ${endTime}</div>
-            </div>
-        </div>
-        <div class="modal-row">
-            <div class="modal-icon">💼</div>
-            <div>
-                <div class="modal-label">Услуга</div>
-                <div class="modal-value">${escapeHtml(booking.service_name || '-')}</div>
-            </div>
-        </div>
-        ${booking.employee_name ? `
-        <div class="modal-row">
-            <div class="modal-icon">👤</div>
-            <div>
-                <div class="modal-label">Сотрудник</div>
-                <div class="modal-value">${escapeHtml(booking.employee_name)}</div>
-            </div>
-        </div>
-        ` : ''}
-        <div class="modal-row">
-            <div class="modal-icon">📞</div>
-            <div>
-                <div class="modal-label">Телефон</div>
-                <div class="modal-value">${escapeHtml(booking.client_phone || '-')}</div>
-            </div>
-        </div>
-        ${booking.comment ? `
-        <div class="modal-row">
-            <div class="modal-icon">💬</div>
-            <div>
-                <div class="modal-label">Комментарий</div>
-                <div class="modal-value">${escapeHtml(booking.comment)}</div>
-            </div>
-        </div>
-        ` : ''}
-        ${booking.price ? `
-        <div class="modal-row">
-            <div class="modal-icon">💰</div>
-            <div>
-                <div class="modal-label">Стоимость</div>
-                <div class="modal-value">${booking.price} ₽</div>
-            </div>
-        </div>
-        ` : ''}
-        <div class="modal-row">
-            <div class="modal-icon">📋</div>
-            <div>
-                <div class="modal-label">Статус</div>
-                <div class="modal-value">
-                    <span class="modal-status ${booking.status || 'confirmed'}">${statusLabels[booking.status] || 'Подтверждено'}</span>
-                </div>
-            </div>
-        </div>
-        ${getStatusActions(booking)}
-    `;
-
-    modal.classList.remove('hidden');
-}
-
-function getStatusActions(booking) {
-    const status = booking.status;
-    let buttons = '';
-
-    // Show different buttons based on current status
-    if (status === 'pending_prepayment' || status === 'prepayment_sent') {
-        buttons = `
-            <div class="modal-actions">
-                <button class="action-btn confirm-btn" onclick="updateBookingStatus(${booking.id}, 'confirmed')">
-                    ✓ Подтвердить оплату
-                </button>
-                <button class="action-btn cancel-btn" onclick="updateBookingStatus(${booking.id}, 'cancelled')">
-                    ✕ Отменить
-                </button>
-            </div>
-        `;
-    } else if (status === 'pending' || status === 'confirmed') {
-        buttons = `
-            <div class="modal-actions">
-                ${status === 'pending' ? `
-                <button class="action-btn confirm-btn" onclick="updateBookingStatus(${booking.id}, 'confirmed')">
-                    ✓ Подтвердить
-                </button>
-                ` : ''}
-                <button class="action-btn complete-btn" onclick="updateBookingStatus(${booking.id}, 'completed')">
-                    ✓ Завершить
-                </button>
-                <button class="action-btn cancel-btn" onclick="updateBookingStatus(${booking.id}, 'cancelled')">
-                    ✕ Отменить
-                </button>
-            </div>
-        `;
-    } else if (status === 'cancelled') {
-        buttons = `
-            <div class="modal-actions">
-                <button class="action-btn confirm-btn" onclick="updateBookingStatus(${booking.id}, 'confirmed')">
-                    ↩ Восстановить
-                </button>
-            </div>
-        `;
-    }
-    // For 'completed' status, no actions needed
-
-    return buttons;
-}
-
-async function updateBookingStatus(bookingId, newStatus) {
-    try {
-        const statusLabels = {
-            'confirmed': 'подтвердить',
-            'completed': 'завершить',
-            'cancelled': 'отменить'
-        };
-
-        // Confirm action
-        if (!confirm(`Вы уверены, что хотите ${statusLabels[newStatus]} эту запись?`)) {
-            return;
-        }
-
-        const response = await fetch(`/api/booking/${bookingId}/status`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Telegram-Init-Data': tg?.initData || ''
-            },
-            body: JSON.stringify({ status: newStatus })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            // Close modal and reload schedule
-            closeModal();
-            await loadSchedule();
-
-            // Show success message
-            if (tg) {
-                tg.showPopup({
-                    title: 'Успешно',
-                    message: `Статус записи изменен`,
-                    buttons: [{ type: 'ok' }]
-                });
-            }
-        } else {
-            alert(data.error || 'Ошибка при изменении статуса');
-        }
-    } catch (error) {
-        console.error('Error updating status:', error);
-        alert('Ошибка при изменении статуса');
-    }
-}
-
-function closeModal() {
-    document.getElementById('bookingModal').classList.add('hidden');
-}
-
-function formatDate(dateStr) {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('ru-RU', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-    });
-}
-
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-function showError(message) {
-    document.getElementById('loading').innerHTML = `
-        <div class="empty-icon">⚠️</div>
-        <p>${message}</p>
-    `;
-}
-
-function goBack() {
-    if (tg?.initData) {
-        tg.close();
-    } else {
-        window.location.href = '/login';
-    }
-}
-
-async function webLogout() {
-    await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
-    window.location.href = '/login';
-}
-
-// Close modal on Escape key
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-        closeModal();
-        closeNewBookingModal();
-    }
-});
-
-// ========== New Booking Modal ==========
-
+/* =====================================================================
+   New booking modal  (POST /api/admin/booking — без изменений API)
+   ===================================================================== */
 function openNewBookingModal(dateStr, timeStr) {
-    if (!selectedBusinessId) {
-        alert('Сначала выберите бизнес');
-        return;
-    }
+  if (!selectedBusinessId) { alert('Сначала выберите бизнес'); return; }
+  const isVenue = businessType === 'venue_rental';
+  document.getElementById('nbEmployeeLabel').textContent = isVenue ? 'Зал / Помещение' : 'Мастер';
 
-    const isVenue = businessType === 'venue_rental';
+  const svcSel = document.getElementById('nbService');
+  svcSel.innerHTML = '<option value="">Выберите услугу</option>';
+  services.forEach(s => {
+    const priceStr = (!isVenue && s.price) ? ` · ${s.price} ₽` : '';
+    const durStr = s.duration ? ` · ${s.duration} мин` : '';
+    const o = document.createElement('option'); o.value = s.id; o.textContent = `${s.name}${durStr}${priceStr}`; svcSel.appendChild(o);
+  });
 
-    // Update labels for venue rental
-    document.getElementById('nbEmployeeLabel').textContent = isVenue ? 'Зал / Помещение' : 'Сотрудник';
+  const addGroup = document.getElementById('nbAdditionalServicesGroup');
+  const addBox = document.getElementById('nbAdditionalServices');
+  if (isVenue && additionalServices.length) {
+    addBox.innerHTML = '';
+    additionalServices.forEach(s => { const l = document.createElement('label'); l.className = 'additional-service-item'; l.innerHTML = `<input type="checkbox" class="nb-add-svc" value="${s.id}"> ${esc(s.name)}${s.price ? ' — ' + s.price + ' ₽' : ''}`; addBox.appendChild(l); });
+    addGroup.style.display = '';
+  } else addGroup.style.display = 'none';
 
-    // Populate services dropdown
-    const serviceSelect = document.getElementById('nbService');
-    serviceSelect.innerHTML = '<option value="">Выберите услугу</option>';
-    services.forEach(svc => {
-        // Для venue_rental цена зависит от тарифа
-        const priceStr = (!isVenue && svc.price) ? ` - ${svc.price} ₽` : '';
-        const durationStr = svc.duration ? ` (${svc.duration} мин)` : '';
-        const option = document.createElement('option');
-        option.value = svc.id;
-        option.textContent = `${svc.name}${durationStr}${priceStr}`;
-        serviceSelect.appendChild(option);
-    });
+  svcSel.onchange = () => { updateEmployeeOptions(isVenue); if (isVenue) calcPrice(); };
+  updateEmployeeOptions(isVenue);
 
-    // Доп. услуги (venue_rental)
-    const addServicesGroup = document.getElementById('nbAdditionalServicesGroup');
-    const addServicesContainer = document.getElementById('nbAdditionalServices');
-    if (isVenue && additionalServices.length > 0) {
-        addServicesContainer.innerHTML = '';
-        additionalServices.forEach(svc => {
-            const addPriceStr = svc.price ? ' — ' + svc.price + ' ₽' : '';
-            const label = document.createElement('label');
-            label.className = 'additional-service-item';
-            label.innerHTML = '<input type="checkbox" class="nb-additional-svc" value="' + svc.id + '"> ' + escapeHtml(svc.name) + addPriceStr;
-            addServicesContainer.appendChild(label);
-        });
-        addServicesGroup.style.display = '';
-    } else {
-        addServicesGroup.style.display = 'none';
-    }
+  const today = new Date(); const d = new Date(today); d.setDate(today.getDate() + dayOffset);
+  document.getElementById('nbDate').value = dateStr || isoDate(d);
+  document.getElementById('nbTime').value = timeStr || '12:00';
+  if (typeof activeEmp === 'number') document.getElementById('nbEmployee').value = activeEmp;
 
-    // Filter employees when service changes
-    serviceSelect.onchange = () => {
-        updateEmployeeOptions(isVenue);
-        if (isVenue) calculateAndShowPrice();
-    };
+  const pi = document.getElementById('nbPriceInfo'); pi.style.display = 'none';
+  ['nbEmployee', 'nbTime'].forEach(idn => { const el = document.getElementById(idn); el.oninput = () => { if (isVenue) calcPrice(); }; el.onchange = el.oninput; });
+  if (isVenue) setTimeout(calcPrice, 50);
 
-    // Populate all employees initially
-    updateEmployeeOptions(isVenue);
-
-    // Pre-fill date and time if provided
-    if (dateStr) {
-        document.getElementById('nbDate').value = dateStr;
-    } else {
-        document.getElementById('nbDate').value = formatDateISO(new Date());
-    }
-
-    if (timeStr) {
-        document.getElementById('nbTime').value = timeStr;
-    } else {
-        document.getElementById('nbTime').value = '10:00';
-    }
-
-    // Pre-select employee if filtered
-    if (selectedEmployeeId) {
-        document.getElementById('nbEmployee').value = selectedEmployeeId;
-    }
-
-    // Обработчики расчёта стоимости (venue_rental)
-    const nbEmployee = document.getElementById('nbEmployee');
-    const nbTime = document.getElementById('nbTime');
-    const nbDate = document.getElementById('nbDate');
-    nbEmployee.addEventListener('change', () => { if (isVenue) calculateAndShowPrice(); });
-    nbTime.addEventListener('input', () => { if (isVenue) calculateAndShowPrice(); });
-    nbDate.addEventListener('input', () => { if (isVenue) calculateAndShowPrice(); });
-
-    // Сбросить цену
-    const priceInfoBlock = document.getElementById('nbPriceInfo');
-    priceInfoBlock.style.display = 'none';
-    if (isVenue) setTimeout(calculateAndShowPrice, 50);
-
-    // Очистить комментарий
-    document.getElementById('nbComment').value = '';
-
-    // Clear client fields and suggestions
-    document.getElementById('nbClientName').value = '';
-    document.getElementById('nbClientPhone').value = '+7 9';
-    hideSuggestions();
-
-    // Reset submit button
-    const submitBtn = document.getElementById('nbSubmitBtn');
-    submitBtn.disabled = false;
-    submitBtn.textContent = 'Создать запись';
-
-    // Show modal
-    document.getElementById('newBookingModal').classList.remove('hidden');
-
-    // Focus on client name
-    setTimeout(() => document.getElementById('nbClientName').focus(), 100);
+  document.getElementById('nbComment').value = '';
+  document.getElementById('nbClientName').value = '';
+  document.getElementById('nbClientPhone').value = '+7 9';
+  const sb = document.getElementById('nbSubmitBtn'); sb.disabled = false; sb.textContent = 'Создать запись';
+  document.getElementById('newBookingModal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('nbClientName').focus(), 100);
 }
 
 function updateEmployeeOptions(isVenue) {
-    const serviceSelect = document.getElementById('nbService');
-    const employeeSelect = document.getElementById('nbEmployee');
-    const prevValue = employeeSelect.value;
-
-    const anyLabel = isVenue ? 'Любой свободный зал' : 'Любой свободный';
-    employeeSelect.innerHTML = `<option value="">${anyLabel}</option>`;
-
-    const selectedServiceId = parseInt(serviceSelect.value);
-    let allowedIds = null;
-
-    if (selectedServiceId) {
-        const svc = services.find(s => s.id === selectedServiceId);
-        if (svc && svc.employee_ids) {
-            allowedIds = svc.employee_ids;
-        }
-    }
-
-    employees.forEach(emp => {
-        if (allowedIds !== null && !allowedIds.includes(emp.id)) {
-            return; // skip employees not allowed for this service
-        }
-        const option = document.createElement('option');
-        option.value = emp.id;
-        option.textContent = emp.name;
-        employeeSelect.appendChild(option);
-    });
-
-    // Restore previous selection if still available
-    if (prevValue) {
-        const stillExists = [...employeeSelect.options].some(o => o.value === prevValue);
-        if (stillExists) {
-            employeeSelect.value = prevValue;
-        }
-    }
-
-    // Pre-select if filtered tab
-    if (selectedEmployeeId && !prevValue) {
-        const stillExists = [...employeeSelect.options].some(o => o.value == selectedEmployeeId);
-        if (stillExists) {
-            employeeSelect.value = selectedEmployeeId;
-        }
-    }
+  const svc = document.getElementById('nbService'); const emp = document.getElementById('nbEmployee');
+  const prev = emp.value;
+  emp.innerHTML = `<option value="">${isVenue ? 'Любой свободный зал' : 'Любой свободный'}</option>`;
+  const sid = parseInt(svc.value); let allowed = null;
+  if (sid) { const s = services.find(x => x.id === sid); if (s && s.employee_ids) allowed = s.employee_ids; }
+  employees.forEach(e => { if (allowed && !allowed.includes(e.id)) return; const o = document.createElement('option'); o.value = e.id; o.textContent = e.name; emp.appendChild(o); });
+  if (prev && [...emp.options].some(o => o.value === prev)) emp.value = prev;
+  else if (typeof activeEmp === 'number' && [...emp.options].some(o => o.value == activeEmp)) emp.value = activeEmp;
 }
 
-function closeNewBookingModal() {
-    document.getElementById('newBookingModal').classList.add('hidden');
+function closeNewBookingModal() { document.getElementById('newBookingModal').classList.add('hidden'); }
+
+async function calcPrice() {
+  if (businessType !== 'venue_rental') return;
+  const empId = document.getElementById('nbEmployee').value, t = document.getElementById('nbTime').value, dt = document.getElementById('nbDate').value, sid = document.getElementById('nbService').value;
+  const pi = document.getElementById('nbPriceInfo');
+  if (!empId || !t || !dt || !sid) { pi.style.display = 'none'; return; }
+  const svc = services.find(s => s.id === parseInt(sid)); if (!svc) { pi.style.display = 'none'; return; }
+  try {
+    const headers = { 'Content-Type': 'application/json' }; if (tg?.initData) headers['X-Telegram-Init-Data'] = tg.initData;
+    const resp = await fetch(`/api/client/business/${selectedBusinessId}/calculate-price?employee_id=${empId}&time=${t}&duration=${svc.duration}&date=${dt}`, { headers, credentials: 'same-origin' });
+    const data = await resp.json();
+    if (data.has_time_price && data.total > 0) { pi.style.display = 'flex'; pi.innerHTML = `<span class="sub">${svc.duration} мин</span><span class="val">${data.total} ₽</span>`; }
+    else if (svc.price) { pi.style.display = 'flex'; pi.innerHTML = `<span class="sub">${svc.duration || ''} мин</span><span class="val">${svc.price} ₽</span>`; }
+    else pi.style.display = 'none';
+  } catch (e) { pi.style.display = 'none'; }
 }
 
-async function calculateAndShowPrice() {
-    if (businessType !== 'venue_rental') return;
-
-    const employeeId = document.getElementById('nbEmployee').value;
-    const timeVal = document.getElementById('nbTime').value;
-    const dateVal = document.getElementById('nbDate').value;
-    const serviceId = document.getElementById('nbService').value;
-    const priceInfo = document.getElementById('nbPriceInfo');
-
-    if (!employeeId || !timeVal || !dateVal || !serviceId) {
-        priceInfo.style.display = 'none';
-        return;
-    }
-
-    const svc = services.find(s => s.id === parseInt(serviceId));
-    if (!svc) { priceInfo.style.display = 'none'; return; }
-
-    try {
-        const headers = { 'Content-Type': 'application/json' };
-        if (tg && tg.initData) headers['X-Telegram-Init-Data'] = tg.initData;
-        const resp = await fetch(
-            '/api/client/business/' + selectedBusinessId + '/calculate-price?employee_id=' + employeeId + '&time=' + timeVal + '&duration=' + svc.duration + '&date=' + dateVal,
-            { headers: headers, credentials: 'same-origin' }
-        );
-        const data = await resp.json();
-
-        if (data.has_time_price && data.total > 0) {
-            priceInfo.style.display = '';
-            if (data.segments && data.segments.length > 1) {
-                let html = '<div class="price-info-title">Стоимость:</div>';
-                data.segments.forEach(function(seg) {
-                    html += '<div class="price-info-row">' + seg.time_from + '–' + seg.time_to + ' (' + seg.hours_str + '): <strong>' + seg.price_per_hour + ' ₽/ч = ' + seg.subtotal + ' ₽</strong></div>';
-                });
-                html += '<div class="price-info-total">Итого: <strong>' + data.total + ' ₽</strong></div>';
-                priceInfo.innerHTML = html;
-            } else {
-                const rate = (data.segments && data.segments.length > 0) ? data.segments[0].price_per_hour : null;
-                const rateStr = rate ? ' (' + rate + ' ₽/ч)' : '';
-                priceInfo.innerHTML = '<div class="price-info-total">Стоимость: <strong>' + data.total + ' ₽</strong>' + rateStr + '</div>';
-            }
-        } else if (svc.price) {
-            priceInfo.style.display = '';
-            priceInfo.innerHTML = '<div class="price-info-total">Стоимость: <strong>' + svc.price + ' ₽</strong></div>';
-        } else {
-            priceInfo.style.display = 'none';
-        }
-    } catch (e) {
-        priceInfo.style.display = 'none';
-    }
+async function submitNewBooking(ev) {
+  ev.preventDefault();
+  const sb = document.getElementById('nbSubmitBtn'); sb.disabled = true; sb.textContent = 'Создание…';
+  const name = document.getElementById('nbClientName').value.trim();
+  const rawPhone = document.getElementById('nbClientPhone').value.trim();
+  const phone = (rawPhone === '+7 9' || rawPhone === '+7') ? '' : rawPhone;
+  const sid = document.getElementById('nbService').value, eid = document.getElementById('nbEmployee').value;
+  const date = document.getElementById('nbDate').value, time = document.getElementById('nbTime').value;
+  const comment = document.getElementById('nbComment').value.trim();
+  const addIds = [...document.querySelectorAll('.nb-add-svc:checked')].map(c => parseInt(c.value));
+  if (!name || !sid || !date || !time) { alert('Заполните все обязательные поля'); sb.disabled = false; sb.textContent = 'Создать запись'; return; }
+  try {
+    const headers = { 'Content-Type': 'application/json' }; if (tg?.initData) headers['X-Telegram-Init-Data'] = tg.initData;
+    const resp = await fetch('/api/admin/booking', { method: 'POST', headers, credentials: 'same-origin', body: JSON.stringify({ business_id: parseInt(selectedBusinessId), service_id: parseInt(sid), employee_id: eid ? parseInt(eid) : null, date, time, client_name: name, client_phone: phone, additional_service_ids: addIds, notes: comment || null }) });
+    const data = await resp.json();
+    if (data.success) { closeNewBookingModal(); await loadSchedule(); notify('Запись создана'); }
+    else { alert(data.error || 'Ошибка при создании записи'); sb.disabled = false; sb.textContent = 'Создать запись'; }
+  } catch (e) { console.error(e); alert('Ошибка при создании записи'); sb.disabled = false; sb.textContent = 'Создать запись'; }
 }
 
-async function submitNewBooking(event) {
-    event.preventDefault();
-
-    const submitBtn = document.getElementById('nbSubmitBtn');
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Создание...';
-
-    const clientName = document.getElementById('nbClientName').value.trim();
-    const _rawPhone = document.getElementById('nbClientPhone').value.trim();
-    const clientPhone = (_rawPhone === '+7 9' || _rawPhone === '+7') ? '' : _rawPhone;
-    const serviceId = document.getElementById('nbService').value;
-    const employeeId = document.getElementById('nbEmployee').value;
-    const bookingDate = document.getElementById('nbDate').value;
-    const bookingTime = document.getElementById('nbTime').value;
-    const comment = document.getElementById('nbComment').value.trim();
-
-    // Доп. услуги
-    const additionalServiceIds = [];
-    document.querySelectorAll('.nb-additional-svc:checked').forEach(function(cb) {
-        additionalServiceIds.push(parseInt(cb.value));
-    });
-
-    if (!clientName || !serviceId || !bookingDate || !bookingTime) {
-        alert('Заполните все обязательные поля');
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Создать запись';
-        return;
-    }
-
-    try {
-        const postHeaders = { 'Content-Type': 'application/json' };
-        if (tg?.initData) postHeaders['X-Telegram-Init-Data'] = tg.initData;
-
-        const response = await fetch('/api/admin/booking', {
-            method: 'POST',
-            headers: postHeaders,
-            credentials: 'same-origin',
-            body: JSON.stringify({
-                business_id: parseInt(selectedBusinessId),
-                service_id: parseInt(serviceId),
-                employee_id: employeeId ? parseInt(employeeId) : null,
-                date: bookingDate,
-                time: bookingTime,
-                client_name: clientName,
-                client_phone: clientPhone,
-                additional_service_ids: additionalServiceIds,
-                notes: comment || null,
-            })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            closeNewBookingModal();
-            await loadSchedule();
-
-            if (tg) {
-                tg.showPopup({
-                    title: 'Успешно',
-                    message: 'Запись успешно создана',
-                    buttons: [{ type: 'ok' }]
-                });
-            } else {
-                alert('Запись успешно создана!');
-            }
-        } else {
-            alert(data.error || 'Ошибка при создании записи');
-            submitBtn.disabled = false;
-            submitBtn.textContent = 'Создать запись';
-        }
-    } catch (error) {
-        console.error('Error creating booking:', error);
-        alert('Ошибка при создании записи');
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Создать запись';
-    }
-}
-
-// ========== Client Autocomplete ==========
-
+/* ---------- client autocomplete ---------- */
 let selectedClientId = null;
-
 function initClientAutocomplete() {
-    const nameInput = document.getElementById('nbClientName');
-    const phoneInput = document.getElementById('nbClientPhone');
-
-    nameInput.addEventListener('input', () => {
-        selectedClientId = null;
-        const query = nameInput.value.trim().toLowerCase();
-        if (query.length < 1) {
-            hideSuggestions();
-            return;
-        }
-        const matches = clients.filter(c =>
-            (c.name && c.name.toLowerCase().includes(query)) ||
-            (c.phone && c.phone.includes(query))
-        ).slice(0, 8);
-        showSuggestions(matches, nameInput);
-    });
-
-    phoneInput.addEventListener('input', () => {
-        selectedClientId = null;
-        const query = phoneInput.value.trim().replace(/[\s\-\(\)]/g, '');
-        if (query.length < 2) {
-            hideSuggestions();
-            return;
-        }
-        const matches = clients.filter(c =>
-            (c.phone && c.phone.replace(/[\s\-\(\)]/g, '').includes(query)) ||
-            (c.name && c.name.toLowerCase().includes(query.toLowerCase()))
-        ).slice(0, 8);
-        showSuggestions(matches, phoneInput);
-    });
-
-    // Hide suggestions on click outside
-    document.addEventListener('click', (e) => {
-        const sugBox = document.getElementById('clientSuggestions');
-        if (sugBox && !sugBox.contains(e.target) && e.target !== nameInput && e.target !== phoneInput) {
-            hideSuggestions();
-        }
-    });
+  const nameInput = document.getElementById('nbClientName');
+  const phoneInput = document.getElementById('nbClientPhone');
+  if (!nameInput) return;
+  const onType = (input, byPhone) => {
+    selectedClientId = null;
+    const q = input.value.trim().toLowerCase();
+    if ((byPhone ? q.replace(/\D/g, '').length : q.length) < (byPhone ? 2 : 1)) { hideSuggestions(); return; }
+    const matches = clients.filter(c => (c.name && c.name.toLowerCase().includes(q)) || (c.phone && c.phone.replace(/\D/g, '').includes(q.replace(/\D/g, '')))).slice(0, 8);
+    showSuggestions(matches, input);
+  };
+  nameInput.addEventListener('input', () => onType(nameInput, false));
+  phoneInput.addEventListener('input', () => onType(phoneInput, true));
+  document.addEventListener('click', (e) => { const box = document.getElementById('clientSuggestions'); if (box && !box.contains(e.target) && e.target !== nameInput && e.target !== phoneInput) hideSuggestions(); });
 }
-
-function showSuggestions(matchedClients, anchorInput) {
-    let sugBox = document.getElementById('clientSuggestions');
-    if (!sugBox) {
-        sugBox = document.createElement('div');
-        sugBox.id = 'clientSuggestions';
-        sugBox.className = 'client-suggestions';
-        document.querySelector('.new-booking-form').appendChild(sugBox);
-    }
-
-    if (matchedClients.length === 0) {
-        hideSuggestions();
-        return;
-    }
-
-    sugBox.innerHTML = '';
-    matchedClients.forEach(client => {
-        const item = document.createElement('div');
-        item.className = 'suggestion-item';
-        const phonePart = client.phone ? ` — ${client.phone}` : '';
-        item.textContent = `${client.name || 'Без имени'}${phonePart}`;
-        item.addEventListener('click', (e) => {
-            e.stopPropagation();
-            selectClient(client);
-        });
-        sugBox.appendChild(item);
-    });
-
-    // Position near the anchor input
-    const rect = anchorInput.getBoundingClientRect();
-    const formRect = document.querySelector('.new-booking-form').getBoundingClientRect();
-    sugBox.style.top = (rect.bottom - formRect.top + 4) + 'px';
-    sugBox.style.left = (rect.left - formRect.left) + 'px';
-    sugBox.style.width = rect.width + 'px';
-    sugBox.style.display = 'block';
+function showSuggestions(list, anchor) {
+  let box = document.getElementById('clientSuggestions');
+  if (!box) { box = document.createElement('div'); box.id = 'clientSuggestions'; box.className = 'client-suggestions'; document.querySelector('#newBookingModal .modal-card').appendChild(box); }
+  if (!list.length) { hideSuggestions(); return; }
+  box.innerHTML = ''; list.forEach(c => { const it = document.createElement('div'); it.className = 'suggestion-item'; it.textContent = `${c.name || 'Без имени'}${c.phone ? ' — ' + c.phone : ''}`; it.onclick = (e) => { e.stopPropagation(); document.getElementById('nbClientName').value = c.name || ''; document.getElementById('nbClientPhone').value = c.phone || ''; selectedClientId = c.id; hideSuggestions(); }; box.appendChild(it); });
+  const r = anchor.getBoundingClientRect(), fr = document.querySelector('#newBookingModal .modal-card').getBoundingClientRect();
+  box.style.top = (r.bottom - fr.top + 4) + 'px'; box.style.left = (r.left - fr.left) + 'px'; box.style.width = r.width + 'px'; box.style.display = 'block';
 }
+function hideSuggestions() { const box = document.getElementById('clientSuggestions'); if (box) box.style.display = 'none'; }
 
-function hideSuggestions() {
-    const sugBox = document.getElementById('clientSuggestions');
-    if (sugBox) {
-        sugBox.style.display = 'none';
-    }
-}
-
-function selectClient(client) {
-    document.getElementById('nbClientName').value = client.name || '';
-    document.getElementById('nbClientPhone').value = client.phone || '';
-    selectedClientId = client.id;
-    hideSuggestions();
-}
-
-// Initialize autocomplete when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(initClientAutocomplete, 200);
-});
-
-// ========== Pinch-to-Zoom Functionality ==========
-// Используем transform для масштабирования
-let currentScale = 1;
-let minScale = 0.5;
-let maxScale = 2.5;
-let lastDistance = 0;
-let isPinching = false;
-
-function initPinchZoom() {
-    const wrapper = document.getElementById('scheduleWrapper');
-    const table = document.getElementById('scheduleTable');
-
-    if (!wrapper || !table) return;
-
-    // Touch start - detect pinch gesture
-    wrapper.addEventListener('touchstart', (e) => {
-        if (e.touches.length === 2) {
-            isPinching = true;
-            lastDistance = getDistance(e.touches[0], e.touches[1]);
-            e.preventDefault();
-        }
-    }, { passive: false });
-
-    // Touch move - handle pinch zoom
-    wrapper.addEventListener('touchmove', (e) => {
-        if (isPinching && e.touches.length === 2) {
-            e.preventDefault();
-
-            const currentDistance = getDistance(e.touches[0], e.touches[1]);
-            const delta = currentDistance - lastDistance;
-
-            // Adjust scale based on pinch
-            const scaleChange = delta * 0.005;
-            currentScale = Math.min(maxScale, Math.max(minScale, currentScale + scaleChange));
-
-            applyZoom(table);
-            lastDistance = currentDistance;
-        }
-    }, { passive: false });
-
-    // Touch end - stop pinching
-    wrapper.addEventListener('touchend', (e) => {
-        if (e.touches.length < 2) {
-            isPinching = false;
-        }
-    });
-
-    // Double-tap to reset zoom
-    let lastTap = 0;
-    wrapper.addEventListener('touchend', (e) => {
-        if (e.touches.length === 0 && !isPinching) {
-            const currentTime = new Date().getTime();
-            const tapLength = currentTime - lastTap;
-
-            if (tapLength < 300 && tapLength > 0) {
-                // Double tap detected - reset zoom
-                currentScale = 1;
-                applyZoom(table);
-                e.preventDefault();
-            }
-            lastTap = currentTime;
-        }
-    });
-
-    // Mouse wheel zoom for desktop
-    wrapper.addEventListener('wheel', (e) => {
-        if (e.ctrlKey) {
-            e.preventDefault();
-            const delta = e.deltaY > 0 ? -0.1 : 0.1;
-            currentScale = Math.min(maxScale, Math.max(minScale, currentScale + delta));
-            applyZoom(table);
-        }
-    }, { passive: false });
-}
-
-function applyZoom(table) {
-    // CSS zoom не ломает position:sticky (в отличие от transform:scale)
-    table.style.zoom = currentScale;
-}
-
-function getDistance(touch1, touch2) {
-    const dx = touch1.clientX - touch2.clientX;
-    const dy = touch1.clientY - touch2.clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-}
-
-// Initialize pinch zoom after DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    // Delay to ensure elements are rendered
-    setTimeout(initPinchZoom, 500);
-});
+/* ---------- misc ---------- */
+function showError(msg) { document.getElementById('loading').innerHTML = `<div style="font-size:40px;opacity:.5">⚠️</div><p>${esc(msg)}</p>`; }
+function goBack() { if (tg?.initData) tg.close(); else location.href = '/login'; }
+async function webLogout() { await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }); location.href = '/login'; }
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeSheet(); closeNewBookingModal(); if (moveMode) cancelMove(); } });
