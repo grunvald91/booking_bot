@@ -155,8 +155,8 @@ function BookingDetailModal({
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
       <div
-        className="sched-root w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5"
-        style={{ background: 'var(--s-surface)', boxShadow: '0 -8px 30px rgba(0,0,0,.2)' }}
+        className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5"
+        style={{ background: 'var(--s-surface)', color: 'var(--s-text)', boxShadow: '0 -8px 30px rgba(0,0,0,.2)' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-start mb-4">
@@ -236,7 +236,7 @@ function RescheduleModal({
   const [employeeId, setEmployeeId] = useState<number | undefined>(booking.employee_id)
   return (
     <div className="fixed inset-0 bg-black/40 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="sched-root w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5" style={{ background: 'var(--s-surface)' }} onClick={(e) => e.stopPropagation()}>
+      <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5" style={{ background: 'var(--s-surface)', color: 'var(--s-text)' }} onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-start mb-4">
           <h3 className="text-lg font-bold" style={{ color: 'var(--s-text)' }}>Перенести запись</h3>
           <button onClick={onClose} className="sched-iconbtn"><X size={18} /></button>
@@ -318,7 +318,7 @@ function ManualBookingModal({
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="sched-root w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--s-surface)' }} onClick={(e) => e.stopPropagation()}>
+      <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--s-surface)', color: 'var(--s-text)' }} onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-start mb-4">
           <h3 className="text-lg font-bold" style={{ color: 'var(--s-text)' }}>Записать клиента</h3>
           <button onClick={onClose} className="sched-iconbtn"><X size={18} /></button>
@@ -370,10 +370,9 @@ function ManualBookingModal({
 
 // ── Booking card ──
 function BookingCard({
-  p, colWidth, pxPerMin, showEmployee, onClick, onDragStart, draggable,
+  p, pxPerMin, showEmployee, onClick, onDragStart, draggable,
 }: {
   p: Positioned
-  colWidth: number
   pxPerMin: number
   showEmployee: boolean
   onClick: () => void
@@ -384,10 +383,12 @@ function BookingCard({
   const sv = statusVar(b.status)
   const top = (p.startMin - DAY_START_H * 60) * pxPerMin
   const height = Math.max(20, (p.endMin - p.startMin) * pxPerMin - 2)
-  const laneW = (colWidth - 4) / p.lanes
-  const left = 2 + p.lane * laneW
+  const laneWPct = 100 / p.lanes
   const cardStyle = {
-    top, height, left, width: laneW - 2,
+    top,
+    height,
+    left: `calc(${(p.lane * laneWPct).toFixed(4)}% + 2px)`,
+    width: `calc(${laneWPct.toFixed(4)}% - 4px)`,
     '--card-accent': `var(--st-${sv})`,
     '--card-bg': `var(--st-${sv}-bg)`,
   } as CSSProperties
@@ -719,7 +720,6 @@ export function SchedulePage() {
                     <BookingCard
                       key={p.booking.id}
                       p={p}
-                      colWidth={Math.max(120, 300)}
                       pxPerMin={pxPerMin}
                       showEmployee={false}
                       draggable
@@ -770,7 +770,6 @@ export function SchedulePage() {
                       <BookingCard
                         key={p.booking.id}
                         p={p}
-                        colWidth={Math.max(96, 130)}
                         pxPerMin={pxPerMin}
                         showEmployee
                         draggable={false}
