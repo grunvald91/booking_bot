@@ -1,0 +1,110 @@
+name: Deploy webapp to server
+
+# Авто-деплой страницы расписания и прочего кода webapp/ на боевой сервор.
+# Сервер /opt/booking_bot НЕ git-репозиторий — поэтому файлы заливаются по SCP,
+# затем перезапускается сервис booking-bot (он же поднимает aiohttp-вебапп на :8080).
+#
+# Деплоятся ТОЛЬКО файлы, изменённые в коммите (под webapp/**), чтобы не затирать
+# серверные файлы, которые могли расходиться с git. Для ручного деплоя конкретных
+# файлов — запустить workflow вручную и передать их в поле "files".
+#
+# Требуется секрет: SERVER_SSH_PASSWORD.
+# Опционально (repository variables): SERVER_HOST, SERVER_USER, SERVER_PORT.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'webapp/**'
+  workflow_dispatch:
+    inputs:
+      files:
+        description: 'Список файлов для заливки (через пробел/перенос строки). Пусто = изменения последнего коммита.'
+        required: false
+        default: ''
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      REMOTE_PATH: /opt/booking_bot
+      SERVICE_NAME: booking-bot
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard — secret present
+        run: |
+          if [ -z "$SSHPASS" ]; then
+            echo "::error::Секрет SERVER_SSH_PASSWORD не задан в Settings → Secrets → Actions."
+            exit 1
+          fi
+
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Determine files to deploy
+        id: pick
+        run: |
+          set -euo pipefail
+          MANUAL='${{ github.event.inputs.files }}'
+          if [ -n "${MANUAL// /}" ]; then
+            FILES=$(printf '%s\n' $MANUAL)
+          else
+            BEFORE='${{ github.event.before }}'
+            AFTER='${{ github.sha }}'
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+              BEFORE=$(git rev-parse "${AFTER}~1" 2>/dev/null || echo "")
+            fi
+            if [ -n "$BEFORE" ]; then
+              FILES=$(git diff --name-only --diff-filter=ACMR "$BEFORE" "$AFTER" -- 'webapp/**' || true)
+            else
+              FILES=$(git ls-files 'webapp/**')
+            fi
+          fi
+          echo "Файлы к заливке:"; printf '%s\n' "$FILES"
+          {
+            echo 'files<<__EOF__'
+            printf '%s\n' "$FILES"
+            echo '__EOF__'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload changed files (SCP)
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ANY=0
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if [ ! -f "$f" ]; then echo "пропуск (нет файла): $f"; continue; fi
+            ANY=1
+            dir=$(dirname "$f")
+            sshpass -e ssh $SSH_OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "mkdir -p '$REMOTE_PATH/$dir'"
+            sshpass -e scp $SSH_OPTS -P "$SERVER_PORT" "$f" "$SERVER_USER@$SERVER_HOST:$REMOTE_PATH/$f"
+            echo "залит: $f"
+          done <<< '${{ steps.pick.outputs.files }}'
+          if [ "$ANY" = "0" ]; then echo "Нет файлов для заливки — деплой не требуется."; fi
+          echo "ANY=$ANY" >> "$GITHUB_ENV"
+
+      - name: Restart service and verify
+        if: env.ANY == '1'
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $SSH_OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" '
+            set -e
+            systemctl restart '"$SERVICE_NAME"'
+            sleep 4
+            echo -n "is-active: "; systemctl is-active '"$SERVICE_NAME"'
+            curl -s -o /dev/null -w "schedule HTTP %{http_code}\n" --max-time 6 http://127.0.0.1:8080/schedule
+          '
