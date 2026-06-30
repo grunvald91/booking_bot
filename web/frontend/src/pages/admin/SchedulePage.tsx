@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo, type CSSProperties } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
+import { Link } from 'react-router-dom'
 import {
   ChevronLeft,
   ChevronRight,
@@ -10,13 +11,15 @@ import {
   XCircle,
   AlertCircle,
   Loader2,
-  ZoomIn,
-  ZoomOut,
   Search,
   Moon,
   Sun,
   ChevronDown,
   CalendarClock,
+  LayoutDashboard,
+  Scissors,
+  Users,
+  Settings,
 } from 'lucide-react'
 import { api, type AdminBooking, type Service, type Employee } from '../../api/client'
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
@@ -112,27 +115,6 @@ function layoutColumn(bookings: AdminBooking[]): Positioned[] {
   })
   const lanes = Math.max(1, laneEnds.length)
   return placed.map((p) => ({ ...p, lanes }))
-}
-
-// Max simultaneous bookings (for week "overloaded day" collapse).
-function maxConcurrency(bookings: AdminBooking[]): number {
-  const points = bookings
-    .flatMap((b) => {
-      const s = timeToMin(b.time)
-      const e = s + (b.service_duration || 60)
-      return [
-        { t: s, d: 1 },
-        { t: e, d: -1 },
-      ]
-    })
-    .sort((a, b) => a.t - b.t || a.d - b.d)
-  let cur = 0
-  let max = 0
-  points.forEach((p) => {
-    cur += p.d
-    if (cur > max) max = cur
-  })
-  return max
 }
 
 function statusVar(status: string) {
@@ -275,7 +257,7 @@ function RescheduleModal({
   )
 }
 
-// ── Manual booking modal (kept, themed) ──
+// ── Manual booking modal (новый дизайн + повтор по неделям) ──
 function ManualBookingModal({
   businessId, services, employees, selectedDate, selectedTime, onClose, onCreated,
 }: {
@@ -293,24 +275,37 @@ function ManualBookingModal({
   const [clientName, setClientName] = useState('')
   const [clientPhone, setClientPhone] = useState('')
   const [notes, setNotes] = useState('')
+  const [repeatExtra, setRepeatExtra] = useState(0) // сколько ДОПОЛНИТЕЛЬНЫХ недель
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+
+  const REPEATS = [
+    { v: 0, l: 'Нет' },
+    { v: 3, l: '4 нед' },
+    { v: 7, l: '8 нед' },
+    { v: 11, l: '12 нед' },
+  ]
+  const dateLabel = selectedDate.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })
 
   const handleSubmit = async () => {
     if (!serviceId || !clientName) return
     setSubmitting(true)
     setError('')
     try {
-      await api.createManualBooking({
-        business_id: businessId,
-        service_id: serviceId,
-        employee_id: employeeId ?? undefined,
-        date: formatDateISO(selectedDate),
-        time,
-        client_name: clientName,
-        client_phone: clientPhone || undefined,
-        notes: notes || undefined,
-      })
+      for (let i = 0; i <= repeatExtra; i++) {
+        const d = new Date(selectedDate)
+        d.setDate(d.getDate() + 7 * i)
+        await api.createManualBooking({
+          business_id: businessId,
+          service_id: serviceId,
+          employee_id: employeeId ?? undefined,
+          date: formatDateISO(d),
+          time,
+          client_name: clientName,
+          client_phone: clientPhone || undefined,
+          notes: notes || undefined,
+        })
+      }
       onCreated()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Ошибка')
@@ -320,52 +315,101 @@ function ManualBookingModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--s-surface)', color: 'var(--s-text)' }} onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-between items-start mb-4">
-          <h3 className="text-lg font-bold" style={{ color: 'var(--s-text)' }}>Записать клиента</h3>
+    <div className="sched-sheet-ov" onClick={onClose}>
+      <div className="sched-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sched-sheet-grip" />
+        <div className="sched-sheet-head">
+          <div><h3>Новая запись</h3><p>{dateLabel}</p></div>
           <button onClick={onClose} className="sched-iconbtn"><X size={18} /></button>
         </div>
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--s-muted)' }}>Услуга</label>
-            <select value={serviceId ?? ''} onChange={(e) => setServiceId(Number(e.target.value) || null)} className="sched-input w-full">
-              <option value="">Выберите услугу</option>
-              {services.filter((s) => s.is_active).map((s) => (
-                <option key={s.id} value={s.id}>{s.name} {s.duration_minutes ? `(${s.duration_minutes} мин)` : ''} {s.price ? `— ${s.price}₽` : ''}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--s-muted)' }}>Специалист / Зал</label>
-            <select value={employeeId ?? ''} onChange={(e) => setEmployeeId(Number(e.target.value) || null)} className="sched-input w-full">
-              <option value="">Любой</option>
-              {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--s-muted)' }}>Время</label>
-            <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="sched-input w-full" />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--s-muted)' }}>Имя клиента</label>
-            <input type="text" value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="Введите имя" className="sched-input w-full" />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--s-muted)' }}>Телефон</label>
-            <input type="tel" value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} placeholder="+7" className="sched-input w-full" />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--s-muted)' }}>Комментарий</label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="sched-input w-full resize-none" />
-          </div>
-          {error && <div className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--st-cancelled)' }}><AlertCircle size={14} />{error}</div>}
+
+        <div className="sched-field">
+          <label>Услуга</label>
+          <select value={serviceId ?? ''} onChange={(e) => setServiceId(Number(e.target.value) || null)} className="sched-input">
+            <option value="">Выберите услугу</option>
+            {services.filter((s) => s.is_active).map((s) => (
+              <option key={s.id} value={s.id}>{s.name} {s.duration_minutes ? `(${s.duration_minutes} мин)` : ''} {s.price ? `— ${s.price}₽` : ''}</option>
+            ))}
+          </select>
         </div>
-        <button onClick={handleSubmit} disabled={submitting || !serviceId || !clientName}
-          className="w-full mt-4 text-white font-semibold py-3 rounded-xl disabled:opacity-50 flex items-center justify-center gap-2" style={{ background: 'var(--s-accent)' }}>
+
+        <div className="sched-field">
+          <label>Специалист / Зал</label>
+          <select value={employeeId ?? ''} onChange={(e) => setEmployeeId(Number(e.target.value) || null)} className="sched-input">
+            <option value="">Любой</option>
+            {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </select>
+        </div>
+
+        <div className="sched-field">
+          <div className="sched-field-row">
+            <div>
+              <label>Время</label>
+              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="sched-input" />
+            </div>
+            <div>
+              <label>Телефон</label>
+              <input type="tel" value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} placeholder="+7" className="sched-input" />
+            </div>
+          </div>
+        </div>
+
+        <div className="sched-field">
+          <label>Имя клиента</label>
+          <input type="text" value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="Введите имя" className="sched-input" />
+        </div>
+
+        <div className="sched-field">
+          <label>Комментарий</label>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="sched-input" />
+        </div>
+
+        <div className="sched-field">
+          <label>Повторять еженедельно</label>
+          <div className="sched-seg-full">
+            {REPEATS.map((r) => (
+              <button key={r.v} className={repeatExtra === r.v ? 'on' : ''} onClick={() => setRepeatExtra(r.v)}>{r.l}</button>
+            ))}
+          </div>
+          {repeatExtra > 0 && (
+            <p className="sched-hint">Будет создано {repeatExtra + 1} записей — то же время и день недели, {repeatExtra} недель подряд.</p>
+          )}
+        </div>
+
+        {error && <div className="sched-error"><AlertCircle size={14} />{error}</div>}
+        <button onClick={handleSubmit} disabled={submitting || !serviceId || !clientName} className="sched-submit">
           {submitting ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-          {submitting ? 'Записываем...' : 'Записать'}
+          {submitting ? 'Записываем…' : repeatExtra > 0 ? `Записать · ${repeatExtra + 1}` : 'Записать'}
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Подтверждение переноса (после drag&drop) ──
+function ConfirmMoveModal({
+  clientName, fromLabel, toLabel, submitting, onCancel, onConfirm,
+}: {
+  clientName: string
+  fromLabel: string
+  toLabel: string
+  submitting: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <div className="sched-center-ov" onClick={onCancel}>
+      <div className="sched-confirm" onClick={(e) => e.stopPropagation()}>
+        <h3>Перенести запись?</h3>
+        <p>{clientName}</p>
+        <div className="sched-confirm-from">Было: {fromLabel}</div>
+        <div className="sched-confirm-to"><CalendarClock size={16} />{toLabel}</div>
+        <div className="sched-confirm-actions">
+          <button className="ghost" onClick={onCancel} disabled={submitting}>Отмена</button>
+          <button className="primary" onClick={onConfirm} disabled={submitting}>
+            {submitting ? <Loader2 size={15} className="animate-spin" /> : <CalendarClock size={15} />}Перенести
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -373,14 +417,14 @@ function ManualBookingModal({
 
 // ── Booking card ──
 function BookingCard({
-  p, pxPerMin, showEmployee, onClick, onDragStart, draggable,
+  p, pxPerMin, showEmployee, onClick, onPointerDown, dragging,
 }: {
   p: Positioned
   pxPerMin: number
   showEmployee: boolean
-  onClick: () => void
-  onDragStart?: () => void
-  draggable: boolean
+  onClick?: () => void
+  onPointerDown?: (e: React.PointerEvent) => void
+  dragging?: boolean
 }) {
   const b = p.booking
   const sv = statusVar(b.status)
@@ -392,21 +436,79 @@ function BookingCard({
     height,
     left: `calc(${(p.lane * laneWPct).toFixed(4)}% + 2px)`,
     width: `calc(${laneWPct.toFixed(4)}% - 4px)`,
+    opacity: dragging ? 0.35 : undefined,
     '--card-accent': `var(--st-${sv})`,
     '--card-bg': `var(--st-${sv}-bg)`,
   } as CSSProperties
   return (
     <div
-      className={`sched-card ${b.status === 'cancelled' ? 'is-cancelled' : ''} ${b.status === 'pending' ? 'is-pending' : ''}`}
+      className={`sched-card ${b.status === 'cancelled' ? 'is-cancelled' : ''} ${b.status === 'pending' ? 'is-pending' : ''} ${onPointerDown ? 'is-draggable' : ''}`}
       style={cardStyle}
-      draggable={draggable}
-      onDragStart={onDragStart}
-      onClick={(e) => { e.stopPropagation(); onClick() }}
+      onPointerDown={onPointerDown}
+      onClick={(e) => { e.stopPropagation(); onClick?.() }}
     >
       <div className="c-name">{b.client_name}</div>
       {height > 32 && <div className="c-sub">{b.service_name}</div>}
       {height > 46 && showEmployee && b.employee_name && <div className="c-sub">{b.employee_name}</div>}
       {height > 46 && <div className="c-sub">{b.time}–{calcEndTime(b.time, b.service_duration || 60)}</div>}
+    </div>
+  )
+}
+
+// ── Day-peek sheet (±окно вокруг места тапа в недельном виде) ──
+function DayPeekSheet({
+  dateStr, lo, hi, bookings, empColor, onClose, onPick,
+}: {
+  dateStr: string
+  lo: number
+  hi: number
+  bookings: AdminBooking[]
+  empColor: (id: number) => string
+  onClose: () => void
+  onPick: (b: AdminBooking) => void
+}) {
+  const [y, m, da] = dateStr.split('-').map(Number)
+  const d = new Date(y, m - 1, da)
+  const list = bookings
+    .filter((b) => b.date === dateStr)
+    .filter((b) => {
+      const s = timeToMin(b.time)
+      return s < hi && s + (b.service_duration || 60) > lo
+    })
+    .sort((a, b) => timeToMin(a.time) - timeToMin(b.time))
+  const title = `${d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })} · ${minToTime(lo)}–${minToTime(hi)}`
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end justify-center" onClick={onClose}>
+      <div className="absolute inset-0" style={{ background: 'rgba(4,9,16,.55)' }} />
+      <div className="sched-peek" onClick={(e) => e.stopPropagation()}>
+        <div className="sched-peek-head">
+          <h3>{title}</h3>
+          <button onClick={onClose} className="sched-iconbtn"><X size={17} /></button>
+        </div>
+        <div className="sched-peek-list">
+          {list.length === 0 ? (
+            <div className="sched-peek-empty">В этом промежутке записей нет</div>
+          ) : list.map((b) => {
+            const sv = statusVar(b.status)
+            const end = calcEndTime(b.time, b.service_duration || 60)
+            return (
+              <button key={b.id} className={`sched-di ${b.status === 'cancelled' ? 'cancelled' : ''}`}
+                style={{ borderLeftColor: `var(--st-${sv})` }}
+                onClick={() => onPick(b)}>
+                <span className="di-time"><span className="t1">{b.time}</span><span className="t2">{b.service_duration || 60} мин</span></span>
+                <span className="di-main">
+                  <span className="di-name">{b.client_name}</span>
+                  <span className="di-svc">{b.service_name}</span>
+                  {b.employee_name && b.employee_id != null && (
+                    <span className="di-emp"><span className="ed" style={{ background: empColor(b.employee_id) }} />{b.employee_name} · {b.time}–{end}</span>
+                  )}
+                </span>
+                <span className="di-badge" style={{ background: `var(--st-${sv}-bg)`, color: `var(--st-${sv})` }}>{STATUS_LABELS[b.status] || b.status}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }
@@ -432,8 +534,7 @@ export function SchedulePage() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null)
   const [pxPerMin, setPxPerMin] = useState(0.8)
   const [search, setSearch] = useState('')
-  const [legendOpen, setLegendOpen] = useState(false)
-  const [summaryOpen, setSummaryOpen] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('schedTheme')
     if (saved === 'dark' || saved === 'light') return saved
@@ -441,9 +542,55 @@ export function SchedulePage() {
     if (tg === 'dark') return 'dark'
     return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
   })
-  const [dragId, setDragId] = useState<number | null>(null)
+  const [daySheet, setDaySheet] = useState<{ dateStr: string; lo: number; hi: number } | null>(null)
+  // живое состояние перетаскивания (день)
+  const [drag, setDrag] = useState<null | {
+    id: number; clientName: string; x: number; y: number; w: number; h: number; grabDY: number; newMin: number; durMin: number
+  }>(null)
+  const [pendingMove, setPendingMove] = useState<null | {
+    id: number; clientName: string; date: string; time: string; employeeId?: number; fromLabel: string; toLabel: string
+  }>(null)
+  const [movingSubmit, setMovingSubmit] = useState(false)
+  const colsRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { localStorage.setItem('schedTheme', theme) }, [theme])
+
+  const WINDOW = 120 // ±минут для панели «записи рядом» в недельном виде
+
+  // ── Pinch-to-zoom (щипком) по таймлайну + Ctrl+колесо на десктопе ──
+  const tlRef = useRef<HTMLDivElement>(null)
+  const pxPerMinRef = useRef(pxPerMin)
+  useEffect(() => { pxPerMinRef.current = pxPerMin }, [pxPerMin])
+  useEffect(() => {
+    const el = tlRef.current
+    if (!el) return
+    const clamp = (v: number) => Math.min(1.8, Math.max(0.35, +v.toFixed(3)))
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+    let base: { d: number; ppm: number } | null = null
+    const onStart = (e: TouchEvent) => { if (e.touches.length === 2) base = { d: dist(e.touches), ppm: pxPerMinRef.current } }
+    const onMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && base) {
+        e.preventDefault()
+        setPxPerMin(clamp(base.ppm * (dist(e.touches) / base.d)))
+      }
+    }
+    const onEnd = (e: TouchEvent) => { if (e.touches.length < 2) base = null }
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      setPxPerMin((p) => clamp(p - e.deltaY * 0.0025))
+    }
+    el.addEventListener('touchstart', onStart, { passive: false })
+    el.addEventListener('touchmove', onMove, { passive: false })
+    el.addEventListener('touchend', onEnd)
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => {
+      el.removeEventListener('touchstart', onStart)
+      el.removeEventListener('touchmove', onMove)
+      el.removeEventListener('touchend', onEnd)
+      el.removeEventListener('wheel', onWheel)
+    }
+  }, [])
 
   const employees = useMemo(
     () => allEmployees.filter((e) => !e.role || e.role === 'master' || e.role === 'master_and_admin'),
@@ -569,6 +716,112 @@ export function SchedulePage() {
     setShowManualBooking(true)
   }
 
+  // ── Pointer-based drag&drop переноса (день): работает и на touch, и мышью ──
+  const beginCardDrag = (e: React.PointerEvent, p: Positioned) => {
+    if (viewMode !== 'day') return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    e.stopPropagation()
+    const el = e.currentTarget as HTMLElement
+    const rect = el.getBoundingClientRect()
+    const grabDY = e.clientY - rect.top
+    const startX = e.clientX, startY = e.clientY
+    const ptrId = e.pointerId
+    const durMin = p.endMin - p.startMin
+    let dragging = false
+    let holdTimer: number | undefined
+
+    const target = (cx: number, cy: number) => {
+      const cont = colsRef.current
+      if (!cont) return { colIndex: 0, newMin: p.startMin }
+      const cr = cont.getBoundingClientRect()
+      const colW = cr.width / Math.max(1, dayColumns.length)
+      const colIndex = Math.max(0, Math.min(dayColumns.length - 1, Math.floor((cx - cr.left) / colW)))
+      const rawMin = DAY_START_H * 60 + (cy - grabDY - cr.top) / pxPerMin
+      const newMin = Math.max(DAY_START_H * 60, Math.min(DAY_END_H * 60 - durMin, Math.round(rawMin / 5) * 5))
+      return { colIndex, newMin }
+    }
+
+    const begin = (cx: number, cy: number) => {
+      dragging = true
+      try { el.setPointerCapture?.(ptrId) } catch { /* noop */ }
+      const t = target(cx, cy)
+      setDrag({ id: p.booking.id, clientName: p.booking.client_name, x: cx, y: cy, w: rect.width, h: rect.height, grabDY, newMin: t.newMin, durMin })
+    }
+
+    const onMove = (ev: PointerEvent) => {
+      const moved = Math.hypot(ev.clientX - startX, ev.clientY - startY)
+      if (!dragging) {
+        if (e.pointerType === 'touch') {
+          // до long-press любое движение = скролл таймлайна → отменяем кандидата
+          if (moved > 10) { cleanup(); }
+          return
+        }
+        if (moved > 5) begin(ev.clientX, ev.clientY); else return
+      }
+      ev.preventDefault()
+      const t = target(ev.clientX, ev.clientY)
+      setDrag((d) => (d ? { ...d, x: ev.clientX, y: ev.clientY, newMin: t.newMin } : d))
+    }
+
+    const onUp = (ev: PointerEvent) => {
+      const wasDragging = dragging
+      cleanup()
+      if (wasDragging) {
+        const t = target(ev.clientX, ev.clientY)
+        const emp = dayColumns[t.colIndex]
+        const dateStr = formatDateISO(dayDate)
+        const empChanged = !!emp && emp.id !== 0 && emp.id !== (p.booking.employee_id || 0)
+        const changed = t.newMin !== p.startMin || empChanged
+        setDrag(null)
+        if (changed) {
+          const wd = dayDate.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })
+          const fromEmp = dayColumns.find((c) => c.id === (p.booking.employee_id || 0))?.name
+          setPendingMove({
+            id: p.booking.id,
+            clientName: p.booking.client_name,
+            date: dateStr,
+            time: minToTime(t.newMin),
+            employeeId: emp?.id || undefined,
+            fromLabel: `${minToTime(p.startMin)}${fromEmp ? `, ${fromEmp}` : ''}`,
+            toLabel: `${wd}, ${minToTime(t.newMin)}${empChanged ? `, ${emp!.name}` : ''}`,
+          })
+        }
+      } else {
+        setSelectedBooking(p.booking)
+      }
+    }
+
+    function cleanup() {
+      dragging = false
+      if (holdTimer) { clearTimeout(holdTimer); holdTimer = undefined }
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+
+    window.addEventListener('pointermove', onMove, { passive: false })
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    if (e.pointerType === 'touch') holdTimer = window.setTimeout(() => begin(startX, startY), 220)
+  }
+
+  const openDayPeek = (dateStr: string, tappedMin: number) => {
+    const lo = Math.max(DAY_START_H * 60, Math.round(tappedMin) - WINDOW)
+    const hi = Math.min(DAY_END_H * 60, Math.round(tappedMin) + WINDOW)
+    setDaySheet({ dateStr, lo, hi })
+  }
+
+  const confirmMove = async () => {
+    if (!pendingMove) return
+    setMovingSubmit(true)
+    try {
+      await doReschedule(pendingMove.id, pendingMove.date, pendingMove.time, pendingMove.employeeId, true)
+    } catch { /* ignore */ } finally {
+      setMovingSubmit(false)
+      setPendingMove(null)
+    }
+  }
+
   // Filtering: by employee + search
   const visibleBookings = useMemo(() => {
     let list = bookings
@@ -602,6 +855,7 @@ export function SchedulePage() {
   }, [bookings])
 
   const colHeight = TOTAL_MIN * pxPerMin
+  const currentBizName = businesses.find((b) => b.id === businessId)?.name
   const todayISO = formatDateISO(new Date())
   const hourMarks = Array.from({ length: DAY_END_H - DAY_START_H + 1 }, (_, i) => DAY_START_H + i)
 
@@ -611,221 +865,238 @@ export function SchedulePage() {
     return base.length > 0 ? base : [{ id: 0, name: 'Расписание' } as Employee]
   }, [employees, selectedEmployeeId])
 
-  return (
-    <div
-      className="sched-root sched-screen flex flex-col overflow-hidden"
-      data-theme={theme}
-      style={{ background: 'var(--s-bg)' }}
-    >
-      {/* Toolbar row 1 */}
-      <div className="flex items-center justify-between gap-2 shrink-0 px-1 pt-1">
-        <BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />
-        <div className="flex items-center gap-2">
-          <div className="tabs-pill shrink-0">
-            <button onClick={() => setViewMode('day')} className={viewMode === 'day' ? 'tab-active' : ''}>День</button>
-            <button onClick={() => setViewMode('week')} className={viewMode === 'week' ? 'tab-active' : ''}>Неделя</button>
-          </div>
-          <button className="sched-iconbtn" onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))} aria-label="Тема">
-            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
-        </div>
-      </div>
+  const showNow =
+    (viewMode === 'day' ? formatDateISO(dayDate) === todayISO : weekOffset === 0) &&
+    nowMin >= DAY_START_H * 60 && nowMin <= DAY_END_H * 60
+  const colCount = viewMode === 'day' ? dayColumns.length : 7
 
-      {/* Toolbar row 2: nav + zoom + search */}
-      <div className="flex items-center gap-1 shrink-0 px-1 mt-1">
-        <button onClick={() => (viewMode === 'week' ? setWeekOffset((w) => w - 1) : setDayOffset((d) => d - 1))} className="sched-iconbtn"><ChevronLeft size={16} /></button>
-        <button onClick={() => { setWeekOffset(0); setDayOffset(0) }} className="text-xs font-semibold px-2 py-1 rounded-lg" style={{ color: 'var(--s-accent)' }}>Сегодня</button>
-        <span className="text-xs font-bold flex-1 text-center truncate" style={{ color: 'var(--s-text)' }}>{viewMode === 'week' ? weekLabel : dayLabel}</span>
-        <button onClick={() => (viewMode === 'week' ? setWeekOffset((w) => w + 1) : setDayOffset((d) => d + 1))} className="sched-iconbtn"><ChevronRight size={16} /></button>
-        <button className="sched-iconbtn" onClick={() => setPxPerMin((z) => Math.max(0.4, +(z - 0.15).toFixed(2)))}><ZoomOut size={14} /></button>
-        <button className="sched-iconbtn" onClick={() => setPxPerMin((z) => Math.min(1.8, +(z + 0.15).toFixed(2)))}><ZoomIn size={14} /></button>
-      </div>
+  return (
+    <div className="sched-root" data-theme={theme}>
+      {/* Header */}
+      <header className="sched-header">
+        <div className="sched-htitle">
+          <h1>Расписание</h1>
+          {currentBizName && <div className="sched-hsub"><span className="dot" />{currentBizName}</div>}
+        </div>
+        <button className="sched-iconbtn bordered" onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))} aria-label="Тема">
+          {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+        </button>
+        <BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />
+      </header>
 
       {/* Search */}
-      <div className="px-1 mt-1 shrink-0 relative">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--s-muted)' }} />
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск: клиент, услуга, телефон"
-          className="sched-input w-full" style={{ paddingLeft: 30 }} />
-      </div>
-
-      {/* Legend + summary toggles */}
-      <div className="px-1 mt-1 shrink-0">
-        <div className="flex gap-2">
-          <button className="sched-chip flex items-center gap-1" onClick={() => setLegendOpen((v) => !v)}>
-            Легенда <ChevronDown size={13} style={{ transform: legendOpen ? 'rotate(180deg)' : '', transition: 'transform .15s' }} />
-          </button>
-          <button className="sched-chip flex items-center gap-1" onClick={() => setSummaryOpen((v) => !v)}>
-            Сводка <ChevronDown size={13} style={{ transform: summaryOpen ? 'rotate(180deg)' : '', transition: 'transform .15s' }} />
-          </button>
+      <div className="sched-toolbar">
+        <div className="sched-search">
+          <Search size={17} />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск по клиенту, услуге, телефону" />
+          {search && <button className="clear" onClick={() => setSearch('')} aria-label="Очистить">×</button>}
         </div>
-        {legendOpen && (
-          <div className="sched-legend mt-2 px-1">
-            {LEGEND_ITEMS.map((it) => (
-              <span className="item" key={it.key}>
-                <span className="dot" style={{ background: `var(--st-${it.key})` }} />{it.label}
-              </span>
-            ))}
-          </div>
-        )}
-        {summaryOpen && (
-          <div className="sched-summary mt-2">
-            <div className="cell"><div className="v">{summary.count}</div><div className="l">записей</div></div>
-            <div className="cell"><div className="v">{summary.revenue.toLocaleString('ru-RU')}₽</div><div className="l">выручка</div></div>
-            <div className="cell"><div className="v">{summary.load}%</div><div className="l">загрузка</div></div>
-          </div>
-        )}
       </div>
 
-      {/* Timeline */}
-      <div className="flex-1 min-h-0 overflow-auto mt-2 px-1 pb-2">
-        {loading && bookings.length === 0 ? (
-          <div className="flex items-center justify-center py-20" style={{ color: 'var(--s-muted)' }}>
-            <Loader2 size={22} className="animate-spin mr-2" /> Загрузка...
+      {/* Control row: режим + листалка дат + сворачивание сводки */}
+      <div className="sched-controls">
+        <div className="sched-seg">
+          <button onClick={() => setViewMode('day')} className={viewMode === 'day' ? 'active' : ''}>День</button>
+          <button onClick={() => setViewMode('week')} className={viewMode === 'week' ? 'active' : ''}>Неделя</button>
+        </div>
+        <div className="sched-stepper">
+          <button onClick={() => (viewMode === 'week' ? setWeekOffset((w) => w - 1) : setDayOffset((d) => d - 1))} className="sched-stepper-nav" aria-label="Назад"><ChevronLeft size={18} /></button>
+          <button className="sched-stepper-label" onClick={() => { setWeekOffset(0); setDayOffset(0) }}>
+            <span className="main">{viewMode === 'week' ? weekLabel : dayLabel}</span>
+          </button>
+          <button onClick={() => (viewMode === 'week' ? setWeekOffset((w) => w + 1) : setDayOffset((d) => d + 1))} className="sched-stepper-nav" aria-label="Вперёд"><ChevronRight size={18} /></button>
+        </div>
+        <button className={`sched-details-toggle ${detailsOpen ? 'open' : ''}`} onClick={() => setDetailsOpen((v) => !v)} aria-label="Сводка и легенда">
+          <ChevronDown size={16} />
+        </button>
+      </div>
+
+      {/* Сводка + легенда (свёрнуты по умолчанию) */}
+      {detailsOpen && (
+        <>
+          <div className="sched-summary">
+            <div className="tile"><div className="num">{summary.count}</div><div className="lbl">записей</div></div>
+            <div className="tile"><div className="num">{summary.revenue.toLocaleString('ru-RU')}</div><div className="lbl">выручка ₽</div></div>
+            <div className="tile"><div className="num">{summary.load}%</div><div className="lbl">загрузка</div></div>
           </div>
-        ) : viewMode === 'day' ? (
-          /* ── DAY ── */
-          <div className="sched-grid" style={{ gridTemplateColumns: `40px repeat(${dayColumns.length}, minmax(100px, 1fr))` }}>
-            {/* header row */}
-            <div className="sched-colhead" style={{ position: 'sticky', left: 0, zIndex: 7 }} />
-            {dayColumns.map((emp) => (
-              <div key={emp.id} className="sched-colhead">{emp.name}</div>
-            ))}
-            {/* body row */}
-            <div className="sched-axis" style={{ height: colHeight }}>
-              {hourMarks.map((h) => (
-                <div key={h} className="sched-axis-tick" style={{ top: (h - DAY_START_H) * 60 * pxPerMin }}>{String(h).padStart(2, '0')}:00</div>
-              ))}
-            </div>
-            {dayColumns.map((emp) => {
-              const dateStr = formatDateISO(dayDate)
-              const colBookings = visibleBookings.filter((b) => b.date === dateStr && (emp.id === 0 || b.employee_id === emp.id))
-              const positioned = layoutColumn(colBookings)
-              const isToday = dateStr === todayISO
-              return (
-                <div
-                  key={emp.id}
-                  className={`sched-col ${dragId !== null ? 'drop-active' : ''}`}
-                  style={{ height: colHeight }}
-                  onClick={(e) => {
-                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                    const min = DAY_START_H * 60 + Math.round(((e.clientY - rect.top) / pxPerMin) / 15) * 15
-                    openNewBooking(dayDate, minToTime(Math.max(DAY_START_H * 60, Math.min(DAY_END_H * 60 - 15, min))))
-                  }}
-                  onDragOver={(e) => { if (dragId !== null) e.preventDefault() }}
-                  onDrop={(e) => {
-                    if (dragId === null) return
-                    e.preventDefault()
-                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                    const rawMin = DAY_START_H * 60 + (e.clientY - rect.top) / pxPerMin
-                    const snapped = Math.round(rawMin / 5) * 5
-                    const id = dragId
-                    setDragId(null)
-                    doReschedule(id, dateStr, minToTime(Math.max(DAY_START_H * 60, Math.min(DAY_END_H * 60 - 15, snapped))), emp.id || undefined, true).catch(() => {})
-                  }}
-                >
-                  {hourMarks.map((h) => <div key={h} className="sched-hourline" style={{ top: (h - DAY_START_H) * 60 * pxPerMin }} />)}
-                  {isToday && nowMin >= DAY_START_H * 60 && nowMin <= DAY_END_H * 60 && (
-                    <div className="sched-now" style={{ top: (nowMin - DAY_START_H * 60) * pxPerMin }} />
-                  )}
-                  {positioned.map((p) => (
-                    <BookingCard
-                      key={p.booking.id}
-                      p={p}
-                      pxPerMin={pxPerMin}
-                      showEmployee={false}
-                      draggable
-                      onDragStart={() => setDragId(p.booking.id)}
-                      onClick={() => setSelectedBooking(p.booking)}
-                    />
-                  ))}
-                </div>
-              )
-            })}
-          </div>
-        ) : (
-          /* ── WEEK ── */
-          <div className="sched-grid" style={{ gridTemplateColumns: `40px repeat(7, minmax(0, 1fr))` }}>
-            <div className="sched-colhead" style={{ position: 'sticky', left: 0, zIndex: 7 }} />
-            {weekDates.map((d, i) => (
-              <div key={i} className={`sched-colhead ${formatDateISO(d) === todayISO ? 'is-today' : ''}`}>
-                <small>{DAYS_SHORT[i]}</small>{d.getDate()}
+          <div className="sched-legend">
+            {LEGEND_ITEMS.map((it) => (
+              <div className="item" key={it.key}>
+                <span className="swatch" style={{ background: `var(--st-${it.key})` }} /><span>{it.label}</span>
               </div>
             ))}
-            <div className="sched-axis" style={{ height: colHeight }}>
-              {hourMarks.map((h) => (
-                <div key={h} className="sched-axis-tick" style={{ top: (h - DAY_START_H) * 60 * pxPerMin }}>{String(h).padStart(2, '0')}</div>
-              ))}
-            </div>
-            {weekDates.map((d, dayIdx) => {
-              const dateStr = formatDateISO(d)
-              const dayBookings = visibleBookings.filter((b) => b.date === dateStr)
-              const overloaded = maxConcurrency(dayBookings) >= 3
-              const isToday = dateStr === todayISO
+          </div>
+        </>
+      )}
+
+      {/* Прилипшая шапка колонок */}
+      <div className="sched-colhead" style={{ gridTemplateColumns: `var(--gutter) repeat(${colCount}, 1fr)` }}>
+        <div />
+        {viewMode === 'day'
+          ? dayColumns.map((emp) => {
+              const dim = selectedEmployeeId !== null && emp.id !== 0 && selectedEmployeeId !== emp.id
               return (
-                <div key={dayIdx} className="sched-col" style={{ height: colHeight }}
-                  onClick={() => dayBookings.length === 0 && openNewBooking(d)}>
-                  {hourMarks.map((h) => <div key={h} className="sched-hourline" style={{ top: (h - DAY_START_H) * 60 * pxPerMin }} />)}
-                  {isToday && nowMin >= DAY_START_H * 60 && nowMin <= DAY_END_H * 60 && (
-                    <div className="sched-now" style={{ top: (nowMin - DAY_START_H * 60) * pxPerMin }} />
-                  )}
-                  {overloaded ? (
-                    <button
-                      className="sched-more"
-                      style={{ top: 4, height: colHeight - 8 }}
-                      onClick={(e) => { e.stopPropagation(); setDayOffset(Math.round((d.getTime() - new Date().setHours(0, 0, 0, 0)) / 86400000)); setViewMode('day') }}
-                    >
-                      {dayBookings.length} записей →
-                    </button>
-                  ) : (
-                    layoutColumn(dayBookings).map((p) => (
-                      <BookingCard
-                        key={p.booking.id}
-                        p={p}
-                        pxPerMin={pxPerMin}
-                        showEmployee
-                        draggable={false}
-                        onClick={() => setSelectedBooking(p.booking)}
-                      />
-                    ))
-                  )}
+                <div key={emp.id} className="sched-emp-cap" style={{ opacity: dim ? 0.35 : 1 }}
+                  onClick={() => emp.id !== 0 && setSelectedEmployeeId(selectedEmployeeId === emp.id ? null : emp.id)}>
+                  <span className="cap" style={{ background: emp.id !== 0 ? empColor(emp.id) : 'var(--s-line-2)' }} />
                 </div>
               )
-            })}
+            })
+          : weekDates.map((d, i) => (
+              <div key={i} className={`sched-wday-head ${formatDateISO(d) === todayISO ? 'today' : ''}`}>
+                <span className="wd">{DAYS_SHORT[i]}</span><span className="dt">{d.getDate()}</span>
+              </div>
+            ))}
+      </div>
+
+      {/* Таймлайн (тело) */}
+      <div className="sched-tl" ref={tlRef}>
+        {loading && bookings.length === 0 ? (
+          <div className="sched-empty"><Loader2 size={22} className="animate-spin" /> Загрузка…</div>
+        ) : (
+          <div className="sched-tl-inner" style={{ height: colHeight, '--pxh': `${(60 * pxPerMin).toFixed(2)}px` } as CSSProperties}>
+            <div className="sched-tl-gutter">
+              {hourMarks.map((h) => (
+                <div key={h} className="sched-tl-hour" style={{ top: (h - DAY_START_H) * 60 * pxPerMin }}>{h}:00</div>
+              ))}
+            </div>
+            <div className="sched-tl-cols" ref={colsRef} style={{ gridTemplateColumns: `repeat(${colCount}, 1fr)` }}>
+              {viewMode === 'day'
+                ? dayColumns.map((emp) => {
+                    const dateStr = formatDateISO(dayDate)
+                    const colBookings = visibleBookings.filter((b) => b.date === dateStr && (emp.id === 0 || b.employee_id === emp.id))
+                    const positioned = layoutColumn(colBookings)
+                    const dim = selectedEmployeeId !== null && emp.id !== 0 && selectedEmployeeId !== emp.id
+                    return (
+                      <div
+                        key={emp.id}
+                        className="sched-tl-col"
+                        style={{ opacity: dim ? 0.32 : 1 }}
+                        onClick={(e) => {
+                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                          const min = DAY_START_H * 60 + Math.round(((e.clientY - rect.top) / pxPerMin) / 15) * 15
+                          openNewBooking(dayDate, minToTime(Math.max(DAY_START_H * 60, Math.min(DAY_END_H * 60 - 15, min))))
+                        }}
+                      >
+                        {positioned.map((p) => (
+                          <BookingCard
+                            key={p.booking.id}
+                            p={p}
+                            pxPerMin={pxPerMin}
+                            showEmployee={false}
+                            dragging={drag?.id === p.booking.id}
+                            onPointerDown={(e) => beginCardDrag(e, p)}
+                          />
+                        ))}
+                      </div>
+                    )
+                  })
+                : weekDates.map((d, dayIdx) => {
+                    const dateStr = formatDateISO(d)
+                    const dayBookings = visibleBookings.filter((b) => b.date === dateStr)
+                    const isToday = dateStr === todayISO
+                    return (
+                      <div key={dayIdx} className={`sched-tl-col ${isToday ? 'today' : ''}`}
+                        style={{ cursor: 'pointer' }}
+                        onClick={(e) => {
+                          if (dayBookings.length === 0) { openNewBooking(d); return }
+                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                          const t = DAY_START_H * 60 + (e.clientY - rect.top) / pxPerMin
+                          openDayPeek(dateStr, t)
+                        }}>
+                        {layoutColumn(dayBookings).map((p) => (
+                          <BookingCard
+                            key={p.booking.id}
+                            p={p}
+                            pxPerMin={pxPerMin}
+                            showEmployee
+                          />
+                        ))}
+                      </div>
+                    )
+                  })}
+            </div>
+            {showNow && (
+              <div className="sched-now" style={{ top: (nowMin - DAY_START_H * 60) * pxPerMin }}>
+                <div className="bar" /><div className="knob" />
+                {viewMode === 'day' && <div className="lbl">{minToTime(nowMin)}</div>}
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Employee filter + FAB */}
+      {/* Чипы-фильтры мастеров */}
       {employees.length > 0 && (
-        <div className="shrink-0 border-t pt-2 pb-1" style={{ borderColor: 'var(--s-line)', background: 'var(--s-surface)' }}>
-          <div className="overflow-x-auto scrollbar-hide px-2">
-            <div className="flex gap-2 items-center">
-              <button onClick={() => setSelectedEmployeeId(null)} className={`sched-chip ${selectedEmployeeId === null ? 'active' : ''}`}>Все</button>
-              {employees.map((emp) => {
-                const col = empColor(emp.id)
-                const active = selectedEmployeeId === emp.id
-                return (
-                  <button
-                    key={emp.id}
-                    onClick={() => setSelectedEmployeeId(active ? null : emp.id)}
-                    className="sched-chip inline-flex items-center"
-                    style={active ? { background: col, color: '#fff', borderColor: col } : { borderColor: col, color: col }}
-                  >
-                    <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: active ? '#fff' : col, marginRight: 6 }} />
-                    {emp.name}
-                  </button>
-                )
-              })}
-              {businessId && (
-                <button onClick={() => openNewBooking(viewMode === 'week' ? new Date() : dayDate)}
-                  className="flex-shrink-0 ml-auto w-9 h-9 rounded-full text-white shadow-md flex items-center justify-center active:scale-95 transition-transform"
-                  style={{ background: 'var(--s-accent)' }} aria-label="Записать клиента">
-                  <Plus size={18} strokeWidth={2.5} />
-                </button>
-              )}
-            </div>
-          </div>
+        <div className="sched-chips">
+          <button onClick={() => setSelectedEmployeeId(null)} className={`sched-chip ${selectedEmployeeId === null ? 'active' : ''}`}>Все</button>
+          {employees.map((emp) => {
+            const col = empColor(emp.id)
+            const active = selectedEmployeeId === emp.id
+            return (
+              <button
+                key={emp.id}
+                onClick={() => setSelectedEmployeeId(active ? null : emp.id)}
+                className={`sched-chip ${active ? 'active' : ''}`}
+                style={active ? { background: col, borderColor: col, color: '#04121f' } : undefined}
+              >
+                {!active && <span className="chip-dot" style={{ background: col }} />}
+                {emp.name}
+              </button>
+            )
+          })}
         </div>
+      )}
+
+      {/* Нижняя навигация (как в архиве) */}
+      <nav className="sched-bottomnav">
+        <Link to="/admin" className="sched-bn"><LayoutDashboard size={21} /><span>Панель</span></Link>
+        <Link to="/admin/schedule" className="sched-bn active"><Clock size={21} /><span>Расписание</span></Link>
+        <Link to="/admin/services" className="sched-bn"><Scissors size={21} /><span>Услуги</span></Link>
+        <Link to="/admin/employees" className="sched-bn"><Users size={21} /><span>Мастера</span></Link>
+        <Link to="/admin/settings" className="sched-bn"><Settings size={21} /><span>Настройки</span></Link>
+      </nav>
+
+      {/* FAB — крупная плавающая кнопка (как в архиве) */}
+      {businessId && (
+        <button onClick={() => openNewBooking(viewMode === 'week' ? new Date() : dayDate)}
+          className="sched-fab" aria-label="Записать клиента">
+          <Plus size={26} strokeWidth={2.4} />
+        </button>
+      )}
+
+      {/* Гхост при перетаскивании */}
+      {drag && (
+        <div className="sched-drag-ghost" style={{
+          position: 'fixed', left: drag.x + 10, top: drag.y - drag.grabDY,
+          width: drag.w, height: drag.h, pointerEvents: 'none', zIndex: 80,
+        }}>
+          <div className="c-name">{drag.clientName}</div>
+          <div className="c-sub">{minToTime(drag.newMin)}–{minToTime(drag.newMin + drag.durMin)}</div>
+        </div>
+      )}
+
+      {daySheet && (
+        <DayPeekSheet
+          dateStr={daySheet.dateStr}
+          lo={daySheet.lo}
+          hi={daySheet.hi}
+          bookings={visibleBookings}
+          empColor={empColor}
+          onClose={() => setDaySheet(null)}
+          onPick={(b) => { setDaySheet(null); setSelectedBooking(b) }}
+        />
+      )}
+
+      {pendingMove && (
+        <ConfirmMoveModal
+          clientName={pendingMove.clientName}
+          fromLabel={pendingMove.fromLabel}
+          toLabel={pendingMove.toLabel}
+          submitting={movingSubmit}
+          onCancel={() => setPendingMove(null)}
+          onConfirm={confirmMove}
+        />
       )}
 
       {selectedBooking && (
