@@ -42,6 +42,7 @@ from ..schemas import (
     AnalyticsOverviewOut,
     ManualBookingIn,
     UpdateBookingStatusIn,
+    AdminRescheduleIn,
     OwnerOut,
     OwnerAddIn,
     TimePricingCreateIn,
@@ -81,6 +82,7 @@ def _admin_booking_out(b: Booking) -> AdminBookingOut:
         client_phone=b.client.phone if b.client else None,
         service_name=b.service.name if b.service else "",
         service_duration=b.service.duration_minutes if b.service else None,
+        price=b.service.price if b.service else None,
         employee_name=b.employee.name if b.employee else None,
         employee_id=b.employee.id if b.employee else None,
         date=b.booking_date,
@@ -569,6 +571,88 @@ async def update_booking_status(
     await db.commit()
     await db.refresh(booking)
 
+    return _admin_booking_out(booking)
+
+
+# ---------- POST /admin/bookings/{id}/reschedule ----------
+
+@router.post("/bookings/{booking_id}/reschedule", response_model=AdminBookingOut)
+async def admin_reschedule_booking(
+    booking_id: int,
+    data: AdminRescheduleIn,
+    user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Перенос записи владельцем/админом (drag&drop или кнопка «Перенести»)."""
+    biz_ids = await _get_owner_business_ids(db, user)
+
+    result = await db.execute(
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(
+            selectinload(Booking.client),
+            selectinload(Booking.service),
+            selectinload(Booking.employee),
+        )
+    )
+    booking = result.scalar_one_or_none()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.business_id not in biz_ids:
+        raise HTTPException(status_code=403, detail="Not your business")
+    if booking.status not in ("pending", "confirmed"):
+        raise HTTPException(status_code=400, detail="Эту запись нельзя перенести")
+
+    # Parse target slot
+    try:
+        h, m = map(int, data.time.split(":"))
+        new_time = dt_time(h, m)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="Invalid time")
+
+    duration = booking.service.duration_minutes if booking.service else 30
+    slot_start = datetime.combine(data.date, new_time)
+    slot_end = slot_start + timedelta(minutes=duration or 30)
+    target_employee_id = data.employee_id if data.employee_id is not None else booking.employee_id
+
+    # Проверка пересечений с другими записями этого сотрудника
+    if target_employee_id:
+        result = await db.execute(
+            select(Booking)
+            .where(
+                and_(
+                    Booking.business_id == booking.business_id,
+                    Booking.employee_id == target_employee_id,
+                    Booking.booking_date == data.date,
+                    Booking.status.in_(["pending", "confirmed"]),
+                    Booking.id != booking.id,
+                )
+            )
+            .options(selectinload(Booking.service))
+        )
+        for eb in result.scalars().all():
+            eb_start = datetime.combine(data.date, eb.booking_time)
+            eb_dur = (eb.service.duration_minutes if eb.service else 30) or 30
+            eb_end = eb_start + timedelta(minutes=eb_dur)
+            if not (slot_end <= eb_start or slot_start >= eb_end):
+                raise HTTPException(status_code=409, detail="На это время уже есть запись")
+
+    booking.booking_date = data.date
+    booking.booking_time = new_time
+    if data.employee_id is not None:
+        booking.employee_id = target_employee_id
+    await db.commit()
+
+    result = await db.execute(
+        select(Booking)
+        .where(Booking.id == booking.id)
+        .options(
+            selectinload(Booking.client),
+            selectinload(Booking.service),
+            selectinload(Booking.employee),
+        )
+    )
+    booking = result.scalar_one()
     return _admin_booking_out(booking)
 
 

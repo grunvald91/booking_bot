@@ -203,6 +203,7 @@ class AdminBookingOut(BaseModel):
     client_phone: Optional[str] = None
     service_name: str
     service_duration: Optional[int] = None
+    price: Optional[int] = None
     employee_name: Optional[str] = None
     employee_id: Optional[int] = None
     date: date
@@ -225,6 +226,13 @@ class ManualBookingIn(BaseModel):
 
 class UpdateBookingStatusIn(BaseModel):
     status: str  # confirmed, completed, cancelled
+
+
+class AdminRescheduleIn(BaseModel):
+    """Перенос записи владельцем/админом (drag&drop в расписании)."""
+    date: date
+    time: str
+    employee_id: Optional[int] = None  # необязательно: перенос на другого мастера/зал
 
 
 class AnalyticsPointOut(BaseModel):
