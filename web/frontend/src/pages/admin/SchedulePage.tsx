@@ -29,6 +29,9 @@ const DAY_START_H = 8
 const DAY_END_H = 22
 const TOTAL_MIN = (DAY_END_H - DAY_START_H) * 60
 
+// Палитра цветов мастеров (для цветных кнопок-фильтров)
+const MASTER_COLORS = ['#2f5beb', '#e0533a', '#1b9e54', '#c98a16', '#7c3aed', '#0ea5b7', '#d6457e', '#5b7c0a', '#0f766e', '#9333ea']
+
 const STATUS_LABELS: Record<string, string> = {
   pending: 'Ожидает',
   confirmed: 'Подтверждено',
@@ -447,6 +450,14 @@ export function SchedulePage() {
     [allEmployees]
   )
 
+  const empColor = useCallback(
+    (id: number) => {
+      const i = employees.findIndex((e) => e.id === id)
+      return MASTER_COLORS[(i < 0 ? 0 : i) % MASTER_COLORS.length]
+    },
+    [employees]
+  )
+
   const weekDates = useMemo(() => {
     const monday = getMonday(new Date())
     monday.setDate(monday.getDate() + weekOffset * 7)
@@ -602,9 +613,9 @@ export function SchedulePage() {
 
   return (
     <div
-      className="sched-root flex flex-col"
+      className="sched-root sched-screen flex flex-col overflow-hidden"
       data-theme={theme}
-      style={{ height: 'calc(100dvh - 120px - env(safe-area-inset-bottom, 0px))', background: 'var(--s-bg)' }}
+      style={{ background: 'var(--s-bg)' }}
     >
       {/* Toolbar row 1 */}
       <div className="flex items-center justify-between gap-2 shrink-0 px-1 pt-1">
@@ -673,7 +684,7 @@ export function SchedulePage() {
           </div>
         ) : viewMode === 'day' ? (
           /* ── DAY ── */
-          <div className="sched-grid" style={{ gridTemplateColumns: `44px repeat(${dayColumns.length}, minmax(120px, 1fr))` }}>
+          <div className="sched-grid" style={{ gridTemplateColumns: `40px repeat(${dayColumns.length}, minmax(100px, 1fr))` }}>
             {/* header row */}
             <div className="sched-colhead" style={{ position: 'sticky', left: 0, zIndex: 7 }} />
             {dayColumns.map((emp) => (
@@ -733,7 +744,7 @@ export function SchedulePage() {
           </div>
         ) : (
           /* ── WEEK ── */
-          <div className="sched-grid" style={{ gridTemplateColumns: `44px repeat(7, minmax(96px, 1fr))` }}>
+          <div className="sched-grid" style={{ gridTemplateColumns: `40px repeat(7, minmax(0, 1fr))` }}>
             <div className="sched-colhead" style={{ position: 'sticky', left: 0, zIndex: 7 }} />
             {weekDates.map((d, i) => (
               <div key={i} className={`sched-colhead ${formatDateISO(d) === todayISO ? 'is-today' : ''}`}>
@@ -790,9 +801,21 @@ export function SchedulePage() {
           <div className="overflow-x-auto scrollbar-hide px-2">
             <div className="flex gap-2 items-center">
               <button onClick={() => setSelectedEmployeeId(null)} className={`sched-chip ${selectedEmployeeId === null ? 'active' : ''}`}>Все</button>
-              {employees.map((emp) => (
-                <button key={emp.id} onClick={() => setSelectedEmployeeId(emp.id)} className={`sched-chip ${selectedEmployeeId === emp.id ? 'active' : ''}`}>{emp.name}</button>
-              ))}
+              {employees.map((emp) => {
+                const col = empColor(emp.id)
+                const active = selectedEmployeeId === emp.id
+                return (
+                  <button
+                    key={emp.id}
+                    onClick={() => setSelectedEmployeeId(active ? null : emp.id)}
+                    className="sched-chip inline-flex items-center"
+                    style={active ? { background: col, color: '#fff', borderColor: col } : { borderColor: col, color: col }}
+                  >
+                    <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: active ? '#fff' : col, marginRight: 6 }} />
+                    {emp.name}
+                  </button>
+                )
+              })}
               {businessId && (
                 <button onClick={() => openNewBooking(viewMode === 'week' ? new Date() : dayDate)}
                   className="flex-shrink-0 ml-auto w-9 h-9 rounded-full text-white shadow-md flex items-center justify-center active:scale-95 transition-transform"

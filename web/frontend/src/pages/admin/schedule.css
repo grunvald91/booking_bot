@@ -4,6 +4,11 @@
    Скоуп .sched-* не задевает остальные страницы SPA.
    ───────────────────────────────────────────────────────────────────────── */
 
+/* Высота экрана расписания = вьюпорт минус шапка(~117) + отступ main(24) + нижняя
+   навигация(~60). В Telegram mini-app добавляется padding-top:60 у body — учитываем. */
+.sched-screen { height: calc(100dvh - 205px - env(safe-area-inset-bottom, 0px)); }
+html.tg-webapp .sched-screen { height: calc(100dvh - 265px - env(safe-area-inset-bottom, 0px)); }
+
 .sched-root {
   --s-bg: #f4f6fa;
   --s-surface: #ffffff;
