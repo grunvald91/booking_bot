@@ -20,6 +20,7 @@ from ..database import (
     VenueTimePricing, Subscription, SubscriptionService, EmployeeService,
 )
 from ..deps import get_current_admin
+from ..booking_utils import compute_recurring_dates
 from ..schemas import (
     BusinessOut,
     BusinessUpdateIn,
@@ -483,18 +484,49 @@ async def analytics_overview(
 
 # ---------- POST /admin/bookings (manual booking) ----------
 
-@router.post("/bookings", response_model=AdminBookingOut)
+@router.post("/bookings", response_model=List[AdminBookingOut])
 async def create_manual_booking(
     data: ManualBookingIn,
     user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a booking on behalf of a client (manual booking by owner)."""
+    """Create a booking on behalf of a client (manual booking by owner).
+
+    Поддерживает data.repeat_weeks (2-8) — еженедельный повтор. Атомарно:
+    если конфликтует хоть одна из дат повтора, не создаётся ничего. Без
+    repeat_weeks поведение не меняется (одна запись, без проверки конфликта —
+    админ уже свёрился с расписанием визуально при клике по календарю)."""
     biz_ids = await _get_owner_business_ids(db, user)
     if data.business_id not in biz_ids:
         raise HTTPException(status_code=403, detail="Not your business")
 
-    # Get or create a guest user for the client
+    # Parse time
+    from datetime import time as dt_time
+    h, m = map(int, data.time.split(":"))
+    booking_time = dt_time(h, m)
+
+    occurrence_dates = compute_recurring_dates(data.date, data.repeat_weeks or 1)
+
+    # Проверка конфликтов по всем датам ТОЛЬКО при повторе — за 8 недель вперёд
+    # визуально свериться с расписанием нереально, в отличие от одиночного клика.
+    if len(occurrence_dates) > 1:
+        conflicts = []
+        for occ_date in occurrence_dates:
+            conflict_filter = [
+                Booking.business_id == data.business_id,
+                Booking.booking_date == occ_date,
+                Booking.booking_time == booking_time,
+                Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"]),
+            ]
+            if data.employee_id:
+                conflict_filter.append(Booking.employee_id == data.employee_id)
+            conflict_result = await db.execute(select(Booking).where(and_(*conflict_filter)))
+            if conflict_result.scalar_one_or_none():
+                conflicts.append(f"{occ_date.strftime('%d.%m')} {data.time}")
+        if conflicts:
+            raise HTTPException(status_code=409, detail="Занято: " + ", ".join(conflicts))
+
+    # Get or create a guest user for the client (один клиент на всю серию)
     import time as time_module
     guest_telegram_id = -int(time_module.time() * 1000)
     guest_user = User(
@@ -505,36 +537,37 @@ async def create_manual_booking(
     db.add(guest_user)
     await db.flush()
 
-    # Parse time
-    from datetime import time as dt_time
-    h, m = map(int, data.time.split(":"))
-    booking_time = dt_time(h, m)
+    created_ids = []
+    for occ_date in occurrence_dates:
+        booking = Booking(
+            business_id=data.business_id,
+            client_id=guest_user.id,
+            service_id=data.service_id,
+            employee_id=data.employee_id,
+            booking_date=occ_date,
+            booking_time=booking_time,
+            status="confirmed",
+            notes=data.notes,
+        )
+        db.add(booking)
+        await db.flush()
+        created_ids.append(booking.id)
 
-    booking = Booking(
-        business_id=data.business_id,
-        client_id=guest_user.id,
-        service_id=data.service_id,
-        employee_id=data.employee_id,
-        booking_date=data.date,
-        booking_time=booking_time,
-        status="confirmed",
-        notes=data.notes,
-    )
-    db.add(booking)
     await db.commit()
 
     # Reload with relationships
     result = await db.execute(
         select(Booking)
-        .where(Booking.id == booking.id)
+        .where(Booking.id.in_(created_ids))
         .options(
             selectinload(Booking.client),
             selectinload(Booking.service),
             selectinload(Booking.employee),
         )
+        .order_by(Booking.booking_date)
     )
-    booking = result.scalar_one()
-    return _admin_booking_out(booking)
+    bookings = result.scalars().all()
+    return [_admin_booking_out(b) for b in bookings]
 
 
 # ---------- PATCH /admin/bookings/{id}/status ----------
