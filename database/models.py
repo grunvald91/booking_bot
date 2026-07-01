@@ -213,6 +213,10 @@ class Booking(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     version: Mapped[int] = mapped_column(Integer, default=1)  # Для оптимистичной блокировки
 
+    # Deep-link secret для подключения анонимного web-клиента к боту:
+    # фронт показывает t.me/<bot>?start=notify_<token>, при /start клиент привязывается.
+    notify_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+
     # Связь с использованием абонемента (если запись оплачена по абонементу)
     subscription_usage_id: Mapped[Optional[int]] = mapped_column(ForeignKey("subscription_usages.id", ondelete="SET NULL"), nullable=True)
 
@@ -268,6 +272,7 @@ class Subscription(Base):
     rules: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Правила применения
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ai_instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # AI-инструкция
 
     # Связи
     business: Mapped["Business"] = relationship(back_populates="subscriptions")
@@ -331,3 +336,14 @@ class SubscriptionUsage(Base):
         foreign_keys="[SubscriptionUsage.booking_id]",
         uselist=False
     )
+
+
+class AuthPhoneCode(Base):
+    """Одноразовые SMS-коды для phone-login.
+    Заменяет in-memory _pending_codes в web/api/routes/auth.py — переживает рестарты API."""
+    __tablename__ = "auth_phone_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    phone: Mapped[str] = mapped_column(String(32), index=True)
+    code: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
