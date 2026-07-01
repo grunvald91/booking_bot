@@ -32,11 +32,11 @@
   --s-line-2: #d8dee7;
   --s-grid: #eceff4;
 
-  /* Акцент */
-  --s-accent: #2ea6ff;
-  --s-accent-press: #2a7cf0;
-  --s-accent-ink: #04121f;            /* текст на акценте */
-  --s-accent-soft: rgba(46, 166, 255, 0.12);
+  /* Акцент (цвета логотипа ServGo) */
+  --s-accent: #2F5BEB;
+  --s-accent-press: #244BD6;
+  --s-accent-ink: #FFFFFF;            /* текст на акценте */
+  --s-accent-soft: rgba(47, 91, 235, 0.12);
 
   /* Семантика */
   --s-success: #1f9e4e;
@@ -82,10 +82,10 @@
   --s-line-2: #243043;
   --s-grid: #18222f;
 
-  --s-accent: #2ea6ff;
-  --s-accent-press: #2a7cf0;
-  --s-accent-ink: #04121f;
-  --s-accent-soft: rgba(46, 166, 255, 0.16);
+  --s-accent: #7FA0FF;
+  --s-accent-press: #6B8FEF;
+  --s-accent-ink: #0D1B2A;
+  --s-accent-soft: rgba(127, 160, 255, 0.18);
 
   --s-success: #30d158;
   --s-warning: #f5a623;
@@ -93,7 +93,7 @@
   --s-now: #ff5a5f;
 
   --st-pending: #f5a623;   --st-pending-bg: rgba(245, 166, 35, 0.15);
-  --st-confirmed: #2ea6ff; --st-confirmed-bg: rgba(46, 166, 255, 0.15);
+  --st-confirmed: #7FA0FF; --st-confirmed-bg: rgba(127, 160, 255, 0.15);
   --st-completed: #30d158; --st-completed-bg: rgba(48, 209, 88, 0.15);
   --st-cancelled: #8d99a8; --st-cancelled-bg: rgba(141, 153, 168, 0.15);
   --st-prepay: #a78bfa;    --st-prepay-bg: rgba(167, 139, 250, 0.16);
@@ -167,8 +167,8 @@ html.tg-webapp .ds-screen { top: 60px; }
   width: 54px; height: 54px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   border: none; cursor: pointer; color: #fff;
-  background: linear-gradient(150deg, #37b0ff, var(--s-accent-press));
-  box-shadow: 0 14px 28px -8px rgba(46, 166, 255, 0.55);
+  background: linear-gradient(150deg, var(--s-accent), var(--s-accent-press));
+  box-shadow: 0 14px 28px -8px rgba(47, 91, 235, 0.55);
   transition: transform 0.12s ease;
 }
 .ds-fab:hover { transform: translateY(-2px); }

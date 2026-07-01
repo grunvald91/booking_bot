@@ -14,39 +14,40 @@ import {
 import { hapticSelection, hapticSuccess } from '../../utils/telegram'
 import { api } from '../../api/client'
 import type { SubscriptionPlan, ClientSubscription, BusinessDetail } from '../../api/client'
+import { ClientShell } from '../../components/ClientShell'
 
 // ── Status config ──
 
 const statusMap: Record<
   string,
-  { label: string; icon: typeof CheckCircle; className: string }
+  { label: string; icon: typeof CheckCircle; badgeClass: string }
 > = {
   active: {
     label: 'Активен',
     icon: CheckCircle,
-    className: 'text-green-700 bg-green-50 border border-green-200',
+    badgeClass: 'ds-badge--completed',
   },
   expired: {
     label: 'Истёк',
     icon: XCircle,
-    className: 'text-red-700 bg-red-50 border border-red-200',
+    badgeClass: 'ds-badge--cancelled',
   },
   waiting_confirmation: {
     label: 'Ожидает подтверждения',
     icon: AlertCircle,
-    className: 'text-yellow-700 bg-yellow-50 border border-yellow-200',
+    badgeClass: 'ds-badge--pending',
   },
   pending_payment: {
     label: 'Ожидает оплаты',
     icon: AlertCircle,
-    className: 'text-yellow-700 bg-yellow-50 border border-yellow-200',
+    badgeClass: 'ds-badge--pending',
   },
 }
 
 const defaultStatus = {
   label: 'Неизвестно',
   icon: AlertCircle,
-  className: 'text-gray-700 bg-gray-50 border border-gray-200',
+  badgeClass: 'ds-badge--cancelled',
 }
 
 // ── Helpers ──
@@ -144,35 +145,40 @@ function PurchaseModal({
   const totalSessions = getTotalSessions(subscription)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 animate-fade-in">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-1 text-apple-gray hover:text-apple-text transition-colors"
-        >
-          <X size={20} />
-        </button>
-
-        <div className="mb-5">
-          <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center mb-4">
-            <CreditCard size={28} className="text-apple-blue" />
+    <div className="ds-sheet-ov" onClick={onClose}>
+      <div className="ds-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="ds-sheet-grip" />
+        <div className="ds-sheet-head">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div
+              style={{
+                width: 48, height: 48, borderRadius: 14, flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--s-accent-soft)',
+              }}
+            >
+              <CreditCard size={24} style={{ color: 'var(--s-accent)' }} />
+            </div>
+            <div>
+              <h3>{subscription.name}</h3>
+              <p style={{ fontSize: 20, fontWeight: 750, color: 'var(--s-text)', margin: '2px 0 0' }}>
+                {formatPrice(subscription.price)} ₽
+              </p>
+              {totalSessions > 0 && (
+                <p className="ds-sub" style={{ marginTop: 2 }}>
+                  {totalSessions >= 999 ? 'Безлимит' : formatSessions(totalSessions)} / {formatDays(subscription.validity_days)}
+                </p>
+              )}
+            </div>
           </div>
-          <h3 className="text-lg font-semibold text-apple-text mb-1">
-            {subscription.name}
-          </h3>
-          <p className="text-2xl font-bold text-apple-text">
-            {formatPrice(subscription.price)} {'\u20BD'}
-          </p>
-          {totalSessions > 0 && (
-            <p className="text-sm text-apple-gray mt-1">
-              {totalSessions >= 999 ? 'Безлимит' : formatSessions(totalSessions)} / {formatDays(subscription.validity_days)}
-            </p>
-          )}
+          <button className="ds-icon-btn" onClick={onClose} aria-label="Закрыть">
+            <X size={20} />
+          </button>
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl p-3 mb-4">
+          <div className="ds-error">
+            <AlertCircle size={14} />
             {error}
           </div>
         )}
@@ -180,22 +186,22 @@ function PurchaseModal({
         {step === 'confirm' && (
           <>
             {subscription.services && subscription.services.length > 0 && (
-              <div className="bg-apple-bg rounded-xl p-4 mb-5">
-                <p className="text-sm font-medium text-apple-text mb-2">Включено:</p>
-                <ul className="space-y-1">
+              <div style={{ background: 'var(--s-surface-2)', borderRadius: 'var(--r-lg)', padding: 14, marginBottom: 16 }}>
+                <p className="ds-text" style={{ fontWeight: 650, marginBottom: 8 }}>Включено:</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {subscription.services.map((s) => (
-                    <li key={s.id} className="text-sm text-apple-gray flex justify-between">
+                    <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--s-muted)' }}>
                       <span>{s.name}</span>
-                      <span className="font-medium text-apple-text">{s.quantity} шт.</span>
-                    </li>
+                      <span style={{ fontWeight: 650, color: 'var(--s-text)' }}>{s.quantity} шт.</span>
+                    </div>
                   ))}
-                </ul>
+                </div>
               </div>
             )}
             <button
               onClick={handleBuy}
               disabled={buying}
-              className="w-full py-3 rounded-2xl text-sm font-semibold bg-apple-blue text-white hover:bg-apple-blue-hover transition-all duration-200 min-h-[44px] disabled:opacity-50"
+              className="ds-btn ds-btn--primary ds-btn--block"
             >
               {buying ? 'Оформление...' : 'Купить абонемент'}
             </button>
@@ -204,28 +210,28 @@ function PurchaseModal({
 
         {step === 'payment' && (
           <>
-            <div className="bg-apple-bg rounded-xl p-4 mb-5 space-y-2">
-              <p className="text-sm font-medium text-apple-text mb-2">Реквизиты для оплаты:</p>
-              <div className="text-sm text-apple-gray">
+            <div style={{ background: 'var(--s-surface-2)', borderRadius: 'var(--r-lg)', padding: 14, marginBottom: 16 }}>
+              <p className="ds-text" style={{ fontWeight: 650, marginBottom: 8 }}>Реквизиты для оплаты:</p>
+              <div className="ds-sub">
                 {businessDetail?.payment_phone ? (
                   <>
-                    <p>Перевод по номеру телефона:</p>
-                    <p className="font-semibold text-apple-text mt-1">{businessDetail.payment_phone}</p>
+                    <p style={{ margin: 0 }}>Перевод по номеру телефона:</p>
+                    <p style={{ fontWeight: 650, color: 'var(--s-text)', marginTop: 4 }}>{businessDetail.payment_phone}</p>
                   </>
                 ) : null}
                 {businessDetail?.payment_details ? (
                   <>
-                    <p className={businessDetail?.payment_phone ? 'mt-2' : ''}>
+                    <p style={{ margin: businessDetail?.payment_phone ? '8px 0 0' : 0 }}>
                       {businessDetail?.payment_phone ? 'Или реквизиты:' : 'Реквизиты для оплаты:'}
                     </p>
-                    <p className="font-semibold text-apple-text mt-1">{businessDetail.payment_details}</p>
+                    <p style={{ fontWeight: 650, color: 'var(--s-text)', marginTop: 4 }}>{businessDetail.payment_details}</p>
                   </>
                 ) : null}
                 {!businessDetail?.payment_phone && !businessDetail?.payment_details && (
-                  <p>Свяжитесь с компанией для уточнения реквизитов оплаты.</p>
+                  <p style={{ margin: 0 }}>Свяжитесь с компанией для уточнения реквизитов оплаты.</p>
                 )}
               </div>
-              <p className="text-xs text-apple-gray mt-3">
+              <p className="ds-caption" style={{ marginTop: 10 }}>
                 В комментарии к переводу укажите ваше имя и название абонемента
               </p>
             </div>
@@ -233,7 +239,7 @@ function PurchaseModal({
             <button
               onClick={handlePaymentSent}
               disabled={sending}
-              className="w-full py-3 rounded-2xl text-sm font-semibold bg-apple-blue text-white hover:bg-apple-blue-hover transition-all duration-200 min-h-[44px] disabled:opacity-50"
+              className="ds-btn ds-btn--primary ds-btn--block"
             >
               {sending ? 'Отправка...' : 'Оплата отправлена'}
             </button>
@@ -241,9 +247,9 @@ function PurchaseModal({
         )}
 
         {step === 'sent' && (
-          <div className="text-center py-3">
-            <CheckCircle size={24} className="text-green-500 mx-auto mb-2" />
-            <p className="text-sm font-medium text-apple-text">
+          <div style={{ textAlign: 'center', padding: '12px 0' }}>
+            <CheckCircle size={28} style={{ color: 'var(--s-success)', margin: '0 auto 8px' }} />
+            <p className="ds-text" style={{ fontWeight: 650 }}>
               Запрос отправлен! Ожидайте подтверждения.
             </p>
           </div>
@@ -340,49 +346,43 @@ export function SubscriptionsPage() {
   // ── Loading ──
   if (loading) {
     return (
-      <div className="max-w-lg mx-auto space-y-4 pb-20">
-        <div className="h-8 w-48 skeleton mb-6" />
-        <div className="h-12 skeleton rounded-2xl mb-4" />
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="h-48 skeleton rounded-2xl" />
-        ))}
-      </div>
+      <ClientShell title="Абонементы">
+        <div style={{ marginTop: 4 }}>
+          <div className="skeleton" style={{ height: 40, borderRadius: 10, marginBottom: 16 }} />
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="skeleton" style={{ height: 180, borderRadius: 14, marginBottom: 10 }} />
+          ))}
+        </div>
+      </ClientShell>
     )
   }
 
   return (
-    <div className="max-w-lg mx-auto pb-20 md:pb-8">
-      <h1 className="text-2xl font-bold text-apple-text mb-6">Абонементы</h1>
-
+    <ClientShell title="Абонементы">
       {/* Tabs */}
-      <div className="flex bg-apple-bg rounded-2xl p-1 mb-6">
+      <div className="ds-seg ds-seg--full" style={{ marginTop: 4, marginBottom: 16 }}>
         <button
+          className={activeTab === 'available' ? 'on' : ''}
           onClick={() => {
             hapticSelection()
             setActiveTab('available')
           }}
-          className={`flex-1 py-2.5 text-sm font-semibold rounded-xl transition-all duration-200 min-h-[44px] ${
-            activeTab === 'available'
-              ? 'bg-white text-apple-text shadow-sm'
-              : 'text-apple-gray'
-          }`}
         >
           Доступные
         </button>
         <button
+          className={activeTab === 'my' ? 'on' : ''}
           onClick={() => {
             hapticSelection()
             setActiveTab('my')
           }}
-          className={`flex-1 py-2.5 text-sm font-semibold rounded-xl transition-all duration-200 min-h-[44px] ${
-            activeTab === 'my'
-              ? 'bg-white text-apple-text shadow-sm'
-              : 'text-apple-gray'
-          }`}
         >
           Мои
           {mySubscriptions.length > 0 && (
-            <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 text-[11px] font-bold bg-apple-blue text-white rounded-full">
+            <span
+              className="ds-badge"
+              style={{ marginLeft: 6, background: 'var(--s-accent)', color: 'var(--s-accent-ink)' }}
+            >
               {mySubscriptions.length}
             </span>
           )}
@@ -391,23 +391,30 @@ export function SubscriptionsPage() {
 
       {/* Error state */}
       {error && activeTab === 'available' && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl p-4 mb-4">
+        <div className="ds-error">
+          <AlertCircle size={14} />
           {error}
         </div>
       )}
 
       {/* Available subscriptions tab */}
       {activeTab === 'available' && !error && (
-        <div className="space-y-4 animate-fade-in">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {subscriptions.length === 0 ? (
-            <div className="text-center py-20">
-              <div className="w-16 h-16 bg-apple-bg rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <Package size={28} className="text-apple-gray" />
+            <div style={{ textAlign: 'center', padding: '64px 0' }}>
+              <div
+                style={{
+                  width: 56, height: 56, borderRadius: 16, margin: '0 auto 14px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'var(--s-surface-2)',
+                }}
+              >
+                <Package size={26} style={{ color: 'var(--s-muted)' }} />
               </div>
-              <h2 className="text-xl font-semibold text-apple-text mb-2">
+              <h2 className="ds-h2" style={{ marginBottom: 6 }}>
                 Нет доступных абонементов
               </h2>
-              <p className="text-apple-gray">
+              <p className="ds-sub">
                 Абонементы пока не добавлены
               </p>
             </div>
@@ -415,49 +422,46 @@ export function SubscriptionsPage() {
             subscriptions.map((sub) => {
               const totalSessions = getTotalSessions(sub)
               return (
-                <div
-                  key={sub.id}
-                  className="bg-white rounded-2xl shadow-sm border border-apple-border/50 p-5 transition-all duration-200"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-apple-text">{sub.name}</h3>
+                <div key={sub.id} className="ds-card" style={{ padding: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <h3 className="ds-h3">{sub.name}</h3>
                       {businessDetail?.name && (
-                        <p className="text-sm text-apple-gray mt-0.5">{businessDetail.name}</p>
+                        <p className="ds-sub" style={{ marginTop: 2 }}>{businessDetail.name}</p>
                       )}
                     </div>
-                    <div className="text-right shrink-0 ml-3">
-                      <p className="text-lg font-bold text-apple-text">
-                        {formatPrice(sub.price)} {'\u20BD'}
+                    <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 12 }}>
+                      <p style={{ fontSize: 17, fontWeight: 750, color: 'var(--s-text)', margin: 0 }}>
+                        {formatPrice(sub.price)} ₽
                       </p>
                     </div>
                   </div>
 
                   {sub.description && (
-                    <p className="text-sm text-apple-gray mb-4">{sub.description}</p>
+                    <p className="ds-sub" style={{ marginBottom: 12 }}>{sub.description}</p>
                   )}
 
-                  <div className="flex items-center gap-4 text-sm text-apple-gray mb-4">
-                    <span className="flex items-center gap-1.5">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12 }}>
+                    <span className="ds-sub" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Ticket size={14} />
                       {totalSessions >= 999 ? 'Безлимит' : formatSessions(totalSessions)}
                     </span>
-                    <span className="flex items-center gap-1.5">
+                    <span className="ds-sub" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Clock size={14} />
                       {formatDays(sub.validity_days)}
                     </span>
                   </div>
 
                   {sub.services && sub.services.length > 0 && (
-                    <div className="bg-apple-bg rounded-xl p-3 mb-4">
-                      <ul className="space-y-1">
+                    <div style={{ background: 'var(--s-surface-2)', borderRadius: 'var(--r-md)', padding: 10, marginBottom: 12 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                         {sub.services.map((s) => (
-                          <li key={s.id} className="text-xs text-apple-gray flex justify-between">
+                          <div key={s.id} className="ds-caption" style={{ display: 'flex', justifyContent: 'space-between' }}>
                             <span>{s.name}</span>
-                            <span className="font-medium">{s.quantity} шт.</span>
-                          </li>
+                            <span style={{ fontWeight: 650 }}>{s.quantity} шт.</span>
+                          </div>
                         ))}
-                      </ul>
+                      </div>
                     </div>
                   )}
 
@@ -466,7 +470,7 @@ export function SubscriptionsPage() {
                       hapticSelection()
                       setPurchaseModal(sub)
                     }}
-                    className="w-full py-3 rounded-2xl text-sm font-semibold bg-apple-blue text-white hover:bg-apple-blue-hover transition-all duration-200 min-h-[44px] flex items-center justify-center gap-2"
+                    className="ds-btn ds-btn--primary ds-btn--block"
                   >
                     Купить
                     <ChevronRight size={16} />
@@ -480,43 +484,56 @@ export function SubscriptionsPage() {
 
       {/* My subscriptions tab */}
       {activeTab === 'my' && (
-        <div className="space-y-4 animate-fade-in">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {!isLoggedIn ? (
-            <div className="text-center py-20">
-              <div className="w-16 h-16 bg-apple-bg rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <LogIn size={28} className="text-apple-gray" />
+            <div style={{ textAlign: 'center', padding: '64px 0' }}>
+              <div
+                style={{
+                  width: 56, height: 56, borderRadius: 16, margin: '0 auto 14px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'var(--s-surface-2)',
+                }}
+              >
+                <LogIn size={26} style={{ color: 'var(--s-muted)' }} />
               </div>
-              <h2 className="text-xl font-semibold text-apple-text mb-2">
+              <h2 className="ds-h2" style={{ marginBottom: 6 }}>
                 Войдите в аккаунт
               </h2>
-              <p className="text-apple-gray">
+              <p className="ds-sub">
                 Для просмотра ваших абонементов необходимо авторизоваться
               </p>
             </div>
           ) : myLoading ? (
-            <div className="space-y-4">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {[1, 2].map((i) => (
-                <div key={i} className="h-40 skeleton rounded-2xl" />
+                <div key={i} className="skeleton" style={{ height: 150, borderRadius: 14 }} />
               ))}
             </div>
           ) : myError ? (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl p-4">
+            <div className="ds-error">
+              <AlertCircle size={14} />
               {myError}
             </div>
           ) : mySubscriptions.length === 0 ? (
-            <div className="text-center py-20">
-              <div className="w-16 h-16 bg-apple-bg rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <Ticket size={28} className="text-apple-gray" />
+            <div style={{ textAlign: 'center', padding: '64px 0' }}>
+              <div
+                style={{
+                  width: 56, height: 56, borderRadius: 16, margin: '0 auto 14px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'var(--s-surface-2)',
+                }}
+              >
+                <Ticket size={26} style={{ color: 'var(--s-muted)' }} />
               </div>
-              <h2 className="text-xl font-semibold text-apple-text mb-2">
+              <h2 className="ds-h2" style={{ marginBottom: 6 }}>
                 У вас нет абонементов
               </h2>
-              <p className="text-apple-gray mb-6">
-                Выберите подходящий абонемент на вкладке "Доступные"
+              <p className="ds-sub" style={{ marginBottom: 20 }}>
+                Выберите подходящий абонемент на вкладке «Доступные»
               </p>
               <button
                 onClick={() => setActiveTab('available')}
-                className="inline-block bg-apple-blue text-white font-medium px-6 py-3 rounded-xl hover:bg-apple-blue-hover transition-all duration-200"
+                className="ds-btn ds-btn--primary"
               >
                 Посмотреть абонементы
               </button>
@@ -532,24 +549,26 @@ export function SubscriptionsPage() {
                 sub.sessions_total > 0
                   ? Math.round((sub.sessions_remaining / sub.sessions_total) * 100)
                   : 0
+              const isExpiringSoon = remaining !== null && remaining <= 7 && remaining >= 0
+              const isExpired = sub.status === 'expired' || (remaining !== null && remaining < 0)
+              const fillColor = isExpired
+                ? 'var(--s-danger)'
+                : sessionsPercent <= 25
+                  ? 'var(--s-warning)'
+                  : 'var(--s-accent)'
 
               return (
-                <div
-                  key={sub.id}
-                  className="bg-white rounded-2xl shadow-sm border border-apple-border/50 p-5 transition-all duration-200"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-apple-text">
+                <div key={sub.id} className="ds-card" style={{ padding: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <h3 className="ds-h3">
                         {sub.subscription_name}
                       </h3>
                       {sub.business_name && (
-                        <p className="text-sm text-apple-gray mt-0.5">{sub.business_name}</p>
+                        <p className="ds-sub" style={{ marginTop: 2 }}>{sub.business_name}</p>
                       )}
                     </div>
-                    <span
-                      className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full shrink-0 ml-2 ${status.className}`}
-                    >
+                    <span className={`ds-badge ${status.badgeClass}`} style={{ flexShrink: 0, marginLeft: 8 }}>
                       <StatusIcon size={12} />
                       {status.label}
                     </span>
@@ -557,17 +576,22 @@ export function SubscriptionsPage() {
 
                   {/* Sessions progress */}
                   {sub.sessions_total > 0 && sub.sessions_total < 999 && (
-                    <div className="mb-4">
-                      <div className="flex items-center justify-between text-sm mb-1.5">
-                        <span className="text-apple-gray">Осталось посещений</span>
-                        <span className="font-semibold text-apple-text">
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <span className="ds-sub">Осталось посещений</span>
+                        <span style={{ fontSize: 13, fontWeight: 650, color: 'var(--s-text)' }}>
                           {sub.sessions_remaining} из {sub.sessions_total}
                         </span>
                       </div>
-                      <div className="h-2 bg-apple-bg rounded-full overflow-hidden">
+                      <div style={{ height: 8, background: 'var(--s-surface-2)', borderRadius: 'var(--r-pill)', overflow: 'hidden' }}>
                         <div
-                          className="h-full bg-apple-blue rounded-full transition-all duration-500"
-                          style={{ width: `${sessionsPercent}%` }}
+                          style={{
+                            height: '100%',
+                            width: `${sessionsPercent}%`,
+                            background: fillColor,
+                            borderRadius: 'var(--r-pill)',
+                            transition: 'width 0.5s ease',
+                          }}
                         />
                       </div>
                     </div>
@@ -575,18 +599,18 @@ export function SubscriptionsPage() {
 
                   {/* Expiry info */}
                   {validUntil && (
-                    <div className="flex items-center gap-1.5 text-sm">
-                      <Clock size={14} className="text-apple-gray" />
-                      {sub.status === 'expired' || (remaining !== null && remaining < 0) ? (
-                        <span className="text-apple-danger">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                      <Clock size={14} style={{ color: 'var(--s-muted)' }} />
+                      {isExpired ? (
+                        <span style={{ color: 'var(--s-danger)' }}>
                           Истёк {formatDateRu(validUntil)}
                         </span>
-                      ) : remaining !== null && remaining <= 7 ? (
-                        <span className="text-orange-600 font-medium">
-                          Осталось {formatDays(remaining)}
+                      ) : isExpiringSoon ? (
+                        <span style={{ color: 'var(--s-warning)', fontWeight: 650 }}>
+                          Осталось {formatDays(remaining!)}
                         </span>
                       ) : (
-                        <span className="text-apple-gray">
+                        <span className="ds-sub">
                           Действует до {formatDateRu(validUntil)}
                         </span>
                       )}
@@ -595,7 +619,7 @@ export function SubscriptionsPage() {
 
                   {/* Payment status */}
                   {sub.payment_status && sub.payment_status !== 'confirmed' && (
-                    <div className="mt-2 text-xs text-apple-gray">
+                    <div className="ds-caption" style={{ marginTop: 8 }}>
                       {sub.payment_status === 'pending' && 'Ожидается оплата'}
                       {sub.payment_status === 'sent' && 'Оплата отправлена, ожидает подтверждения'}
                     </div>
@@ -616,6 +640,6 @@ export function SubscriptionsPage() {
           onPurchased={handlePurchased}
         />
       )}
-    </div>
+    </ClientShell>
   )
 }

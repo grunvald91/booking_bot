@@ -4,14 +4,13 @@ import {
   MapPin,
   Phone,
   Clock,
-  ChevronLeft,
-  User,
   Navigation,
   DoorOpen,
   Users as UsersIcon,
   X,
 } from 'lucide-react'
 import { api, type BusinessDetail, type EmployeeWithPricing } from '../../api/client'
+import { ClientShell } from '../../components/ClientShell'
 
 function parsePhotos(raw?: string): string[] {
   if (!raw) return []
@@ -33,7 +32,7 @@ function linkifyText(text: string): React.ReactNode {
     if (/^(https?:\/\/|vk\.com\/|t\.me\/)/i.test(part)) {
       const href = part.startsWith('http') ? part : `https://${part}`
       return (
-        <a key={i} href={href} target="_blank" rel="noopener noreferrer" className="text-apple-blue underline">
+        <a key={i} href={href} target="_blank" rel="noopener noreferrer" className="ds-accent" style={{ textDecoration: 'underline' }}>
           {part}
         </a>
       )
@@ -75,29 +74,37 @@ export function BusinessPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6 pb-24">
-        <div className="h-8 w-2/3 skeleton" />
-        <div className="h-5 w-1/2 skeleton" />
-        <div className="space-y-4 mt-8">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-24 skeleton rounded-2xl" />
-          ))}
+      <ClientShell backTo="/" title="Загрузка…">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+          <div className="skeleton" style={{ height: 20, width: '60%', borderRadius: 8 }} />
+          <div className="skeleton" style={{ height: 14, width: '40%', borderRadius: 8 }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="skeleton" style={{ height: 72, borderRadius: 14 }} />
+            ))}
+          </div>
         </div>
-      </div>
+      </ClientShell>
     )
   }
 
   if (error || !business) {
     return (
-      <div className="text-center py-20 animate-fade-in">
-        <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mx-auto mb-5 shadow-sm">
-          <MapPin size={32} className="text-apple-gray" />
+      <ClientShell backTo="/" title="Бизнес не найден">
+        <div style={{ textAlign: 'center', padding: '48px 0' }}>
+          <div style={{
+            width: 64, height: 64, borderRadius: 20, background: 'var(--s-surface)',
+            border: '1px solid var(--s-line)', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', margin: '0 auto 16px',
+          }}>
+            <MapPin size={28} style={{ color: 'var(--s-muted)' }} />
+          </div>
+          <p className="ds-sub" style={{ fontSize: 15 }}>Бизнес не найден</p>
+          <Link to="/" className="ds-accent" style={{ marginTop: 12, display: 'inline-block', fontSize: 13, fontWeight: 650 }}>
+            На главную
+          </Link>
         </div>
-        <p className="text-apple-gray text-lg font-medium">Бизнес не найден</p>
-        <Link to="/" className="text-apple-blue mt-4 inline-block text-sm font-semibold">
-          На главную
-        </Link>
-      </div>
+      </ClientShell>
     )
   }
 
@@ -106,49 +113,37 @@ export function BusinessPage() {
     formatWorkingHours(business.working_hours_start, business.working_hours_end)
 
   return (
-    <div className="pb-28 md:pb-8">
-      {/* Back button + Hero */}
-      <div className="mb-8 animate-fade-in">
-        <Link
-          to="/"
-          className="inline-flex items-center gap-1 text-sm text-apple-blue font-medium mb-3 hover:text-apple-blue-hover transition-colors duration-200"
-        >
-          <ChevronLeft size={18} />
-          Все бизнесы
-        </Link>
-        <h1 className="text-2xl md:text-4xl font-extrabold text-apple-text tracking-tight">
-          {business.name}
-        </h1>
+    <ClientShell backTo="/" title={business.name}>
+      {/* Info block: description, address, phone, hours, directions */}
+      <div style={{ marginTop: 12, marginBottom: 20 }}>
         {business.description && (
-          <p className="text-apple-gray mt-2 leading-relaxed whitespace-pre-line">
+          <p className="ds-sub" style={{ whiteSpace: 'pre-line', lineHeight: 1.5 }}>
             {linkifyText(business.description)}
           </p>
         )}
 
         {/* Info pills */}
-        <div className="flex flex-wrap gap-2.5 mt-4">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
           {business.address && (
             <a
               href={`https://yandex.ru/maps/?text=${encodeURIComponent(business.address)}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-[13px] text-apple-blue bg-apple-blue/5 px-3 py-1.5 rounded-full shadow-sm hover:bg-apple-blue/10 transition-colors duration-200"
+              className="ds-chip"
+              style={{ color: 'var(--s-accent)' }}
             >
               <MapPin size={13} />
               {business.address}
             </a>
           )}
           {business.phone && (
-            <a
-              href={`tel:${business.phone}`}
-              className="inline-flex items-center gap-1.5 text-[13px] text-apple-blue bg-apple-blue/5 px-3 py-1.5 rounded-full shadow-sm hover:bg-apple-blue/10 transition-colors duration-200"
-            >
+            <a href={`tel:${business.phone}`} className="ds-chip" style={{ color: 'var(--s-accent)' }}>
               <Phone size={13} />
               {business.phone}
             </a>
           )}
           {workingHours && (
-            <span className="inline-flex items-center gap-1.5 text-[13px] text-apple-gray bg-white px-3 py-1.5 rounded-full shadow-sm">
+            <span className="ds-chip">
               <Clock size={13} />
               {workingHours}
             </span>
@@ -157,14 +152,12 @@ export function BusinessPage() {
 
         {/* Directions */}
         {business.directions && (
-          <div className="mt-5 p-4 bg-white rounded-2xl shadow-sm animate-fade-in-delay-1">
-            <div className="flex items-center gap-2 mb-2">
-              <Navigation size={15} className="text-apple-blue" />
-              <h3 className="text-sm font-semibold text-apple-text">
-                Как добраться
-              </h3>
+          <div className="ds-card" style={{ padding: 14, marginTop: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 7 }}>
+              <Navigation size={15} className="ds-accent" />
+              <h3 className="ds-h3">Как добраться</h3>
             </div>
-            <p className="text-sm text-apple-gray whitespace-pre-line leading-relaxed">
+            <p className="ds-sub" style={{ whiteSpace: 'pre-line', lineHeight: 1.5 }}>
               {linkifyText(business.directions)}
             </p>
           </div>
@@ -173,16 +166,16 @@ export function BusinessPage() {
 
       {/* Employees / Rooms */}
       {business.employees && business.employees.length > 0 && (
-        <section className="mb-8 animate-fade-in-delay-3">
-          <h2 className="text-lg font-bold text-apple-text mb-3 flex items-center gap-2">
+        <section style={{ marginBottom: 24 }}>
+          <h2 className="ds-h2" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             {business.business_type === 'venue_rental' ? (
-              <DoorOpen size={18} className="text-apple-blue" />
+              <DoorOpen size={18} className="ds-accent" />
             ) : (
-              <User size={18} className="text-apple-blue" />
+              <UsersIcon size={18} className="ds-accent" />
             )}
             {business.business_type === 'venue_rental' ? 'Залы' : 'Специалисты'}
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
             {business.employees.map((emp) => {
               const photoIds = parsePhotos(emp.photos)
               const cover = photoIds[0]
@@ -191,33 +184,38 @@ export function BusinessPage() {
                   key={emp.id}
                   type="button"
                   onClick={() => setSelectedEmp(emp)}
-                  className="group bg-white rounded-2xl shadow-sm p-3 text-center hover:shadow-md transition-all duration-200 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
+                  className="ds-card"
+                  style={{
+                    padding: 12, textAlign: 'center', cursor: 'pointer',
+                    border: '1px solid var(--s-line)', font: 'inherit', color: 'inherit',
+                  }}
                 >
-                  <div className="w-16 h-16 bg-apple-bg rounded-full flex items-center justify-center mx-auto mb-2 overflow-hidden">
+                  <div style={{
+                    width: 60, height: 60, borderRadius: '50%', background: 'var(--s-surface-2)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    margin: '0 auto 8px', overflow: 'hidden',
+                  }}>
                     {cover ? (
                       <img
                         src={`/api/telegram-photo/${encodeURIComponent(cover)}`}
                         alt={emp.name}
-                        className="w-full h-full object-cover"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                         loading="lazy"
                       />
                     ) : business.business_type === 'venue_rental' ? (
-                      <DoorOpen size={22} className="text-apple-gray" />
+                      <DoorOpen size={22} style={{ color: 'var(--s-muted)' }} />
                     ) : (
-                      <User size={22} className="text-apple-gray" />
+                      <UsersIcon size={22} style={{ color: 'var(--s-muted)' }} />
                     )}
                   </div>
-                  <h3 className="font-semibold text-apple-text text-sm leading-tight">
+                  <h3 className="ds-h3" style={{ fontSize: 13, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {emp.name}
                   </h3>
                   {emp.specialization && (
-                    <p className="text-[12px] text-apple-gray mt-0.5 line-clamp-2">
+                    <p className="ds-caption" style={{ marginTop: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                       {emp.specialization}
                     </p>
                   )}
-                  <span className="block text-[11px] text-apple-blue mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    Подробнее →
-                  </span>
                 </button>
               )
             })}
@@ -225,29 +223,24 @@ export function BusinessPage() {
         </section>
       )}
 
-      {/* Employee / Room detail modal */}
+      {/* Employee / Room detail sheet */}
       {selectedEmp && (
-        <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-start justify-center overflow-y-auto px-3 pt-[max(1rem,env(safe-area-inset-top))] pb-[calc(5rem+env(safe-area-inset-bottom))] sm:items-center sm:p-4 animate-fade-in"
-          onClick={() => setSelectedEmp(null)}
-        >
-          <div
-            className="bg-white rounded-3xl shadow-xl w-full max-w-md sm:max-h-[90vh] sm:overflow-y-auto my-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="ds-sheet-ov" onClick={() => setSelectedEmp(null)}>
+          <div className="ds-sheet" style={{ padding: 0 }} onClick={(e) => e.stopPropagation()}>
             {(() => {
               const photoIds = parsePhotos(selectedEmp.photos)
               return (
                 <>
                   {photoIds.length > 0 ? (
-                    <div className="relative">
-                      <div className="flex overflow-x-auto snap-x snap-mandatory scrollbar-hide rounded-t-3xl">
+                    <div style={{ position: 'relative' }}>
+                      <div className="ds-sheet-grip" style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 1, background: 'rgba(255,255,255,0.7)' }} />
+                      <div style={{ display: 'flex', overflowX: 'auto', scrollSnapType: 'x mandatory', borderRadius: 'var(--r-xl) var(--r-xl) 0 0' }}>
                         {photoIds.map((fid, idx) => (
                           <img
                             key={idx}
                             src={`/api/telegram-photo/${encodeURIComponent(fid)}`}
                             alt={`${selectedEmp.name} ${idx + 1}`}
-                            className="w-full h-64 object-cover snap-start shrink-0"
+                            style={{ width: '100%', height: 256, objectFit: 'cover', scrollSnapAlign: 'start', flexShrink: 0 }}
                           />
                         ))}
                       </div>
@@ -255,56 +248,59 @@ export function BusinessPage() {
                         type="button"
                         onClick={() => setSelectedEmp(null)}
                         aria-label="Закрыть"
-                        className="absolute top-3 right-3 w-9 h-9 rounded-full bg-black/40 backdrop-blur text-white flex items-center justify-center"
+                        className="ds-icon-btn"
+                        style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(4,9,16,0.45)', color: '#fff' }}
                       >
                         <X size={18} />
                       </button>
                       {photoIds.length > 1 && (
-                        <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5 pointer-events-none">
+                        <div style={{ position: 'absolute', bottom: 8, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 6, pointerEvents: 'none' }}>
                           {photoIds.map((_, idx) => (
-                            <span key={idx} className="w-1.5 h-1.5 rounded-full bg-white/80" />
+                            <span key={idx} style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.8)' }} />
                           ))}
                         </div>
                       )}
                     </div>
                   ) : (
-                    <div className="relative h-32 bg-apple-bg flex items-center justify-center rounded-t-3xl">
+                    <div style={{
+                      position: 'relative', height: 128, background: 'var(--s-surface-2)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      borderRadius: 'var(--r-xl) var(--r-xl) 0 0',
+                    }}>
+                      <div className="ds-sheet-grip" style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)' }} />
                       {business.business_type === 'venue_rental' ? (
-                        <DoorOpen size={48} className="text-apple-gray" />
+                        <DoorOpen size={44} style={{ color: 'var(--s-muted)' }} />
                       ) : (
-                        <User size={48} className="text-apple-gray" />
+                        <UsersIcon size={44} style={{ color: 'var(--s-muted)' }} />
                       )}
                       <button
                         type="button"
                         onClick={() => setSelectedEmp(null)}
                         aria-label="Закрыть"
-                        className="absolute top-3 right-3 w-9 h-9 rounded-full bg-white shadow text-apple-gray flex items-center justify-center"
+                        className="ds-icon-btn bordered"
+                        style={{ position: 'absolute', top: 12, right: 12 }}
                       >
                         <X size={18} />
                       </button>
                     </div>
                   )}
 
-                  <div className="p-5">
-                    <h2 className="text-xl font-bold text-apple-text">
-                      {selectedEmp.name}
-                    </h2>
+                  <div style={{ padding: '16px 18px calc(20px + env(safe-area-inset-bottom, 0px))' }}>
+                    <h2 className="ds-h1">{selectedEmp.name}</h2>
                     {selectedEmp.specialization && (
-                      <p className="text-sm text-apple-gray mt-1">
-                        {selectedEmp.specialization}
-                      </p>
+                      <p className="ds-sub" style={{ marginTop: 4 }}>{selectedEmp.specialization}</p>
                     )}
 
                     {(selectedEmp.capacity != null || selectedEmp.area_sqm != null) && (
-                      <div className="flex flex-wrap gap-2 mt-3">
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
                         {selectedEmp.capacity != null && (
-                          <span className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-full bg-apple-blue/5 text-apple-blue">
+                          <span className="ds-chip" style={{ color: 'var(--s-accent)' }}>
                             <UsersIcon size={12} />
                             до {selectedEmp.capacity} чел.
                           </span>
                         )}
                         {selectedEmp.area_sqm != null && (
-                          <span className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-full bg-apple-blue/5 text-apple-blue">
+                          <span className="ds-chip" style={{ color: 'var(--s-accent)' }}>
                             <MapPin size={12} />
                             {selectedEmp.area_sqm} м²
                           </span>
@@ -313,7 +309,7 @@ export function BusinessPage() {
                     )}
 
                     {selectedEmp.description && (
-                      <p className="text-sm text-apple-text/80 mt-4 whitespace-pre-line leading-relaxed">
+                      <p className="ds-sub" style={{ marginTop: 14, whiteSpace: 'pre-line', lineHeight: 1.5 }}>
                         {linkifyText(selectedEmp.description)}
                       </p>
                     )}
@@ -321,7 +317,8 @@ export function BusinessPage() {
                     <Link
                       to={`/book/${business.id}?employee=${selectedEmp.id}`}
                       onClick={() => setSelectedEmp(null)}
-                      className="block w-full text-center bg-apple-blue text-white font-semibold py-3.5 rounded-2xl hover:bg-apple-blue-hover transition-all duration-200 mt-5 shadow-lg shadow-apple-blue/20 active:scale-[0.98]"
+                      className="ds-btn ds-btn--primary ds-btn--block"
+                      style={{ marginTop: 18 }}
                     >
                       Записаться
                     </Link>
@@ -333,16 +330,17 @@ export function BusinessPage() {
         </div>
       )}
 
-      {/* Sticky book button */}
-      <div className="fixed bottom-16 md:bottom-0 left-0 right-0 p-4 pb-[max(1rem,calc(env(safe-area-inset-bottom)+4rem))] md:pb-4 bg-gradient-to-t from-apple-bg via-apple-bg/95 to-transparent md:relative md:from-transparent md:via-transparent md:bg-transparent md:p-0">
-        <Link
-          to={`/book/${business.id}`}
-          className="block w-full max-w-md mx-auto bg-apple-blue text-white text-center font-semibold py-4 rounded-2xl hover:bg-apple-blue-hover transition-all duration-200 shadow-lg shadow-apple-blue/20 active:scale-[0.98]"
-        >
+      {/* Book button — sticky внизу скролл-контейнера, всегда на виду */}
+      <div
+        style={{
+          position: 'sticky', bottom: 0, marginTop: 24, paddingTop: 12, paddingBottom: 4,
+          background: 'linear-gradient(to top, var(--s-bg) 60%, transparent)',
+        }}
+      >
+        <Link to={`/book/${business.id}`} className="ds-btn ds-btn--primary ds-btn--block">
           Записаться
         </Link>
       </div>
-    </div>
+    </ClientShell>
   )
 }
-

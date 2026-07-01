@@ -426,8 +426,8 @@ textarea.sched-input { resize: none; min-height: 54px; }
   width: 54px; height: 54px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   border: none; cursor: pointer; color: #fff;
-  background: linear-gradient(150deg, #37b0ff, var(--s-accent-press));
-  box-shadow: 0 14px 28px -8px rgba(46, 166, 255, 0.55);
+  background: linear-gradient(150deg, var(--s-accent), var(--s-accent-press));
+  box-shadow: 0 14px 28px -8px rgba(47, 91, 235, 0.55);
   transition: transform 0.12s ease;
 }
 .sched-fab:hover { transform: translateY(-2px); }
