@@ -66,6 +66,25 @@ interface TelegramWebApp {
   offEvent: (eventType: string, callback: () => void) => void
 }
 
+// ВРЕМЕННО: диагностическая плашка с реальными значениями safe area устройства,
+// поверх шапки Telegram. Тап по ней — закрыть. Убрать вызов showSafeAreaDebug()
+// (и саму функцию) после того как отступ будет подобран точно.
+function showSafeAreaDebug() {
+  if (!tg) return
+  const box = document.createElement('div')
+  box.style.cssText =
+    'position:fixed;top:0;left:0;right:0;z-index:999999;background:#000;color:#0f0;' +
+    'font:11px/1.5 monospace;padding:8px 10px;white-space:pre-wrap;word-break:break-all;'
+  box.textContent =
+    `safeAreaInset: ${JSON.stringify(tg.safeAreaInset)}\n` +
+    `contentSafeAreaInset: ${JSON.stringify(tg.contentSafeAreaInset)}\n` +
+    `innerHeight: ${window.innerHeight}  viewportHeight: ${(tg as unknown as { viewportHeight?: number }).viewportHeight}\n` +
+    `--tg-safe-top: ${getComputedStyle(document.documentElement).getPropertyValue('--tg-safe-top')}\n` +
+    '(тап — закрыть)'
+  box.onclick = () => box.remove()
+  document.body.appendChild(box)
+}
+
 // Helper functions
 export const tg = window.Telegram?.WebApp
 
@@ -93,6 +112,10 @@ export function initTelegramWebApp() {
   applySafeArea()
   tg.onEvent?.('safeAreaChanged', applySafeArea)
   tg.onEvent?.('contentSafeAreaChanged', applySafeArea)
+
+  // ВРЕМЕННО: показать реальные значения safe area на экране, чтобы подобрать
+  // точный отступ без гадания (см. --tg-safe-top выше). Убрать после диагностики.
+  showSafeAreaDebug()
 
   // Apply theme colors as CSS variables
   const params = tg.themeParams
