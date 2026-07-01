@@ -162,6 +162,7 @@ export interface CreateBookingData {
   client_name: string;
   client_phone: string;
   notes?: string;
+  repeat_weeks?: number;
 }
 
 export interface AdminBooking {
@@ -189,6 +190,7 @@ export interface ManualBookingData {
   client_name: string;
   client_phone?: string;
   notes?: string;
+  repeat_weeks?: number;
 }
 
 export interface DashboardData {
@@ -463,7 +465,7 @@ export const api = {
   getAdminBookings: (params?: string) =>
     request<AdminBooking[]>(`/admin/bookings${params ? '?' + params : ''}`),
   createManualBooking: (data: ManualBookingData) =>
-    request<AdminBooking>('/admin/bookings', {
+    request<AdminBooking[]>('/admin/bookings', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
