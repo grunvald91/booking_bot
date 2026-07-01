@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 import { LayoutDashboard, Clock, Scissors, Users, Settings, Moon, Sun } from 'lucide-react'
 import { useTheme } from '../hooks/useTheme'
@@ -30,9 +31,9 @@ export function AdminShell({
 }) {
   const [theme, toggleTheme] = useTheme()
   const { pathname } = useLocation()
-  return (
+  return createPortal(
     <div className="ds-screen" data-theme={theme}>
-      <header style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', flexShrink: 0 }}>
+      <header className="ds-shell-header" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', flexShrink: 0 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 className="ds-h1">{title}</h1>
           {subtitle != null && <div className="ds-sub" style={{ marginTop: 2 }}>{subtitle}</div>}
@@ -43,7 +44,7 @@ export function AdminShell({
         </button>
       </header>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '0 14px 16px' }}>
+      <div className="ds-shell-content" style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '0 14px 16px' }}>
         {children}
       </div>
 
@@ -55,6 +56,7 @@ export function AdminShell({
           </Link>
         ))}
       </nav>
-    </div>
+    </div>,
+    document.body
   )
 }

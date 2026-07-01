@@ -203,7 +203,7 @@ export function AnalyticsPage() {
 
       {loading ? (
         <div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div className="ds-stats-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             {[1, 2, 3, 4].map((i) => <div key={i} className="skeleton" style={{ height: 92, borderRadius: 14 }} />)}
           </div>
           <div className="skeleton" style={{ height: 210, borderRadius: 14, marginTop: 14 }} />
@@ -211,7 +211,7 @@ export function AnalyticsPage() {
       ) : (
         <>
           {/* KPI */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div className="ds-stats-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <KpiCard label="Выручка" value={kpis ? formatRub(kpis.revenue) : '—'} icon={<Wallet size={16} />} color="var(--s-accent)" cur={kpis?.revenue ?? 0} prev={kpis?.revenue_prev ?? 0} />
             <KpiCard label="Записей" value={kpis ? String(kpis.bookings) : '—'} icon={<Calendar size={16} />} color="var(--s-success)" cur={kpis?.bookings ?? 0} prev={kpis?.bookings_prev ?? 0} />
             <KpiCard label="Средний чек" value={kpis ? formatRub(kpis.avg_check) : '—'} icon={<Receipt size={16} />} color="var(--s-warning)" cur={kpis?.avg_check ?? 0} prev={kpis?.avg_check_prev ?? 0} />

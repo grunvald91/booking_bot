@@ -393,7 +393,7 @@ export function SettingsPage() {
         </div>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 4 }}>
+      <div className="ds-form-narrow" style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 4 }}>
         {/* === 1. Business Profile === */}
         <section className="ds-card" style={{ padding: 14 }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>

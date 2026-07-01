@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import {
   ChevronLeft,
@@ -870,8 +871,9 @@ export function SchedulePage() {
     nowMin >= DAY_START_H * 60 && nowMin <= DAY_END_H * 60
   const colCount = viewMode === 'day' ? dayColumns.length : 7
 
-  return (
+  return createPortal(
     <div className="sched-root" data-theme={theme}>
+      <div className="sched-main">
       {/* Header */}
       <header className="sched-header">
         <div className="sched-htitle">
@@ -1047,6 +1049,7 @@ export function SchedulePage() {
           })}
         </div>
       )}
+      </div>
 
       {/* Нижняя навигация (как в архиве) */}
       <nav className="sched-bottomnav">
@@ -1131,6 +1134,7 @@ export function SchedulePage() {
           onCreated={() => { setShowManualBooking(false); fetchBookings() }}
         />
       )}
-    </div>
+    </div>,
+    document.body
   )
 }

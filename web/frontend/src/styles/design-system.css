@@ -290,3 +290,37 @@ textarea.ds-input { resize: none; min-height: 54px; }
   color: var(--s-muted); font-size: 10px; font-weight: 600;
 }
 .ds-bn.active { color: var(--s-accent); font-weight: 700; }
+
+/* ─────────────────────────── 11. ДЕСКТОП (боковая навигация) ─────────────────────────── */
+@media (min-width: 900px) {
+  .ds-screen {
+    display: grid;
+    grid-template-columns: 232px 1fr;
+    grid-template-rows: auto 1fr;
+    grid-template-areas: "nav header" "nav content";
+  }
+  .ds-shell-header { grid-area: header; border-bottom: 1px solid var(--s-line); padding: 16px 28px !important; }
+  .ds-shell-content {
+    grid-area: content;
+    max-width: 1080px; width: 100%; margin: 0 auto;
+    padding: 22px 28px 40px !important;
+  }
+  .ds-bottomnav {
+    grid-area: nav;
+    flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 4px;
+    width: 232px; padding: 20px 14px; border-top: none; border-right: 1px solid var(--s-line);
+  }
+  .ds-bn {
+    flex-direction: row; justify-content: flex-start; gap: 12px;
+    padding: 10px 12px; border-radius: var(--r-md); font-size: 14px;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .ds-bn:hover { background: var(--s-surface-2); color: var(--s-text); }
+  .ds-bn.active { background: var(--s-accent-soft); }
+  .ds-bn span { font-size: 14px; }
+
+  /* Плитки-метрики: на десктопе в один ряд вместо растянутых 2 колонок */
+  .ds-stats-grid { grid-template-columns: repeat(4, 1fr) !important; gap: 14px !important; }
+  /* Формы: не растягивать поля во всю ширину широкого экрана */
+  .ds-form-narrow { max-width: 640px; }
+}
