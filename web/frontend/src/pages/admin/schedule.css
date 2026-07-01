@@ -26,6 +26,10 @@
 /* Обёртка контента (всё, кроме боковой навигации) — прозрачна для внутреннего flex-layout */
 .sched-main { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
+/* Telegram WebApp: рендерится порталом прямо в body, padding-top на body (index.css) сюда
+   не доходит — сдвигаем сам fixed-экран под нативную шапку TG. */
+html.tg-webapp .sched-root { top: 60px; }
+
 /* Доп. токены, специфичные для таймлайна расписания (нет в общем ките) */
 .sched-root { --s-today: #d8e9fb; --s-weekcol: #eef4fb; }
 .sched-root[data-theme='dark'] { --s-today: #15314e; --s-weekcol: #0f1a27; }
