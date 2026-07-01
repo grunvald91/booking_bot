@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import date, time, datetime
 from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ---------- Auth ----------
@@ -169,6 +169,8 @@ class CreateBookingIn(BaseModel):
     notes: Optional[str] = None
     client_name: Optional[str] = None
     client_phone: Optional[str] = None
+    # Повтор той же брони еженедельно на N недель (включая первую); None = без повтора.
+    repeat_weeks: Optional[int] = Field(default=None, ge=2, le=8)
 
 
 class BookingOut(BaseModel):
@@ -222,6 +224,8 @@ class ManualBookingIn(BaseModel):
     client_name: str
     client_phone: Optional[str] = None
     notes: Optional[str] = None
+    # Повтор той же брони еженедельно на N недель (включая первую); None = без повтора.
+    repeat_weeks: Optional[int] = Field(default=None, ge=2, le=8)
 
 
 class UpdateBookingStatusIn(BaseModel):
