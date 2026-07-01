@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Users, Plus, Pencil, Trash2, X, User, Shield, Clock, MapPin, Users as UsersIcon, Calendar, ChevronLeft, ChevronRight, ImagePlus, ImageIcon } from 'lucide-react'
+import { Plus, Pencil, Trash2, X, User, Shield, Clock, MapPin, Users as UsersIcon, Calendar, ChevronLeft, ChevronRight, ImagePlus, ImageIcon } from 'lucide-react'
 import { api, type Employee, type Service } from '../../api/client'
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
 import { BusinessSelector } from '../../components/BusinessSelector'
+import { AdminShell } from '../../components/AdminShell'
 
 function parsePhotos(raw?: string | null): string[] {
   if (!raw) return []
@@ -23,9 +24,9 @@ const placeholderEmployees: Employee[] = [
   { id: 5, name: 'Дарья Новикова', role: 'master', specialization: 'Косметолог', is_active: false },
 ]
 
-const roleBadge: Record<string, { label: string; className: string }> = {
-  master: { label: 'Мастер', className: 'bg-blue-50 text-blue-700' },
-  admin: { label: 'Администратор', className: 'bg-purple-50 text-purple-700' },
+const roleBadgeVariant: Record<string, { label: string; variant: string }> = {
+  master: { label: 'Мастер', variant: 'ds-badge--confirmed' },
+  admin: { label: 'Администратор', variant: 'ds-badge--prepay' },
 }
 
 function getTodayStr(): string {
@@ -332,422 +333,447 @@ export function EmployeesPage() {
     )
   }
 
-  const inputClass =
-    'w-full px-4 py-3 rounded-xl border border-apple-border/50 text-sm focus:outline-none focus:border-apple-blue focus:ring-1 focus:ring-apple-blue/30 transition-all duration-200'
-
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        <div className="h-8 w-48 skeleton mb-6" />
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="h-20 skeleton rounded-2xl" />
-        ))}
-      </div>
-    )
-  }
-
   const today = getTodayStr()
 
   return (
-    <div>
-      <BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} vertical />
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-apple-text flex items-center gap-2">
-          <Users size={24} />
-          Сотрудники
-        </h1>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-2 bg-apple-blue text-white text-sm font-medium px-4 py-2.5 rounded-xl hover:bg-apple-blue-hover transition-all duration-200"
-        >
-          <Plus size={16} />
+    <AdminShell
+      title="Мастера"
+      headerExtra={
+        <BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />
+      }
+    >
+      {/* Add button row */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12, marginTop: 4 }}>
+        <button className="ds-btn ds-btn--primary ds-btn--sm" onClick={openCreate}>
+          <Plus size={15} />
           Добавить
         </button>
       </div>
 
-      {/* Employees grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {employees.map((emp) => {
-          const badge = roleBadge[emp.role || 'master'] || roleBadge.master
-          const isOnDuty = emp.on_duty_date === today
-          return (
-            <div
-              key={emp.id}
-              className={`bg-white rounded-2xl shadow-sm border border-apple-border/50 p-3 transition-all duration-200 ${
-                emp.is_active === false ? 'opacity-60' : ''
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-apple-bg rounded-full flex items-center justify-center shrink-0">
-                  <User size={18} className="text-apple-gray" />
+      {/* Loading skeletons */}
+      {loading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div className="skeleton" style={{ height: 32, width: 160, borderRadius: 8, marginBottom: 4 }} />
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="skeleton" style={{ height: 72, borderRadius: 14 }} />
+          ))}
+        </div>
+      ) : (
+        /* Employees list */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {employees.map((emp) => {
+            const badge = roleBadgeVariant[emp.role || 'master'] || roleBadgeVariant.master
+            const isOnDuty = emp.on_duty_date === today
+            return (
+              <div
+                key={emp.id}
+                className="ds-card"
+                style={{ padding: '10px 12px', opacity: emp.is_active === false ? 0.6 : 1 }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {/* Avatar */}
+                  <div style={{
+                    width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
+                    background: 'var(--s-surface-2)', border: '1px solid var(--s-line)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'var(--s-muted)',
+                  }}>
+                    <User size={18} />
+                  </div>
+
+                  {/* Name + spec */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="ds-h3" style={{ fontSize: 14, fontWeight: 650, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {emp.name}
+                    </div>
+                    <div className="ds-sub" style={{ fontSize: 12, marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {emp.specialization || badge.label}
+                    </div>
+                    {emp.telegram_id && (
+                      <div className="ds-caption" style={{ marginTop: 1 }}>
+                        TG ID: {emp.telegram_id}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Action controls */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                    <button
+                      onClick={() => toggleActive(emp.id)}
+                      className={`ds-btn ds-btn--sm ${emp.is_active !== false ? 'ds-badge--completed' : 'ds-badge--cancelled'}`}
+                      style={{ padding: '4px 8px', fontSize: 11, fontWeight: 700, border: 'none', cursor: 'pointer', borderRadius: 'var(--r-pill)' }}
+                    >
+                      {emp.is_active !== false ? 'Вкл' : 'Выкл'}
+                    </button>
+                    <button
+                      className="ds-icon-btn"
+                      onClick={() => openEdit(emp)}
+                      aria-label="Редактировать"
+                      style={{ width: 30, height: 30 }}
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      className="ds-icon-btn"
+                      onClick={() => handleDelete(emp.id)}
+                      aria-label="Удалить"
+                      style={{ width: 30, height: 30, color: 'var(--s-danger)' }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-medium text-apple-text truncate">{emp.name}</h3>
-                  <p className="text-xs text-apple-gray truncate">{emp.specialization || badge.label}</p>
-                  {emp.telegram_id && (
-                    <p className="text-[10px] text-apple-gray/60 truncate">
-                      TG ID: {emp.telegram_id}
-                    </p>
+
+                {/* Info badges row */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 8, marginLeft: 50 }}>
+                  {/* Role badge */}
+                  <span className={`ds-badge ${badge.variant}`}>{badge.label}</span>
+
+                  {/* Duty toggle */}
+                  <button
+                    onClick={() => handleToggleDuty(emp.id)}
+                    disabled={dutyLoading === emp.id}
+                    className={`ds-badge ${isOnDuty ? 'ds-badge--completed' : 'ds-badge--cancelled'}`}
+                    style={{ cursor: 'pointer', border: 'none', opacity: dutyLoading === emp.id ? 0.5 : 1, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  >
+                    <Shield size={9} />
+                    {isOnDuty ? 'На дежурстве' : 'Не дежурит'}
+                  </button>
+
+                  {/* Schedule button */}
+                  <button
+                    onClick={() => openDutySchedule(emp)}
+                    className="ds-badge ds-badge--prepay"
+                    style={{ cursor: 'pointer', border: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  >
+                    <Calendar size={9} />
+                    График
+                  </button>
+
+                  {/* Booking interval */}
+                  {emp.booking_interval_minutes && (
+                    <span className="ds-badge ds-badge--confirmed" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <Clock size={9} />
+                      {emp.booking_interval_minutes} мин
+                    </span>
+                  )}
+
+                  {/* Venue rental badges */}
+                  {isVenueRental && emp.capacity && (
+                    <span className="ds-badge ds-badge--pending" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <UsersIcon size={9} />
+                      {emp.capacity} чел
+                    </span>
+                  )}
+                  {isVenueRental && emp.area_sqm && (
+                    <span className="ds-badge ds-badge--pending" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <MapPin size={9} />
+                      {emp.area_sqm} м²
+                    </span>
                   )}
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    onClick={() => toggleActive(emp.id)}
-                    className={`text-xs px-2 py-1 rounded-lg font-medium transition-all duration-200 ${
-                      emp.is_active !== false
-                        ? 'bg-green-50 text-apple-success'
-                        : 'bg-apple-bg text-apple-gray'
-                    }`}
-                  >
-                    {emp.is_active !== false ? 'Вкл' : 'Выкл'}
-                  </button>
-                  <button
-                    onClick={() => openEdit(emp)}
-                    className="p-1.5 rounded-lg text-apple-gray hover:text-apple-blue hover:bg-blue-50 transition-all duration-200"
-                  >
-                    <Pencil size={14} />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(emp.id)}
-                    className="p-1.5 rounded-lg text-apple-gray hover:text-apple-danger hover:bg-red-50 transition-all duration-200"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </div>
 
-              {/* Info badges row */}
-              <div className="flex flex-wrap items-center gap-1.5 mt-2 ml-[52px]">
-                {/* Duty badge */}
-                <button
-                  onClick={() => handleToggleDuty(emp.id)}
-                  disabled={dutyLoading === emp.id}
-                  className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg font-medium transition-all duration-200 cursor-pointer ${
-                    isOnDuty
-                      ? 'bg-green-50 text-green-700 hover:bg-green-100'
-                      : 'bg-gray-50 text-apple-gray hover:bg-gray-100'
-                  } ${dutyLoading === emp.id ? 'opacity-50' : ''}`}
-                >
-                  <Shield size={10} />
-                  {isOnDuty ? 'На дежурстве' : 'Не дежурит'}
-                </button>
-                <button
-                  onClick={() => openDutySchedule(emp)}
-                  className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg font-medium bg-purple-50 text-purple-600 hover:bg-purple-100 transition-all duration-200 cursor-pointer"
-                >
-                  <Calendar size={10} />
-                  График
-                </button>
-
-                {/* Booking interval */}
-                {emp.booking_interval_minutes && (
-                  <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg bg-blue-50 text-blue-600">
-                    <Clock size={10} />
-                    Интервал: {emp.booking_interval_minutes} мин
-                  </span>
-                )}
-
-                {/* Venue rental badges */}
-                {isVenueRental && emp.capacity && (
-                  <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg bg-orange-50 text-orange-600">
-                    <UsersIcon size={10} />
-                    {emp.capacity} чел
-                  </span>
-                )}
-                {isVenueRental && emp.area_sqm && (
-                  <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg bg-orange-50 text-orange-600">
-                    <MapPin size={10} />
-                    {emp.area_sqm} м²
-                  </span>
+                {emp.is_active === false && (
+                  <div className="ds-caption" style={{ color: 'var(--s-danger)', marginTop: 4, marginLeft: 50 }}>
+                    Неактивен
+                  </div>
                 )}
               </div>
+            )
+          })}
+        </div>
+      )}
 
-              {emp.is_active === false && (
-                <span className="inline-block text-xs text-apple-danger mt-1 ml-[52px]">
-                  Неактивен
-                </span>
-              )}
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Modal */}
+      {/* Create / Edit sheet */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-semibold text-apple-text">
-                {editingEmployee ? 'Редактировать' : 'Новый сотрудник'}
-              </h2>
-              <button
-                onClick={closeModal}
-                className="p-1 rounded-lg text-apple-gray hover:bg-apple-bg transition-all duration-200"
-              >
-                <X size={20} />
+        <div className="ds-sheet-ov">
+          <div className="ds-sheet">
+            <div className="ds-sheet-grip" />
+            <div className="ds-sheet-head">
+              <div>
+                <h3>{editingEmployee ? 'Редактировать' : 'Новый сотрудник'}</h3>
+              </div>
+              <button className="ds-icon-btn" onClick={closeModal} aria-label="Закрыть">
+                <X size={18} />
               </button>
             </div>
 
-            <div className="space-y-4">
-              {/* Name */}
-              <div>
-                <label className="block text-sm text-apple-gray mb-1.5">Имя</label>
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="Иванова Анна"
-                  className={inputClass}
-                />
-              </div>
-
-              {/* Role */}
-              <div>
-                <label className="block text-sm text-apple-gray mb-1.5">Роль</label>
-                <select
-                  value={form.role}
-                  onChange={(e) => setForm({ ...form, role: e.target.value })}
-                  className={`${inputClass} bg-white`}
-                >
-                  <option value="master">Мастер</option>
-                  <option value="admin">Администратор</option>
-                </select>
-              </div>
-
-              {/* Specialization */}
-              <div>
-                <label className="block text-sm text-apple-gray mb-1.5">
-                  Специализация
-                </label>
-                <input
-                  type="text"
-                  value={form.specialization}
-                  onChange={(e) =>
-                    setForm({ ...form, specialization: e.target.value })
-                  }
-                  placeholder="Парикмахер-стилист"
-                  className={inputClass}
-                />
-              </div>
-
-              {/* Description */}
-              <div>
-                <label className="block text-sm text-apple-gray mb-1.5">Описание</label>
-                <textarea
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="Описание сотрудника..."
-                  rows={3}
-                  className={`${inputClass} resize-none`}
-                />
-              </div>
-
-              {/* Telegram ID */}
-              <div>
-                <label className="block text-sm text-apple-gray mb-1.5">Telegram ID</label>
-                <input
-                  type="number"
-                  value={form.telegram_id}
-                  onChange={(e) => setForm({ ...form, telegram_id: e.target.value })}
-                  placeholder="123456789"
-                  className={inputClass}
-                />
-              </div>
-
-              {/* Booking Interval */}
-              <div>
-                <label className="block text-sm text-apple-gray mb-1.5">Интервал записи, мин</label>
-                <input
-                  type="number"
-                  value={form.booking_interval_minutes}
-                  onChange={(e) => setForm({ ...form, booking_interval_minutes: e.target.value })}
-                  placeholder="30"
-                  className={inputClass}
-                />
-              </div>
-
-              {/* Venue Rental specific fields */}
-              {isVenueRental && (
-                <>
-                  <div className="pt-2 border-t border-apple-border/30">
-                    <p className="text-xs font-semibold text-apple-gray uppercase tracking-wider mb-3">
-                      Параметры площадки
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm text-apple-gray mb-1.5">Вместимость, чел</label>
-                      <input
-                        type="number"
-                        value={form.capacity}
-                        onChange={(e) => setForm({ ...form, capacity: e.target.value })}
-                        placeholder="10"
-                        className={inputClass}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-apple-gray mb-1.5">Площадь, м²</label>
-                      <input
-                        type="number"
-                        value={form.area_sqm}
-                        onChange={(e) => setForm({ ...form, area_sqm: e.target.value })}
-                        placeholder="50"
-                        className={inputClass}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-apple-gray mb-1.5">
-                      Мин. время бронирования, мин
-                    </label>
-                    <input
-                      type="number"
-                      value={form.min_booking_minutes}
-                      onChange={(e) => setForm({ ...form, min_booking_minutes: e.target.value })}
-                      placeholder="60"
-                      className={inputClass}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-apple-gray mb-1.5">Тариф соло, руб/ч</label>
-                    <input
-                      type="number"
-                      value={form.solo_price_per_hour}
-                      onChange={(e) => setForm({ ...form, solo_price_per_hour: e.target.value })}
-                      placeholder="500"
-                      className={inputClass}
-                    />
-                  </div>
-                </>
-              )}
-
-              {/* Photos */}
-              <div className="pt-2 border-t border-apple-border/30">
-                <p className="text-xs font-semibold text-apple-gray uppercase tracking-wider mb-3">
-                  Фото {isVenueRental ? 'зала' : 'сотрудника'}
-                </p>
-                {!editingEmployee ? (
-                  <p className="text-xs text-apple-gray">
-                    Сохраните {isVenueRental ? 'зал' : 'сотрудника'}, затем добавьте фото.
-                  </p>
-                ) : (
-                  <>
-                    <input
-                      ref={photoInputRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0]
-                        if (f) handlePhotoUpload(f)
-                      }}
-                    />
-                    <div className="grid grid-cols-3 gap-2">
-                      {employeePhotos.map((fid, idx) => (
-                        <div key={`${fid}-${idx}`} className="relative aspect-square rounded-xl overflow-hidden bg-apple-bg group">
-                          <img
-                            src={`/api/telegram-photo/${encodeURIComponent(fid)}`}
-                            alt={`Фото ${idx + 1}`}
-                            className="w-full h-full object-cover"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handlePhotoDelete(idx)}
-                            className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center opacity-90"
-                            aria-label="Удалить фото"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => photoInputRef.current?.click()}
-                        disabled={photoUploading}
-                        className="aspect-square rounded-xl border-2 border-dashed border-apple-border flex flex-col items-center justify-center gap-1 text-apple-gray hover:border-apple-blue hover:text-apple-blue transition-all duration-200 disabled:opacity-50"
-                      >
-                        {photoUploading ? (
-                          <div className="w-5 h-5 border-2 border-apple-blue border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                          <>
-                            <ImagePlus size={20} />
-                            <span className="text-[10px] font-medium">Добавить</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                    {employeePhotos.length === 0 && !photoUploading && (
-                      <p className="text-xs text-apple-gray mt-2 flex items-center gap-1">
-                        <ImageIcon size={12} />
-                        Фото пока нет
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-
-              {/* Employee-Service Links */}
-              <div className="pt-2 border-t border-apple-border/30">
-                <p className="text-xs font-semibold text-apple-gray uppercase tracking-wider mb-3">
-                  Услуги
-                </p>
-                {servicesLoading ? (
-                  <div className="space-y-2">
-                    {[1, 2, 3].map((i) => (
-                      <div key={i} className="h-6 skeleton rounded-lg" />
-                    ))}
-                  </div>
-                ) : allServices.length === 0 ? (
-                  <p className="text-xs text-apple-gray">Нет доступных услуг</p>
-                ) : (
-                  <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {allServices.map((svc) => (
-                      <label
-                        key={svc.id}
-                        className="flex items-center gap-3 cursor-pointer py-1 px-2 rounded-lg hover:bg-apple-bg transition-all duration-200"
-                      >
-                        <div className="relative">
-                          <input
-                            type="checkbox"
-                            checked={selectedServiceIds.includes(svc.id)}
-                            onChange={() => toggleServiceLink(svc.id)}
-                            className="sr-only peer"
-                          />
-                          <div className="w-5 h-5 border-2 border-gray-300 rounded-md peer-checked:bg-apple-blue peer-checked:border-apple-blue transition-all duration-200 flex items-center justify-center">
-                            {selectedServiceIds.includes(svc.id) && (
-                              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <span className="text-sm text-apple-text truncate block">{svc.name}</span>
-                          {svc.price !== undefined && (
-                            <span className="text-xs text-apple-gray">{svc.price} руб</span>
-                          )}
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
+            {/* Name */}
+            <div className="ds-field">
+              <label className="ds-label">Имя</label>
+              <input
+                type="text"
+                className="ds-input"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="Иванова Анна"
+              />
             </div>
 
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={closeModal}
-                className="flex-1 bg-apple-bg text-apple-text font-medium py-3 rounded-xl hover:bg-gray-200 transition-all duration-200"
+            {/* Role */}
+            <div className="ds-field">
+              <label className="ds-label">Роль</label>
+              <select
+                className="ds-input"
+                value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value })}
               >
+                <option value="master">Мастер</option>
+                <option value="admin">Администратор</option>
+              </select>
+            </div>
+
+            {/* Specialization */}
+            <div className="ds-field">
+              <label className="ds-label">Специализация</label>
+              <input
+                type="text"
+                className="ds-input"
+                value={form.specialization}
+                onChange={(e) => setForm({ ...form, specialization: e.target.value })}
+                placeholder="Парикмахер-стилист"
+              />
+            </div>
+
+            {/* Description */}
+            <div className="ds-field">
+              <label className="ds-label">Описание</label>
+              <textarea
+                className="ds-input"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="Описание сотрудника..."
+                rows={3}
+              />
+            </div>
+
+            {/* Telegram ID */}
+            <div className="ds-field">
+              <label className="ds-label">Telegram ID</label>
+              <input
+                type="number"
+                className="ds-input"
+                value={form.telegram_id}
+                onChange={(e) => setForm({ ...form, telegram_id: e.target.value })}
+                placeholder="123456789"
+              />
+            </div>
+
+            {/* Booking interval */}
+            <div className="ds-field">
+              <label className="ds-label">Интервал записи, мин</label>
+              <input
+                type="number"
+                className="ds-input"
+                value={form.booking_interval_minutes}
+                onChange={(e) => setForm({ ...form, booking_interval_minutes: e.target.value })}
+                placeholder="30"
+              />
+            </div>
+
+            {/* Venue rental specific fields */}
+            {isVenueRental && (
+              <>
+                <div style={{ borderTop: '1px solid var(--s-line)', paddingTop: 12, marginBottom: 10 }}>
+                  <span className="ds-caption" style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Параметры площадки
+                  </span>
+                </div>
+
+                <div className="ds-field-row">
+                  <div className="ds-field">
+                    <label className="ds-label">Вместимость, чел</label>
+                    <input
+                      type="number"
+                      className="ds-input"
+                      value={form.capacity}
+                      onChange={(e) => setForm({ ...form, capacity: e.target.value })}
+                      placeholder="10"
+                    />
+                  </div>
+                  <div className="ds-field">
+                    <label className="ds-label">Площадь, м²</label>
+                    <input
+                      type="number"
+                      className="ds-input"
+                      value={form.area_sqm}
+                      onChange={(e) => setForm({ ...form, area_sqm: e.target.value })}
+                      placeholder="50"
+                    />
+                  </div>
+                </div>
+
+                <div className="ds-field">
+                  <label className="ds-label">Мин. время бронирования, мин</label>
+                  <input
+                    type="number"
+                    className="ds-input"
+                    value={form.min_booking_minutes}
+                    onChange={(e) => setForm({ ...form, min_booking_minutes: e.target.value })}
+                    placeholder="60"
+                  />
+                </div>
+
+                <div className="ds-field">
+                  <label className="ds-label">Тариф соло, руб/ч</label>
+                  <input
+                    type="number"
+                    className="ds-input"
+                    value={form.solo_price_per_hour}
+                    onChange={(e) => setForm({ ...form, solo_price_per_hour: e.target.value })}
+                    placeholder="500"
+                  />
+                </div>
+              </>
+            )}
+
+            {/* Photos section */}
+            <div style={{ borderTop: '1px solid var(--s-line)', paddingTop: 12, marginBottom: 10 }}>
+              <span className="ds-caption" style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Фото {isVenueRental ? 'зала' : 'сотрудника'}
+              </span>
+            </div>
+
+            {!editingEmployee ? (
+              <p className="ds-hint">
+                Сохраните {isVenueRental ? 'зал' : 'сотрудника'}, затем добавьте фото.
+              </p>
+            ) : (
+              <>
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    if (f) handlePhotoUpload(f)
+                  }}
+                />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 8 }}>
+                  {employeePhotos.map((fid, idx) => (
+                    <div
+                      key={`${fid}-${idx}`}
+                      style={{ position: 'relative', aspectRatio: '1', borderRadius: 'var(--r-md)', overflow: 'hidden', background: 'var(--s-surface-2)' }}
+                    >
+                      <img
+                        src={`/api/telegram-photo/${encodeURIComponent(fid)}`}
+                        alt={`Фото ${idx + 1}`}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handlePhotoDelete(idx)}
+                        style={{
+                          position: 'absolute', top: 4, right: 4, width: 22, height: 22,
+                          background: 'var(--s-danger)', color: '#fff', borderRadius: '50%', border: 'none',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                        }}
+                        aria-label="Удалить фото"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => photoInputRef.current?.click()}
+                    disabled={photoUploading}
+                    style={{
+                      aspectRatio: '1', borderRadius: 'var(--r-md)',
+                      border: '2px dashed var(--s-line-2)', background: 'transparent',
+                      color: 'var(--s-muted)', display: 'flex', flexDirection: 'column',
+                      alignItems: 'center', justifyContent: 'center', gap: 4,
+                      cursor: 'pointer', opacity: photoUploading ? 0.5 : 1,
+                    }}
+                  >
+                    {photoUploading ? (
+                      <div className="animate-spin" style={{ width: 20, height: 20, border: '2px solid var(--s-accent)', borderTopColor: 'transparent', borderRadius: '50%' }} />
+                    ) : (
+                      <>
+                        <ImagePlus size={20} />
+                        <span style={{ fontSize: 10, fontWeight: 600 }}>Добавить</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                {employeePhotos.length === 0 && !photoUploading && (
+                  <p className="ds-hint" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <ImageIcon size={12} />
+                    Фото пока нет
+                  </p>
+                )}
+              </>
+            )}
+
+            {/* Employee-Service links */}
+            <div style={{ borderTop: '1px solid var(--s-line)', paddingTop: 12, marginBottom: 10, marginTop: 4 }}>
+              <span className="ds-caption" style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Услуги
+              </span>
+            </div>
+
+            {servicesLoading ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="skeleton" style={{ height: 28, borderRadius: 8 }} />
+                ))}
+              </div>
+            ) : allServices.length === 0 ? (
+              <p className="ds-hint">Нет доступных услуг</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 180, overflowY: 'auto' }}>
+                {allServices.map((svc) => (
+                  <label
+                    key={svc.id}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+                      padding: '6px 8px', borderRadius: 'var(--r-sm)',
+                      background: selectedServiceIds.includes(svc.id) ? 'var(--s-accent-soft)' : 'transparent',
+                    }}
+                  >
+                    <div style={{ position: 'relative', flexShrink: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedServiceIds.includes(svc.id)}
+                        onChange={() => toggleServiceLink(svc.id)}
+                        style={{ position: 'absolute', opacity: 0, width: 0, height: 0 }}
+                      />
+                      <div style={{
+                        width: 18, height: 18, border: `2px solid ${selectedServiceIds.includes(svc.id) ? 'var(--s-accent)' : 'var(--s-line-2)'}`,
+                        borderRadius: 5, background: selectedServiceIds.includes(svc.id) ? 'var(--s-accent)' : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s',
+                      }}>
+                        {selectedServiceIds.includes(svc.id) && (
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span className="ds-text" style={{ display: 'block', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {svc.name}
+                      </span>
+                      {svc.price !== undefined && (
+                        <span className="ds-caption">{svc.price} руб</span>
+                      )}
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {/* Footer buttons */}
+            <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+              <button className="ds-btn ds-btn--ghost" style={{ flex: 1 }} onClick={closeModal}>
                 Отмена
               </button>
               <button
+                className="ds-btn ds-btn--primary"
+                style={{ flex: 1 }}
                 onClick={handleSave}
                 disabled={!form.name || !form.specialization}
-                className="flex-1 bg-apple-blue text-white font-medium py-3 rounded-xl hover:bg-apple-blue-hover transition-all duration-200 disabled:opacity-50"
               >
                 {editingEmployee ? 'Сохранить' : 'Добавить'}
               </button>
@@ -756,23 +782,17 @@ export function EmployeesPage() {
         </div>
       )}
 
-      {/* Duty Schedule Modal */}
+      {/* Duty Schedule dialog */}
       {dutyModalEmp && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-apple-text">
-                График: {dutyModalEmp.name}
-              </h2>
-              <button
-                onClick={() => setDutyModalEmp(null)}
-                className="p-1 rounded-lg text-apple-gray hover:bg-apple-bg transition-all duration-200"
-              >
-                <X size={20} />
+        <div className="ds-center-ov">
+          <div className="ds-dialog" style={{ maxWidth: 360 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>График: {dutyModalEmp.name}</h3>
+              <button className="ds-icon-btn" onClick={() => setDutyModalEmp(null)} aria-label="Закрыть">
+                <X size={16} />
               </button>
             </div>
 
-            {/* Month navigation */}
             {(() => {
               const baseDate = new Date()
               baseDate.setDate(1)
@@ -781,11 +801,10 @@ export function EmployeesPage() {
               const month = baseDate.getMonth()
               const monthName = baseDate.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })
 
-              // Build calendar grid
               const firstDay = new Date(year, month, 1)
               const lastDay = new Date(year, month + 1, 0)
               let startDow = firstDay.getDay()
-              if (startDow === 0) startDow = 7 // Mon=1..Sun=7
+              if (startDow === 0) startDow = 7
               const daysInMonth = lastDay.getDate()
               const todayStr = getTodayStr()
 
@@ -795,27 +814,26 @@ export function EmployeesPage() {
 
               return (
                 <>
-                  <div className="flex items-center justify-between mb-3">
-                    <button onClick={() => setDutyMonthOffset(o => o - 1)}
-                      className="p-1.5 rounded-lg hover:bg-apple-bg transition-all">
-                      <ChevronLeft size={16} />
+                  {/* Month nav */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <button className="ds-icon-btn" onClick={() => setDutyMonthOffset(o => o - 1)}>
+                      <ChevronLeft size={15} />
                     </button>
-                    <span className="text-sm font-medium text-apple-text capitalize">{monthName}</span>
-                    <button onClick={() => setDutyMonthOffset(o => o + 1)}
-                      className="p-1.5 rounded-lg hover:bg-apple-bg transition-all">
-                      <ChevronRight size={16} />
+                    <span className="ds-text" style={{ fontWeight: 600, textTransform: 'capitalize' }}>{monthName}</span>
+                    <button className="ds-icon-btn" onClick={() => setDutyMonthOffset(o => o + 1)}>
+                      <ChevronRight size={15} />
                     </button>
                   </div>
 
                   {/* Day headers */}
-                  <div className="grid grid-cols-7 gap-1 mb-1">
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3, marginBottom: 4 }}>
                     {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((d) => (
-                      <div key={d} className="text-center text-[10px] font-semibold text-apple-gray uppercase">{d}</div>
+                      <div key={d} className="ds-caption" style={{ textAlign: 'center', fontWeight: 700, textTransform: 'uppercase' }}>{d}</div>
                     ))}
                   </div>
 
                   {/* Calendar grid */}
-                  <div className="grid grid-cols-7 gap-1">
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3 }}>
                     {cells.map((day, idx) => {
                       if (day === null) return <div key={`empty-${idx}`} />
                       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
@@ -825,13 +843,14 @@ export function EmployeesPage() {
                         <button
                           key={dateStr}
                           onClick={() => toggleDutyDate(dateStr)}
-                          className={`w-full aspect-square rounded-lg text-xs font-medium flex items-center justify-center transition-all duration-150 ${
-                            isDuty
-                              ? 'bg-green-500 text-white shadow-sm'
-                              : isToday
-                              ? 'bg-apple-blue/10 text-apple-blue border border-apple-blue/30'
-                              : 'hover:bg-apple-bg text-apple-text'
-                          }`}
+                          style={{
+                            aspectRatio: '1', borderRadius: 'var(--r-sm)', fontSize: 12, fontWeight: 600,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                            border: isToday && !isDuty ? '1px solid var(--s-accent)' : '1px solid transparent',
+                            background: isDuty ? 'var(--s-success)' : isToday ? 'var(--s-accent-soft)' : 'var(--s-surface-2)',
+                            color: isDuty ? '#fff' : isToday ? 'var(--s-accent)' : 'var(--s-text)',
+                            transition: 'all 0.12s',
+                          }}
                         >
                           {day}
                         </button>
@@ -839,31 +858,24 @@ export function EmployeesPage() {
                     })}
                   </div>
 
-                  <p className="text-[10px] text-apple-gray mt-2 text-center">
+                  <p className="ds-hint" style={{ textAlign: 'center', marginTop: 8 }}>
                     Нажмите на день, чтобы отметить дежурство. Зелёные — дежурные дни.
                   </p>
                 </>
               )
             })()}
 
-            <div className="flex gap-3 mt-4">
-              <button
-                onClick={() => setDutyModalEmp(null)}
-                className="flex-1 bg-apple-bg text-apple-text font-medium py-3 rounded-xl hover:bg-gray-200 transition-all duration-200"
-              >
+            <div className="ds-dialog-actions" style={{ marginTop: 14 }}>
+              <button className="ds-btn ds-btn--ghost" onClick={() => setDutyModalEmp(null)}>
                 Отмена
               </button>
-              <button
-                onClick={saveDutySchedule}
-                disabled={dutySaving}
-                className="flex-1 bg-apple-blue text-white font-medium py-3 rounded-xl hover:bg-apple-blue-hover transition-all duration-200 disabled:opacity-50"
-              >
+              <button className="ds-btn ds-btn--primary" onClick={saveDutySchedule} disabled={dutySaving}>
                 {dutySaving ? 'Сохранение...' : 'Сохранить'}
               </button>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </AdminShell>
   )
 }
