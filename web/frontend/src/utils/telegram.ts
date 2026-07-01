@@ -66,23 +66,48 @@ interface TelegramWebApp {
   offEvent: (eventType: string, callback: () => void) => void
 }
 
-// ВРЕМЕННО: диагностическая плашка с реальными значениями safe area устройства,
-// поверх шапки Telegram. Тап по ней — закрыть. Убрать вызов showSafeAreaDebug()
-// (и саму функцию) после того как отступ будет подобран точно.
-function showSafeAreaDebug() {
+// ВРЕМЕННО: живой калибратор отступа под шапку Telegram — panel внизу экрана
+// с кнопками +/-, не перекрывает область, которую как раз калибруем (верх).
+// safeAreaInset/contentSafeAreaInset у Telegram оказались нулевыми на реальном
+// устройстве — полагаться на API нельзя, подбираем значение вручную и один раз.
+// Убрать вызов showSafeAreaCalibrator() (и саму функцию) после того как отступ
+// будет подобран и зашит в CSS.
+function showSafeAreaCalibrator() {
   if (!tg) return
-  const box = document.createElement('div')
-  box.style.cssText =
-    'position:fixed;top:0;left:0;right:0;z-index:999999;background:#000;color:#0f0;' +
-    'font:11px/1.5 monospace;padding:8px 10px;white-space:pre-wrap;word-break:break-all;'
-  box.textContent =
-    `safeAreaInset: ${JSON.stringify(tg.safeAreaInset)}\n` +
-    `contentSafeAreaInset: ${JSON.stringify(tg.contentSafeAreaInset)}\n` +
-    `innerHeight: ${window.innerHeight}  viewportHeight: ${(tg as unknown as { viewportHeight?: number }).viewportHeight}\n` +
-    `--tg-safe-top: ${getComputedStyle(document.documentElement).getPropertyValue('--tg-safe-top')}\n` +
-    '(тап — закрыть)'
-  box.onclick = () => box.remove()
-  document.body.appendChild(box)
+  let current = 60
+  document.documentElement.style.setProperty('--tg-safe-top', `${current}px`)
+
+  const bar = document.createElement('div')
+  bar.style.cssText =
+    'position:fixed;bottom:0;left:0;right:0;z-index:999999;background:#000;color:#0f0;' +
+    'font:13px/1.4 monospace;padding:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;'
+
+  const label = document.createElement('span')
+  label.style.cssText = 'margin-right:auto;font-weight:bold;'
+  const render = () => { label.textContent = `Отступ: ${current}px` }
+  render()
+
+  const mkBtn = (text: string, delta: number) => {
+    const b = document.createElement('button')
+    b.textContent = text
+    b.style.cssText =
+      'background:#0f0;color:#000;border:none;border-radius:6px;padding:8px 12px;font:13px monospace;font-weight:bold;'
+    b.onclick = () => {
+      current = Math.max(0, current + delta)
+      document.documentElement.style.setProperty('--tg-safe-top', `${current}px`)
+      render()
+    }
+    return b
+  }
+
+  const closeBtn = document.createElement('button')
+  closeBtn.textContent = 'Готово'
+  closeBtn.style.cssText =
+    'background:#333;color:#0f0;border:1px solid #0f0;border-radius:6px;padding:8px 12px;font:13px monospace;'
+  closeBtn.onclick = () => bar.remove()
+
+  bar.append(label, mkBtn('−10', -10), mkBtn('−1', -1), mkBtn('+1', 1), mkBtn('+10', 10), closeBtn)
+  document.body.appendChild(bar)
 }
 
 // Helper functions
@@ -113,9 +138,8 @@ export function initTelegramWebApp() {
   tg.onEvent?.('safeAreaChanged', applySafeArea)
   tg.onEvent?.('contentSafeAreaChanged', applySafeArea)
 
-  // ВРЕМЕННО: показать реальные значения safe area на экране, чтобы подобрать
-  // точный отступ без гадания (см. --tg-safe-top выше). Убрать после диагностики.
-  showSafeAreaDebug()
+  // ВРЕМЕННО: живой калибратор отступа (см. функцию выше). Убрать после подбора.
+  showSafeAreaCalibrator()
 
   // Apply theme colors as CSS variables
   const params = tg.themeParams
