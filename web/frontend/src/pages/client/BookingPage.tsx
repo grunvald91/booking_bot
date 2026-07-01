@@ -56,6 +56,7 @@ import {
   MapPin,
   Navigation,
   Paperclip,
+  Repeat,
 } from 'lucide-react'
 import {
   api,
@@ -288,6 +289,9 @@ function BookingPageInner() {
     return localStorage.getItem('clientPhone') || ''
   })
   const [comment, setComment] = useState('')
+  const [repeatEnabled, setRepeatEnabled] = useState(false)
+  const [repeatWeeks, setRepeatWeeks] = useState(4)
+  const [createdDates, setCreatedDates] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [success, setSuccess] = useState(false)
   const [bookingError, setBookingError] = useState<string | null>(null)
@@ -596,6 +600,7 @@ function BookingPageInner() {
         client_name: clientName,
         client_phone: clientPhone,
         notes: comment || undefined,
+        repeat_weeks: repeatEnabled ? repeatWeeks : undefined,
       })
       const firstResult: any = Array.isArray(result) && result.length > 0
         ? result[0]
@@ -603,6 +608,10 @@ function BookingPageInner() {
       if (firstResult) {
         setCreatedBookingId(firstResult.id)
         setCreatedNotifyToken(firstResult.notify_token ?? null)
+        if (Array.isArray(result) && repeatEnabled) {
+          const uniqueDates = Array.from(new Set(result.map((b: any) => b.date).filter(Boolean))) as string[]
+          setCreatedDates(uniqueDates)
+        }
         // Сохранить бронь в "Мои брони" для возврата без логина
         if (firstResult.notify_token) {
           try {
@@ -628,7 +637,18 @@ function BookingPageInner() {
     } catch (err: any) {
       console.error('Booking creation error:', err)
       const msg = err?.message || ''
-      if (msg.includes('409') || msg.includes('already taken')) {
+      if (repeatEnabled) {
+        try {
+          const parsed = JSON.parse(msg)
+          setBookingError(
+            parsed?.detail
+              ? `Не удалось создать серию — ${parsed.detail}`
+              : 'Не удалось создать серию записей. Попробуйте другое время.'
+          )
+        } catch {
+          setBookingError('Не удалось создать серию записей. Попробуйте другое время.')
+        }
+      } else if (msg.includes('409') || msg.includes('already taken')) {
         setBookingError('Это время уже занято. Выберите другое время.')
       } else {
         setBookingError('Не удалось создать запись. Попробуйте ещё раз.')
@@ -771,6 +791,14 @@ function BookingPageInner() {
                   {selectedDate && formatDateRu(selectedDate)}, {selectedTime}
                 </span>
               </div>
+              {createdDates.length > 1 && (
+                <div className="bk-success-row">
+                  <span className="lbl">Повторится ещё</span>
+                  <span className="val">
+                    {createdDates.slice(1).map((d) => formatDateRu(d)).join(', ')}
+                  </span>
+                </div>
+              )}
               {business?.address && (
                 <div className="bk-success-row">
                   <span className="lbl">Адрес</span>
@@ -1859,6 +1887,47 @@ function BookingPageInner() {
                 rows={3}
                 className="ds-input"
               />
+            </div>
+
+            <div className="ds-field" style={{ marginBottom: 0, marginTop: 13 }}>
+              <button
+                type="button"
+                onClick={() => setRepeatEnabled((v) => !v)}
+                className={`bk-option ${repeatEnabled ? 'is-selected' : ''}`}
+                style={{ width: '100%' }}
+              >
+                <div style={{ flex: 1, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Repeat size={16} />
+                  <span className="bk-option-title">Повторять каждую неделю</span>
+                </div>
+                <div className={`bk-check ${repeatEnabled ? 'is-on' : ''}`}>
+                  {repeatEnabled && <Check size={14} strokeWidth={3} />}
+                </div>
+              </button>
+              {repeatEnabled && (
+                <div className="bk-addon-hours" style={{ marginTop: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setRepeatWeeks((w) => Math.max(2, w - 1))}
+                    className="ds-icon-btn"
+                  >
+                    <Minus size={16} />
+                  </button>
+                  <span className="val">{repeatWeeks} нед</span>
+                  <button
+                    type="button"
+                    onClick={() => setRepeatWeeks((w) => Math.min(8, w + 1))}
+                    className="ds-icon-btn"
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+              )}
+              {repeatEnabled && (
+                <p className="ds-hint">
+                  Ещё {repeatWeeks - 1} {repeatWeeks - 1 === 1 ? 'такая же запись' : 'таких же записи'} каждую неделю после первой.
+                </p>
+              )}
             </div>
           </div>
 
