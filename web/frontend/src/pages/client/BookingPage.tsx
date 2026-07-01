@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef, Component, type ReactNode } from 'react'
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
+import { ClientShell } from '../../components/ClientShell'
+import './booking.css'
 
 // Защита от белого экрана: если в success-рендере что-то падает,
 // клиент должен увидеть хоть какое-то сообщение, а не пустоту.
@@ -15,20 +17,18 @@ class SuccessErrorBoundary extends Component<{ children: ReactNode; bookingId?: 
         ? `${window.location.origin}/b/${this.props.notifyToken}`
         : null
       return (
-        <div className="flex flex-col items-center justify-center py-20 text-center px-4">
-          <div className="w-16 h-16 mb-4 rounded-full bg-green-50 flex items-center justify-center">
-            <span className="text-3xl">✅</span>
-          </div>
-          <h2 className="text-xl font-bold text-apple-text mb-2">Запись создана</h2>
-          <p className="text-apple-gray text-sm mb-4 max-w-sm">
+        <div className="bk-fallback">
+          <div className="bk-fallback-icon is-ok">✅</div>
+          <h2 className="ds-h1">Запись создана</h2>
+          <p className="ds-sub bk-fallback-sub">
             Бронь сохранена{this.props.bookingId ? ` (№${this.props.bookingId})` : ''}. Подробности и статус доступны по ссылке.
           </p>
           {publicUrl && (
-            <a href={publicUrl} className="inline-block bg-apple-blue text-white px-6 py-3 rounded-2xl font-semibold mb-3">
+            <a href={publicUrl} className="ds-btn ds-btn--primary" style={{ marginBottom: 12 }}>
               Открыть страницу брони
             </a>
           )}
-          <Link to="/" className="text-sm text-apple-blue underline">На главную</Link>
+          <Link to="/" className="ds-accent" style={{ fontSize: 13, textDecoration: 'underline' }}>На главную</Link>
         </div>
       )
     }
@@ -110,7 +110,7 @@ function linkifyText(text: string): React.ReactNode {
     if (/^(https?:\/\/|vk\.com\/|t\.me\/)/i.test(part)) {
       const href = part.startsWith('http') ? part : `https://${part}`
       return (
-        <a key={i} href={href} target="_blank" rel="noopener noreferrer" className="text-apple-blue underline">
+        <a key={i} href={href} target="_blank" rel="noopener noreferrer" className="ds-accent" style={{ textDecoration: 'underline' }}>
           {part}
         </a>
       )
@@ -165,36 +165,34 @@ function CalendarPicker({
     setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm p-5">
-      <div className="flex items-center justify-between mb-4">
+    <div className="ds-card bk-cal">
+      <div className="bk-cal-head">
         <button
           onClick={prevMonth}
-          className="p-2.5 rounded-xl hover:bg-apple-bg transition-all duration-200 min-h-[44px] min-w-[44px] flex items-center justify-center"
+          className="bk-cal-nav"
           aria-label="Предыдущий месяц"
         >
           <ChevronLeft size={20} />
         </button>
-        <h3 className="font-semibold text-apple-text">
+        <h3>
           {MONTHS_RU[currentMonth.getMonth()]} {currentMonth.getFullYear()}
         </h3>
         <button
           onClick={nextMonth}
-          className="p-2.5 rounded-xl hover:bg-apple-bg transition-all duration-200 min-h-[44px] min-w-[44px] flex items-center justify-center"
+          className="bk-cal-nav"
           aria-label="Следующий месяц"
         >
           <ChevronRight size={20} />
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 mb-2">
+      <div className="bk-cal-weekdays">
         {['\u041F\u043D', '\u0412\u0442', '\u0421\u0440', '\u0427\u0442', '\u041F\u0442', '\u0421\u0431', '\u0412\u0441'].map((d) => (
-          <div key={d} className="text-center text-xs font-medium text-apple-gray py-1">
-            {d}
-          </div>
+          <span key={d}>{d}</span>
         ))}
       </div>
 
-      <div className="grid grid-cols-7 gap-1">
+      <div className="bk-cal-days">
         {days.map((day, idx) => {
           if (!day) return <div key={`empty-${idx}`} />
           const dateStr = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
@@ -210,15 +208,7 @@ function CalendarPicker({
               key={dateStr}
               disabled={isPast}
               onClick={() => onSelect(dateStr)}
-              className={`aspect-square min-h-[40px] flex items-center justify-center rounded-xl text-sm font-medium transition-all duration-200 active:scale-95 ${
-                isPast
-                  ? 'text-apple-border cursor-not-allowed'
-                  : isSelected
-                    ? 'bg-servgo-grad text-white shadow-md'
-                    : isToday
-                      ? 'bg-apple-blue/10 text-apple-blue hover:bg-apple-blue/20'
-                      : 'text-apple-text hover:bg-apple-bg'
-              }`}
+              className={`bk-cal-day ${isSelected ? 'is-selected' : isToday ? 'is-today' : ''}`}
             >
               {day.getDate()}
             </button>
@@ -240,12 +230,12 @@ function scrollToRef(ref: React.RefObject<HTMLDivElement | null>, delay = 300) {
 function SectionHeader({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle?: string }) {
   return (
     <>
-      <h2 className="text-lg font-bold text-apple-text mb-0.5 flex items-center gap-2">
-        {icon}
-        {title}
-      </h2>
-      {subtitle && <p className="text-sm text-apple-gray mb-4">{subtitle}</p>}
-      {!subtitle && <div className="mb-4" />}
+      <div className="bk-section-head">
+        <span className="ico">{icon}</span>
+        <h2 className="ds-h2">{title}</h2>
+      </div>
+      {subtitle && <p className="ds-sub bk-section-sub">{subtitle}</p>}
+      {!subtitle && <div className="bk-section-sub" />}
     </>
   )
 }
@@ -722,391 +712,396 @@ function BookingPageInner() {
     }
 
     return (
-     <SuccessErrorBoundary bookingId={createdBookingId} notifyToken={createdNotifyToken}>
-      <div className="flex flex-col items-center justify-center py-20 text-center animate-fade-in">
-        <div className={`w-20 h-20 rounded-full flex items-center justify-center mb-6 ${prepaymentEnabled && totalPrice > 0 ? 'bg-amber-50' : 'bg-green-50'}`}>
-          {prepaymentEnabled && totalPrice > 0 ? (
-            <Clock size={40} className="text-amber-500" />
-          ) : (
-            <CheckCircle size={40} className="text-apple-success" />
-          )}
-        </div>
-        <h2 className="text-2xl font-extrabold text-apple-text mb-2">
-          {prepaymentEnabled && totalPrice > 0
-            ? 'Запись ожидает предоплаты'
-            : 'Запись создана!'}
-        </h2>
-        <p className="text-apple-gray mb-6 max-w-sm">
-          {prepaymentEnabled && totalPrice > 0 ? (
-            <>
-              {mainServiceLabel}, {selectedDate && formatDateRu(selectedDate)} в{' '}
-              {selectedTime}
-              {selectedRoomOrEmployee && ` \u00B7 ${selectedRoomOrEmployee.name}`}
-              {'. Оплатите предоплату для подтверждения.'}
-            </>
-          ) : (
-            <>
-              {mainServiceLabel}, {selectedDate && formatDateRu(selectedDate)} в{' '}
-              {selectedTime}
-              {selectedRoomOrEmployee && ` \u00B7 ${selectedRoomOrEmployee.name}`}
-            </>
-          )}
-        </p>
-        <div className="bg-white rounded-2xl shadow-sm p-6 w-full max-w-sm mb-6">
-          <div className="space-y-3 text-left">
-            <div className="flex justify-between text-sm">
-              <span className="text-apple-gray">{isVenue ? 'Зал' : 'Услуга'}</span>
-              <span className="font-medium text-right">
-                {isVenue ? selectedRoom?.name : selectedService?.name}
-              </span>
-            </div>
-            {isVenue && selectedServices.length > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-apple-gray">Услуги</span>
-                <span className="font-medium text-right">
-                  {selectedServices.map((s) => s.name).join(', ')}
+      <ClientShell backTo={`/business/${businessId}`} title={business?.name ?? 'Запись'}>
+       <SuccessErrorBoundary bookingId={createdBookingId} notifyToken={createdNotifyToken}>
+        <div className="bk-success bk-fade-in">
+          <div className={`bk-success-icon ${prepaymentEnabled && totalPrice > 0 ? 'is-pending' : 'is-done'}`}>
+            {prepaymentEnabled && totalPrice > 0 ? (
+              <Clock size={40} />
+            ) : (
+              <CheckCircle size={40} />
+            )}
+          </div>
+          <h2 className="ds-h1">
+            {prepaymentEnabled && totalPrice > 0
+              ? 'Запись ожидает предоплаты'
+              : 'Запись создана!'}
+          </h2>
+          <p className="ds-sub bk-success-sub">
+            {prepaymentEnabled && totalPrice > 0 ? (
+              <>
+                {mainServiceLabel}, {selectedDate && formatDateRu(selectedDate)} в{' '}
+                {selectedTime}
+                {selectedRoomOrEmployee && ` \u00B7 ${selectedRoomOrEmployee.name}`}
+                {'. Оплатите предоплату для подтверждения.'}
+              </>
+            ) : (
+              <>
+                {mainServiceLabel}, {selectedDate && formatDateRu(selectedDate)} в{' '}
+                {selectedTime}
+                {selectedRoomOrEmployee && ` \u00B7 ${selectedRoomOrEmployee.name}`}
+              </>
+            )}
+          </p>
+          <div className="ds-card bk-success-card">
+            <div>
+              <div className="bk-success-row">
+                <span className="lbl">{isVenue ? 'Зал' : 'Услуга'}</span>
+                <span className="val">
+                  {isVenue ? selectedRoom?.name : selectedService?.name}
                 </span>
               </div>
-            )}
-            {!isVenue && selectedEmployee && (
-              <div className="flex justify-between text-sm">
-                <span className="text-apple-gray">Специалист</span>
-                <span className="font-medium">{selectedEmployee.name}</span>
+              {isVenue && selectedServices.length > 0 && (
+                <div className="bk-success-row">
+                  <span className="lbl">Услуги</span>
+                  <span className="val">
+                    {selectedServices.map((s) => s.name).join(', ')}
+                  </span>
+                </div>
+              )}
+              {!isVenue && selectedEmployee && (
+                <div className="bk-success-row">
+                  <span className="lbl">Специалист</span>
+                  <span className="val">{selectedEmployee.name}</span>
+                </div>
+              )}
+              <div className="bk-success-row">
+                <span className="lbl">Дата и время</span>
+                <span className="val">
+                  {selectedDate && formatDateRu(selectedDate)}, {selectedTime}
+                </span>
               </div>
-            )}
-            <div className="flex justify-between text-sm">
-              <span className="text-apple-gray">Дата и время</span>
-              <span className="font-medium">
-                {selectedDate && formatDateRu(selectedDate)}, {selectedTime}
+              {business?.address && (
+                <div className="bk-success-row">
+                  <span className="lbl">Адрес</span>
+                  <a
+                    href={`https://yandex.ru/maps/?text=${encodeURIComponent(business.address)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ds-accent val"
+                    style={{ textDecoration: 'underline' }}
+                  >
+                    {business.address}
+                  </a>
+                </div>
+              )}
+              {totalPrice > 0 && (
+                <div className="bk-success-row total">
+                  <span className="lbl">Итого</span>
+                  <span className="val">{formatPrice(totalPrice)}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Bot subscribe — чтобы анонимный web-клиент мог получать уведомления о подтверждении */}
+          {createdNotifyToken && (
+            <a
+              href={`https://t.me/Sochiservice_bot?start=notify_${createdNotifyToken}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bk-bot-link"
+            >
+              <span className="t1">📲 Получать уведомления в Telegram</span>
+              <span className="t2">
+                Открыть бота, чтобы узнавать о подтверждении{prepaymentEnabled ? ' предоплаты' : ' записи'} и напоминаниях
               </span>
+            </a>
+          )}
+
+          {/* Directions on success screen */}
+          {business?.directions && (
+            <div className="ds-card bk-directions-card">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <Navigation size={15} className="ds-accent" />
+                <h3 className="ds-h3">Как добраться</h3>
+              </div>
+              <p className="ds-sub" style={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
+                {linkifyText(business.directions)}
+              </p>
             </div>
-            {business?.address && (
-              <div className="flex justify-between text-sm">
-                <span className="text-apple-gray">Адрес</span>
-                <a
-                  href={`https://yandex.ru/maps/?text=${encodeURIComponent(business.address)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-apple-blue underline text-right max-w-[60%]"
-                >
-                  {business.address}
-                </a>
-              </div>
-            )}
-            {totalPrice > 0 && (
-              <div className="border-t border-apple-border/50 pt-3 flex justify-between">
-                <span className="font-medium">Итого</span>
-                <span className="font-bold text-lg">{formatPrice(totalPrice)}</span>
-              </div>
-            )}
-          </div>
-        </div>
+          )}
 
-        {/* Bot subscribe — чтобы анонимный web-клиент мог получать уведомления о подтверждении */}
-        {createdNotifyToken && (
-          <a
-            href={`https://t.me/Sochiservice_bot?start=notify_${createdNotifyToken}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-full max-w-sm mb-3 flex flex-col items-center gap-1 bg-apple-blue text-white rounded-2xl px-5 py-4 shadow-lg shadow-apple-blue/20 active:scale-[0.98] transition-all"
-          >
-            <span className="text-sm font-bold">📲 Получать уведомления в Telegram</span>
-            <span className="text-[11px] text-white/85 text-center leading-snug">
-              Открыть бота, чтобы узнавать о подтверждении{prepaymentEnabled ? ' предоплаты' : ' записи'} и напоминаниях
-            </span>
-          </a>
-        )}
-
-        {/* Directions on success screen */}
-        {business?.directions && (
-          <div className="bg-white rounded-2xl shadow-sm p-5 w-full max-w-sm mb-6 text-left">
-            <div className="flex items-center gap-2 mb-2">
-              <Navigation size={15} className="text-apple-blue" />
-              <h3 className="text-sm font-semibold text-apple-text">Как добраться</h3>
-            </div>
-            <p className="text-sm text-apple-gray whitespace-pre-line leading-relaxed">
-              {linkifyText(business.directions)}
-            </p>
-          </div>
-        )}
-
-        {/* Prepayment block */}
-        {prepaymentEnabled && totalPrice > 0 && (
-          <div className="w-full max-w-sm mb-6">
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 text-left">
-              <div className="flex items-center gap-2 mb-3">
-                <CreditCard size={20} className="text-amber-600" />
-                <h3 className="font-semibold text-amber-800">
-                  Для подтверждения записи необходима предоплата
-                </h3>
-              </div>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-amber-700">Сумма</span>
-                  <span className="font-bold text-amber-900">{formatPrice(prepaymentAmount)}</span>
+          {/* Prepayment block */}
+          {prepaymentEnabled && totalPrice > 0 && (
+            <div className="bk-prepay">
+              <div className="bk-prepay-box">
+                <div className="bk-prepay-head">
+                  <CreditCard size={20} />
+                  <h3>
+                    Для подтверждения записи необходима предоплата
+                  </h3>
                 </div>
-                {paymentPhone && (
-                  <div className="flex justify-between">
-                    <span className="text-amber-700">Телефон для оплаты</span>
-                    <span className="font-medium text-amber-900">{paymentPhone}</span>
+                <div>
+                  <div className="bk-prepay-row">
+                    <span>Сумма</span>
+                    <span className="val">{formatPrice(prepaymentAmount)}</span>
                   </div>
-                )}
-                {paymentDetails && (
-                  <div className="flex justify-between">
-                    <span className="text-amber-700">Реквизиты</span>
-                    <span className="font-medium text-amber-900">{paymentDetails}</span>
-                  </div>
-                )}
-              </div>
-              {cancellationPolicyText ? (
-                <div className="mt-3 bg-red-50 border-2 border-red-400 rounded-xl p-3">
-                  <p className="text-sm font-bold text-red-700 mb-1">{'\u26A0\uFE0F Условия отмены'}</p>
-                  <p className="text-sm text-red-800 whitespace-pre-line">{cancellationPolicyText}</p>
+                  {paymentPhone && (
+                    <div className="bk-prepay-row">
+                      <span>Телефон для оплаты</span>
+                      <span className="val">{paymentPhone}</span>
+                    </div>
+                  )}
+                  {paymentDetails && (
+                    <div className="bk-prepay-row">
+                      <span>Реквизиты</span>
+                      <span className="val">{paymentDetails}</span>
+                    </div>
+                  )}
                 </div>
-              ) : cancellationPolicyPhoto ? (
-                <div className="mt-3">
-                  <img
-                    src={'/api/telegram-photo/' + encodeURIComponent(cancellationPolicyPhoto)}
-                    alt="Условия отмены"
-                    className="w-full rounded-xl border border-red-300"
-                  />
-                </div>
-              ) : null}
-              <div className="mt-4 space-y-3">
-                {paymentSent || receiptUploaded ? (
-                  <div className="py-4 rounded-2xl bg-green-50 border border-green-200 text-center">
-                    <CheckCircle size={24} className="text-green-600 mx-auto mb-2" />
-                    <p className="text-green-700 font-semibold text-sm">
-                      {receiptUploaded ? 'Чек отправлен владельцу' : 'Владелец уведомлён'}
-                    </p>
-                    <p className="text-green-600 text-xs mt-1">
-                      Ожидайте подтверждения оплаты. Вам придёт уведомление.
-                    </p>
+                {cancellationPolicyText ? (
+                  <div className="bk-cancel-policy">
+                    <p>{'\u26A0\uFE0F Условия отмены'}</p>
+                    <p>{cancellationPolicyText}</p>
                   </div>
-                ) : (
-                  <>
-                    <input
-                      ref={receiptInputRef}
-                      type="file"
-                      accept="image/*,.pdf,application/pdf"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (!file) return
-                        setReceiptError(null)
-                        // Очистить старое превью
-                        if (pendingReceiptPreview) URL.revokeObjectURL(pendingReceiptPreview)
-                        setPendingReceipt(file)
-                        const isImage = file.type.startsWith('image/')
-                        setPendingReceiptPreview(isImage ? URL.createObjectURL(file) : null)
-                        // Сброс input value чтобы повторный выбор того же файла триггерил onChange
-                        e.target.value = ''
-                      }}
+                ) : cancellationPolicyPhoto ? (
+                  <div className="bk-cancel-policy">
+                    <img
+                      src={'/api/telegram-photo/' + encodeURIComponent(cancellationPolicyPhoto)}
+                      alt="Условия отмены"
                     />
+                  </div>
+                ) : null}
+                <div className="bk-prepay-actions">
+                  {paymentSent || receiptUploaded ? (
+                    <div className="bk-prepay-done">
+                      <CheckCircle size={24} className="ico" />
+                      <p className="t1">
+                        {receiptUploaded ? 'Чек отправлен владельцу' : 'Владелец уведомлён'}
+                      </p>
+                      <p className="t2">
+                        Ожидайте подтверждения оплаты. Вам придёт уведомление.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <input
+                        ref={receiptInputRef}
+                        type="file"
+                        accept="image/*,.pdf,application/pdf"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (!file) return
+                          setReceiptError(null)
+                          // Очистить старое превью
+                          if (pendingReceiptPreview) URL.revokeObjectURL(pendingReceiptPreview)
+                          setPendingReceipt(file)
+                          const isImage = file.type.startsWith('image/')
+                          setPendingReceiptPreview(isImage ? URL.createObjectURL(file) : null)
+                          // Сброс input value чтобы повторный выбор того же файла триггерил onChange
+                          e.target.value = ''
+                        }}
+                      />
 
-                    {/* F3: превью + 3 кнопки (Отправить / Заменить / Удалить) */}
-                    {pendingReceipt ? (
-                      <div className="space-y-3">
-                        <div className="bg-white rounded-2xl border border-apple-border/60 p-3">
-                          {pendingReceiptPreview ? (
-                            <img
-                              src={pendingReceiptPreview}
-                              alt="Превью чека"
-                              className="w-full max-h-72 object-contain rounded-xl"
-                            />
-                          ) : (
-                            <div className="flex items-center gap-3 py-3">
-                              <div className="w-12 h-12 rounded-xl bg-apple-blue/10 flex items-center justify-center shrink-0">
-                                <Paperclip size={20} className="text-apple-blue" />
+                      {/* F3: превью + 3 кнопки (Отправить / Заменить / Удалить) */}
+                      {pendingReceipt ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                          <div className="bk-receipt-preview">
+                            {pendingReceiptPreview ? (
+                              <img
+                                src={pendingReceiptPreview}
+                                alt="Превью чека"
+                              />
+                            ) : (
+                              <div className="bk-receipt-file">
+                                <div className="bk-receipt-file-ico">
+                                  <Paperclip size={20} />
+                                </div>
+                                <div style={{ minWidth: 0, flex: 1 }}>
+                                  <p className="bk-receipt-file-name">{pendingReceipt.name}</p>
+                                  <p className="bk-receipt-file-meta">
+                                    {(pendingReceipt.size / 1024).toFixed(0)} КБ · {pendingReceipt.type || 'файл'}
+                                  </p>
+                                </div>
                               </div>
-                              <div className="min-w-0 flex-1">
-                                <p className="text-sm font-semibold text-apple-text truncate">{pendingReceipt.name}</p>
-                                <p className="text-xs text-apple-gray">
-                                  {(pendingReceipt.size / 1024).toFixed(0)} КБ · {pendingReceipt.type || 'файл'}
-                                </p>
-                              </div>
-                            </div>
+                            )}
+                            <p className="bk-receipt-hint">
+                              Проверьте, что файл правильный — затем отправьте
+                            </p>
+                          </div>
+
+                          {receiptError && (
+                            <p className="bk-receipt-error">{receiptError}</p>
                           )}
-                          <p className="text-xs text-apple-gray mt-2 text-center">
-                            Проверьте, что файл правильный — затем отправьте
-                          </p>
-                        </div>
 
-                        {receiptError && (
-                          <p className="text-xs text-red-600 text-center">{receiptError}</p>
-                        )}
-
-                        <button
-                          onClick={async () => {
-                            if (!pendingReceipt) return
-                            if (!createdNotifyToken && !createdBookingId) return
-                            setReceiptError(null)
-                            setReceiptUploading(true)
-                            try {
-                              if (createdNotifyToken) {
-                                // QR-клиент без auth — публичный endpoint по токену.
-                                await api.uploadReceiptByToken(createdNotifyToken, pendingReceipt)
-                              } else if (createdBookingId) {
-                                await api.uploadReceipt(createdBookingId, pendingReceipt)
-                              }
-                              setReceiptUploaded(true)
-                              if (pendingReceiptPreview) URL.revokeObjectURL(pendingReceiptPreview)
-                              setPendingReceipt(null)
-                              setPendingReceiptPreview(null)
-                              // Перебрасываем на публичную страницу брони — там поллинг
-                              // и при подтверждении владельцем статус обновится сам.
-                              if (createdNotifyToken) {
-                                navigate(`/b/${createdNotifyToken}`)
-                              }
-                            } catch (err) {
-                              setReceiptError('Не удалось отправить чек. Попробуйте ещё раз.')
-                            } finally {
-                              setReceiptUploading(false)
-                            }
-                          }}
-                          disabled={receiptUploading}
-                          className="w-full py-4 rounded-2xl text-base font-bold bg-apple-blue text-white hover:bg-apple-blue-hover transition-all duration-200 min-h-[52px] disabled:opacity-50 shadow-lg shadow-apple-blue/20 active:scale-[0.98] flex items-center justify-center gap-2"
-                        >
-                          {receiptUploading ? (
-                            <>
-                              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                              Отправка...
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle size={18} />
-                              Отправить чек
-                            </>
-                          )}
-                        </button>
-
-                        <div className="grid grid-cols-2 gap-2">
                           <button
-                            onClick={() => receiptInputRef.current?.click()}
-                            disabled={receiptUploading}
-                            className="py-3 rounded-2xl text-sm font-semibold bg-white border border-apple-border text-apple-text hover:bg-apple-bg transition-all min-h-[44px] disabled:opacity-50 flex items-center justify-center gap-2"
-                          >
-                            <Paperclip size={15} />
-                            Заменить
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (pendingReceiptPreview) URL.revokeObjectURL(pendingReceiptPreview)
-                              setPendingReceipt(null)
-                              setPendingReceiptPreview(null)
+                            onClick={async () => {
+                              if (!pendingReceipt) return
+                              if (!createdNotifyToken && !createdBookingId) return
                               setReceiptError(null)
+                              setReceiptUploading(true)
+                              try {
+                                if (createdNotifyToken) {
+                                  // QR-клиент без auth — публичный endpoint по токену.
+                                  await api.uploadReceiptByToken(createdNotifyToken, pendingReceipt)
+                                } else if (createdBookingId) {
+                                  await api.uploadReceipt(createdBookingId, pendingReceipt)
+                                }
+                                setReceiptUploaded(true)
+                                if (pendingReceiptPreview) URL.revokeObjectURL(pendingReceiptPreview)
+                                setPendingReceipt(null)
+                                setPendingReceiptPreview(null)
+                                // Перебрасываем на публичную страницу брони — там поллинг
+                                // и при подтверждении владельцем статус обновится сам.
+                                if (createdNotifyToken) {
+                                  navigate(`/b/${createdNotifyToken}`)
+                                }
+                              } catch (err) {
+                                setReceiptError('Не удалось отправить чек. Попробуйте ещё раз.')
+                              } finally {
+                                setReceiptUploading(false)
+                              }
                             }}
                             disabled={receiptUploading}
-                            className="py-3 rounded-2xl text-sm font-semibold bg-white border border-red-200 text-red-600 hover:bg-red-50 transition-all min-h-[44px] disabled:opacity-50"
+                            className="ds-btn ds-btn--primary ds-btn--block"
                           >
-                            Удалить
+                            {receiptUploading ? (
+                              <>
+                                <span className="bk-spinner" />
+                                Отправка...
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle size={18} />
+                                Отправить чек
+                              </>
+                            )}
                           </button>
+
+                          <div className="bk-receipt-actions-2">
+                            <button
+                              onClick={() => receiptInputRef.current?.click()}
+                              disabled={receiptUploading}
+                              className="ds-btn ds-btn--ghost ds-btn--sm"
+                            >
+                              <Paperclip size={15} />
+                              Заменить
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (pendingReceiptPreview) URL.revokeObjectURL(pendingReceiptPreview)
+                                setPendingReceipt(null)
+                                setPendingReceiptPreview(null)
+                                setReceiptError(null)
+                              }}
+                              disabled={receiptUploading}
+                              className="ds-btn ds-btn--ghost ds-btn--sm"
+                              style={{ color: 'var(--s-danger)', borderColor: 'var(--s-danger)' }}
+                            >
+                              Удалить
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => receiptInputRef.current?.click()}
-                        disabled={!createdBookingId}
-                        className="w-full py-4 rounded-2xl text-base font-bold bg-apple-blue text-white hover:bg-apple-blue-hover transition-all duration-200 min-h-[52px] disabled:opacity-50 shadow-lg shadow-apple-blue/20 active:scale-[0.98] flex items-center justify-center gap-2"
-                      >
-                        <Paperclip size={18} />
-                        Прикрепить чек
-                      </button>
-                    )}
-                    {!business?.require_receipt_for_prepayment && (
-                      <button
-                        onClick={handlePaymentSent}
-                        disabled={!createdBookingId}
-                        className="w-full py-4 rounded-2xl text-base font-bold bg-green-500 text-white hover:bg-green-600 transition-all duration-200 min-h-[52px] disabled:opacity-50 shadow-lg shadow-green-500/30 active:scale-[0.98]"
-                      >
-                        {'Оплата отправлена \u2713'}
-                      </button>
-                    )}
-                  </>
-                )}
+                      ) : (
+                        <button
+                          onClick={() => receiptInputRef.current?.click()}
+                          disabled={!createdBookingId}
+                          className="ds-btn ds-btn--primary ds-btn--block"
+                        >
+                          <Paperclip size={18} />
+                          Прикрепить чек
+                        </button>
+                      )}
+                      {!business?.require_receipt_for_prepayment && (
+                        <button
+                          onClick={handlePaymentSent}
+                          disabled={!createdBookingId}
+                          className="ds-btn ds-btn--block"
+                          style={{ background: 'var(--s-success)', color: '#fff' }}
+                        >
+                          {'Оплата отправлена \u2713'}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
+          )}
+
+          {/* F-bonus: сохранить ссылку на публичную страницу брони (без TG) — в самом низу */}
+          {createdNotifyToken && (() => {
+            const publicUrl = `${window.location.origin}/b/${createdNotifyToken}`
+            const copy = async () => {
+              try { await navigator.clipboard.writeText(publicUrl) } catch {}
+            }
+            return (
+              <div className="ds-card bk-save-link">
+                <div className="bk-save-link-title">📌 Сохранить страницу брони</div>
+                <p className="bk-save-link-hint">
+                  Откройте позже, чтобы видеть статус и инструкции владельца. Без Telegram.
+                </p>
+                <div className="bk-save-link-url">
+                  {publicUrl}
+                </div>
+                <div className="bk-save-link-actions">
+                  <button
+                    onClick={copy}
+                    className="ds-btn ds-btn--primary ds-btn--sm"
+                  >
+                    Скопировать
+                  </button>
+                  <a
+                    href={publicUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ds-btn ds-btn--ghost ds-btn--sm"
+                  >
+                    Открыть ↗
+                  </a>
+                </div>
+              </div>
+            )
+          })()}
+
+          <div className="bk-success-actions">
+            <button
+              onClick={() => navigate(`/business/${businessId}`)}
+              className="ds-btn ds-btn--ghost"
+            >
+              К бизнесу
+            </button>
+            <button
+              onClick={() => navigate('/')}
+              className="ds-btn ds-btn--primary"
+            >
+              На главную
+            </button>
           </div>
-        )}
-
-        {/* F-bonus: сохранить ссылку на публичную страницу брони (без TG) — в самом низу */}
-        {createdNotifyToken && (() => {
-          const publicUrl = `${window.location.origin}/b/${createdNotifyToken}`
-          const copy = async () => {
-            try { await navigator.clipboard.writeText(publicUrl) } catch {}
-          }
-          return (
-            <div className="w-full max-w-sm mb-6 bg-white rounded-2xl shadow-sm p-4 text-left">
-              <div className="text-xs font-semibold text-apple-text mb-1">📌 Сохранить страницу брони</div>
-              <p className="text-[11px] text-apple-gray mb-3 leading-snug">
-                Откройте позже, чтобы видеть статус и инструкции владельца. Без Telegram.
-              </p>
-              <div className="bg-apple-bg rounded-xl px-3 py-2 text-[11px] text-apple-text font-mono break-all mb-3">
-                {publicUrl}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={copy}
-                  className="py-2.5 rounded-xl bg-apple-blue text-white text-sm font-semibold active:scale-[0.98]"
-                >
-                  Скопировать
-                </button>
-                <a
-                  href={publicUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="py-2.5 rounded-xl bg-white border border-apple-border text-apple-text text-sm font-semibold text-center"
-                >
-                  Открыть ↗
-                </a>
-              </div>
-            </div>
-          )
-        })()}
-
-        <div className="flex gap-3">
-          <button
-            onClick={() => navigate(`/business/${businessId}`)}
-            className="bg-apple-bg text-apple-text font-medium px-6 py-3 rounded-xl hover:bg-gray-200 transition-all duration-200"
-          >
-            К бизнесу
-          </button>
-          <button
-            onClick={() => navigate('/')}
-            className="bg-apple-blue text-white font-medium px-6 py-3 rounded-xl hover:bg-apple-blue-hover transition-all duration-200"
-          >
-            На главную
-          </button>
         </div>
-      </div>
-     </SuccessErrorBoundary>
+       </SuccessErrorBoundary>
+      </ClientShell>
     )
   }
 
   // ── Main render — single long page ──
 
   return (
-    <div className="max-w-lg mx-auto pb-24 md:pb-8 space-y-6">
+    <ClientShell backTo={`/business/${businessId}`} title={business?.name ?? 'Запись'}>
+      <div style={{ paddingTop: 12, paddingBottom: 24 }}>
 
       {/* F1: business header — клиент видит, куда зашёл (важно при входе по QR) */}
       {business && (
-        <div className="bg-white rounded-2xl shadow-sm p-3 flex items-center gap-3">
+        <div className="ds-card bk-biz-card">
           {businessCover ? (
-            <img
-              src={`/api/telegram-photo/${encodeURIComponent(businessCover)}`}
-              alt={business.name}
-              className="w-12 h-12 rounded-xl object-cover shrink-0 border border-apple-border/40"
-            />
+            <div className="bk-biz-cover">
+              <img
+                src={`/api/telegram-photo/${encodeURIComponent(businessCover)}`}
+                alt={business.name}
+              />
+            </div>
           ) : (
-            <div className="w-12 h-12 rounded-xl bg-apple-blue/10 flex items-center justify-center shrink-0">
-              <Scissors size={18} className="text-apple-blue" />
+            <div className="bk-biz-cover">
+              <Scissors size={18} />
             </div>
           )}
-          <div className="min-w-0 flex-1">
-            <div className="text-[11px] uppercase tracking-wide text-apple-gray">Запись в</div>
-            <h1 className="text-base font-bold text-apple-text truncate">{business.name}</h1>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="bk-biz-eyebrow">Запись в</div>
+            <h2 className="ds-h2" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{business.name}</h2>
             {business.address && (
-              <p className="text-xs text-apple-gray truncate">{business.address}</p>
+              <p className="ds-caption" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{business.address}</p>
             )}
           </div>
         </div>
@@ -1114,7 +1109,7 @@ function BookingPageInner() {
 
       {/* F2: auto-pick toast */}
       {skipToast && (
-        <div className="fixed left-1/2 -translate-x-1/2 top-20 z-50 px-4 py-2 bg-apple-text/90 text-white text-sm font-medium rounded-2xl shadow-lg animate-fade-in pointer-events-none">
+        <div className="bk-toast">
           {`✓ выбрано — `}{skipToast}
         </div>
       )}
@@ -1126,13 +1121,13 @@ function BookingPageInner() {
       {isVenue && (
         <>
           {/* 1. Service selection (multi) — first */}
-          <div ref={refVenueServices}>
+          <div ref={refVenueServices} className="bk-section">
             <SectionHeader
-              icon={<Scissors size={20} className="text-apple-blue" />}
+              icon={<Scissors size={20} />}
               title="Выберите услуги"
               subtitle="можно несколько"
             />
-            <div className="space-y-2.5">
+            <div className="bk-option-list">
               {services.map((svc) => {
                 const isSelected = selectedServices.some((s) => s.id === svc.id)
                 return (
@@ -1145,32 +1140,24 @@ function BookingPageInner() {
                           : [...prev, svc]
                       )
                     }}
-                    className={`w-full flex items-center justify-between p-4 md:p-5 rounded-2xl transition-all duration-200 active:scale-[0.98] min-h-[56px] ${
-                      isSelected
-                        ? 'bg-apple-blue/10 border-2 border-apple-blue'
-                        : 'bg-white shadow-sm border-2 border-transparent hover:shadow-md'
-                    }`}
+                    className={`bk-option ${isSelected ? 'is-selected' : ''}`}
                   >
-                    <div className="flex-1 text-left">
-                      <h3 className={`font-semibold text-sm ${isSelected ? 'text-apple-blue' : 'text-apple-text'}`}>
+                    <div style={{ flex: 1, textAlign: 'left' }}>
+                      <h3 className="bk-option-title">
                         {svc.name}
                       </h3>
                       {svc.description && (
-                        <p className="text-xs text-apple-gray mt-0.5">{svc.description}</p>
+                        <p className="bk-option-desc">{svc.description}</p>
                       )}
                       {formatDuration(svc.duration_minutes) && (
-                        <div className="flex items-center gap-3 mt-1.5">
-                          <span className="text-xs text-apple-gray">
+                        <div className="bk-option-meta">
+                          <span className="bk-option-meta-item">
                             {formatDuration(svc.duration_minutes)}
                           </span>
                         </div>
                       )}
                     </div>
-                    <div
-                      className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ml-3 transition-all duration-200 ${
-                        isSelected ? 'bg-apple-blue text-white' : 'border-2 border-apple-border'
-                      }`}
-                    >
+                    <div className={`bk-check ${isSelected ? 'is-on' : ''}`}>
                       {isSelected && <Check size={14} strokeWidth={3} />}
                     </div>
                   </button>
@@ -1180,15 +1167,15 @@ function BookingPageInner() {
 
             {/* Summary */}
             {selectedServices.length > 0 && (
-              <div className="mt-4 bg-white rounded-2xl shadow-sm p-4 flex items-center justify-between">
-                <div className="text-sm text-apple-gray">
+              <div className="bk-summary-row">
+                <div className="ds-sub">
                   {selectedServices.length} услуг
                   {selectedServices.reduce((sum, s) => sum + (s.duration_minutes ?? 0), 0) > 0 &&
                     ` \u00B7 ${formatDuration(selectedServices.reduce((sum, s) => sum + (s.duration_minutes ?? 0), 0))}`}
                 </div>
                 <button
                   onClick={() => scrollToRef(refRoom, 100)}
-                  className="text-sm font-semibold text-apple-blue"
+                  className="lnk"
                 >
                   Далее ↓
                 </button>
@@ -1198,9 +1185,9 @@ function BookingPageInner() {
 
           {/* 2. Date — after services */}
           {showDateSection && (
-            <div ref={refDate} className="animate-fade-in">
+            <div ref={refDate} className="bk-section bk-fade-in">
               <SectionHeader
-                icon={<Calendar size={20} className="text-apple-blue" />}
+                icon={<Calendar size={20} />}
                 title="Выберите дату"
               />
               <CalendarPicker
@@ -1217,12 +1204,12 @@ function BookingPageInner() {
 
           {/* 3. Room selection — after date */}
           {showRoomSection && (
-            <div ref={refRoom} className="animate-fade-in">
+            <div ref={refRoom} className="bk-section bk-fade-in">
               <SectionHeader
-                icon={<DoorOpen size={20} className="text-apple-blue" />}
+                icon={<DoorOpen size={20} />}
                 title="Выберите зал"
               />
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="bk-option-grid bk-option-grid--2">
                 {employees.map((room) => {
                   const isSelected = selectedRoom?.id === room.id
                   const priceRange = getRoomPriceRange(room)
@@ -1235,47 +1222,38 @@ function BookingPageInner() {
                         setSelectedRoom(room)
                         scrollToRef(refTime)
                       }}
-                      className={`text-left p-4 md:p-5 rounded-2xl transition-all duration-200 active:scale-[0.98] min-h-[44px] ${
-                        isSelected
-                          ? 'bg-apple-blue/10 border-2 border-apple-blue shadow-sm'
-                          : 'bg-white shadow-sm hover:shadow-md border-2 border-transparent'
-                      }`}
+                      className={`bk-option bk-room-card ${isSelected ? 'is-selected' : ''}`}
                     >
-                      <div className="flex items-start gap-3">
-                        <div
-                          className={`w-14 h-14 rounded-xl flex items-center justify-center shrink-0 overflow-hidden ${
-                            isSelected ? 'bg-apple-blue text-white' : 'bg-apple-bg text-apple-gray'
-                          }`}
-                        >
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                        <div className="bk-room-thumb">
                           {cover ? (
                             <img
                               src={`/api/telegram-photo/${encodeURIComponent(cover)}`}
                               alt={room.name}
-                              className="w-full h-full object-cover"
                               loading="lazy"
                             />
                           ) : (
                             <Music size={20} />
                           )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className={`font-semibold text-sm ${isSelected ? 'text-apple-blue' : 'text-apple-text'}`}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <h3 className="bk-option-title">
                             {room.name}
                           </h3>
                           {room.description && (
-                            <p className="text-xs text-apple-gray mt-0.5 line-clamp-2">
+                            <p className="bk-option-desc" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                               {room.description}
                             </p>
                           )}
-                          <div className="flex items-center gap-3 mt-2">
+                          <div className="bk-option-meta">
                             {room.capacity && (
-                              <span className="text-xs text-apple-gray flex items-center gap-1">
+                              <span className="bk-option-meta-item">
                                 <Users size={12} />
                                 до {room.capacity} чел.
                               </span>
                             )}
                             {priceRange && (
-                              <span className="text-xs font-semibold text-apple-text">
+                              <span className="bk-option-price">
                                 {priceRange}
                               </span>
                             )}
@@ -1291,32 +1269,32 @@ function BookingPageInner() {
 
           {/* 4. Time */}
           {showTimeSection && (
-            <div ref={refTime} className="animate-fade-in">
+            <div ref={refTime} className="bk-section bk-fade-in">
               <SectionHeader
-                icon={<Clock size={20} className="text-apple-blue" />}
+                icon={<Clock size={20} />}
                 title="Выберите время"
                 subtitle={selectedDate ? formatDateRu(selectedDate) : undefined}
               />
               {loadingSlots ? (
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                <div className="bk-slot-grid">
                   {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className="h-12 skeleton rounded-xl" />
+                    <div key={i} className="skeleton" style={{ height: 48, borderRadius: 'var(--r-md)' }} />
                   ))}
                 </div>
               ) : slots.length === 0 ? (
-                <div className="text-center py-8">
-                  <Clock size={32} className="text-apple-gray mx-auto mb-3" />
-                  <p className="text-apple-gray">Нет свободных слотов на эту дату</p>
+                <div className="bk-slot-empty">
+                  <Clock size={32} style={{ color: 'var(--s-muted)', margin: '0 auto 12px' }} />
+                  <p>Нет свободных слотов на эту дату</p>
                   <button
                     onClick={() => scrollToRef(refDate, 100)}
-                    className="text-apple-blue text-sm font-semibold mt-3 hover:opacity-80 min-h-[44px]"
+                    className="lnk"
                   >
                     Выбрать другую дату
                   </button>
                 </div>
               ) : (
                 <>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  <div className="bk-slot-grid">
                     {slots.map((time) => (
                       <button
                         key={time}
@@ -1325,11 +1303,7 @@ function BookingPageInner() {
                           const nextRef = selectedRoom?.solo_price_per_hour ? refFormat : (additionalServices.length > 0 ? refAddons : refConfirm)
                           scrollToRef(nextRef)
                         }}
-                        className={`py-3.5 min-h-[44px] rounded-xl text-sm font-semibold transition-all duration-200 active:scale-95 ${
-                          selectedTime === time
-                            ? 'bg-servgo-grad text-white shadow-md'
-                            : 'bg-white shadow-sm text-apple-text hover:shadow-md'
-                        }`}
+                        className={`bk-slot ${selectedTime === time ? 'is-selected' : ''}`}
                       >
                         {time}
                       </button>
@@ -1338,36 +1312,36 @@ function BookingPageInner() {
 
                   {/* Price breakdown */}
                   {selectedTime && (
-                    <div className="mt-4 bg-white rounded-2xl shadow-sm p-4">
+                    <div className="ds-card bk-price-card">
                       {priceLoading ? (
-                        <div className="flex items-center gap-2 text-sm text-apple-gray">
-                          <div className="w-4 h-4 border-2 border-apple-blue border-t-transparent rounded-full animate-spin" />
+                        <div className="bk-price-loading">
+                          <span className="bk-spinner" />
                           Рассчитываем цену...
                         </div>
                       ) : priceData && priceData.segments.length > 0 ? (
-                        <div className="space-y-2">
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                           {priceData.segments.map((seg, i) => (
-                            <div key={i} className="flex justify-between text-sm">
-                              <span className="text-apple-gray">
+                            <div key={i} className="bk-price-row">
+                              <span className="lbl">
                                 {seg.time_from}{'\u2013'}{seg.time_to} ({formatDuration(seg.minutes)}) {'\u00D7'} {formatPrice(seg.price_per_hour, true)}
                               </span>
-                              <span className="font-medium">{formatPrice(seg.subtotal)}</span>
+                              <span className="val">{formatPrice(seg.subtotal)}</span>
                             </div>
                           ))}
-                          <div className="border-t border-apple-border/50 pt-2 flex justify-between">
-                            <span className="font-semibold text-sm">Итого</span>
-                            <span className="font-bold">{formatPrice(priceData.total)}</span>
+                          <div className="bk-price-total">
+                            <span className="lbl">Итого</span>
+                            <span className="val">{formatPrice(priceData.total)}</span>
                           </div>
                         </div>
                       ) : priceData && priceData.total > 0 ? (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-apple-gray">Стоимость</span>
-                          <span className="font-bold">{formatPrice(priceData.total)}</span>
+                        <div className="bk-price-row">
+                          <span className="lbl">Стоимость</span>
+                          <span className="val">{formatPrice(priceData.total)}</span>
                         </div>
                       ) : totalPrice > 0 ? (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-apple-gray">Стоимость</span>
-                          <span className="font-bold">{formatPrice(totalPrice)}</span>
+                        <div className="bk-price-row">
+                          <span className="lbl">Стоимость</span>
+                          <span className="val">{formatPrice(totalPrice)}</span>
                         </div>
                       ) : null}
                     </div>
@@ -1379,9 +1353,9 @@ function BookingPageInner() {
 
           {/* 5. Format (solo vs group) */}
           {showFormatSection && (
-            <div ref={refFormat} className="animate-fade-in">
+            <div ref={refFormat} className="bk-section bk-fade-in">
               <SectionHeader
-                icon={<Users size={20} className="text-apple-blue" />}
+                icon={<Users size={20} />}
                 title="Формат занятия"
               />
               {(() => {
@@ -1389,29 +1363,25 @@ function BookingPageInner() {
                 const groupPrice = priceData?.total ?? 0
                 const soloPrice = (selectedRoom?.solo_price_per_hour ?? 0) * hours
                 return (
-                  <div className="space-y-3">
+                  <div className="bk-option-list">
                     <button
                       onClick={() => {
                         setIsSoloPricing(false)
                         scrollToRef(additionalServices.length > 0 ? refAddons : refConfirm)
                       }}
-                      className={`w-full text-left p-5 rounded-2xl transition-all duration-200 active:scale-[0.98] min-h-[44px] ${
-                        !isSoloPricing
-                          ? 'bg-apple-blue/10 border-2 border-apple-blue'
-                          : 'bg-white shadow-sm border-2 border-transparent hover:shadow-md'
-                      }`}
+                      className={`bk-option ${!isSoloPricing ? 'is-selected' : ''}`}
                     >
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${!isSoloPricing ? 'bg-apple-blue text-white' : 'bg-apple-bg text-apple-gray'}`}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
+                        <div className={`bk-emp-ava ${!isSoloPricing ? 'is-selected' : ''}`} style={{ borderRadius: 'var(--r-md)' }}>
                           <Users size={18} />
                         </div>
-                        <div className="flex-1">
-                          <h3 className={`font-semibold text-sm ${!isSoloPricing ? 'text-apple-blue' : 'text-apple-text'}`}>
+                        <div style={{ flex: 1 }}>
+                          <h3 className="bk-option-title">
                             Групповое занятие
                           </h3>
-                          <p className="text-xs text-apple-gray mt-0.5">Цена по времени суток</p>
+                          <p className="bk-option-desc">Цена по времени суток</p>
                         </div>
-                        <span className="font-bold text-sm">{formatPrice(groupPrice)}</span>
+                        <span className="bk-option-price">{formatPrice(groupPrice)}</span>
                       </div>
                     </button>
                     <button
@@ -1419,25 +1389,21 @@ function BookingPageInner() {
                         setIsSoloPricing(true)
                         scrollToRef(additionalServices.length > 0 ? refAddons : refConfirm)
                       }}
-                      className={`w-full text-left p-5 rounded-2xl transition-all duration-200 active:scale-[0.98] min-h-[44px] ${
-                        isSoloPricing
-                          ? 'bg-apple-blue/10 border-2 border-apple-blue'
-                          : 'bg-white shadow-sm border-2 border-transparent hover:shadow-md'
-                      }`}
+                      className={`bk-option ${isSoloPricing ? 'is-selected' : ''}`}
                     >
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isSoloPricing ? 'bg-apple-blue text-white' : 'bg-apple-bg text-apple-gray'}`}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
+                        <div className={`bk-emp-ava ${isSoloPricing ? 'is-selected' : ''}`} style={{ borderRadius: 'var(--r-md)' }}>
                           <UserCheck size={18} />
                         </div>
-                        <div className="flex-1">
-                          <h3 className={`font-semibold text-sm ${isSoloPricing ? 'text-apple-blue' : 'text-apple-text'}`}>
+                        <div style={{ flex: 1 }}>
+                          <h3 className="bk-option-title">
                             Индивидуальное
                           </h3>
-                          <p className="text-xs text-apple-gray mt-0.5">
+                          <p className="bk-option-desc">
                             {formatPrice(selectedRoom?.solo_price_per_hour, true)} {'\u00D7'} {hours} ч
                           </p>
                         </div>
-                        <span className="font-bold text-sm">{formatPrice(soloPrice)}</span>
+                        <span className="bk-option-price">{formatPrice(soloPrice)}</span>
                       </div>
                     </button>
                   </div>
@@ -1456,12 +1422,12 @@ function BookingPageInner() {
       {!isVenue && (
         <>
           {/* 1. Service selection */}
-          <div ref={refService}>
+          <div ref={refService} className="bk-section">
             <SectionHeader
-              icon={<Scissors size={20} className="text-apple-blue" />}
+              icon={<Scissors size={20} />}
               title="Выберите услугу"
             />
-            <div className="space-y-2.5">
+            <div className="bk-option-list">
               {services.map((service) => {
                 const isSelected = selectedService?.id === service.id
                 return (
@@ -1473,24 +1439,21 @@ function BookingPageInner() {
                       setSelectedTime(null)
                       scrollToRef(refDate)
                     }}
-                    className={`w-full text-left rounded-2xl p-5 transition-all duration-200 press-scale ${
-                      isSelected
-                        ? 'bg-apple-blue/10 border-2 border-apple-blue shadow-sm'
-                        : 'bg-white shadow-sm hover:shadow-md border-2 border-transparent'
-                    }`}
+                    className={`bk-option ${isSelected ? 'is-selected' : ''}`}
+                    style={{ display: 'block' }}
                   >
-                    <h3 className={`font-semibold ${isSelected ? 'text-apple-blue' : 'text-apple-text'}`}>{service.name}</h3>
+                    <h3 className="bk-option-title">{service.name}</h3>
                     {service.description && (
-                      <p className="text-sm text-apple-gray mt-0.5">{service.description}</p>
+                      <p className="bk-option-desc">{service.description}</p>
                     )}
-                    <div className="flex items-center gap-3 mt-2">
+                    <div className="bk-option-meta">
                       {service.price != null && (
-                        <span className="text-sm font-bold text-apple-text">
+                        <span className="bk-option-price">
                           {formatPrice(service.price, service.is_hourly_price)}
                         </span>
                       )}
                       {formatDuration(service.duration_minutes) && (
-                        <span className="text-sm text-apple-gray">
+                        <span className="bk-option-meta-item">
                           {formatDuration(service.duration_minutes)}
                         </span>
                       )}
@@ -1503,9 +1466,9 @@ function BookingPageInner() {
 
           {/* 2. Date — after service */}
           {showDateSection && (
-            <div ref={refDate} className="animate-fade-in">
+            <div ref={refDate} className="bk-section bk-fade-in">
               <SectionHeader
-                icon={<Calendar size={20} className="text-apple-blue" />}
+                icon={<Calendar size={20} />}
                 title="Выберите дату"
                 subtitle={selectedService?.name}
               />
@@ -1522,13 +1485,13 @@ function BookingPageInner() {
 
           {/* 3. Employee selection — after date */}
           {showEmployeeSection && (
-            <div ref={refEmployee} className="animate-fade-in">
+            <div ref={refEmployee} className="bk-section bk-fade-in">
               <SectionHeader
-                icon={<User size={20} className="text-apple-blue" />}
+                icon={<User size={20} />}
                 title="Выберите специалиста"
                 subtitle="необязательно"
               />
-              <div className="grid grid-cols-2 gap-2">
+              <div className="bk-emp-grid">
                 {employees.map((emp) => {
                   const isSelected = selectedEmployee?.id === emp.id
                   const photoIds = parsePhotos(emp.photos)
@@ -1539,33 +1502,23 @@ function BookingPageInner() {
                       onClick={() => {
                         setSelectedEmployee(isSelected ? null : emp)
                       }}
-                      className={`p-4 rounded-2xl text-left transition-all duration-200 active:scale-95 min-h-[60px] ${
-                        isSelected
-                          ? 'bg-apple-blue/10 border-2 border-apple-blue shadow-sm'
-                          : 'bg-white shadow-sm hover:shadow-md border-2 border-transparent'
-                      }`}
+                      className={`bk-option bk-emp-card ${isSelected ? 'is-selected' : ''}`}
+                      style={{ minHeight: 60 }}
                     >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 overflow-hidden ${
-                            isSelected ? 'bg-apple-blue text-white' : 'bg-apple-bg text-apple-gray'
-                          }`}
-                        >
-                          {cover ? (
-                            <img
-                              src={`/api/telegram-photo/${encodeURIComponent(cover)}`}
-                              alt={emp.name}
-                              className="w-full h-full object-cover"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <User size={18} />
-                          )}
-                        </div>
-                        <span className={`text-sm font-medium leading-tight ${isSelected ? 'text-apple-blue' : 'text-apple-text'}`}>
-                          {emp.name}
-                        </span>
+                      <div className="bk-emp-ava">
+                        {cover ? (
+                          <img
+                            src={`/api/telegram-photo/${encodeURIComponent(cover)}`}
+                            alt={emp.name}
+                            loading="lazy"
+                          />
+                        ) : (
+                          <User size={18} />
+                        )}
                       </div>
+                      <span className="bk-emp-name">
+                        {emp.name}
+                      </span>
                     </button>
                   )
                 })}
@@ -1575,31 +1528,31 @@ function BookingPageInner() {
 
           {/* 4. Time */}
           {showTimeSection && (
-            <div ref={refTime} className="animate-fade-in">
+            <div ref={refTime} className="bk-section bk-fade-in">
               <SectionHeader
-                icon={<Clock size={20} className="text-apple-blue" />}
+                icon={<Clock size={20} />}
                 title="Выберите время"
                 subtitle={selectedDate ? formatDateRu(selectedDate) : undefined}
               />
               {loadingSlots ? (
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                <div className="bk-slot-grid">
                   {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className="h-12 skeleton rounded-xl" />
+                    <div key={i} className="skeleton" style={{ height: 48, borderRadius: 'var(--r-md)' }} />
                   ))}
                 </div>
               ) : slots.length === 0 ? (
-                <div className="text-center py-8">
-                  <Clock size={32} className="text-apple-gray mx-auto mb-3" />
-                  <p className="text-apple-gray">Нет свободных слотов на эту дату</p>
+                <div className="bk-slot-empty">
+                  <Clock size={32} style={{ color: 'var(--s-muted)', margin: '0 auto 12px' }} />
+                  <p>Нет свободных слотов на эту дату</p>
                   <button
                     onClick={() => scrollToRef(refDate, 100)}
-                    className="text-apple-blue text-sm font-semibold mt-3 hover:opacity-80 min-h-[44px]"
+                    className="lnk"
                   >
                     Выбрать другую дату
                   </button>
                 </div>
               ) : (
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                <div className="bk-slot-grid">
                   {slots.map((time) => (
                     <button
                       key={time}
@@ -1607,11 +1560,7 @@ function BookingPageInner() {
                         setSelectedTime(time)
                         scrollToRef(refConfirm)
                       }}
-                      className={`py-3.5 min-h-[44px] rounded-xl text-sm font-semibold transition-all duration-200 active:scale-95 ${
-                        selectedTime === time
-                          ? 'bg-servgo-grad text-white shadow-md'
-                          : 'bg-white shadow-sm text-apple-text hover:shadow-md'
-                      }`}
+                      className={`bk-slot ${selectedTime === time ? 'is-selected' : ''}`}
                     >
                       {time}
                     </button>
@@ -1628,13 +1577,13 @@ function BookingPageInner() {
       {/* ═══════════════════════════════════════ */}
 
       {showAddonsSection && (
-        <div ref={refAddons} className="animate-fade-in">
+        <div ref={refAddons} className="bk-section bk-fade-in">
           <SectionHeader
-            icon={<Package size={20} className="text-apple-blue" />}
+            icon={<Package size={20} />}
             title="Дополнительные услуги"
             subtitle="необязательно"
           />
-          <div className="space-y-2.5">
+          <div className="bk-option-list">
             {additionalServices.map((svc) => {
               const isSelected = selectedAddons.has(svc.id)
               const hours = addonHours[svc.id] ?? 1
@@ -1642,57 +1591,49 @@ function BookingPageInner() {
                 <div key={svc.id}>
                   <button
                     onClick={() => toggleAddon(svc.id)}
-                    className={`w-full flex items-center justify-between p-4 rounded-2xl transition-all duration-200 active:scale-[0.98] min-h-[56px] ${
-                      isSelected
-                        ? 'bg-apple-blue/10 border-2 border-apple-blue'
-                        : 'bg-white shadow-sm border-2 border-transparent hover:shadow-md'
-                    }`}
+                    className={`bk-option ${isSelected ? 'is-selected' : ''}`}
                   >
-                    <div className="flex-1 text-left">
-                      <span className={`text-sm font-medium ${isSelected ? 'text-apple-blue' : 'text-apple-text'}`}>
+                    <div style={{ flex: 1, textAlign: 'left' }}>
+                      <span className="bk-option-title">
                         {svc.name}
                       </span>
-                      <div className="flex items-center gap-2 mt-0.5">
+                      <div className="bk-option-meta" style={{ marginTop: 2 }}>
                         {(svc.price != null && svc.price > 0) && (
-                          <span className="text-[13px] text-apple-blue font-medium">
+                          <span className="bk-option-meta-item" style={{ color: 'var(--s-accent)', fontWeight: 600 }}>
                             {formatPrice(svc.price)}{svc.is_hourly_price ? '/ч' : ''}
                           </span>
                         )}
                         {(svc.duration_minutes != null && svc.duration_minutes > 0) && (
-                          <span className="text-[13px] text-apple-gray">
+                          <span className="bk-option-meta-item">
                             {formatDuration(svc.duration_minutes)}
                           </span>
                         )}
                       </div>
                     </div>
-                    <div
-                      className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ml-3 transition-all duration-200 ${
-                        isSelected ? 'bg-apple-blue text-white' : 'border-2 border-apple-border'
-                      }`}
-                    >
+                    <div className={`bk-check ${isSelected ? 'is-on' : ''}`}>
                       {isSelected && <Check size={14} strokeWidth={3} />}
                     </div>
                   </button>
 
                   {/* Hourly controls */}
                   {isSelected && svc.is_hourly_price && (
-                    <div className="flex items-center gap-3 mt-2 ml-4 mb-1">
+                    <div className="bk-addon-hours">
                       <button
                         onClick={() => setAddonHourCount(svc.id, hours - 1)}
-                        className="w-9 h-9 rounded-xl bg-apple-bg flex items-center justify-center hover:bg-gray-200 transition-colors min-h-[44px] min-w-[44px]"
+                        className="ds-icon-btn"
                       >
                         <Minus size={16} />
                       </button>
-                      <span className="text-sm font-semibold w-12 text-center">
+                      <span className="val">
                         {hours} ч
                       </span>
                       <button
                         onClick={() => setAddonHourCount(svc.id, hours + 1)}
-                        className="w-9 h-9 rounded-xl bg-apple-bg flex items-center justify-center hover:bg-gray-200 transition-colors min-h-[44px] min-w-[44px]"
+                        className="ds-icon-btn"
                       >
                         <Plus size={16} />
                       </button>
-                      <span className="text-sm text-apple-gray ml-auto">
+                      <span className="price">
                         {formatPrice((svc.price ?? 0) * hours)}
                       </span>
                     </div>
@@ -1709,88 +1650,88 @@ function BookingPageInner() {
       {/* ═══════════════════════════════════════ */}
 
       {showConfirmSection && (
-        <div ref={refConfirm} className="animate-fade-in">
+        <div ref={refConfirm} className="bk-section bk-fade-in">
           <SectionHeader
-            icon={<CheckCircle size={20} className="text-apple-blue" />}
+            icon={<CheckCircle size={20} />}
             title="Подтверждение"
             subtitle="Проверьте данные"
           />
 
           {/* Summary card */}
-          <div className="bg-white rounded-2xl shadow-sm p-5 mb-5">
-            <div className="space-y-3">
+          <div className="ds-card bk-card">
+            <div className="bk-summary-list">
               {isVenue && selectedRoom && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-apple-gray">Зал</span>
-                  <span className="font-medium">{selectedRoom.name}</span>
+                <div className="bk-summary-line">
+                  <span className="lbl">Зал</span>
+                  <span className="val">{selectedRoom.name}</span>
                 </div>
               )}
               {mainServiceLabel && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-apple-gray">{isVenue ? 'Услуги' : 'Услуга'}</span>
-                  <span className="font-medium text-right max-w-[60%]">{mainServiceLabel}</span>
+                <div className="bk-summary-line">
+                  <span className="lbl">{isVenue ? 'Услуги' : 'Услуга'}</span>
+                  <span className="val" style={{ maxWidth: '60%' }}>{mainServiceLabel}</span>
                 </div>
               )}
               {!isVenue && selectedEmployee && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-apple-gray">Специалист</span>
-                  <span className="font-medium">{selectedEmployee.name}</span>
+                <div className="bk-summary-line">
+                  <span className="lbl">Специалист</span>
+                  <span className="val">{selectedEmployee.name}</span>
                 </div>
               )}
               {isVenue && isSoloPricing && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-apple-gray">Формат</span>
-                  <span className="font-medium">Индивидуальное</span>
+                <div className="bk-summary-line">
+                  <span className="lbl">Формат</span>
+                  <span className="val">Индивидуальное</span>
                 </div>
               )}
-              <div className="flex justify-between text-sm">
-                <span className="text-apple-gray">Дата</span>
-                <span className="font-medium">
+              <div className="bk-summary-line">
+                <span className="lbl">Дата</span>
+                <span className="val">
                   {selectedDate && formatDateRu(selectedDate)}
                 </span>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-apple-gray">Время</span>
-                <span className="font-medium">{selectedTime}</span>
+              <div className="bk-summary-line">
+                <span className="lbl">Время</span>
+                <span className="val">{selectedTime}</span>
               </div>
               {totalDuration > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-apple-gray">Длительность</span>
-                  <span className="font-medium">{formatDuration(totalDuration)}</span>
+                <div className="bk-summary-line">
+                  <span className="lbl">Длительность</span>
+                  <span className="val">{formatDuration(totalDuration)}</span>
                 </div>
               )}
 
               {/* Price breakdown for venue */}
               {isVenue && !isSoloPricing && priceData && priceData.segments.length > 0 && (
-                <div className="border-t border-apple-border/50 pt-3 space-y-1.5">
-                  <div className="text-xs font-medium text-apple-gray mb-1">Расчёт стоимости:</div>
+                <div className="bk-summary-block">
+                  <div className="bk-summary-block-title">Расчёт стоимости:</div>
                   {priceData.segments.map((seg, i) => (
-                    <div key={i} className="flex justify-between text-xs text-apple-gray">
-                      <span>
+                    <div key={i} className="bk-summary-line">
+                      <span className="lbl">
                         {seg.time_from}{'\u2013'}{seg.time_to} ({formatDuration(seg.minutes)}) {'\u00D7'} {formatPrice(seg.price_per_hour, true)}
                       </span>
-                      <span className="font-medium text-apple-text">{formatPrice(seg.subtotal)}</span>
+                      <span className="val">{formatPrice(seg.subtotal)}</span>
                     </div>
                   ))}
                 </div>
               )}
 
               {isVenue && !isSoloPricing && (!priceData || !priceData.has_time_price || (priceData.segments.length === 0 && priceData.total === 0)) && selectedServices.length > 0 && (
-                <div className="border-t border-apple-border/50 pt-3 space-y-1.5">
+                <div className="bk-summary-block">
                   {selectedServices.map((svc: Service) => (
-                    <div key={svc.id} className="flex justify-between text-sm">
-                      <span className="text-apple-gray">{svc.name}</span>
-                      <span className="font-medium">{formatPrice(svc.price ?? 0)}</span>
+                    <div key={svc.id} className="bk-summary-line">
+                      <span className="lbl">{svc.name}</span>
+                      <span className="val">{formatPrice(svc.price ?? 0)}</span>
                     </div>
                   ))}
                 </div>
               )}
 
               {isVenue && isSoloPricing && selectedRoom?.solo_price_per_hour && (
-                <div className="border-t border-apple-border/50 pt-3">
-                  <div className="flex justify-between text-xs text-apple-gray">
-                    <span>{formatPrice(selectedRoom.solo_price_per_hour, true)} {'\u00D7'} {Math.max(1, totalDuration / 60)} ч</span>
-                    <span className="font-medium text-apple-text">{formatPrice(selectedRoom.solo_price_per_hour * Math.max(1, totalDuration / 60))}</span>
+                <div className="bk-summary-block">
+                  <div className="bk-summary-line">
+                    <span className="lbl">{formatPrice(selectedRoom.solo_price_per_hour, true)} {'\u00D7'} {Math.max(1, totalDuration / 60)} ч</span>
+                    <span className="val">{formatPrice(selectedRoom.solo_price_per_hour * Math.max(1, totalDuration / 60))}</span>
                   </div>
                 </div>
               )}
@@ -1800,19 +1741,19 @@ function BookingPageInner() {
                 const activeAddons = additionalServices.filter((s) => selectedAddons.has(s.id))
                 if (activeAddons.length === 0) return null
                 return (
-                  <div className="border-t border-apple-border/50 pt-3 space-y-1.5">
+                  <div className="bk-summary-block">
                     {activeAddons.map((addon) => {
                       const h = addonHours[addon.id] ?? 1
                       const price = addon.is_hourly_price
                         ? (addon.price ?? 0) * h
                         : (addon.price ?? 0)
                       return (
-                        <div key={addon.id} className="flex justify-between text-sm">
-                          <span className="text-apple-gray">
+                        <div key={addon.id} className="bk-summary-line">
+                          <span className="lbl">
                             + {addon.name}
                             {addon.is_hourly_price && ` (${h} ч)`}
                           </span>
-                          <span className="font-medium">{formatPrice(price)}</span>
+                          <span className="val">{formatPrice(price)}</span>
                         </div>
                       )
                     })}
@@ -1821,9 +1762,9 @@ function BookingPageInner() {
               })()}
 
               {totalPrice > 0 && (
-                <div className="border-t border-apple-border/50 pt-3 flex justify-between">
-                  <span className="font-semibold">Итого</span>
-                  <span className="font-bold text-lg">{formatPrice(totalPrice)}</span>
+                <div className="bk-summary-total">
+                  <span className="lbl">Итого</span>
+                  <span className="val">{formatPrice(totalPrice)}</span>
                 </div>
               )}
             </div>
@@ -1831,24 +1772,25 @@ function BookingPageInner() {
 
           {/* Address & directions */}
           {(business?.address || business?.directions) && (
-            <div className="bg-white rounded-2xl shadow-sm p-5 mb-5">
+            <div className="ds-card bk-card">
               {business?.address && (
-                <div className="flex items-start gap-2 mb-2">
-                  <MapPin size={16} className="text-apple-blue mt-0.5 shrink-0" />
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: business?.directions ? 8 : 0 }}>
+                  <MapPin size={16} className="ds-accent" style={{ marginTop: 2, flexShrink: 0 }} />
                   <a
                     href={`https://yandex.ru/maps/?text=${encodeURIComponent(business.address)}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm text-apple-blue underline"
+                    className="ds-accent"
+                    style={{ fontSize: 13, textDecoration: 'underline' }}
                   >
                     {business.address}
                   </a>
                 </div>
               )}
               {business?.directions && (
-                <div className="flex items-start gap-2">
-                  <Navigation size={16} className="text-apple-gray mt-0.5 shrink-0" />
-                  <p className="text-sm text-apple-gray whitespace-pre-line leading-relaxed">
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                  <Navigation size={16} style={{ color: 'var(--s-muted)', marginTop: 2, flexShrink: 0 }} />
+                  <p className="ds-sub" style={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
                     {linkifyText(business.directions)}
                   </p>
                 </div>
@@ -1858,18 +1800,18 @@ function BookingPageInner() {
 
           {/* Business description */}
           {business?.description && (
-            <div className="bg-white rounded-2xl shadow-sm p-5 mb-5">
-              <p className="text-sm text-apple-gray whitespace-pre-line leading-relaxed">
+            <div className="ds-card bk-card">
+              <p className="ds-sub" style={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
                 {linkifyText(business.description)}
               </p>
             </div>
           )}
 
           {/* Contact info */}
-          <div className="space-y-3 mb-6">
-            <div>
-              <label className="block text-sm font-medium text-apple-gray mb-1.5">
-                Ваше имя <span className="text-red-500">*</span>
+          <div style={{ marginBottom: 24 }}>
+            <div className="ds-field">
+              <label className="ds-label">
+                Ваше имя <span style={{ color: 'var(--s-danger)' }}>*</span>
               </label>
               <input
                 ref={nameInputRef}
@@ -1880,19 +1822,15 @@ function BookingPageInner() {
                   if (fieldErrors.name) setFieldErrors((p) => ({ ...p, name: false }))
                 }}
                 placeholder="Введите имя"
-                className={`w-full px-4 py-3.5 rounded-xl bg-white shadow-sm text-sm focus:outline-none focus:ring-2 transition-all duration-200 ${
-                  fieldErrors.name
-                    ? 'border-2 border-red-400 ring-2 ring-red-200 focus:ring-red-300'
-                    : 'border-2 border-transparent focus:ring-apple-blue/40'
-                }`}
+                className={`ds-input ${fieldErrors.name ? 'bk-input-error' : ''}`}
               />
               {fieldErrors.name && (
-                <p className="text-xs text-red-600 mt-1 ml-1">Укажите ваше имя</p>
+                <p className="ds-error" style={{ marginTop: 4, marginBottom: 0 }}>Укажите ваше имя</p>
               )}
             </div>
-            <div>
-              <label className="block text-sm font-medium text-apple-gray mb-1.5">
-                Телефон <span className="text-red-500">*</span>
+            <div className="ds-field">
+              <label className="ds-label">
+                Телефон <span style={{ color: 'var(--s-danger)' }}>*</span>
               </label>
               <input
                 ref={phoneInputRef}
@@ -1903,42 +1841,38 @@ function BookingPageInner() {
                   if (fieldErrors.phone) setFieldErrors((p) => ({ ...p, phone: false }))
                 }}
                 placeholder="+7 (___) ___-__-__"
-                className={`w-full px-4 py-3.5 rounded-xl bg-white shadow-sm text-sm focus:outline-none focus:ring-2 transition-all duration-200 ${
-                  fieldErrors.phone
-                    ? 'border-2 border-red-400 ring-2 ring-red-200 focus:ring-red-300'
-                    : 'border-2 border-transparent focus:ring-apple-blue/40'
-                }`}
+                className={`ds-input ${fieldErrors.phone ? 'bk-input-error' : ''}`}
               />
               {fieldErrors.phone && (
-                <p className="text-xs text-red-600 mt-1 ml-1">Укажите телефон для связи</p>
+                <p className="ds-error" style={{ marginTop: 4, marginBottom: 0 }}>Укажите телефон для связи</p>
               )}
             </div>
-            <div>
-              <label className="block text-sm font-medium text-apple-gray mb-1.5">
+            <div className="ds-field" style={{ marginBottom: 0 }}>
+              <label className="ds-label">
                 Комментарий{' '}
-                <span className="text-apple-gray/50 font-normal">(необязательно)</span>
+                <span style={{ fontWeight: 400 }}>(необязательно)</span>
               </label>
               <textarea
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 placeholder="Пожелания к записи..."
                 rows={3}
-                className="w-full px-4 py-3.5 rounded-xl bg-white shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40 transition-all duration-200 resize-none"
+                className="ds-input"
               />
             </div>
           </div>
 
           {/* Prepayment info */}
           {business?.prepayment_enabled && totalPrice > 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5">
-              <h3 className="text-sm font-semibold text-amber-800 mb-2 flex items-center gap-1.5">
+            <div className="bk-info-box is-amber">
+              <h3>
                 <CreditCard size={16} />
                 Предоплата
               </h3>
-              <div className="space-y-1.5 text-sm text-amber-700">
+              <div>
                 <p>
                   {'Для подтверждения бронирования необходимо внести предоплату '}
-                  <span className="font-bold">
+                  <span style={{ fontWeight: 700 }}>
                     {(business.prepayment_percent ?? 100) === 100
                       ? formatPrice(totalPrice)
                       : `${business.prepayment_percent}% = ${formatPrice(Math.ceil(totalPrice * (business.prepayment_percent ?? 100) / 100))}`}
@@ -1947,17 +1881,17 @@ function BookingPageInner() {
                 {(business.payment_details || business.payment_phone) && (
                   <p>
                     {'Реквизиты: '}
-                    <span className="font-medium">{business.payment_details || business.payment_phone}</span>
+                    <span style={{ fontWeight: 600 }}>{business.payment_details || business.payment_phone}</span>
                   </p>
                 )}
                 {business.payment_phone && business.payment_details && (
                   <p>
                     {'Телефон: '}
-                    <span className="font-medium">{business.payment_phone}</span>
+                    <span style={{ fontWeight: 600 }}>{business.payment_phone}</span>
                   </p>
                 )}
               </div>
-              <p className="text-xs text-amber-600 mt-2">
+              <p className="bk-info-hint">
                 После записи оплатите по указанным реквизитам. Без предоплаты бронь может быть отменена.
               </p>
             </div>
@@ -1965,42 +1899,42 @@ function BookingPageInner() {
 
           {/* Cancellation policy */}
           {business?.cancellation_policy_text ? (
-            <div className="bg-red-50 border-2 border-red-400 rounded-2xl p-4 mb-5">
-              <h3 className="text-sm font-bold text-red-700 mb-2">
+            <div className="bk-info-box is-danger">
+              <h3>
                 {'\u26A0\uFE0F Условия отмены'}
               </h3>
-              <p className="text-sm text-red-800 whitespace-pre-line leading-relaxed">
+              <p style={{ whiteSpace: 'pre-line' }}>
                 {business.cancellation_policy_text}
               </p>
             </div>
           ) : business?.cancellation_policy_photo ? (
-            <div className="bg-red-50 border-2 border-red-400 rounded-2xl p-4 mb-5">
-              <h3 className="text-sm font-bold text-red-700 mb-2">
+            <div className="bk-info-box is-danger">
+              <h3>
                 {'\u26A0\uFE0F Условия отмены'}
               </h3>
               <img
                 src={`/api/telegram-photo/${encodeURIComponent(business.cancellation_policy_photo)}`}
                 alt="Условия отмены"
-                className="w-full rounded-xl"
               />
             </div>
           ) : null}
 
           {bookingError && (
-            <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-center mb-5">
-              <p className="text-red-700 font-medium text-sm">{bookingError}</p>
+            <div className="bk-error-box">
+              <p>{bookingError}</p>
             </div>
           )}
 
           {missingFields.length > 0 && !bookingError && (
-            <p className="text-xs text-apple-gray text-center mb-2">
-              Чтобы записаться, осталось указать: <span className="font-medium text-apple-text">{missingFields.join(' и ')}</span>
+            <p className="bk-missing-hint">
+              Чтобы записаться, осталось указать: <span style={{ fontWeight: 600, color: 'var(--s-text)' }}>{missingFields.join(' и ')}</span>
             </p>
           )}
           <button
             onClick={handleSubmit}
             disabled={submitting}
-            className="btn-grad w-full py-4 text-base rounded-2xl disabled:cursor-not-allowed"
+            className="ds-btn ds-btn--primary ds-btn--block"
+            style={{ padding: '15px', fontSize: 16 }}
           >
             {submitting ? 'Записываем...' : 'Записаться'}
           </button>
@@ -2013,13 +1947,14 @@ function BookingPageInner() {
           type="button"
           onClick={() => scrollToRef(nextRef, 0)}
           style={{ bottom: 'max(5rem, calc(4rem + env(safe-area-inset-bottom)))' }}
-          className="btn-grad fixed right-4 z-50 flex items-center gap-1.5 text-sm pl-4 pr-3 py-2.5 rounded-full animate-fade-in"
+          className="bk-fab-next bk-fade-in"
         >
           Далее
           <ChevronDown size={16} strokeWidth={2.5} />
         </button>
       )}
-    </div>
+      </div>
+    </ClientShell>
   )
 }
 
@@ -2037,25 +1972,23 @@ class PageErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
   render() {
     if (this.state.error) {
       return (
-        <div className="flex flex-col items-center justify-center py-20 text-center px-4">
-          <div className="w-16 h-16 mb-4 rounded-full bg-red-50 flex items-center justify-center">
-            <span className="text-3xl">⚠️</span>
-          </div>
-          <h2 className="text-xl font-bold text-apple-text mb-2">Не удалось открыть форму записи</h2>
-          <p className="text-apple-gray text-sm mb-4 max-w-sm">
+        <div className="bk-fallback">
+          <div className="bk-fallback-icon is-error">⚠️</div>
+          <h2 className="ds-h1">Не удалось открыть форму записи</h2>
+          <p className="ds-sub bk-fallback-sub">
             Произошла ошибка. Попробуйте обновить страницу или вернуться на главную.
           </p>
-          <p className="text-[10px] text-apple-gray mb-4 max-w-sm break-words font-mono">
+          <p className="bk-fallback-mono">
             {String(this.state.error?.message || this.state.error)}
           </p>
-          <div className="flex gap-2">
+          <div className="bk-fallback-actions">
             <button
               onClick={() => window.location.reload()}
-              className="bg-apple-blue text-white px-6 py-3 rounded-2xl font-semibold"
+              className="ds-btn ds-btn--primary"
             >
               Обновить
             </button>
-            <Link to="/" className="bg-apple-bg text-apple-text px-6 py-3 rounded-2xl font-semibold">
+            <Link to="/" className="ds-btn ds-btn--ghost">
               На главную
             </Link>
           </div>

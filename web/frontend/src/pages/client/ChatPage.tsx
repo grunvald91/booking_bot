@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Bot, Send, Check, X, Loader2 } from 'lucide-react'
 import { api } from '../../api/client'
+import { ClientShell } from '../../components/ClientShell'
 
 interface ChatMessage {
   id: string
@@ -20,7 +21,7 @@ function formatMessage(text: string) {
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**')) {
       return (
-        <strong key={i} className="font-semibold">
+        <strong key={i} style={{ fontWeight: 600 }}>
           {part.slice(2, -2)}
         </strong>
       )
@@ -147,110 +148,154 @@ export function ChatPage() {
   }
 
   return (
-    <div className="flex flex-col -mx-4 sm:-mx-6 -mt-6 -mb-24" style={{ height: 'calc(100dvh - 56px - 56px)' }}>
-      {/* Messages area — scrollable */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {messages.map((msg) => (
-          <div key={msg.id}>
-            {msg.role === 'ai' ? (
-              <div className="flex gap-2 max-w-[85%]">
-                <div className="w-7 h-7 rounded-full bg-apple-blue/10 flex items-center justify-center flex-shrink-0 mt-1">
-                  <Bot size={16} className="text-apple-blue" />
+    <ClientShell title="AI-помощник">
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        {/* Messages area — scrolls independently within the shell's content area */}
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12, padding: '14px 0' }}>
+          {messages.map((msg) => (
+            <div key={msg.id}>
+              {msg.role === 'ai' ? (
+                <div style={{ display: 'flex', gap: 8, maxWidth: '85%' }}>
+                  <div
+                    style={{
+                      width: 28, height: 28, borderRadius: '50%', flexShrink: 0, marginTop: 4,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: 'var(--s-accent-soft)',
+                    }}
+                  >
+                    <Bot size={16} style={{ color: 'var(--s-accent)' }} />
+                  </div>
+                  <div>
+                    <div
+                      className="ds-text"
+                      style={{
+                        background: 'var(--s-surface-2)', color: 'var(--s-text)',
+                        borderRadius: 16, borderTopLeftRadius: 4,
+                        padding: '10px 14px',
+                      }}
+                    >
+                      {formatMessage(msg.text)}
+                    </div>
+                    {/* Pending action card */}
+                    {msg.pending_action && !msg.actionHandled && (
+                      <div
+                        style={{
+                          marginTop: 8, borderRadius: 16,
+                          padding: '12px 14px',
+                          background: 'color-mix(in srgb, var(--s-warning) 12%, var(--s-surface))',
+                          border: '1px solid color-mix(in srgb, var(--s-warning) 35%, transparent)',
+                        }}
+                      >
+                        <p className="ds-text" style={{ fontWeight: 600, marginBottom: 10, color: 'var(--s-text)' }}>
+                          {msg.pending_action.description}
+                        </p>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button
+                            onClick={() => handleConfirm(msg.pending_action!.action_id, msg.id)}
+                            disabled={confirmingId === msg.pending_action.action_id}
+                            className="ds-btn ds-btn--primary ds-btn--sm"
+                          >
+                            {confirmingId === msg.pending_action.action_id ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              <Check size={14} />
+                            )}
+                            Подтвердить
+                          </button>
+                          <button
+                            onClick={() => handleReject(msg.pending_action!.action_id, msg.id)}
+                            disabled={confirmingId === msg.pending_action.action_id}
+                            className="ds-btn ds-btn--ghost ds-btn--sm"
+                          >
+                            <X size={14} />
+                            Отмена
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {msg.pending_action && msg.actionHandled && (
+                      <div
+                        style={{
+                          marginTop: 8, borderRadius: 16, padding: '10px 14px',
+                          background: 'var(--s-surface-2)', border: '1px solid var(--s-line)',
+                        }}
+                      >
+                        <p className="ds-caption" style={{ textDecoration: 'line-through' }}>
+                          {msg.pending_action.description}
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm text-apple-text">
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <div
+                    className="ds-text"
+                    style={{
+                      background: 'var(--s-accent)', color: 'var(--s-accent-ink)',
+                      borderRadius: 16, borderTopRightRadius: 4,
+                      padding: '10px 14px', maxWidth: '85%',
+                    }}
+                  >
                     {formatMessage(msg.text)}
                   </div>
-                  {/* Pending action card */}
-                  {msg.pending_action && !msg.actionHandled && (
-                    <div className="mt-2 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
-                      <p className="text-sm font-medium text-amber-900 mb-2">
-                        {msg.pending_action.description}
-                      </p>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleConfirm(msg.pending_action!.action_id, msg.id)}
-                          disabled={confirmingId === msg.pending_action.action_id}
-                          className="flex items-center gap-1.5 bg-apple-blue text-white text-sm font-medium px-4 py-2 rounded-full hover:bg-apple-blue-hover transition-all duration-200 disabled:opacity-50"
-                        >
-                          {confirmingId === msg.pending_action.action_id ? (
-                            <Loader2 size={14} className="animate-spin" />
-                          ) : (
-                            <Check size={14} />
-                          )}
-                          Подтвердить
-                        </button>
-                        <button
-                          onClick={() => handleReject(msg.pending_action!.action_id, msg.id)}
-                          disabled={confirmingId === msg.pending_action.action_id}
-                          className="flex items-center gap-1.5 bg-white border border-apple-border text-apple-gray text-sm font-medium px-4 py-2 rounded-full hover:bg-gray-50 transition-all duration-200 disabled:opacity-50"
-                        >
-                          <X size={14} />
-                          Отмена
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  {msg.pending_action && msg.actionHandled && (
-                    <div className="mt-2 bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5">
-                      <p className="text-xs text-apple-gray line-through">
-                        {msg.pending_action.description}
-                      </p>
-                    </div>
-                  )}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* Loading indicator */}
+          {loading && (
+            <div style={{ display: 'flex', gap: 8, maxWidth: '85%' }}>
+              <div
+                style={{
+                  width: 28, height: 28, borderRadius: '50%', flexShrink: 0, marginTop: 4,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'var(--s-accent-soft)',
+                }}
+              >
+                <Bot size={16} style={{ color: 'var(--s-accent)' }} />
+              </div>
+              <div style={{ background: 'var(--s-surface-2)', borderRadius: 16, borderTopLeftRadius: 4, padding: '12px 14px' }}>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <div className="animate-bounce" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--s-muted-2)', animationDelay: '0ms' }} />
+                  <div className="animate-bounce" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--s-muted-2)', animationDelay: '150ms' }} />
+                  <div className="animate-bounce" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--s-muted-2)', animationDelay: '300ms' }} />
                 </div>
               </div>
-            ) : (
-              <div className="flex justify-end">
-                <div className="bg-apple-blue text-white rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm max-w-[85%]">
-                  {formatMessage(msg.text)}
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-
-        {/* Loading indicator */}
-        {loading && (
-          <div className="flex gap-2 max-w-[85%]">
-            <div className="w-7 h-7 rounded-full bg-apple-blue/10 flex items-center justify-center flex-shrink-0 mt-1">
-              <Bot size={16} className="text-apple-blue" />
             </div>
-            <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3">
-              <div className="flex gap-1.5">
-                <div className="w-2 h-2 bg-apple-gray/40 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <div className="w-2 h-2 bg-apple-gray/40 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <div className="w-2 h-2 bg-apple-gray/40 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input area — pinned to the bottom of the visible area */}
+        <div style={{ flexShrink: 0, paddingTop: 10 }}>
+          <div className="ds-search" style={{ borderRadius: 999, paddingRight: 6 }}>
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Напишите сообщение..."
+              disabled={loading}
+            />
+            <button
+              onClick={sendMessage}
+              disabled={!input.trim() || loading}
+              className="ds-icon-btn"
+              style={{
+                width: 34, height: 34, borderRadius: '50%',
+                background: 'var(--s-accent)', color: 'var(--s-accent-ink)',
+                opacity: !input.trim() || loading ? 0.4 : 1,
+              }}
+            >
+              <Send size={16} />
+            </button>
           </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Input area — glued to bottom */}
-      <div className="shrink-0 bg-white border-t border-apple-border/30 px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Напишите сообщение..."
-            className="flex-1 bg-gray-100 rounded-full px-5 py-2.5 text-sm text-apple-text placeholder:text-apple-gray/50 outline-none focus:ring-2 focus:ring-apple-blue/30 transition-all duration-200"
-            disabled={loading}
-          />
-          <button
-            onClick={sendMessage}
-            disabled={!input.trim() || loading}
-            className="w-10 h-10 rounded-full bg-apple-blue text-white flex items-center justify-center hover:bg-apple-blue-hover transition-all duration-200 disabled:opacity-30 disabled:hover:bg-apple-blue flex-shrink-0"
-          >
-            <Send size={18} />
-          </button>
         </div>
       </div>
-    </div>
+    </ClientShell>
   )
 }

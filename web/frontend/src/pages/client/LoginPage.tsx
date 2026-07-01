@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Phone, Send } from 'lucide-react'
 import { api } from '../../api/client'
+import { ClientShell } from '../../components/ClientShell'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -79,119 +80,117 @@ export function LoginPage() {
   }
 
   return (
-    <div className="max-w-sm mx-auto py-12 md:py-20">
-      <div className="text-center mb-10">
-        <h1 className="text-2xl font-bold text-apple-text">Вход</h1>
-        <p className="text-apple-gray mt-2">
-          Войдите, чтобы управлять записями
-        </p>
-      </div>
-
-      {mode === 'phone' && (
-        <div className="space-y-4">
-          <button
-            onClick={handleTelegramLogin}
-            className="w-full flex items-center justify-center gap-3 bg-[#0088cc] text-white font-medium py-3.5 rounded-xl hover:bg-[#0077b5] transition-all duration-200"
-          >
-            <Send size={18} />
-            Войти через Telegram
-          </button>
-
-          <div className="flex items-center gap-4 my-6">
-            <div className="flex-1 h-px bg-apple-border" />
-            <span className="text-sm text-apple-gray">или</span>
-            <div className="flex-1 h-px bg-apple-border" />
-          </div>
-
+    <ClientShell backTo="/" title="Вход">
+      <div className="ds-form-narrow" style={{ paddingTop: 4 }}>
+        {mode === 'phone' && (
           <div>
-            <label className="block text-sm text-apple-gray mb-1.5">
-              Номер телефона
-            </label>
-            <div className="relative">
-              <Phone
-                size={18}
-                className="absolute left-4 top-1/2 -translate-y-1/2 text-apple-gray"
-              />
-              <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+7 (___) ___-__-__"
-                className="w-full pl-12 pr-4 py-3.5 rounded-xl border border-apple-border/50 text-sm focus:outline-none focus:border-apple-blue focus:ring-1 focus:ring-apple-blue/30 transition-all duration-200"
-              />
+            <button
+              onClick={handleTelegramLogin}
+              className="ds-btn ds-btn--block"
+              style={{ background: '#0088cc', color: '#fff', marginBottom: 16 }}
+            >
+              <Send size={18} />
+              Войти через Telegram
+            </button>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '16px 0' }}>
+              <div style={{ flex: 1, height: 1, background: 'var(--s-line)' }} />
+              <span className="ds-sub">или</span>
+              <div style={{ flex: 1, height: 1, background: 'var(--s-line)' }} />
             </div>
+
+            <div className="ds-field">
+              <label className="ds-label">Номер телефона</label>
+              <div style={{ position: 'relative' }}>
+                <Phone
+                  size={18}
+                  style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: 'var(--s-muted)' }}
+                />
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="+7 (___) ___-__-__"
+                  className="ds-input"
+                  style={{ paddingLeft: 40 }}
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={handleSendCode}
+              disabled={loading || !phone}
+              className="ds-btn ds-btn--primary ds-btn--block"
+            >
+              {loading ? 'Отправляем...' : 'Получить код'}
+            </button>
+
+            {error && <p className="ds-error" style={{ justifyContent: 'center', marginTop: 10 }}>{error}</p>}
+
+            <p className="ds-hint" style={{ textAlign: 'center', marginTop: 14 }}>
+              Если у вас есть бизнес — войдите через Telegram или по телефону.
+              Роль администратора определится автоматически.
+            </p>
           </div>
+        )}
 
-          <button
-            onClick={handleSendCode}
-            disabled={loading || !phone}
-            className="w-full bg-apple-blue text-white font-medium py-3.5 rounded-xl hover:bg-apple-blue-hover transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Отправляем...' : 'Получить код'}
-          </button>
+        {mode === 'code' && (
+          <div>
+            <div style={{ textAlign: 'center', marginBottom: 20 }}>
+              {codeSentVia === 'telegram' ? (
+                <p className="ds-sub">
+                  Код отправлен в <span style={{ fontWeight: 600, color: '#0088cc' }}>Telegram</span> на аккаунт с номером{' '}
+                  <span style={{ fontWeight: 600, color: 'var(--s-text)' }}>{phone}</span>
+                </p>
+              ) : (
+                <p className="ds-sub">
+                  Не удалось отправить код в Telegram. Убедитесь, что вы зарегистрированы через бот{' '}
+                  <a href="https://t.me/Sochiservice_bot" target="_blank" rel="noopener noreferrer" style={{ color: '#0088cc', fontWeight: 600 }}>@Sochiservice_bot</a>
+                </p>
+              )}
+            </div>
 
-          {error && (
-            <p className="text-sm text-apple-danger text-center">{error}</p>
-          )}
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginBottom: 20 }}>
+              {code.map((digit, i) => (
+                <input
+                  key={i}
+                  ref={(el) => { codeRefs.current[i] = el }}
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={1}
+                  value={digit}
+                  onChange={(e) => handleCodeInput(i, e.target.value)}
+                  onKeyDown={(e) => handleCodeKeyDown(i, e)}
+                  className="ds-input"
+                  style={{
+                    width: 48,
+                    height: 48,
+                    padding: 0,
+                    textAlign: 'center',
+                    fontSize: 22,
+                    fontWeight: 700,
+                  }}
+                />
+              ))}
+            </div>
 
-          <p className="text-xs text-apple-gray text-center mt-4 leading-relaxed">
-            Если у вас есть бизнес — войдите через Telegram или по телефону.
-            Роль администратора определится автоматически.
-          </p>
-        </div>
-      )}
+            {loading && <p className="ds-sub" style={{ textAlign: 'center' }}>Проверяем...</p>}
 
-      {mode === 'code' && (
-        <div className="space-y-6">
-          <div className="text-center">
-            {codeSentVia === 'telegram' ? (
-              <p className="text-sm text-apple-gray">
-                Код отправлен в <span className="font-medium text-[#0088cc]">Telegram</span> на аккаунт с номером{' '}
-                <span className="font-medium text-apple-text">{phone}</span>
-              </p>
-            ) : (
-              <p className="text-sm text-apple-gray">
-                Не удалось отправить код в Telegram. Убедитесь, что вы зарегистрированы через бот{' '}
-                <a href="https://t.me/Sochiservice_bot" target="_blank" rel="noopener noreferrer" className="text-[#0088cc] font-medium">@Sochiservice_bot</a>
-              </p>
-            )}
+            {error && <p className="ds-error" style={{ justifyContent: 'center' }}>{error}</p>}
+
+            <button
+              onClick={() => {
+                setMode('phone')
+                setCode(['', '', '', '', '', ''])
+              }}
+              className="ds-btn ds-btn--block"
+              style={{ background: 'none', border: 'none', color: 'var(--s-accent)' }}
+            >
+              Изменить номер
+            </button>
           </div>
-
-          <div className="flex justify-center gap-2 sm:gap-3">
-            {code.map((digit, i) => (
-              <input
-                key={i}
-                ref={(el) => { codeRefs.current[i] = el }}
-                type="text"
-                inputMode="numeric"
-                maxLength={1}
-                value={digit}
-                onChange={(e) => handleCodeInput(i, e.target.value)}
-                onKeyDown={(e) => handleCodeKeyDown(i, e)}
-                className="w-12 h-12 sm:w-14 sm:h-14 text-center text-xl sm:text-2xl font-bold rounded-xl border border-apple-border/50 focus:outline-none focus:border-apple-blue focus:ring-2 focus:ring-apple-blue/40 transition-all duration-200"
-              />
-            ))}
-          </div>
-
-          {loading && (
-            <p className="text-sm text-apple-gray text-center">Проверяем...</p>
-          )}
-
-          {error && (
-            <p className="text-sm text-apple-danger text-center">{error}</p>
-          )}
-
-          <button
-            onClick={() => {
-              setMode('phone')
-              setCode(['', '', '', '', '', ''])
-            }}
-            className="w-full text-sm text-apple-blue text-center py-2 hover:opacity-80 transition-opacity"
-          >
-            Изменить номер
-          </button>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </ClientShell>
   )
 }
