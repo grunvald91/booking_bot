@@ -12,6 +12,7 @@ import {
 import { api, type Service, type GroupPricingTier } from '../../api/client'
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
 import { BusinessSelector } from '../../components/BusinessSelector'
+import { AdminShell } from '../../components/AdminShell'
 
 const placeholderServices: Service[] = [
   { id: 1, name: 'Стрижка женская', description: 'Стрижка с укладкой', price: 2500, duration_minutes: 60, is_active: true, sort_order: 0 },
@@ -57,18 +58,39 @@ function ToggleSwitch({
   label: string
 }) {
   return (
-    <label className="flex items-center gap-3 cursor-pointer">
-      <div className="relative">
+    <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+      <div style={{ position: 'relative', flexShrink: 0 }}>
         <input
           type="checkbox"
           checked={checked}
           onChange={(e) => onChange(e.target.checked)}
-          className="sr-only peer"
+          style={{ position: 'absolute', opacity: 0, width: 0, height: 0 }}
         />
-        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:bg-apple-blue transition-colors" />
-        <div className="absolute left-[2px] top-[2px] bg-white w-5 h-5 rounded-full transition-transform peer-checked:translate-x-5 shadow-sm" />
+        <div
+          style={{
+            width: 44,
+            height: 24,
+            borderRadius: 999,
+            background: checked ? 'var(--s-accent)' : 'var(--s-surface-3)',
+            transition: 'background 0.2s ease',
+            border: '1px solid var(--s-line)',
+          }}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            left: checked ? 22 : 2,
+            top: 2,
+            width: 20,
+            height: 20,
+            borderRadius: '50%',
+            background: 'var(--s-surface)',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+            transition: 'left 0.2s ease',
+          }}
+        />
       </div>
-      <span className="text-sm text-apple-text">{label}</span>
+      <span className="ds-text">{label}</span>
     </label>
   )
 }
@@ -79,6 +101,7 @@ export function ServicesPage() {
   const [loading, setLoading] = useState(true)
   const [editingService, setEditingService] = useState<Service | null>(null)
   const [isCreating, setIsCreating] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Service | null>(null)
   const [form, setForm] = useState<ServiceFormData>({
     name: '',
     description: '',
@@ -156,10 +179,10 @@ export function ServicesPage() {
   }
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Удалить услугу?')) return
     try {
       await api.deleteService(businessId!, id)
       setServices((prev) => prev.filter((s) => s.id !== id))
+      setDeleteTarget(null)
     } catch (e) {
       alert('Ошибка при удалении услуги: ' + (e instanceof Error ? e.message : String(e)))
     }
@@ -247,89 +270,90 @@ export function ServicesPage() {
   const renderServiceCard = (service: Service, group: Service[], idx: number) => (
     <div
       key={service.id}
-      className={`bg-white rounded-2xl shadow-sm border border-apple-border/50 p-5 transition-all duration-200 ${
-        !service.is_active ? 'opacity-60' : ''
-      }`}
+      className="ds-card"
+      style={{
+        padding: '12px 14px',
+        opacity: service.is_active ? 1 : 0.6,
+        transition: 'opacity 0.2s ease',
+      }}
     >
-      <div className="flex items-start justify-between">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h3 className="font-medium text-apple-text">{service.name}</h3>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span className="ds-h3">{service.name}</span>
             {service.is_additional && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">
-                Доп. услуга
-              </span>
+              <span className="ds-badge ds-badge--confirmed">Доп. услуга</span>
             )}
             {!service.is_active && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-apple-danger">
-                Неактивна
-              </span>
+              <span className="ds-badge ds-badge--cancelled">Неактивна</span>
             )}
           </div>
-          <p className="text-sm text-apple-gray mt-0.5">
-            {service.description}
-          </p>
-          <div className="flex items-center gap-4 mt-2">
-            <span className="flex items-center gap-1 text-sm font-semibold text-apple-text">
+          {service.description && (
+            <p className="ds-sub" style={{ marginTop: 2 }}>{service.description}</p>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--s-text)' }}>
               {formatPrice(service.price, service.is_hourly_price)}
               {service.pricing_type === 'per_person' && (
-                <span className="text-xs font-normal text-apple-gray">/чел</span>
+                <span className="ds-sub" style={{ fontWeight: 400, marginLeft: 2 }}>/чел</span>
               )}
             </span>
-            <span className="flex items-center gap-1 text-sm text-apple-gray">
-              <Clock size={14} />
+            <span className="ds-sub" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Clock size={13} />
               {formatDuration(service.duration_minutes ?? service.duration)}
             </span>
             {service.pricing_type === 'per_person' && service.group_pricing && service.group_pricing.length > 0 && (
-              <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+              <span className="ds-badge ds-badge--prepay">
                 {service.group_pricing.length} тариф{service.group_pricing.length > 1 ? (service.group_pricing.length < 5 ? 'а' : 'ов') : ''}
               </span>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-1 ml-4">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
           {/* Reorder buttons */}
-          <div className="flex flex-col gap-0.5 mr-1">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginRight: 2 }}>
             <button
               onClick={() => handleMoveUp(service, group)}
               disabled={idx === 0}
-              className="p-1 rounded-md text-apple-gray hover:text-apple-blue hover:bg-blue-50 transition-all duration-200 disabled:opacity-30 disabled:hover:text-apple-gray disabled:hover:bg-transparent"
+              className="ds-icon-btn"
+              style={{ width: 26, height: 26 }}
               title="Переместить вверх"
             >
-              <ChevronUp size={14} />
+              <ChevronUp size={13} />
             </button>
             <button
               onClick={() => handleMoveDown(service, group)}
               disabled={idx === group.length - 1}
-              className="p-1 rounded-md text-apple-gray hover:text-apple-blue hover:bg-blue-50 transition-all duration-200 disabled:opacity-30 disabled:hover:text-apple-gray disabled:hover:bg-transparent"
+              className="ds-icon-btn"
+              style={{ width: 26, height: 26 }}
               title="Переместить вниз"
             >
-              <ChevronDown size={14} />
+              <ChevronDown size={13} />
             </button>
           </div>
 
           <button
             onClick={() => toggleActive(service.id)}
-            className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all duration-200 ${
-              service.is_active
-                ? 'bg-green-50 text-apple-success hover:bg-green-100'
-                : 'bg-apple-bg text-apple-gray hover:bg-gray-200'
-            }`}
+            className={`ds-btn ds-btn--sm${service.is_active ? '' : ' ds-btn--ghost'}`}
+            style={service.is_active ? { background: 'var(--st-completed-bg)', color: 'var(--s-success)', borderColor: 'transparent' } : {}}
           >
             {service.is_active ? 'Вкл' : 'Выкл'}
           </button>
           <button
             onClick={() => openEdit(service)}
-            className="p-2 rounded-lg text-apple-gray hover:text-apple-blue hover:bg-blue-50 transition-all duration-200"
+            className="ds-icon-btn"
+            title="Редактировать"
           >
-            <Pencil size={16} />
+            <Pencil size={15} />
           </button>
           <button
-            onClick={() => handleDelete(service.id)}
-            className="p-2 rounded-lg text-apple-gray hover:text-apple-danger hover:bg-red-50 transition-all duration-200"
+            onClick={() => setDeleteTarget(service)}
+            className="ds-icon-btn"
+            style={{ color: 'var(--s-danger)' }}
+            title="Удалить"
           >
-            <Trash2 size={16} />
+            <Trash2 size={15} />
           </button>
         </div>
       </div>
@@ -338,39 +362,40 @@ export function ServicesPage() {
 
   if (loading) {
     return (
-      <div className="space-y-4">
-        <div className="h-8 w-48 skeleton mb-6" />
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="h-24 skeleton rounded-2xl" />
-        ))}
-      </div>
+      <AdminShell
+        title="Услуги"
+        headerExtra={<BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
+          <div className="skeleton" style={{ height: 28, width: 160, borderRadius: 8 }} />
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="skeleton" style={{ height: 90, borderRadius: 14 }} />
+          ))}
+        </div>
+      </AdminShell>
     )
   }
 
   return (
-    <div>
-      <BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} vertical />
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-apple-text flex items-center gap-2">
-          <Scissors size={24} />
-          Услуги
-        </h1>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-2 bg-apple-blue text-white text-sm font-medium px-4 py-2.5 rounded-xl hover:bg-apple-blue-hover transition-all duration-200"
-        >
-          <Plus size={16} />
+    <AdminShell
+      title="Услуги"
+      headerExtra={<BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />}
+    >
+      {/* Add button */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4, marginBottom: 14 }}>
+        <button onClick={openCreate} className="ds-btn ds-btn--primary ds-btn--sm">
+          <Plus size={15} />
           Добавить услугу
         </button>
       </div>
 
       {/* Main services section */}
       {mainServices.length > 0 && (
-        <div className="mb-6">
-          <h2 className="text-sm font-semibold text-apple-gray uppercase tracking-wide mb-3">
+        <div style={{ marginBottom: 16 }}>
+          <p className="ds-caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, marginBottom: 8 }}>
             Основные услуги
-          </h2>
-          <div className="space-y-3">
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {mainServices.map((service, idx) =>
               renderServiceCard(service, mainServices, idx)
             )}
@@ -380,11 +405,11 @@ export function ServicesPage() {
 
       {/* Additional services section */}
       {additionalServices.length > 0 && (
-        <div className="mb-6">
-          <h2 className="text-sm font-semibold text-apple-gray uppercase tracking-wide mb-3">
+        <div style={{ marginBottom: 16 }}>
+          <p className="ds-caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, marginBottom: 8 }}>
             Дополнительные услуги
-          </h2>
-          <div className="space-y-3">
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {additionalServices.map((service, idx) =>
               renderServiceCard(service, additionalServices, idx)
             )}
@@ -394,213 +419,209 @@ export function ServicesPage() {
 
       {/* Empty state */}
       {services.length === 0 && (
-        <div className="text-center text-apple-gray py-12">
-          <Scissors size={40} className="mx-auto mb-3 opacity-30" />
-          <p>Нет услуг. Нажмите «Добавить услугу» чтобы создать первую.</p>
+        <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--s-muted)' }}>
+          <Scissors size={40} style={{ margin: '0 auto 10px', opacity: 0.3, display: 'block' }} />
+          <p className="ds-sub">Нет услуг. Нажмите «Добавить услугу» чтобы создать первую.</p>
         </div>
       )}
 
-      {/* Modal */}
+      {/* Create / Edit sheet */}
       {isCreating && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-semibold text-apple-text">
-                {editingService ? 'Редактировать услугу' : 'Новая услуга'}
-              </h2>
-              <button
-                onClick={closeModal}
-                className="p-1 rounded-lg text-apple-gray hover:bg-apple-bg transition-all duration-200"
-              >
-                <X size={20} />
+        <div className="ds-sheet-ov" onClick={closeModal}>
+          <div className="ds-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="ds-sheet-grip" />
+            <div className="ds-sheet-head">
+              <div>
+                <h3>{editingService ? 'Редактировать услугу' : 'Новая услуга'}</h3>
+              </div>
+              <button className="ds-icon-btn" onClick={closeModal} aria-label="Закрыть">
+                <X size={18} />
               </button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-apple-gray mb-1.5">
-                  Название
-                </label>
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="Например: Стрижка женская"
-                  className="w-full px-4 py-3 rounded-xl border border-apple-border/50 text-sm focus:outline-none focus:border-apple-blue focus:ring-1 focus:ring-apple-blue/30 transition-all duration-200"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-apple-gray mb-1.5">
-                  Описание
-                </label>
-                <input
-                  type="text"
-                  value={form.description}
-                  onChange={(e) =>
-                    setForm({ ...form, description: e.target.value })
-                  }
-                  placeholder="Краткое описание"
-                  className="w-full px-4 py-3 rounded-xl border border-apple-border/50 text-sm focus:outline-none focus:border-apple-blue focus:ring-1 focus:ring-apple-blue/30 transition-all duration-200"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm text-apple-gray mb-1.5">
-                    Цена, ₽
-                  </label>
-                  <input
-                    type="number"
-                    value={form.price}
-                    onChange={(e) => setForm({ ...form, price: e.target.value })}
-                    placeholder="2500"
-                    className="w-full px-4 py-3 rounded-xl border border-apple-border/50 text-sm focus:outline-none focus:border-apple-blue focus:ring-1 focus:ring-apple-blue/30 transition-all duration-200"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-apple-gray mb-1.5">
-                    Длительность, мин
-                  </label>
-                  <input
-                    type="number"
-                    value={form.duration}
-                    onChange={(e) =>
-                      setForm({ ...form, duration: e.target.value })
-                    }
-                    placeholder="60"
-                    className="w-full px-4 py-3 rounded-xl border border-apple-border/50 text-sm focus:outline-none focus:border-apple-blue focus:ring-1 focus:ring-apple-blue/30 transition-all duration-200"
-                  />
-                </div>
-              </div>
-
-              {/* Toggle switches */}
-              <div className="space-y-3 pt-1">
-                <ToggleSwitch
-                  checked={form.is_additional}
-                  onChange={(val) => setForm({ ...form, is_additional: val })}
-                  label="Дополнительная услуга"
-                />
-                <ToggleSwitch
-                  checked={form.is_hourly_price}
-                  onChange={(val) => setForm({ ...form, is_hourly_price: val })}
-                  label="Почасовая цена"
-                />
-              </div>
-
-              {/* Pricing type */}
-              <div className="pt-2 border-t border-apple-border/30">
-                <label className="block text-sm text-apple-gray mb-1.5">
-                  Тип ценообразования
-                </label>
-                <select
-                  value={form.pricing_type}
-                  onChange={(e) => setForm({ ...form, pricing_type: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border border-apple-border/50 text-sm focus:outline-none focus:border-apple-blue focus:ring-1 focus:ring-apple-blue/30 transition-all duration-200 bg-white"
-                >
-                  <option value="fixed">Фиксированная цена</option>
-                  <option value="per_person">По количеству человек</option>
-                </select>
-              </div>
-
-              {/* Group pricing tiers */}
-              {form.pricing_type === 'per_person' && (
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-sm text-apple-gray">Тарифы по кол-ву человек</label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const lastMax = form.group_pricing.length > 0
-                          ? form.group_pricing[form.group_pricing.length - 1].max_people + 1
-                          : 1
-                        setForm({
-                          ...form,
-                          group_pricing: [
-                            ...form.group_pricing,
-                            { min_people: lastMax, max_people: lastMax + 4, price: Number(form.price) || 0 },
-                          ],
-                        })
-                      }}
-                      className="text-xs text-apple-blue font-medium flex items-center gap-1 hover:underline"
-                    >
-                      <Plus size={12} />
-                      Добавить тариф
-                    </button>
-                  </div>
-                  {form.group_pricing.length === 0 && (
-                    <p className="text-xs text-apple-gray italic">
-                      Добавьте тарифы для разного количества человек
-                    </p>
-                  )}
-                  <div className="space-y-2">
-                    {form.group_pricing.map((tier, idx) => (
-                      <div key={idx} className="flex items-center gap-2 bg-apple-bg rounded-xl p-2.5">
-                        <div className="flex items-center gap-1 flex-1">
-                          <input
-                            type="number"
-                            min={1}
-                            value={tier.min_people}
-                            onChange={(e) => {
-                              const newTiers = [...form.group_pricing]
-                              newTiers[idx] = { ...newTiers[idx], min_people: Number(e.target.value) || 1 }
-                              setForm({ ...form, group_pricing: newTiers })
-                            }}
-                            className="w-12 px-2 py-1.5 rounded-lg border border-apple-border/50 text-xs text-center"
-                          />
-                          <span className="text-xs text-apple-gray">—</span>
-                          <input
-                            type="number"
-                            min={1}
-                            value={tier.max_people}
-                            onChange={(e) => {
-                              const newTiers = [...form.group_pricing]
-                              newTiers[idx] = { ...newTiers[idx], max_people: Number(e.target.value) || 1 }
-                              setForm({ ...form, group_pricing: newTiers })
-                            }}
-                            className="w-12 px-2 py-1.5 rounded-lg border border-apple-border/50 text-xs text-center"
-                          />
-                          <span className="text-xs text-apple-gray shrink-0">чел</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            value={tier.price}
-                            onChange={(e) => {
-                              const newTiers = [...form.group_pricing]
-                              newTiers[idx] = { ...newTiers[idx], price: Number(e.target.value) || 0 }
-                              setForm({ ...form, group_pricing: newTiers })
-                            }}
-                            className="w-20 px-2 py-1.5 rounded-lg border border-apple-border/50 text-xs text-right"
-                          />
-                          <span className="text-xs text-apple-gray">₽</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const newTiers = form.group_pricing.filter((_, i) => i !== idx)
-                            setForm({ ...form, group_pricing: newTiers })
-                          }}
-                          className="p-1 text-apple-gray hover:text-apple-danger transition-colors"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+            {/* Name */}
+            <div className="ds-field">
+              <label className="ds-label">Название</label>
+              <input
+                type="text"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="Например: Стрижка женская"
+                className="ds-input"
+              />
             </div>
 
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={closeModal}
-                className="flex-1 bg-apple-bg text-apple-text font-medium py-3 rounded-xl hover:bg-gray-200 transition-all duration-200"
+            {/* Description */}
+            <div className="ds-field">
+              <label className="ds-label">Описание</label>
+              <input
+                type="text"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="Краткое описание"
+                className="ds-input"
+              />
+            </div>
+
+            {/* Price + Duration */}
+            <div className="ds-field-row">
+              <div className="ds-field" style={{ marginBottom: 0 }}>
+                <label className="ds-label">Цена, ₽</label>
+                <input
+                  type="number"
+                  value={form.price}
+                  onChange={(e) => setForm({ ...form, price: e.target.value })}
+                  placeholder="2500"
+                  className="ds-input"
+                />
+              </div>
+              <div className="ds-field" style={{ marginBottom: 0 }}>
+                <label className="ds-label">Длительность, мин</label>
+                <input
+                  type="number"
+                  value={form.duration}
+                  onChange={(e) => setForm({ ...form, duration: e.target.value })}
+                  placeholder="60"
+                  className="ds-input"
+                />
+              </div>
+            </div>
+
+            {/* Toggles */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, margin: '14px 0' }}>
+              <ToggleSwitch
+                checked={form.is_additional}
+                onChange={(val) => setForm({ ...form, is_additional: val })}
+                label="Дополнительная услуга"
+              />
+              <ToggleSwitch
+                checked={form.is_hourly_price}
+                onChange={(val) => setForm({ ...form, is_hourly_price: val })}
+                label="Почасовая цена"
+              />
+            </div>
+
+            {/* Pricing type */}
+            <div className="ds-field" style={{ borderTop: '1px solid var(--s-line)', paddingTop: 14 }}>
+              <label className="ds-label">Тип ценообразования</label>
+              <select
+                value={form.pricing_type}
+                onChange={(e) => setForm({ ...form, pricing_type: e.target.value })}
+                className="ds-input"
+                style={{ appearance: 'auto' }}
               >
+                <option value="fixed">Фиксированная цена</option>
+                <option value="per_person">По количеству человек</option>
+              </select>
+            </div>
+
+            {/* Group pricing tiers */}
+            {form.pricing_type === 'per_person' && (
+              <div className="ds-field">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <label className="ds-label" style={{ marginBottom: 0 }}>Тарифы по кол-ву человек</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const lastMax = form.group_pricing.length > 0
+                        ? form.group_pricing[form.group_pricing.length - 1].max_people + 1
+                        : 1
+                      setForm({
+                        ...form,
+                        group_pricing: [
+                          ...form.group_pricing,
+                          { min_people: lastMax, max_people: lastMax + 4, price: Number(form.price) || 0 },
+                        ],
+                      })
+                    }}
+                    className="ds-btn ds-btn--sm"
+                    style={{ background: 'var(--s-accent-soft)', color: 'var(--s-accent)', border: 'none', gap: 4 }}
+                  >
+                    <Plus size={12} />
+                    Добавить тариф
+                  </button>
+                </div>
+                {form.group_pricing.length === 0 && (
+                  <p className="ds-hint">Добавьте тарифы для разного количества человек</p>
+                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {form.group_pricing.map((tier, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        background: 'var(--s-surface-2)', borderRadius: 'var(--r-md)',
+                        padding: '8px 10px', border: '1px solid var(--s-line)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
+                        <input
+                          type="number"
+                          min={1}
+                          value={tier.min_people}
+                          onChange={(e) => {
+                            const newTiers = [...form.group_pricing]
+                            newTiers[idx] = { ...newTiers[idx], min_people: Number(e.target.value) || 1 }
+                            setForm({ ...form, group_pricing: newTiers })
+                          }}
+                          className="ds-input"
+                          style={{ width: 52, padding: '6px 8px', textAlign: 'center', fontSize: 13 }}
+                        />
+                        <span className="ds-sub">—</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={tier.max_people}
+                          onChange={(e) => {
+                            const newTiers = [...form.group_pricing]
+                            newTiers[idx] = { ...newTiers[idx], max_people: Number(e.target.value) || 1 }
+                            setForm({ ...form, group_pricing: newTiers })
+                          }}
+                          className="ds-input"
+                          style={{ width: 52, padding: '6px 8px', textAlign: 'center', fontSize: 13 }}
+                        />
+                        <span className="ds-sub" style={{ flexShrink: 0 }}>чел</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <input
+                          type="number"
+                          value={tier.price}
+                          onChange={(e) => {
+                            const newTiers = [...form.group_pricing]
+                            newTiers[idx] = { ...newTiers[idx], price: Number(e.target.value) || 0 }
+                            setForm({ ...form, group_pricing: newTiers })
+                          }}
+                          className="ds-input"
+                          style={{ width: 80, padding: '6px 8px', textAlign: 'right', fontSize: 13 }}
+                        />
+                        <span className="ds-sub">₽</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newTiers = form.group_pricing.filter((_, i) => i !== idx)
+                          setForm({ ...form, group_pricing: newTiers })
+                        }}
+                        className="ds-icon-btn"
+                        style={{ width: 28, height: 28, color: 'var(--s-danger)', flexShrink: 0 }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+              <button onClick={closeModal} className="ds-btn ds-btn--ghost ds-btn--block">
                 Отмена
               </button>
               <button
                 onClick={handleSave}
                 disabled={!form.name || !form.price || !form.duration}
-                className="flex-1 bg-apple-blue text-white font-medium py-3 rounded-xl hover:bg-apple-blue-hover transition-all duration-200 disabled:opacity-50"
+                className="ds-btn ds-btn--primary ds-btn--block"
               >
                 {editingService ? 'Сохранить' : 'Создать'}
               </button>
@@ -608,6 +629,24 @@ export function ServicesPage() {
           </div>
         </div>
       )}
-    </div>
+
+      {/* Delete confirm dialog */}
+      {deleteTarget && (
+        <div className="ds-center-ov" onClick={() => setDeleteTarget(null)}>
+          <div className="ds-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Удалить услугу?</h3>
+            <p>«{deleteTarget.name}» будет удалена без возможности восстановления.</p>
+            <div className="ds-dialog-actions">
+              <button onClick={() => setDeleteTarget(null)} className="ds-btn ds-btn--ghost">
+                Отмена
+              </button>
+              <button onClick={() => handleDelete(deleteTarget.id)} className="ds-btn ds-btn--danger">
+                Удалить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </AdminShell>
   )
 }

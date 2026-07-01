@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Ticket, Plus, Pencil, Trash2, X, Package, Clock, DollarSign } from 'lucide-react'
+import { Plus, Pencil, Trash2, X, Package, Clock, DollarSign } from 'lucide-react'
 import { api, type Service, type SubscriptionAdmin, type SubscriptionCreateData } from '../../api/client'
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
 import { BusinessSelector } from '../../components/BusinessSelector'
+import { AdminShell } from '../../components/AdminShell'
 
 function formatPrice(price?: number | null) {
   if (price == null) return '—'
@@ -175,259 +176,253 @@ export function SubscriptionsAdminPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        <div className="h-8 w-48 skeleton mb-6" />
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="h-24 skeleton rounded-2xl" />
-        ))}
-      </div>
-    )
-  }
-
   return (
-    <div>
-      <BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} vertical />
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-apple-text flex items-center gap-2">
-          <Ticket size={24} />
-          Абонементы
-        </h1>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-2 bg-apple-blue text-white text-sm font-medium px-4 py-2.5 rounded-xl hover:bg-apple-blue-hover transition-all duration-200"
-        >
-          <Plus size={16} />
-          Добавить
-        </button>
-      </div>
-
-      {/* Empty state */}
-      {subscriptions.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 text-apple-gray">
-          <Package size={48} className="mb-4 opacity-40" />
-          <p className="text-lg font-medium mb-1">Нет абонементов</p>
-          <p className="text-sm">Создайте первый абонемент</p>
+    <AdminShell
+      title="Абонементы"
+      headerExtra={<BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />}
+    >
+      {loading ? (
+        <div style={{ marginTop: 4 }}>
+          <div className="skeleton" style={{ height: 32, width: 192, borderRadius: 10, marginBottom: 16 }} />
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="skeleton" style={{ height: 96, borderRadius: 14, marginBottom: 10 }} />
+          ))}
         </div>
+      ) : (
+        <>
+          {/* Add button */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14, marginTop: 4 }}>
+            <button className="ds-btn ds-btn--primary ds-btn--sm" onClick={openCreate}>
+              <Plus size={15} />
+              Добавить
+            </button>
+          </div>
+
+          {/* Empty state */}
+          {subscriptions.length === 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 0', color: 'var(--s-muted)' }}>
+              <Package size={48} style={{ marginBottom: 14, opacity: 0.4 }} />
+              <p style={{ fontSize: 16, fontWeight: 600, color: 'var(--s-text-2)', marginBottom: 4 }}>Нет абонементов</p>
+              <p className="ds-sub">Создайте первый абонемент</p>
+            </div>
+          )}
+
+          {/* Subscriptions list */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {subscriptions.map((sub) => (
+              <div
+                key={sub.id}
+                className="ds-card"
+                style={{ padding: '14px 14px', opacity: sub.is_active ? 1 : 0.6 }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  {/* Main content */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 14, fontWeight: 650, color: 'var(--s-text)' }}>{sub.name}</span>
+                      {!sub.is_active && (
+                        <span className="ds-badge ds-badge--cancelled">Неактивен</span>
+                      )}
+                    </div>
+                    {sub.description && (
+                      <p className="ds-sub" style={{ marginTop: 2 }}>{sub.description}</p>
+                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 6 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, fontWeight: 650, color: 'var(--s-text)' }}>
+                        <DollarSign size={13} />
+                        {formatPrice(sub.price)} ₽
+                      </span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: 'var(--s-muted)' }}>
+                        <Clock size={13} />
+                        {sub.validity_days} дней
+                      </span>
+                    </div>
+                    {sub.services.length > 0 && (
+                      <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        {sub.services.map((svc) => (
+                          <p key={svc.id} className="ds-caption" style={{ color: 'var(--s-muted)' }}>
+                            — {svc.name} x{svc.quantity}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                    {sub.rules && (
+                      <p className="ds-caption" style={{ marginTop: 6, color: 'var(--s-muted)', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                        {sub.rules}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                    <button
+                      onClick={() => toggleActive(sub.id)}
+                      className={`ds-btn ds-btn--sm ${sub.is_active ? 'ds-btn--ghost' : 'ds-btn--ghost'}`}
+                      style={{
+                        color: sub.is_active ? 'var(--s-success)' : 'var(--s-muted)',
+                        fontSize: 12,
+                        padding: '6px 10px',
+                      }}
+                    >
+                      {sub.is_active ? 'Вкл' : 'Выкл'}
+                    </button>
+                    <button
+                      onClick={() => openEdit(sub)}
+                      className="ds-icon-btn"
+                      aria-label="Редактировать"
+                    >
+                      <Pencil size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(sub.id)}
+                      className="ds-icon-btn"
+                      style={{ color: 'var(--s-danger)' }}
+                      aria-label="Удалить"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
-      {/* Subscriptions list */}
-      <div className="space-y-3">
-        {subscriptions.map((sub) => (
-          <div
-            key={sub.id}
-            className={`bg-white rounded-2xl shadow-sm border border-apple-border/50 p-5 transition-all duration-200 ${
-              !sub.is_active ? 'opacity-60' : ''
-            }`}
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-medium text-apple-text">{sub.name}</h3>
-                  {!sub.is_active && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-apple-danger">
-                      Неактивен
-                    </span>
-                  )}
-                </div>
-                {sub.description && (
-                  <p className="text-sm text-apple-gray mt-0.5">{sub.description}</p>
-                )}
-                <div className="flex items-center gap-4 mt-2">
-                  <span className="flex items-center gap-1 text-sm font-semibold text-apple-text">
-                    <DollarSign size={14} />
-                    {formatPrice(sub.price)} ₽
-                  </span>
-                  <span className="flex items-center gap-1 text-sm text-apple-gray">
-                    <Clock size={14} />
-                    {sub.validity_days} дней
-                  </span>
-                </div>
-                {sub.services.length > 0 && (
-                  <div className="mt-2 space-y-0.5">
-                    {sub.services.map((svc) => (
-                      <p key={svc.id} className="text-sm text-apple-gray">
-                        — {svc.name} x{svc.quantity}
-                      </p>
-                    ))}
-                  </div>
-                )}
-                {sub.rules && (
-                  <p className="text-xs text-apple-gray mt-2 line-clamp-2">{sub.rules}</p>
-                )}
-              </div>
-
-              <div className="flex items-center gap-1 ml-4">
-                <button
-                  onClick={() => toggleActive(sub.id)}
-                  className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all duration-200 ${
-                    sub.is_active
-                      ? 'bg-green-50 text-apple-success hover:bg-green-100'
-                      : 'bg-apple-bg text-apple-gray hover:bg-gray-200'
-                  }`}
-                >
-                  {sub.is_active ? 'Вкл' : 'Выкл'}
-                </button>
-                <button
-                  onClick={() => openEdit(sub)}
-                  className="p-2 rounded-lg text-apple-gray hover:text-apple-blue hover:bg-blue-50 transition-all duration-200"
-                >
-                  <Pencil size={16} />
-                </button>
-                <button
-                  onClick={() => handleDelete(sub.id)}
-                  className="p-2 rounded-lg text-apple-gray hover:text-apple-danger hover:bg-red-50 transition-all duration-200"
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Modal */}
+      {/* Create / Edit sheet */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-semibold text-apple-text">
-                {editingSub ? 'Редактировать абонемент' : 'Новый абонемент'}
-              </h2>
-              <button
-                onClick={closeModal}
-                className="p-1 rounded-lg text-apple-gray hover:bg-apple-bg transition-all duration-200"
-              >
+        <div className="ds-sheet-ov" onClick={closeModal}>
+          <div className="ds-sheet" style={{ maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+            <div className="ds-sheet-grip" />
+            <div className="ds-sheet-head">
+              <div>
+                <h3>{editingSub ? 'Редактировать абонемент' : 'Новый абонемент'}</h3>
+              </div>
+              <button className="ds-icon-btn" onClick={closeModal} aria-label="Закрыть">
                 <X size={20} />
               </button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-apple-gray mb-1.5">
-                  Название
-                </label>
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="Например: Безлимит на месяц"
-                  className="w-full px-4 py-3 rounded-xl border border-apple-border/50 text-sm focus:outline-none focus:border-apple-blue focus:ring-1 focus:ring-apple-blue/30 transition-all duration-200"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-apple-gray mb-1.5">
-                  Описание
-                </label>
-                <textarea
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="Краткое описание абонемента"
-                  rows={2}
-                  className="w-full px-4 py-3 rounded-xl border border-apple-border/50 text-sm focus:outline-none focus:border-apple-blue focus:ring-1 focus:ring-apple-blue/30 transition-all duration-200 resize-none"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm text-apple-gray mb-1.5">
-                    Цена, ₽
-                  </label>
-                  <input
-                    type="number"
-                    value={form.price}
-                    onChange={(e) => setForm({ ...form, price: e.target.value })}
-                    placeholder="5000"
-                    className="w-full px-4 py-3 rounded-xl border border-apple-border/50 text-sm focus:outline-none focus:border-apple-blue focus:ring-1 focus:ring-apple-blue/30 transition-all duration-200"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-apple-gray mb-1.5">
-                    Срок действия, дней
-                  </label>
-                  <input
-                    type="number"
-                    value={form.validity_days}
-                    onChange={(e) => setForm({ ...form, validity_days: e.target.value })}
-                    placeholder="30"
-                    className="w-full px-4 py-3 rounded-xl border border-apple-border/50 text-sm focus:outline-none focus:border-apple-blue focus:ring-1 focus:ring-apple-blue/30 transition-all duration-200"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm text-apple-gray mb-1.5">
-                  Правила
-                </label>
-                <textarea
-                  value={form.rules}
-                  onChange={(e) => setForm({ ...form, rules: e.target.value })}
-                  placeholder="Условия использования абонемента"
-                  rows={2}
-                  className="w-full px-4 py-3 rounded-xl border border-apple-border/50 text-sm focus:outline-none focus:border-apple-blue focus:ring-1 focus:ring-apple-blue/30 transition-all duration-200 resize-none"
-                />
-              </div>
+            {/* Name */}
+            <div className="ds-field">
+              <label className="ds-label">Название</label>
+              <input
+                type="text"
+                className="ds-input"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="Например: Безлимит на месяц"
+              />
+            </div>
 
-              {/* Services picker */}
-              <div>
-                <label className="block text-sm text-apple-gray mb-1.5">
-                  Включённые услуги
-                </label>
-                {servicesLoading ? (
-                  <div className="h-20 skeleton rounded-xl" />
-                ) : availableServices.length === 0 ? (
-                  <p className="text-sm text-apple-gray py-3">Нет доступных услуг</p>
-                ) : (
-                  <div className="space-y-2 max-h-48 overflow-y-auto border border-apple-border/50 rounded-xl p-3">
-                    {availableServices
-                      .filter((svc) => svc.is_active)
-                      .map((svc) => {
-                        const selected = form.services.find((s) => s.service_id === svc.id)
-                        return (
-                          <div key={svc.id} className="flex items-center gap-3">
-                            <input
-                              type="checkbox"
-                              checked={!!selected}
-                              onChange={() => toggleServiceInForm(svc.id)}
-                              className="w-4 h-4 rounded border-apple-border text-apple-blue focus:ring-apple-blue/30"
-                            />
-                            <span className="flex-1 text-sm text-apple-text truncate">
-                              {svc.name}
-                              {svc.price != null && (
-                                <span className="text-apple-gray ml-1">
-                                  ({formatPrice(svc.price)} ₽)
-                                </span>
-                              )}
-                            </span>
-                            {selected && (
-                              <input
-                                type="number"
-                                min={1}
-                                value={selected.quantity}
-                                onChange={(e) =>
-                                  setServiceQuantity(svc.id, parseInt(e.target.value) || 1)
-                                }
-                                className="w-16 px-2 py-1 rounded-lg border border-apple-border/50 text-sm text-center focus:outline-none focus:border-apple-blue focus:ring-1 focus:ring-apple-blue/30 transition-all duration-200"
-                              />
-                            )}
-                          </div>
-                        )
-                      })}
-                  </div>
-                )}
+            {/* Description */}
+            <div className="ds-field">
+              <label className="ds-label">Описание</label>
+              <textarea
+                className="ds-input"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="Краткое описание абонемента"
+                rows={2}
+              />
+            </div>
+
+            {/* Price + Validity */}
+            <div className="ds-field-row">
+              <div className="ds-field">
+                <label className="ds-label">Цена, ₽</label>
+                <input
+                  type="number"
+                  className="ds-input"
+                  value={form.price}
+                  onChange={(e) => setForm({ ...form, price: e.target.value })}
+                  placeholder="5000"
+                />
+              </div>
+              <div className="ds-field">
+                <label className="ds-label">Срок действия, дней</label>
+                <input
+                  type="number"
+                  className="ds-input"
+                  value={form.validity_days}
+                  onChange={(e) => setForm({ ...form, validity_days: e.target.value })}
+                  placeholder="30"
+                />
               </div>
             </div>
 
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={closeModal}
-                className="flex-1 bg-apple-bg text-apple-text font-medium py-3 rounded-xl hover:bg-gray-200 transition-all duration-200"
-              >
+            {/* Rules */}
+            <div className="ds-field">
+              <label className="ds-label">Правила</label>
+              <textarea
+                className="ds-input"
+                value={form.rules}
+                onChange={(e) => setForm({ ...form, rules: e.target.value })}
+                placeholder="Условия использования абонемента"
+                rows={2}
+              />
+            </div>
+
+            {/* Services picker */}
+            <div className="ds-field">
+              <label className="ds-label">Включённые услуги</label>
+              {servicesLoading ? (
+                <div className="skeleton" style={{ height: 80, borderRadius: 12 }} />
+              ) : availableServices.length === 0 ? (
+                <p className="ds-sub" style={{ padding: '12px 0' }}>Нет доступных услуг</p>
+              ) : (
+                <div
+                  className="ds-input"
+                  style={{ padding: '8px 10px', maxHeight: 192, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}
+                >
+                  {availableServices
+                    .filter((svc) => svc.is_active)
+                    .map((svc) => {
+                      const selected = form.services.find((s) => s.service_id === svc.id)
+                      return (
+                        <div key={svc.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <input
+                            type="checkbox"
+                            checked={!!selected}
+                            onChange={() => toggleServiceInForm(svc.id)}
+                            style={{ width: 16, height: 16, flexShrink: 0, accentColor: 'var(--s-accent)' }}
+                          />
+                          <span style={{ flex: 1, fontSize: 13, color: 'var(--s-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {svc.name}
+                            {svc.price != null && (
+                              <span style={{ color: 'var(--s-muted)', marginLeft: 4 }}>
+                                ({formatPrice(svc.price)} ₽)
+                              </span>
+                            )}
+                          </span>
+                          {selected && (
+                            <input
+                              type="number"
+                              min={1}
+                              value={selected.quantity}
+                              onChange={(e) =>
+                                setServiceQuantity(svc.id, parseInt(e.target.value) || 1)
+                              }
+                              className="ds-input"
+                              style={{ width: 60, padding: '4px 8px', textAlign: 'center', fontSize: 13 }}
+                            />
+                          )}
+                        </div>
+                      )
+                    })}
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+              <button className="ds-btn ds-btn--ghost ds-btn--block" onClick={closeModal}>
                 Отмена
               </button>
               <button
+                className="ds-btn ds-btn--primary ds-btn--block"
                 onClick={handleSave}
                 disabled={!form.name || !form.price || !form.validity_days}
-                className="flex-1 bg-apple-blue text-white font-medium py-3 rounded-xl hover:bg-apple-blue-hover transition-all duration-200 disabled:opacity-50"
               >
                 {editingSub ? 'Сохранить' : 'Создать'}
               </button>
@@ -435,6 +430,6 @@ export function SubscriptionsAdminPage() {
           </div>
         </div>
       )}
-    </div>
+    </AdminShell>
   )
 }
