@@ -83,7 +83,7 @@ export function AdminDashboard() {
       headerExtra={<BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />}
     >
       {/* Статистика */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 4 }}>
+      <div className="ds-stats-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 4 }}>
         {loading
           ? [1, 2, 3, 4].map((i) => <div key={i} className="skeleton" style={{ height: 92, borderRadius: 14 }} />)
           : stats.map(({ label, value, Icon, color }) => (

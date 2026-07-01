@@ -23,6 +23,9 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* Обёртка контента (всё, кроме боковой навигации) — прозрачна для внутреннего flex-layout */
+.sched-main { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+
 /* Доп. токены, специфичные для таймлайна расписания (нет в общем ките) */
 .sched-root { --s-today: #d8e9fb; --s-weekcol: #eef4fb; }
 .sched-root[data-theme='dark'] { --s-today: #15314e; --s-weekcol: #0f1a27; }
@@ -425,3 +428,27 @@ textarea.sched-input { resize: none; min-height: 54px; }
 }
 .sched-fab:hover { transform: translateY(-2px); }
 .sched-fab:active { transform: scale(0.94); }
+
+/* ── Десктоп: боковая навигация вместо нижней ── */
+@media (min-width: 900px) {
+  .sched-root {
+    display: grid;
+    grid-template-columns: 232px 1fr;
+    grid-template-areas: "nav main";
+  }
+  .sched-main { grid-area: main; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+  .sched-bottomnav {
+    grid-area: nav;
+    flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 4px;
+    width: 232px; padding: 20px 14px; border-top: none; border-right: 1px solid var(--s-line);
+  }
+  .sched-bn {
+    flex-direction: row; justify-content: flex-start; gap: 12px;
+    padding: 10px 12px; border-radius: 11px; font-size: 14px;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .sched-bn:hover { background: var(--s-surface-2); color: var(--s-text); }
+  .sched-bn.active { background: var(--s-accent-soft); }
+  .sched-bn span { font-size: 14px; }
+  .sched-fab { right: 32px; bottom: 32px; }
+}
