@@ -79,11 +79,13 @@ export function initTelegramWebApp() {
   // Add class to body so CSS can target Telegram WebApp context
   document.documentElement.classList.add('tg-webapp')
 
-  // Реальная высота шапки Telegram (меню/стрелка/название) + safe area устройства —
-  // берём у самого Telegram вместо зашитой константы, т.к. высота "родной" шапки
-  // отличается от чата к чату/устройству к устройству.
+  // Реальная высота шапки Telegram (меню/стрелка/название) — берём у самого
+  // Telegram вместо зашитой константы, т.к. высота "родной" шапки отличается
+  // от чата к чату/устройству к устройству. contentSafeAreaInset уже покрывает
+  // зону под шапкой целиком (включая системную область) — плюсовать к нему ещё
+  // safeAreaInset не нужно, иначе отступ задваивается и получается с запасом.
   const applySafeArea = () => {
-    const top = (tg.safeAreaInset?.top ?? 0) + (tg.contentSafeAreaInset?.top ?? 0)
+    const top = tg.contentSafeAreaInset?.top ?? tg.safeAreaInset?.top ?? 0
     if (top > 0) {
       document.documentElement.style.setProperty('--tg-safe-top', `${top}px`)
     }
