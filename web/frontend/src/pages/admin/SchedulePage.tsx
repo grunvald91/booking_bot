@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
+  Minus,
   X,
   Phone,
   Clock,
@@ -268,7 +269,7 @@ function ManualBookingModal({
   selectedDate: Date
   selectedTime?: string
   onClose: () => void
-  onCreated: () => void
+  onCreated: (toastMessage?: string) => void
 }) {
   const [serviceId, setServiceId] = useState<number | null>(null)
   const [employeeId, setEmployeeId] = useState<number | null>(null)
@@ -276,16 +277,11 @@ function ManualBookingModal({
   const [clientName, setClientName] = useState('')
   const [clientPhone, setClientPhone] = useState('')
   const [notes, setNotes] = useState('')
-  const [repeatExtra, setRepeatExtra] = useState(0) // сколько ДОПОЛНИТЕЛЬНЫХ недель
+  const [repeatEnabled, setRepeatEnabled] = useState(false)
+  const [repeatWeeks, setRepeatWeeks] = useState(4)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
-  const REPEATS = [
-    { v: 0, l: 'Нет' },
-    { v: 3, l: '4 нед' },
-    { v: 7, l: '8 нед' },
-    { v: 11, l: '12 нед' },
-  ]
   const dateLabel = selectedDate.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })
 
   const handleSubmit = async () => {
@@ -293,23 +289,31 @@ function ManualBookingModal({
     setSubmitting(true)
     setError('')
     try {
-      for (let i = 0; i <= repeatExtra; i++) {
-        const d = new Date(selectedDate)
-        d.setDate(d.getDate() + 7 * i)
-        await api.createManualBooking({
-          business_id: businessId,
-          service_id: serviceId,
-          employee_id: employeeId ?? undefined,
-          date: formatDateISO(d),
-          time,
-          client_name: clientName,
-          client_phone: clientPhone || undefined,
-          notes: notes || undefined,
-        })
+      const created = await api.createManualBooking({
+        business_id: businessId,
+        service_id: serviceId,
+        employee_id: employeeId ?? undefined,
+        date: formatDateISO(selectedDate),
+        time,
+        client_name: clientName,
+        client_phone: clientPhone || undefined,
+        notes: notes || undefined,
+        repeat_weeks: repeatEnabled ? repeatWeeks : undefined,
+      })
+      if (Array.isArray(created) && created.length > 1) {
+        onCreated(`Создано ${created.length} записей`)
+      } else {
+        onCreated()
       }
-      onCreated()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Ошибка')
+      let msg = e instanceof Error ? e.message : 'Ошибка'
+      try {
+        const parsed = JSON.parse(msg)
+        if (parsed?.detail) msg = parsed.detail
+      } catch {
+        // не JSON — оставляем исходный текст
+      }
+      setError(msg)
     } finally {
       setSubmitting(false)
     }
@@ -368,19 +372,37 @@ function ManualBookingModal({
         <div className="sched-field">
           <label>Повторять еженедельно</label>
           <div className="sched-seg-full">
-            {REPEATS.map((r) => (
-              <button key={r.v} className={repeatExtra === r.v ? 'on' : ''} onClick={() => setRepeatExtra(r.v)}>{r.l}</button>
-            ))}
+            <button className={!repeatEnabled ? 'on' : ''} onClick={() => setRepeatEnabled(false)}>Нет</button>
+            <button className={repeatEnabled ? 'on' : ''} onClick={() => setRepeatEnabled(true)}>Повторять</button>
           </div>
-          {repeatExtra > 0 && (
-            <p className="sched-hint">Будет создано {repeatExtra + 1} записей — то же время и день недели, {repeatExtra} недель подряд.</p>
+          {repeatEnabled && (
+            <>
+              <div className="bk-addon-hours" style={{ marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setRepeatWeeks((w) => Math.max(2, w - 1))}
+                  className="ds-icon-btn"
+                >
+                  <Minus size={16} />
+                </button>
+                <span className="val">{repeatWeeks} нед</span>
+                <button
+                  type="button"
+                  onClick={() => setRepeatWeeks((w) => Math.min(8, w + 1))}
+                  className="ds-icon-btn"
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+              <p className="sched-hint">Будет создано {repeatWeeks} записей — то же время и день недели, {repeatWeeks} недель подряд.</p>
+            </>
           )}
         </div>
 
         {error && <div className="sched-error"><AlertCircle size={14} />{error}</div>}
         <button onClick={handleSubmit} disabled={submitting || !serviceId || !clientName} className="sched-submit">
           {submitting ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-          {submitting ? 'Записываем…' : repeatExtra > 0 ? `Записать · ${repeatExtra + 1}` : 'Записать'}
+          {submitting ? 'Записываем…' : repeatEnabled ? `Записать · ${repeatWeeks}` : 'Записать'}
         </button>
       </div>
     </div>
@@ -1131,7 +1153,11 @@ export function SchedulePage() {
           selectedDate={manualBookingDate}
           selectedTime={manualBookingTime}
           onClose={() => setShowManualBooking(false)}
-          onCreated={() => { setShowManualBooking(false); fetchBookings() }}
+          onCreated={(toastMessage) => {
+            setShowManualBooking(false)
+            fetchBookings()
+            if (toastMessage) alert(toastMessage)
+          }}
         />
       )}
     </div>,
