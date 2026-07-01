@@ -19,6 +19,7 @@ from sqlalchemy.orm import selectinload
 
 from ..database import get_db, Business, Service, Employee, Booking, User, VenueTimePricing
 from ..deps import get_current_user, get_current_user_optional
+from ..booking_utils import compute_recurring_dates
 from ..schemas import (
     BusinessOut,
     BusinessDetailOut,
@@ -535,7 +536,8 @@ async def create_booking(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid time format, expected HH:MM")
 
-    current_time = datetime.combine(body.date, booking_time)
+    # Повтор: тот же день недели/время, 2-8 повторов включая первый (без repeat_weeks — 1 дата, как раньше).
+    occurrence_dates = compute_recurring_dates(body.date, body.repeat_weeks or 1)
     created_bookings = []
 
     # Pre-compute additional services info for notes
@@ -560,57 +562,93 @@ async def create_booking(
             booking_notes += "\n"
         booking_notes += "Доп. услуги: " + ", ".join(addon_notes_parts)
 
-    for svc_id in svc_ids:
-        # Validate service
-        svc_result = await db.execute(
-            select(Service).where(
-                Service.id == svc_id,
-                Service.business_id == body.business_id,
-                Service.is_active == True,
+    # Phase 1: проверка конфликтов по ВСЕМ датам повтора, без записи в БД.
+    # Атомарность: если конфликтует хоть одна дата — не создаём ничего.
+    if len(occurrence_dates) > 1:
+        conflicts = []
+        for occ_date in occurrence_dates:
+            check_time = datetime.combine(occ_date, booking_time)
+            for svc_id in svc_ids:
+                svc_result = await db.execute(
+                    select(Service).where(
+                        Service.id == svc_id,
+                        Service.business_id == body.business_id,
+                        Service.is_active == True,
+                    )
+                )
+                service = svc_result.scalar_one_or_none()
+                if not service:
+                    raise HTTPException(status_code=404, detail=f"Service {svc_id} not found")
+                bt = check_time.time()
+                conflict_filter = [
+                    Booking.business_id == body.business_id,
+                    Booking.booking_date == occ_date,
+                    Booking.booking_time == bt,
+                    Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"]),
+                ]
+                if body.employee_id:
+                    conflict_filter.append(Booking.employee_id == body.employee_id)
+                conflict_result = await db.execute(select(Booking).where(and_(*conflict_filter)))
+                if conflict_result.scalar_one_or_none():
+                    conflicts.append(f"{occ_date.strftime('%d.%m')} {bt.strftime('%H:%M')}")
+                check_time += timedelta(minutes=service.duration_minutes or 30)
+        if conflicts:
+            raise HTTPException(status_code=409, detail="Занято: " + ", ".join(conflicts))
+
+    # Phase 2: создание записей по каждой дате повтора.
+    for occ_date in occurrence_dates:
+        current_time = datetime.combine(occ_date, booking_time)
+        for svc_id in svc_ids:
+            # Validate service
+            svc_result = await db.execute(
+                select(Service).where(
+                    Service.id == svc_id,
+                    Service.business_id == body.business_id,
+                    Service.is_active == True,
+                )
             )
-        )
-        service = svc_result.scalar_one_or_none()
-        if not service:
-            raise HTTPException(status_code=404, detail=f"Service {svc_id} not found")
+            service = svc_result.scalar_one_or_none()
+            if not service:
+                raise HTTPException(status_code=404, detail=f"Service {svc_id} not found")
 
-        bt = current_time.time()
+            bt = current_time.time()
 
-        # Check for conflicts with row locking to prevent race conditions
-        conflict_filter = [
-            Booking.business_id == body.business_id,
-            Booking.booking_date == body.date,
-            Booking.booking_time == bt,
-            Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"]),
-        ]
-        if body.employee_id:
-            conflict_filter.append(Booking.employee_id == body.employee_id)
+            # Check for conflicts with row locking to prevent race conditions
+            conflict_filter = [
+                Booking.business_id == body.business_id,
+                Booking.booking_date == occ_date,
+                Booking.booking_time == bt,
+                Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"]),
+            ]
+            if body.employee_id:
+                conflict_filter.append(Booking.employee_id == body.employee_id)
 
-        conflict_result = await db.execute(
-            select(Booking).where(and_(*conflict_filter)).with_for_update(skip_locked=True)
-        )
-        if conflict_result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=409,
-                detail=f"Time slot {bt.strftime('%H:%M')} is already taken",
+            conflict_result = await db.execute(
+                select(Booking).where(and_(*conflict_filter)).with_for_update(skip_locked=True)
             )
+            if conflict_result.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Time slot {bt.strftime('%H:%M')} is already taken",
+                )
 
-        # Use pending_prepayment status when prepayment is enabled (matches bot flow)
-        initial_status = "pending_prepayment" if getattr(business, 'prepayment_enabled', False) else "pending"
-        booking = Booking(
-            business_id=body.business_id,
-            client_id=booking_user.id,
-            service_id=svc_id,
-            employee_id=body.employee_id,
-            booking_date=body.date,
-            booking_time=bt,
-            status=initial_status,
-            notes=booking_notes or None,
-        )
-        db.add(booking)
-        created_bookings.append(booking)
+            # Use pending_prepayment status when prepayment is enabled (matches bot flow)
+            initial_status = "pending_prepayment" if getattr(business, 'prepayment_enabled', False) else "pending"
+            booking = Booking(
+                business_id=body.business_id,
+                client_id=booking_user.id,
+                service_id=svc_id,
+                employee_id=body.employee_id,
+                booking_date=occ_date,
+                booking_time=bt,
+                status=initial_status,
+                notes=booking_notes or None,
+            )
+            db.add(booking)
+            created_bookings.append(booking)
 
-        # Advance time by service duration for sequential bookings
-        current_time += timedelta(minutes=service.duration_minutes or 30)
+            # Advance time by service duration for sequential bookings
+            current_time += timedelta(minutes=service.duration_minutes or 30)
 
     await db.commit()
 
