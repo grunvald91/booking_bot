@@ -121,7 +121,7 @@ body {
 
 /* Telegram WebApp: add gap so app header doesn't touch TG header controls */
 html.tg-webapp body {
-  padding-top: var(--tg-safe-top, 60px);
+  padding-top: var(--tg-safe-top, 0px);
 }
 
 /* Skeleton loading animation */
