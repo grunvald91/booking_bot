@@ -119,6 +119,10 @@
   background: var(--s-bg);
 }
 
+/* Telegram WebApp: рендерится порталом прямо в body, поэтому padding-top на body
+   (см. index.css) сюда не доходит — сдвигаем сам fixed-экран под нативную шапку TG. */
+html.tg-webapp .ds-screen { top: 60px; }
+
 /* ─────────────────────────── 3. ТИПОГРАФИКА ─────────────────────────── */
 .ds-h1 { font-size: 19px; font-weight: 750; line-height: 1.1; color: var(--s-text); margin: 0; }
 .ds-h2 { font-size: 17px; font-weight: 700; line-height: 1.15; color: var(--s-text); margin: 0; }
