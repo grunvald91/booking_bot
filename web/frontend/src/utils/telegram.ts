@@ -58,6 +58,12 @@ interface TelegramWebApp {
     offClick: (fn: () => void) => void
     isVisible: boolean
   }
+  // Отступы от собственного UI Telegram (шапка с меню, safe area устройства).
+  // Доступны с Bot API 8.0+ — на старых клиентах будут undefined.
+  safeAreaInset?: { top: number; bottom: number; left: number; right: number }
+  contentSafeAreaInset?: { top: number; bottom: number; left: number; right: number }
+  onEvent: (eventType: string, callback: () => void) => void
+  offEvent: (eventType: string, callback: () => void) => void
 }
 
 // Helper functions
@@ -72,6 +78,19 @@ export function initTelegramWebApp() {
 
   // Add class to body so CSS can target Telegram WebApp context
   document.documentElement.classList.add('tg-webapp')
+
+  // Реальная высота шапки Telegram (меню/стрелка/название) + safe area устройства —
+  // берём у самого Telegram вместо зашитой константы, т.к. высота "родной" шапки
+  // отличается от чата к чату/устройству к устройству.
+  const applySafeArea = () => {
+    const top = (tg.safeAreaInset?.top ?? 0) + (tg.contentSafeAreaInset?.top ?? 0)
+    if (top > 0) {
+      document.documentElement.style.setProperty('--tg-safe-top', `${top}px`)
+    }
+  }
+  applySafeArea()
+  tg.onEvent?.('safeAreaChanged', applySafeArea)
+  tg.onEvent?.('contentSafeAreaChanged', applySafeArea)
 
   // Apply theme colors as CSS variables
   const params = tg.themeParams
