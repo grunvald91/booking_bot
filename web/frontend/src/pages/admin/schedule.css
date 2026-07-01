@@ -28,7 +28,7 @@
 
 /* Telegram WebApp: рендерится порталом прямо в body, padding-top на body (index.css) сюда
    не доходит — сдвигаем сам fixed-экран под нативную шапку TG. */
-html.tg-webapp .sched-root { top: 60px; }
+html.tg-webapp .sched-root { top: var(--tg-safe-top, 60px); }
 
 /* Доп. токены, специфичные для таймлайна расписания (нет в общем ките) */
 .sched-root { --s-today: #d8e9fb; --s-weekcol: #eef4fb; }

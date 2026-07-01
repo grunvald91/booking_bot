@@ -31,7 +31,7 @@ export function BusinessSelector({ businesses, selectedId, onSelect, vertical }:
   }
 
   return (
-    <div className="overflow-x-auto scrollbar-hide">
+    <div className="overflow-x-auto scrollbar-hide" style={{ flexShrink: 1, minWidth: 0, maxWidth: '45%' }}>
       <div className="flex gap-1 bg-apple-bg rounded-full p-0.5 w-fit">
         {businesses.map((b) => (
           <button
