@@ -707,9 +707,13 @@ async def create_booking(
             weekday = weekdays_ru[body.date.weekday()]
             booking_date_str = f"{body.date.strftime('%d.%m.%Y')} ({weekday})"
 
-            # Collect services info
+            # Collect services info — только по ПЕРВОМУ визиту серии: при повторе
+            # result_bookings содержит len(occurrence_dates) * len(svc_ids) строк
+            # (по одной на каждую услугу каждой недели), иначе уведомление показало бы
+            # услуги/сумму/длительность, умноженные на количество повторов.
+            first_visit_bookings = result_bookings[:len(svc_ids)] if svc_ids else result_bookings
             main_services = []
-            for rb in result_bookings:
+            for rb in first_visit_bookings:
                 if rb.service_name:
                     main_services.append({
                         "name": rb.service_name,
@@ -771,6 +775,8 @@ async def create_booking(
             )
             if grand_total > 0:
                 owner_msg += f"\n💰 Общая сумма: {grand_total}₽"
+            if len(occurrence_dates) > 1:
+                owner_msg += f"\n🔁 Повторится ещё {len(occurrence_dates) - 1} раз(а) — каждую неделю"
             if emp_name:
                 if is_venue:
                     owner_msg += f"\n\n🏠 Помещение: {emp_name}"
