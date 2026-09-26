@@ -86,7 +86,9 @@ jobs:
           asyncio.run(run())
           REMOTE_PY
           printf 'frontend_dist='; test -d /opt/booking_bot/web/frontend/dist && echo present || echo absent
-          cd /opt/booking_bot && sha256sum database/models.py web/api/main.py web/api/routes/admin.py web/api/schemas.py scripts/seed_100boats_demo.py web/frontend/dist/index.html
+          cd /opt/booking_bot && sha256sum database/models.py web/api/main.py web/api/routes/admin.py web/api/schemas.py scripts/seed_100boats_demo.py web/frontend/dist/index.html web/frontend/src/App.tsx web/frontend/src/api/client.ts web/frontend/src/pages/admin/SchedulePage.tsx web/frontend/package-lock.json
+          printf 'remote_git='; git rev-parse --short HEAD 2>/dev/null || true
+          printf 'remote_frontend_index='; sed -n '1,8p' web/frontend/dist/index.html
           ./venv/bin/python - <<'SOURCE_PY'
           from pathlib import Path
           paths={'web/api/main.py':['app.include_router(client.router'],
