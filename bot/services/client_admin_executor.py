@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from database.database import async_session_maker
 from database.models import Business, Booking, User, Service, Employee, EmployeeService
-from database.crud import get_business_additional_services
+from database.crud import get_business_additional_services, create_booking
 from bot.utils.business_types import is_venue_rental_type
 
 logger = logging.getLogger(__name__)
@@ -273,45 +273,76 @@ async def _create_booking(s, args: dict, client_id: int,
     )
     initial_status = "pending_prepayment" if need_prepayment else "confirmed"
 
-    # Создать основную запись
-    booking = Booking(
-        business_id=biz_id,
-        client_id=client_id,
-        service_id=svc_id,
-        booking_date=book_date,
-        booking_time=book_time,
-        employee_id=args.get("employee_id"),
-        notes=args.get("notes"),
-        status=initial_status,
-    )
-    s.add(booking)
-    await s.flush()
-
-    # Создать записи для доп. услуг (если есть)
     additional_ids = args.get("additional_service_ids") or []
-    for add_id in additional_ids:
-        res = await s.execute(select(Service).where(Service.id == add_id))
-        add_svc = res.scalar_one_or_none()
-        if add_svc:
-            add_booking = Booking(
-                business_id=biz_id,
-                client_id=client_id,
-                service_id=add_id,
-                booking_date=book_date,
-                booking_time=book_time,
-                employee_id=args.get("employee_id"),
-                status=initial_status,
+    additional_services = {}
+    if additional_ids:
+        add_svc_result = await s.execute(select(Service).where(Service.id.in_(additional_ids)))
+        for add_svc in add_svc_result.scalars().all():
+            additional_services[add_svc.id] = add_svc
+
+    prepayment_amount = None
+    if need_prepayment:
+        prepayment_percent = business.prepayment_percent or 100
+        main_duration_hours = (service.duration_minutes or 60) / 60
+        addon_price_total = 0
+        for i in additional_ids:
+            if i in additional_services:
+                add_svc = additional_services[i]
+                if getattr(add_svc, 'is_hourly_price', False):
+                    addon_price_total += int((add_svc.price or 0) * main_duration_hours)
+                else:
+                    addon_price_total += add_svc.price or 0
+        total_price = (service.price or 0) + addon_price_total
+        prepayment_amount = int(total_price * prepayment_percent / 100)
+
+    # Создать основную запись и записи для доп. услуг одной серией
+    # (проверка конфликтов и защита от дублей — внутри create_booking).
+    # Если конфликт возникнет на любом шаге — откатываем всю серию, а не
+    # только текущий вызов (create_booking коммитит на каждом вызове).
+    created_bookings = []
+    try:
+        booking = await create_booking(
+            s,
+            business_id=biz_id,
+            client_id=client_id,
+            service_id=svc_id,
+            booking_date=book_date,
+            booking_time=book_time,
+            employee_id=args.get("employee_id"),
+            notes=args.get("notes"),
+            status=initial_status,
+            prepayment_amount=prepayment_amount,
+        )
+        created_bookings.append(booking)
+
+        # Создать записи для доп. услуг (если есть)
+        for add_id in additional_ids:
+            if add_id in additional_services:
+                extra_booking = await create_booking(
+                    s,
+                    business_id=biz_id,
+                    client_id=client_id,
+                    service_id=add_id,
+                    booking_date=book_date,
+                    booking_time=book_time,
+                    employee_id=args.get("employee_id"),
+                    status=initial_status,
+                    prepayment_amount=prepayment_amount,
+                )
+                created_bookings.append(extra_booking)
+    except ValueError as e:
+        if created_bookings:
+            from sqlalchemy import delete as sa_delete
+            await s.execute(
+                sa_delete(Booking).where(Booking.id.in_([b.id for b in created_bookings]))
             )
-            s.add(add_booking)
+            await s.commit()
+        return f"❌ {e}"
 
     biz_name = args.get("business_name") or business.name
     svc_name = args.get("service_name") or service.name
 
     if need_prepayment:
-        prepayment_percent = business.prepayment_percent or 100
-        prepayment_amount = int(service.price * prepayment_percent / 100)
-        booking.prepayment_amount = prepayment_amount
-
         response = (
             f"✅ Запись создана!\n"
             f"📍 {biz_name}\n"
@@ -319,7 +350,7 @@ async def _create_booking(s, args: dict, client_id: int,
             f"💆 {svc_name}\n"
             f"#{booking.id}\n\n"
             f"💳 Требуется предоплата: {prepayment_amount} руб."
-            + (f" ({prepayment_percent}% от {service.price} руб.)" if prepayment_percent < 100 else "")
+            + (f" ({business.prepayment_percent or 100}% от {total_price} руб.)" if (business.prepayment_percent or 100) < 100 else "")
             + f"\n📱 Перевести на номер: {business.payment_phone}"
         )
         if business.payment_details:

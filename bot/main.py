@@ -4,75 +4,54 @@
 """
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, Dict
-from aiogram import Bot, Dispatcher, BaseMiddleware
-from aiogram.types import CallbackQuery, Message
+import os
+from aiogram import Bot, Dispatcher
+from aiogram.types import Update
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from bot.config import BOT_TOKEN
-from bot.handlers import common, client, admin, master, admin_management
+from bot.config import BOT_TOKEN, WEBAPP_HOST, WEBAPP_PORT, WEBAPP_URL
+from bot.handlers import common, client, admin, master, admin_management, administrator, subscription_admin, subscription_client, inline_mode
 from database import init_db
 from bot.services.scheduler import ReminderScheduler
 
 
-# Настройка логирования в файл
+# Настройка логирования
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot_debug.log', encoding='utf-8', mode='w'),
-        logging.StreamHandler()
-    ]
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Отключаем спам от aiogram и aiohttp
-logging.getLogger('aiogram').setLevel(logging.INFO)
-logging.getLogger('aiohttp').setLevel(logging.WARNING)
+
+async def _build_storage():
+    """Создать FSM-storage: Redis если доступен, иначе MemoryStorage."""
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    try:
+        from aiogram.fsm.storage.redis import RedisStorage
+        from redis.asyncio import Redis
+        redis = Redis.from_url(redis_url)
+        await redis.ping()
+        logger.info("FSM storage: Redis at %s", redis_url)
+        return RedisStorage(redis=redis)
+    except Exception as e:
+        logger.warning("FSM storage: Redis unavailable (%s), falling back to MemoryStorage", e)
+        return MemoryStorage()
 
 
-class CallbackLoggingMiddleware(BaseMiddleware):
-    """Middleware для логирования callback_query"""
+async def run_webapp_server():
+    """Запуск веб-сервера для Mini App"""
+    if not WEBAPP_URL:
+        logger.warning("WEBAPP_URL не указан, веб-сервер не запускается")
+        return None
 
-    async def __call__(
-        self,
-        handler: Callable[[CallbackQuery, Dict[str, Any]], Awaitable[Any]],
-        event: CallbackQuery,
-        data: Dict[str, Any]
-    ) -> Any:
-        logger.info(f"=== CALLBACK === data: {event.data}, user: {event.from_user.id}")
-        state = data.get("state")
-        if state:
-            current_state = await state.get_state()
-            logger.info(f"=== STATE === {current_state}")
-
-        try:
-            result = await handler(event, data)
-            logger.info(f"=== CALLBACK OK ===")
-            return result
-        except Exception as e:
-            logger.error(f"=== CALLBACK ERROR === {e}", exc_info=True)
-            raise
-
-
-class MessageLoggingMiddleware(BaseMiddleware):
-    """Middleware для логирования message"""
-
-    async def __call__(
-        self,
-        handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]],
-        event: Message,
-        data: Dict[str, Any]
-    ) -> Any:
-        logger.info(f"=== MESSAGE === text: {event.text}, user: {event.from_user.id}")
-
-        try:
-            result = await handler(event, data)
-            logger.info(f"=== MESSAGE OK ===")
-            return result
-        except Exception as e:
-            logger.error(f"=== MESSAGE ERROR === {e}", exc_info=True)
-            raise
+    try:
+        from webapp.server import run_webapp
+        runner = await run_webapp(WEBAPP_HOST, WEBAPP_PORT)
+        logger.info(f"WebApp сервер запущен на {WEBAPP_HOST}:{WEBAPP_PORT}")
+        return runner
+    except Exception as e:
+        logger.error(f"Ошибка запуска WebApp сервера: {e}")
+        return None
 
 
 async def main():
@@ -81,19 +60,19 @@ async def main():
 
     # Инициализация бота и диспетчера
     bot = Bot(token=BOT_TOKEN)
-    storage = MemoryStorage()
+    storage = await _build_storage()
     dp = Dispatcher(storage=storage)
-
-    # Добавляем middleware для логирования
-    dp.callback_query.middleware(CallbackLoggingMiddleware())
-    dp.message.middleware(MessageLoggingMiddleware())
 
     # Регистрация роутеров (порядок важен!)
     dp.include_router(common.router)
     dp.include_router(admin_management.router)
+    dp.include_router(administrator.router)  # Администратор бизнеса (новая роль)
     dp.include_router(master.router)
+    dp.include_router(subscription_admin.router)  # Абонементы (владелец)
+    dp.include_router(subscription_client.router)  # Абонементы (клиент)
     dp.include_router(client.router)
     dp.include_router(admin.router)
+    dp.include_router(inline_mode.router)  # Inline-режим (@bot запрос)
 
     # Инициализация базы данных
     logger.info("Инициализация базы данных...")
@@ -105,12 +84,29 @@ async def main():
     scheduler.start()
     logger.info("Планировщик уведомлений запущен")
 
+    # Запуск веб-сервера для Mini App
+    webapp_runner = await run_webapp_server()
+
+    # Логирование всех обновлений (outer middleware)
+    @dp.update.outer_middleware()
+    async def log_all_updates(handler, event: Update, data):
+        if event.message:
+            logger.info(f"[DEBUG] Message: text='{event.message.text}', from={event.message.from_user.id}")
+        elif event.callback_query:
+            logger.info(f"[DEBUG] Callback: data='{event.callback_query.data}', from={event.callback_query.from_user.id}")
+        else:
+            logger.info(f"[DEBUG] Other update type: {event.model_dump_json()[:500]}")
+        result = await handler(event, data)
+        return result
+
     # Запуск бота
     logger.info("Бот запущен и готов к работе!")
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         scheduler.shutdown()
+        if webapp_runner:
+            await webapp_runner.cleanup()
         await bot.session.close()
 
 

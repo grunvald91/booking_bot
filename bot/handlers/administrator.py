@@ -15,7 +15,7 @@ from database.crud import (
     get_business_employees,
     get_business_services,
     get_business_bookings,
-    get_or_create_user,
+    get_or_create_guest_user,
     create_booking,
     update_booking_status,
     get_booking_by_id,
@@ -27,6 +27,7 @@ from database.crud import (
     get_employee_service_ids,
     set_employee_services,
 )
+from bot.utils.recurring import compute_recurring_dates, build_visit_slots
 from bot.keyboards import administrator_kb
 from bot.keyboards.client_kb import get_services_keyboard, get_booking_calendar_keyboard, get_times_keyboard
 from bot.states.administrator import AdminBookingStates, AdminCancelStates
@@ -415,7 +416,7 @@ async def admin_enter_client_name(message: Message, state: FSMContext):
 
 @router.message(AdminBookingStates.entering_client_phone)
 async def admin_enter_client_phone(message: Message, state: FSMContext):
-    """Ввод телефона и создание записи"""
+    """Ввод телефона и переход к выбору повтора записи"""
     phone = message.text.strip()
 
     # Простая валидация телефона
@@ -425,11 +426,18 @@ async def admin_enter_client_phone(message: Message, state: FSMContext):
         return
 
     await state.update_data(client_phone=phone)
-    await state.set_state(AdminBookingStates.confirming)
+    await state.set_state(AdminBookingStates.choosing_repeat)
 
+    await message.answer(
+        "Повторять эту запись каждую неделю?",
+        reply_markup=administrator_kb.get_admin_repeat_toggle_keyboard()
+    )
+
+
+async def show_admin_confirmation(message: Message, state: FSMContext):
+    """Показ экрана подтверждения ручной записи"""
     data = await state.get_data()
 
-    # Формируем список услуг
     services_info = data.get('services_info', [])
     if services_info:
         services_text = "\n".join([f"  • {s['name']} ({s['duration']} мин)" for s in services_info])
@@ -440,100 +448,175 @@ async def admin_enter_client_phone(message: Message, state: FSMContext):
     else:
         services_display = ""
 
-    # Показываем подтверждение
+    repeat_weeks = data.get('repeat_weeks')
+    repeat_line = f"🔁 Повторится ещё {repeat_weeks - 1} раз(а) — каждую неделю\n" if repeat_weeks and repeat_weeks > 1 else ""
+
     await message.answer(
         f"✅ <b>Подтверждение записи</b>\n\n"
         f"👤 Клиент: {data.get('client_name')}\n"
-        f"📱 Телефон: {phone}\n"
+        f"📱 Телефон: {data.get('client_phone')}\n"
         f"{services_display}"
         f"📅 Дата: {data.get('booking_date')}\n"
-        f"🕐 Время: {data.get('booking_time')}\n\n"
+        f"🕐 Время: {data.get('booking_time')}\n"
+        f"{repeat_line}\n"
         f"Создать запись?",
         parse_mode="HTML",
         reply_markup=administrator_kb.get_admin_confirmation_keyboard()
     )
+    await state.set_state(AdminBookingStates.confirming)
+
+
+@router.callback_query(F.data == "admin_repeat_skip", AdminBookingStates.choosing_repeat)
+async def admin_repeat_skip_chosen(callback: CallbackQuery, state: FSMContext):
+    """Владелец отказался от повтора"""
+    await state.update_data(repeat_weeks=None)
+    await show_admin_confirmation(callback.message, state)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_repeat_enable", AdminBookingStates.choosing_repeat)
+async def admin_repeat_enable_chosen(callback: CallbackQuery, state: FSMContext):
+    """Владелец включил повтор — показываем степпер"""
+    await state.update_data(repeat_weeks_draft=2)
+    await callback.message.edit_text(
+        "Сколько недель повторять запись?",
+        reply_markup=administrator_kb.get_admin_repeat_stepper_keyboard(2)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.in_(["admin_repeat_dec", "admin_repeat_inc"]), AdminBookingStates.choosing_repeat)
+async def admin_repeat_stepper_changed(callback: CallbackQuery, state: FSMContext):
+    """Изменение числа недель повтора степпером"""
+    data = await state.get_data()
+    weeks = data.get('repeat_weeks_draft', 2)
+    if callback.data == "admin_repeat_dec":
+        weeks = max(2, weeks - 1)
+    else:
+        weeks = min(8, weeks + 1)
+    await state.update_data(repeat_weeks_draft=weeks)
+    await callback.message.edit_text(
+        "Сколько недель повторять запись?",
+        reply_markup=administrator_kb.get_admin_repeat_stepper_keyboard(weeks)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_repeat_noop", AdminBookingStates.choosing_repeat)
+async def admin_repeat_noop_pressed(callback: CallbackQuery, state: FSMContext):
+    """Нажатие на лейбл степпера — просто гасим спиннер"""
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_repeat_cancel", AdminBookingStates.choosing_repeat)
+async def admin_repeat_stepper_cancelled(callback: CallbackQuery, state: FSMContext):
+    """Возврат от степпера к выбору без повтора / повторять"""
+    await callback.message.edit_text(
+        "Повторять эту запись каждую неделю?",
+        reply_markup=administrator_kb.get_admin_repeat_toggle_keyboard()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_repeat_done", AdminBookingStates.choosing_repeat)
+async def admin_repeat_stepper_done(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение числа недель — переходим к подтверждению записи"""
+    data = await state.get_data()
+    await state.update_data(repeat_weeks=data.get('repeat_weeks_draft', 2))
+    await show_admin_confirmation(callback.message, state)
+    await callback.answer()
 
 
 @router.callback_query(F.data == "admin_confirm_action", AdminBookingStates.confirming)
 async def admin_confirm_booking(callback: CallbackQuery, state: FSMContext):
-    """Создание записи"""
+    """Создание записи (с поддержкой повтора по неделям)"""
     data = await state.get_data()
 
     try:
         async with async_session_maker() as session:
-            # Создаем или находим клиента
-            # Для ручной записи создаем пользователя с telegram_id=0
-            user = await get_or_create_user(
+            # Создаем или находим клиента (гостевой профиль, привязан к телефону)
+            user = await get_or_create_guest_user(
                 session,
-                telegram_id=0,  # Ручная запись без telegram
-                username=None,
-                full_name=data.get("client_name")
+                full_name=data.get("client_name"),
+                phone=data.get("client_phone"),
             )
-            # Обновляем телефон
-            user.phone = data.get("client_phone")
-            await session.commit()
 
             # Парсим дату и время
             booking_date = datetime.strptime(data.get("booking_date"), "%d.%m.%Y").date()
             booking_time = datetime.strptime(data.get("booking_time"), "%H:%M").time()
+            repeat_weeks = data.get('repeat_weeks') or 1
+            occurrence_dates = compute_recurring_dates(booking_date, repeat_weeks)
 
             # Получаем данные для уведомлений
-            from database.crud import get_employee_by_id, get_business_by_id, get_service_by_id
-            employee = await get_employee_by_id(session, data.get("employee_id")) if data.get("employee_id") else None
+            from database.crud import get_employee_by_id, get_business_by_id, get_service_by_id, check_series_conflicts
+            employee_id = data.get("employee_id")
+            employee = await get_employee_by_id(session, employee_id) if employee_id else None
             business = await get_business_by_id(session, data.get("business_id"))
 
             # Получаем информацию о выбранных услугах
             services_info = data.get('services_info', [])
-
-            # Если есть несколько услуг, создаем запись для каждой с последовательным временем
             if services_info:
-                created_bookings = []
-                current_time = booking_time
+                visit_slots = build_visit_slots(services_info, booking_time)
+            else:
+                # Обратная совместимость - одна услуга (старый формат)
+                service_id = data.get("selected_service_ids", [0])[0]
+                visit_slots = [(service_id, booking_time)]
 
-                for service_info in services_info:
-                    # Создаем запись для каждой услуги
-                    booking = await create_booking(
-                        session,
-                        business_id=data.get("business_id"),
-                        client_id=user.id,
-                        service_id=service_info['id'],
-                        employee_id=data.get("employee_id"),
-                        booking_date=booking_date,
-                        booking_time=current_time,
-                        status="confirmed"
+            conflicts = await check_series_conflicts(session, employee_id, occurrence_dates, visit_slots)
+            if conflicts:
+                conflict_text = ", ".join(d.strftime("%d.%m") for d in conflicts)
+                await callback.message.edit_text(
+                    f"❌ Не удалось создать серию: слот занят на даты: {conflict_text}.\n\n"
+                    "Ничего не создано — выберите другое время или уменьшите число повторов."
+                )
+                await state.clear()
+                await callback.answer()
+                return
+
+            created_bookings = []
+            try:
+                for occurrence_date in occurrence_dates:
+                    for service_id, start_time in visit_slots:
+                        booking = await create_booking(
+                            session,
+                            business_id=data.get("business_id"),
+                            client_id=user.id,
+                            service_id=service_id,
+                            employee_id=employee_id,
+                            booking_date=occurrence_date,
+                            booking_time=start_time,
+                            status="confirmed"
+                        )
+                        created_bookings.append(booking)
+            except ValueError as e:
+                if created_bookings:
+                    from sqlalchemy import delete as sa_delete
+                    from database.models import Booking
+                    await session.execute(
+                        sa_delete(Booking).where(Booking.id.in_([b.id for b in created_bookings]))
                     )
-                    created_bookings.append(booking)
+                    await session.commit()
+                await callback.message.edit_text(f"❌ Не удалось создать серию: {str(e)}. Ничего не создано.")
+                await state.clear()
+                await callback.answer()
+                return
 
-                    # Увеличиваем время для следующей услуги
-                    current_datetime = datetime.combine(booking_date, current_time)
-                    current_datetime += timedelta(minutes=service_info['duration'])
-                    current_time = current_datetime.time()
-
-                # Формируем список услуг для уведомления
+            # Данные для уведомления и итогового экрана — по первому визиту (первые len(visit_slots) записей)
+            first_visit_bookings = created_bookings[:len(visit_slots)]
+            if services_info:
                 services_text = "\n".join([f"  • {s['name']} ({s['duration']} мин)" for s in services_info])
                 total_duration = data.get('total_duration', 0)
                 total_price = data.get('total_price', 0)
                 price_text = f"💰 Стоимость: {total_price}₽\n" if total_price > 0 else ""
-                booking_ids = ", ".join([f"#{b.id}" for b in created_bookings])
             else:
-                # Обратная совместимость - одна услуга (старый формат)
-                service_id = data.get("selected_service_ids", [0])[0]
-                booking = await create_booking(
-                    session,
-                    business_id=data.get("business_id"),
-                    client_id=user.id,
-                    service_id=service_id,
-                    employee_id=data.get("employee_id"),
-                    booking_date=booking_date,
-                    booking_time=booking_time,
-                    status="confirmed"
-                )
-                service = await get_service_by_id(session, service_id)
+                service = await get_service_by_id(session, visit_slots[0][0])
                 services_text = f"  • {service.name if service else 'Не указана'}"
                 total_duration = service.duration_minutes if service else 0
                 total_price = service.price if service else 0
                 price_text = f"💰 Стоимость: {total_price}₽\n" if total_price else ""
-                booking_ids = f"#{booking.id}"
+            booking_ids = ", ".join([f"#{b.id}" for b in first_visit_bookings])
+
+        repeat_line = f"🔁 Повторится ещё {repeat_weeks - 1} раз(а) — каждую неделю\n" if repeat_weeks > 1 else ""
 
         # Формируем текст уведомления
         notification_text = (
@@ -545,6 +628,7 @@ async def admin_confirm_booking(callback: CallbackQuery, state: FSMContext):
             f"{price_text}"
             f"📅 Дата: {data.get('booking_date')}\n"
             f"🕐 Время: {data.get('booking_time')}\n"
+            f"{repeat_line}"
             f"🏢 Бизнес: {business.name if business else ''}"
         )
 
@@ -575,7 +659,8 @@ async def admin_confirm_booking(callback: CallbackQuery, state: FSMContext):
             f"Номер записи: {booking_ids}\n"
             f"👤 {data.get('client_name')}\n"
             f"📅 {data.get('booking_date')} в {data.get('booking_time')}\n"
-            f"⏱ Длительность: {total_duration} мин",
+            f"⏱ Длительность: {total_duration} мин\n"
+            f"{repeat_line}",
             parse_mode="HTML"
         )
 

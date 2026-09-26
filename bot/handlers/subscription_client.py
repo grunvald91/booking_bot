@@ -19,8 +19,11 @@ from database.crud import (
     update_client_subscription_status,
     get_subscription_remaining,
     get_client_available_services,
+    get_business_employees,
+    get_service_by_id,
 )
 from bot.states.subscription import SubscriptionPurchaseStates
+from bot.states import BookingStates
 from bot.keyboards import subscription_kb, client_kb
 from bot.utils.business_types import get_terminology
 
@@ -605,6 +608,59 @@ async def choose_subscription_for_booking(callback: CallbackQuery, state: FSMCon
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("use_sub_svc:"))
+async def subscription_service_chosen(callback: CallbackQuery, state: FSMContext):
+    """Выбрана конкретная услуга из абонемента — переходим к обычному выбору мастера/даты/времени"""
+    parts = callback.data.split(":")
+    client_subscription_id = int(parts[1])
+    service_id = int(parts[2])
+
+    async with async_session_maker() as session:
+        client_sub = await get_client_subscription_by_id(session, client_subscription_id)
+        if not client_sub:
+            await callback.answer("Абонемент не найден", show_alert=True)
+            return
+
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name
+        )
+
+        if client_sub.client_id != user.id:
+            await callback.answer("Абонемент не найден", show_alert=True)
+            return
+
+        service = await get_service_by_id(session, service_id)
+        if not service:
+            await callback.answer("Услуга не найдена", show_alert=True)
+            return
+
+        employees = await get_business_employees(session, client_sub.business_id)
+
+    await state.update_data(
+        business_id=client_sub.business_id,
+        business_name=client_sub.business.name,
+        service_id=service_id,
+        service_name=service.name,
+        service_duration=service.duration_minutes,
+        service_price=None,
+        client_subscription_id=client_subscription_id,
+        subscription_name=client_sub.subscription.name,
+    )
+
+    await callback.message.edit_text(
+        f"🎫 Абонемент: {client_sub.subscription.name}\n"
+        f"Услуга: {service.name}\n"
+        f"Длительность: {service.duration_minutes} мин\n\n"
+        "Выберите специалиста:",
+        reply_markup=client_kb.get_employees_keyboard(employees)
+    )
+    await state.set_state(BookingStates.choosing_employee)
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("regular_booking:"))
 async def switch_to_regular_booking(callback: CallbackQuery, state: FSMContext):
     """Переключение на обычную запись (без абонемента)"""
@@ -613,13 +669,11 @@ async def switch_to_regular_booking(callback: CallbackQuery, state: FSMContext):
     # Возвращаемся к выбору услуг
     await state.update_data(use_subscription=False)
 
-    # Переадресовываем на выбор услуг
-    await callback.message.edit_text(
-        "Переход к обычной записи...",
-    )
-
-    # Имитируем нажатие на бизнес
-    callback.data = f"business:{business_id}"
-    # Дальнейшую обработку сделает основной хендлер client.py
-
-    await callback.answer()
+    # Переходим к списку услуг того же бизнеса. aiogram не переотправляет
+    # апдейт сам по себе просто из-за смены callback.data постфактум —
+    # мутируем его под формат, который ждёт целевой хендлер, и вызываем
+    # хендлер напрямую (тот же паттерн, что уже используется в admin.py:
+    # manage_additional_services/edit_service_menu/show_duty_calendar).
+    from bot.handlers.client import continue_booking_after_info
+    callback.data = f"continue_booking:{business_id}"
+    await continue_booking_after_info(callback, state)

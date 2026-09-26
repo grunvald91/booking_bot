@@ -64,6 +64,18 @@ async def cmd_start(message: Message, state: FSMContext):
             logger.error(f"Inline card deep link error: {e}")
             pass
 
+    # Deep link "подписка на уведомления о брони, созданной из webapp"
+    # /start notify_<token> — привязывает анонимного web-клиента к Telegram
+    if deep_link_param and deep_link_param.startswith("notify_"):
+        try:
+            token = deep_link_param.replace("notify_", "", 1)
+            logger.info(f"notify deep link: token={token[:6]}...")
+            await handle_notify_deeplink(message, token)
+            return
+        except Exception as e:
+            logger.error(f"notify deep link error: {e}")
+            pass
+
     async with async_session_maker() as session:
         # Создаем или получаем пользователя
         user = await get_or_create_user(
@@ -218,6 +230,113 @@ async def start_direct_booking(message: Message, state: FSMContext, business_id:
         reply_markup=builder.as_markup()
     )
     await state.set_state(BookingStates.choosing_business)
+
+
+async def handle_notify_deeplink(message: Message, token: str):
+    """Привязать анонимного web-клиента (создавшего бронь через webapp без
+    логина в боте) к этому Telegram-аккаунту, чтобы он мог получать
+    уведомления о статусе предоплаты / подтверждении / напоминания."""
+    import logging
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from database.models import Booking, User
+
+    logger = logging.getLogger(__name__)
+
+    if not token or len(token) < 6 or len(token) > 64:
+        await message.answer("❌ Неверная или просроченная ссылка для подписки.")
+        return
+
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(Booking)
+            .options(
+                selectinload(Booking.business),
+                selectinload(Booking.service),
+                selectinload(Booking.client),
+                selectinload(Booking.employee),
+            )
+            .where(Booking.notify_token == token)
+            .limit(1)
+        )
+        booking = result.scalar_one_or_none()
+
+        if not booking:
+            await message.answer(
+                "❌ Бронь не найдена.\n\n"
+                "Возможно ссылка устарела или относится к старой брони.",
+            )
+            return
+
+        anon_client = booking.client
+        tg_id = message.from_user.id
+
+        # Если у брони клиент-аноним (отрицательный синтетический telegram_id),
+        # подменяем его на реальный — если этот реальный пользователь ещё не существует.
+        if anon_client and anon_client.telegram_id is not None and anon_client.telegram_id < 0:
+            existing = await session.execute(
+                select(User).where(User.telegram_id == tg_id)
+            )
+            existing_user = existing.scalar_one_or_none()
+            if existing_user:
+                # Переключаем все брони/контакты с anon_client на existing_user
+                from sqlalchemy import update
+                await session.execute(
+                    update(Booking).where(Booking.client_id == anon_client.id).values(client_id=existing_user.id)
+                )
+                # Сохраним телефон если был у анона
+                if anon_client.phone and not existing_user.phone:
+                    existing_user.phone = anon_client.phone
+                await session.flush()
+            else:
+                anon_client.telegram_id = tg_id
+                if message.from_user.username:
+                    anon_client.username = message.from_user.username
+                if message.from_user.full_name:
+                    anon_client.full_name = message.from_user.full_name
+            await session.commit()
+            await session.refresh(booking)
+
+        # Снова подгружаем актуального клиента после возможного переключения
+        result = await session.execute(
+            select(Booking)
+            .options(
+                selectinload(Booking.business),
+                selectinload(Booking.service),
+                selectinload(Booking.client),
+                selectinload(Booking.employee),
+            )
+            .where(Booking.id == booking.id)
+            .limit(1)
+        )
+        booking = result.scalar_one_or_none()
+
+    # Сформируем краткое инфо о брони
+    status_map = {
+        "pending": "⏳ Ожидает подтверждения",
+        "pending_prepayment": "💳 Ожидает предоплату",
+        "prepayment_sent": "🕓 Чек проверяется владельцем",
+        "confirmed": "✅ Подтверждена",
+        "completed": "✔️ Завершена",
+        "cancelled": "❌ Отменена",
+    }
+    status_label = status_map.get(booking.status, booking.status)
+    date_str = booking.booking_date.strftime("%d.%m.%Y")
+    time_str = booking.booking_time.strftime("%H:%M")
+    emp_line = f"\n👤 Специалист: {booking.employee.name}" if booking.employee else ""
+    svc_line = booking.service.name if booking.service else ""
+    biz_line = booking.business.name if booking.business else ""
+
+    text = (
+        "🔔 <b>Вы подписаны на уведомления по брони</b>\n\n"
+        f"🏢 {biz_line}\n"
+        f"💼 {svc_line}{emp_line}\n"
+        f"📅 {date_str} в {time_str}\n\n"
+        f"<b>Статус:</b> {status_label}\n\n"
+        "Здесь вы получите сообщение, когда владелец подтвердит запись или предоплату, "
+        "и напоминания за 24 ч и 2 ч до визита."
+    )
+    await message.answer(text, parse_mode="HTML", reply_markup=get_main_menu_keyboard())
 
 
 @router.message(Command("help"))

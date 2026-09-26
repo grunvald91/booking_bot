@@ -53,6 +53,8 @@ async def init_db():
         "ALTER TABLE businesses ADD COLUMN cancellation_policy_photo TEXT",
         "ALTER TABLE businesses ADD COLUMN require_receipt_for_prepayment BOOLEAN DEFAULT FALSE",
         "ALTER TABLE services ADD COLUMN sort_order INTEGER DEFAULT 0",
+        "ALTER TABLE bookings ADD COLUMN notify_token VARCHAR(64)",
+        "CREATE INDEX IF NOT EXISTS ix_bookings_notify_token ON bookings (notify_token)",
     ]
 
     for migration in migrations:

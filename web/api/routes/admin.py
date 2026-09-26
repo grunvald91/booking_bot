@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from typing import List, Optional
 import io
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
 from fastapi.responses import StreamingResponse
@@ -20,6 +21,7 @@ from ..database import (
     get_db, Business, Service, Employee, Booking, User, BusinessOwner,
     VenueTimePricing, Subscription, SubscriptionService, EmployeeService,
 )
+from database.crud import get_or_create_guest_user
 from ..deps import get_current_admin
 from ..booking_utils import compute_recurring_dates
 from ..schemas import (
@@ -41,6 +43,8 @@ from ..schemas import (
     AnalyticsKPIs,
     AnalyticsTopItem,
     AnalyticsDailyPoint,
+    AnalyticsPrepaymentStats,
+    AnalyticsHeatmapCell,
     AnalyticsOverviewOut,
     ManualBookingIn,
     UpdateBookingStatusIn,
@@ -310,7 +314,8 @@ async def analytics_overview(
     user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """KPIs, top services/employees, daily breakdown for the last N days."""
+    """KPIs, top services/employees, daily breakdown, cancellations,
+    prepayment conversion, and a fixed-90-day load heatmap."""
     biz_ids = await _get_owner_business_ids(db, user)
     if business_id not in biz_ids:
         raise HTTPException(status_code=403, detail="Not your business")
@@ -325,22 +330,24 @@ async def analytics_overview(
     biz_result = await db.execute(select(Business).where(Business.id == business_id))
     business = biz_result.scalar_one_or_none()
 
-    # ---- helper: fetch bookings with service+employee for a date range ----
-    async def _fetch_bookings(d_start: date, d_end: date):
+    # ---- helper: fetch bookings with service+employee for a date range, filtered by status ----
+    async def _fetch_by_status(d_start: date, d_end: date, statuses: list[str]):
         res = await db.execute(
             select(Booking)
             .where(
                 Booking.business_id == business_id,
                 Booking.booking_date >= d_start,
                 Booking.booking_date <= d_end,
-                Booking.status.in_(["confirmed", "completed"]),
+                Booking.status.in_(statuses),
             )
             .options(selectinload(Booking.service), selectinload(Booking.employee))
         )
         return res.scalars().all()
 
-    cur_bookings = await _fetch_bookings(start_date, end_date)
-    prev_bookings = await _fetch_bookings(prev_start, prev_end)
+    cur_bookings = await _fetch_by_status(start_date, end_date, ["confirmed", "completed"])
+    prev_bookings = await _fetch_by_status(prev_start, prev_end, ["confirmed", "completed"])
+    cur_cancelled = await _fetch_by_status(start_date, end_date, ["cancelled"])
+    prev_cancelled = await _fetch_by_status(prev_start, prev_end, ["cancelled"])
 
     def _calc_revenue(bookings):
         total = 0
@@ -362,6 +369,13 @@ async def analytics_overview(
     prev_revenue = _calc_revenue(prev_bookings)
     prev_count = len(prev_bookings)
     prev_avg = round(prev_revenue / prev_count) if prev_count > 0 else 0
+
+    def _cancellation_rate(cancelled_list, active_count):
+        total = len(cancelled_list) + active_count
+        return round(len(cancelled_list) / total * 100, 1) if total > 0 else 0.0
+
+    cur_cancellation_rate = _cancellation_rate(cur_cancelled, cur_count)
+    prev_cancellation_rate = _cancellation_rate(prev_cancelled, prev_count)
 
     # ---- load_percent ----
     # Fetch active employee count once
@@ -404,6 +418,10 @@ async def analytics_overview(
         bookings_prev=prev_count,
         avg_check_prev=prev_avg,
         load_percent_prev=prev_load,
+        cancellation_rate=cur_cancellation_rate,
+        cancelled_count=len(cur_cancelled),
+        cancellation_rate_prev=prev_cancellation_rate,
+        cancelled_count_prev=len(prev_cancelled),
     )
 
     # ---- top services ----
@@ -461,28 +479,76 @@ async def analytics_overview(
         for e in emp_list
     ]
 
-    # ---- daily breakdown ----
+    # ---- daily breakdown (bookings + revenue + cancelled) ----
     daily_map: dict[date, dict] = {}
     for b in cur_bookings:
         d = b.booking_date
         if d not in daily_map:
-            daily_map[d] = {"bookings": 0, "revenue": 0}
+            daily_map[d] = {"bookings": 0, "revenue": 0, "cancelled": 0}
         daily_map[d]["bookings"] += 1
         if b.service:
             daily_map[d]["revenue"] += b.service.price or 0
+    for b in cur_cancelled:
+        d = b.booking_date
+        if d not in daily_map:
+            daily_map[d] = {"bookings": 0, "revenue": 0, "cancelled": 0}
+        daily_map[d]["cancelled"] += 1
 
     daily = []
     current = start_date
     while current <= end_date:
-        entry = daily_map.get(current, {"bookings": 0, "revenue": 0})
-        daily.append(AnalyticsDailyPoint(date=current, bookings=entry["bookings"], revenue=entry["revenue"]))
+        entry = daily_map.get(current, {"bookings": 0, "revenue": 0, "cancelled": 0})
+        daily.append(AnalyticsDailyPoint(
+            date=current, bookings=entry["bookings"], revenue=entry["revenue"], cancelled=entry["cancelled"],
+        ))
         current += timedelta(days=1)
+
+    # ---- prepayment conversion (current period, ALL statuses) ----
+    all_period_bookings = await _fetch_by_status(
+        start_date, end_date,
+        ["pending", "confirmed", "completed", "cancelled", "pending_prepayment", "prepayment_sent"],
+    )
+    required = [b for b in all_period_bookings if b.prepayment_amount is not None]
+    confirmed_pp = [b for b in required if b.prepayment_confirmed_at is not None]
+    conversion_rate = round(len(confirmed_pp) / len(required) * 100, 1) if required else 0.0
+    if confirmed_pp:
+        total_minutes = sum(
+            (b.prepayment_confirmed_at - b.created_at).total_seconds() / 60.0
+            for b in confirmed_pp
+            if b.created_at is not None
+        )
+        avg_confirmation_minutes = round(total_minutes / len(confirmed_pp), 1)
+    else:
+        avg_confirmation_minutes = None
+
+    prepayment = AnalyticsPrepaymentStats(
+        required_count=len(required),
+        confirmed_count=len(confirmed_pp),
+        conversion_rate=conversion_rate,
+        avg_confirmation_minutes=avg_confirmation_minutes,
+    )
+
+    # ---- heatmap: fixed last 90 days, confirmed+completed only ----
+    heatmap_start = today - timedelta(days=89)
+    heatmap_bookings = await _fetch_by_status(heatmap_start, today, ["confirmed", "completed"])
+    heatmap_map: dict[tuple[int, int], int] = {}
+    for b in heatmap_bookings:
+        dow = b.booking_date.weekday()
+        hour = b.booking_time.hour
+        key = (dow, hour)
+        heatmap_map[key] = heatmap_map.get(key, 0) + 1
+    heatmap = [
+        AnalyticsHeatmapCell(day_of_week=dow, hour=hour, count=count)
+        for (dow, hour), count in heatmap_map.items()
+    ]
 
     return AnalyticsOverviewOut(
         kpis=kpis,
         top_services=top_services,
         top_employees=top_employees,
         daily=daily,
+        prepayment=prepayment,
+        heatmap=heatmap,
     )
 
 
@@ -530,16 +596,9 @@ async def create_manual_booking(
         if conflicts:
             raise HTTPException(status_code=409, detail="Занято: " + ", ".join(conflicts))
 
-    # Get or create a guest user for the client (один клиент на всю серию)
-    import time as time_module
-    guest_telegram_id = -int(time_module.time() * 1000)
-    guest_user = User(
-        telegram_id=guest_telegram_id,
-        full_name=data.client_name,
-        phone=data.client_phone,
-    )
-    db.add(guest_user)
-    await db.flush()
+    # Get or create a guest user for the client (один клиент на всю серию,
+    # переиспользуется по телефону между визитами)
+    guest_user = await get_or_create_guest_user(db, data.client_name, data.client_phone)
 
     created_ids = []
     for occ_date in occurrence_dates:
@@ -552,6 +611,7 @@ async def create_manual_booking(
             booking_time=booking_time,
             status="confirmed",
             notes=data.notes,
+            notify_token=str(uuid.uuid4()),
         )
         db.add(booking)
         await db.flush()

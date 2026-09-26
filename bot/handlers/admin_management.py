@@ -228,7 +228,7 @@ async def back_to_admin_menu(callback: CallbackQuery, state: FSMContext):
     # Удаляем сообщение с управлением владельцами
     try:
         await callback.message.delete()
-    except Exception:
+    except:
         pass
 
     # Отправляем новое сообщение с панелью владельца

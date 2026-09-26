@@ -59,6 +59,7 @@ from database.crud import (
     get_employees_for_services,
     create_booking,
     get_or_create_user,
+    get_or_create_guest_user,
     get_service_by_id,
     is_employee_day_off,
     get_user_bookings,
@@ -2196,25 +2197,7 @@ async def api_client_create_booking(request: web.Request) -> web.Response:
                 )
             elif client_name:
                 # Web-бронирование без Telegram
-                from sqlalchemy import select as sa_select
-                from database.models import User as UserModel
-
-                db_user = None
-                if client_phone:
-                    clean_phone = client_phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
-                    result = await session.execute(
-                        sa_select(UserModel).where(UserModel.phone == clean_phone)
-                    )
-                    db_user = result.scalar_one_or_none()
-
-                if not db_user:
-                    db_user = UserModel(
-                        telegram_id=0,
-                        full_name=client_name,
-                        phone=client_phone if client_phone else None,
-                    )
-                    session.add(db_user)
-                    await session.flush()
+                db_user = await get_or_create_guest_user(session, client_name, client_phone)
             else:
                 return web.json_response({'error': 'Требуется авторизация через Telegram или указание имени клиента'}, status=401)
 
@@ -2322,57 +2305,72 @@ async def api_client_create_booking(request: web.Request) -> web.Response:
             created_bookings = []
             current_time = datetime.combine(selected_date, selected_time)
 
-            for service_id in service_ids:
-                service = await get_service_by_id(session, service_id)
-                if not service:
-                    continue
+            # Обе серии (основные + доп. услуги) создаются через create_booking(),
+            # который коммитит на каждый вызов отдельно. Если конфликт возникнет не
+            # на первой итерации — откатываем всю уже созданную серию компенсирующим
+            # DELETE, а не оставляем частично созданные записи в БД.
+            try:
+                for service_id in service_ids:
+                    service = await get_service_by_id(session, service_id)
+                    if not service:
+                        continue
 
-                booking = await create_booking(
-                    session,
-                    business_id=business_id,
-                    client_id=db_user.id,
-                    service_id=service_id,
-                    employee_id=employee_id,
-                    booking_date=selected_date,
-                    booking_time=current_time.time(),
-                    notes=notes if len(created_bookings) == 0 else None
-                )
+                    booking = await create_booking(
+                        session,
+                        business_id=business_id,
+                        client_id=db_user.id,
+                        service_id=service_id,
+                        employee_id=employee_id,
+                        booking_date=selected_date,
+                        booking_time=current_time.time(),
+                        notes=notes if len(created_bookings) == 0 else None
+                    )
 
-                created_bookings.append({
-                    'id': booking.id,
-                    'service_id': service_id,
-                    'service': service.name,
-                    'time': current_time.strftime('%H:%M'),
-                    'is_additional': False,
-                })
+                    created_bookings.append({
+                        'id': booking.id,
+                        'service_id': service_id,
+                        'service': service.name,
+                        'time': current_time.strftime('%H:%M'),
+                        'is_additional': False,
+                    })
 
-                # Следующая услуга начинается после текущей
-                current_time += timedelta(minutes=service.duration_minutes)
+                    # Следующая услуга начинается после текущей
+                    current_time += timedelta(minutes=service.duration_minutes)
 
-            # Создаем записи для доп. услуг (не сдвигают время)
-            for service_id in additional_service_ids:
-                service = await get_service_by_id(session, service_id)
-                if not service:
-                    continue
+                # Создаем записи для доп. услуг (не сдвигают время)
+                for service_id in additional_service_ids:
+                    service = await get_service_by_id(session, service_id)
+                    if not service:
+                        continue
 
-                booking = await create_booking(
-                    session,
-                    business_id=business_id,
-                    client_id=db_user.id,
-                    service_id=service_id,
-                    employee_id=employee_id,
-                    booking_date=selected_date,
-                    booking_time=selected_time,
-                    notes=None
-                )
+                    booking = await create_booking(
+                        session,
+                        business_id=business_id,
+                        client_id=db_user.id,
+                        service_id=service_id,
+                        employee_id=employee_id,
+                        booking_date=selected_date,
+                        booking_time=selected_time,
+                        notes=None
+                    )
 
-                created_bookings.append({
-                    'id': booking.id,
-                    'service_id': service_id,
-                    'service': service.name,
-                    'time': selected_time.strftime('%H:%M'),
-                    'is_additional': True,
-                })
+                    created_bookings.append({
+                        'id': booking.id,
+                        'service_id': service_id,
+                        'service': service.name,
+                        'time': selected_time.strftime('%H:%M'),
+                        'is_additional': True,
+                    })
+            except ValueError:
+                if created_bookings:
+                    from sqlalchemy import delete as sa_delete
+                    await session.execute(
+                        sa_delete(BookingModel).where(
+                            BookingModel.id.in_([b['id'] for b in created_bookings])
+                        )
+                    )
+                    await session.commit()
+                raise
 
             if not created_bookings:
                 return web.json_response({'error': 'Failed to create bookings'}, status=400)
@@ -3565,28 +3563,8 @@ async def api_admin_create_booking(request: web.Request) -> web.Response:
                 return web.json_response({'error': 'Business not found'}, status=404)
 
             # Создаём или находим клиента
-            # Ищем по телефону, если указан
             from sqlalchemy import select, and_
-            from database.models import User as UserModel
-
-            client = None
-            if client_phone:
-                # Нормализуем телефон
-                clean_phone = client_phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
-                result = await session.execute(
-                    select(UserModel).where(UserModel.phone == clean_phone)
-                )
-                client = result.scalar_one_or_none()
-
-            if not client:
-                # Создаём нового пользователя-клиента
-                client = UserModel(
-                    telegram_id=0,  # Нет telegram аккаунта
-                    full_name=client_name,
-                    phone=client_phone if client_phone else None,
-                )
-                session.add(client)
-                await session.flush()
+            client = await get_or_create_guest_user(session, client_name, client_phone)
 
             # Если сотрудник не выбран, выбираем первого свободного
             if not employee_id:
