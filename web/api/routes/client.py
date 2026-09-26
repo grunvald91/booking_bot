@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import httpx
+import uuid
 
 logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
@@ -19,6 +20,7 @@ from sqlalchemy.orm import selectinload
 
 from ..database import get_db, Business, Service, Employee, Booking, User, VenueTimePricing
 from ..deps import get_current_user, get_current_user_optional
+from database.crud import get_or_create_guest_user
 from ..booking_utils import compute_recurring_dates
 from ..schemas import (
     BusinessOut,
@@ -32,6 +34,8 @@ from ..schemas import (
     CalculatePriceOut,
     PriceSegment,
     RescheduleIn,
+    PublicBookingOut,
+    PublicServiceItem,
 )
 
 router = APIRouter()
@@ -193,7 +197,36 @@ def _booking_to_out(b: Booking, can_cancel: bool = False, can_reschedule: bool =
         created_at=b.created_at,
         can_cancel=can_cancel,
         can_reschedule=can_reschedule,
+        notify_token=b.notify_token,
     )
+
+
+def _service_to_out(service: Service) -> ServiceOut:
+    """Convert Service model to ServiceOut, parsing group_pricing JSON.
+
+    `group_pricing` is stored as a JSON-encoded string (Text column) —
+    ServiceOut.model_validate(service) would hand that raw string straight
+    to the List[GroupPricingTier] field and fail Pydantic validation.
+    """
+    data = {
+        "id": service.id,
+        "name": service.name,
+        "description": service.description,
+        "duration_minutes": service.duration_minutes,
+        "price": service.price,
+        "is_active": service.is_active,
+        "is_additional": service.is_additional,
+        "is_hourly_price": service.is_hourly_price,
+        "sort_order": service.sort_order,
+        "pricing_type": getattr(service, 'pricing_type', 'fixed') or 'fixed',
+    }
+    gp = getattr(service, 'group_pricing', None)
+    if gp:
+        try:
+            data["group_pricing"] = json.loads(gp) if isinstance(gp, str) else gp
+        except (json.JSONDecodeError, TypeError):
+            data["group_pricing"] = None
+    return ServiceOut(**data)
 
 
 def _employee_to_out(e: Employee, pricing_rules: list = None) -> EmployeeOut:
@@ -302,7 +335,7 @@ async def get_business(business_id: int, db: AsyncSession = Depends(get_db)):
         photos=biz.photos,
         directions=biz.directions,
         services_count=len(active_services),
-        services=[ServiceOut.model_validate(s) for s in active_services],
+        services=[_service_to_out(s) for s in active_services],
         employees=[_employee_to_out(e, pricing_by_emp.get(e.id, [])) for e in active_employees],
         prepayment_enabled=getattr(biz, 'prepayment_enabled', False) or False,
         prepayment_percent=getattr(biz, 'prepayment_percent', None),
@@ -508,20 +541,8 @@ async def create_booking(
     if not booking_user:
         if not body.client_phone:
             raise HTTPException(status_code=401, detail="Authentication required or provide client_phone")
-        # Find or create user by phone
-        user_result = await db.execute(
-            select(User).where(User.phone == body.client_phone)
-        )
-        booking_user = user_result.scalar_one_or_none()
-        if not booking_user:
-            import time as time_module
-            booking_user = User(
-                telegram_id=-int(time_module.time() * 1000) % 2_000_000_000,
-                full_name=body.client_name or "Web Client",
-                phone=body.client_phone,
-            )
-            db.add(booking_user)
-            await db.flush()
+        # Find or create guest client by phone (гостевой профиль, привязан к телефону)
+        booking_user = await get_or_create_guest_user(db, body.client_name or "Web Client", body.client_phone)
 
     # Determine service IDs list
     svc_ids = list(body.service_ids) if body.service_ids else []
@@ -561,6 +582,20 @@ async def create_booking(
         if booking_notes:
             booking_notes += "\n"
         booking_notes += "Доп. услуги: " + ", ".join(addon_notes_parts)
+
+    # Precompute prepayment amount for the visit (same services repeat on
+    # every occurrence date if repeat_weeks is set — one amount applies to
+    # every booking row created below, matching the pattern already used
+    # in webapp/server.py::api_client_create_booking).
+    visit_prepayment_amount = None
+    if getattr(business, 'prepayment_enabled', False):
+        main_services_result = await db.execute(
+            select(Service).where(Service.id.in_(svc_ids), Service.business_id == body.business_id)
+        )
+        main_services_price_total = sum((s.price or 0) for s in main_services_result.scalars().all())
+        visit_total_price = main_services_price_total + addon_total_price
+        prepayment_percent = business.prepayment_percent or 100
+        visit_prepayment_amount = int(visit_total_price * prepayment_percent / 100)
 
     # Phase 1: проверка конфликтов по ВСЕМ датам повтора, без записи в БД.
     # Атомарность: если конфликтует хоть одна дата — не создаём ничего.
@@ -643,6 +678,8 @@ async def create_booking(
                 booking_time=bt,
                 status=initial_status,
                 notes=booking_notes or None,
+                notify_token=str(uuid.uuid4()),
+                prepayment_amount=visit_prepayment_amount if initial_status == "pending_prepayment" else None,
             )
             db.add(booking)
             created_bookings.append(booking)
@@ -1177,34 +1214,10 @@ async def get_telegram_photo(file_id: str):
     )
 
 
-# ---------- POST /bookings/{id}/prepayment-sent ----------
+# ---------- Shared prepayment/receipt logic (used by both id-based and token-based routes) ----------
 
-@router.post("/bookings/{booking_id}/prepayment-sent")
-async def prepayment_sent(
-    booking_id: int,
-    db: AsyncSession = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user_optional),
-):
+async def _mark_prepayment_sent(booking: Booking, db: AsyncSession) -> dict:
     """Mark that the client has sent the prepayment and notify the owner."""
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    result = await db.execute(
-        select(Booking)
-        .options(
-            selectinload(Booking.client),
-            selectinload(Booking.service),
-            selectinload(Booking.employee),
-            selectinload(Booking.business),
-        )
-        .where(Booking.id == booking_id)
-    )
-    booking = result.scalar_one_or_none()
-    if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
-
-    if booking.client_id != user.id:
-        raise HTTPException(status_code=403, detail="Not your booking")
-
     booking.status = "prepayment_sent"
     await db.commit()
 
@@ -1218,8 +1231,8 @@ async def prepayment_sent(
                 msg = await _build_prepayment_owner_msg(booking, db)
                 prepay_kb = {
                     "inline_keyboard": [
-                        [{"text": "✅ Подтвердить оплату", "callback_data": f"confirm_prepayment:{booking_id}"}],
-                        [{"text": "❌ Отменить бронь / нет оплаты", "callback_data": f"reject_prepayment:{booking_id}"}]
+                        [{"text": "✅ Подтвердить оплату", "callback_data": f"confirm_prepayment:{booking.id}"}],
+                        [{"text": "❌ Отменить бронь / нет оплаты", "callback_data": f"reject_prepayment:{booking.id}"}]
                     ]
                 }
                 bot_token = "***REMOVED***"
@@ -1229,48 +1242,21 @@ async def prepayment_sent(
                         json={"chat_id": owner.telegram_id, "text": msg, "parse_mode": "HTML", "reply_markup": prepay_kb},
                     )
                     if resp.status_code != 200:
-                        logger.error(f"Telegram sendMessage failed for prepayment booking {booking_id}: {resp.status_code} {resp.text}")
+                        logger.error(f"Telegram sendMessage failed for prepayment booking {booking.id}: {resp.status_code} {resp.text}")
                     else:
-                        logger.info(f"Prepayment notification sent to owner {owner.telegram_id} for booking {booking_id}")
+                        logger.info(f"Prepayment notification sent to owner {owner.telegram_id} for booking {booking.id}")
             else:
-                logger.warning(f"No owner telegram_id for booking {booking_id}")
+                logger.warning(f"No owner telegram_id for booking {booking.id}")
         else:
-            logger.warning(f"No business/owner for booking {booking_id}")
+            logger.warning(f"No business/owner for booking {booking.id}")
     except Exception as e:
-        logger.error(f"Prepayment notification error for booking {booking_id}: {e}", exc_info=True)
+        logger.error(f"Prepayment notification error for booking {booking.id}: {e}", exc_info=True)
 
     return {"message": "Payment notification recorded"}
 
 
-# ---------- POST /bookings/{id}/receipt ----------
-
-@router.post("/bookings/{booking_id}/receipt")
-async def upload_receipt(
-    booking_id: int,
-    file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user_optional),
-):
+async def _send_receipt_and_notify(booking: Booking, db: AsyncSession, file: UploadFile) -> dict:
     """Upload a receipt photo: forward it to the owner via Telegram and mark prepayment_sent."""
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    result = await db.execute(
-        select(Booking)
-        .options(
-            selectinload(Booking.client),
-            selectinload(Booking.service),
-            selectinload(Booking.employee),
-            selectinload(Booking.business),
-        )
-        .where(Booking.id == booking_id)
-    )
-    booking = result.scalar_one_or_none()
-    if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
-
-    if booking.client_id != user.id:
-        raise HTTPException(status_code=403, detail="Not your booking")
-
     booking.status = "prepayment_sent"
     await db.commit()
 
@@ -1306,14 +1292,14 @@ async def upload_receipt(
                             files={"photo": (filename, file_content, content_type)},
                         )
                         if resp.status_code != 200:
-                            logger.warning(f"sendPhoto failed for booking {booking_id}, trying sendDocument: {resp.text[:200]}")
+                            logger.warning(f"sendPhoto failed for booking {booking.id}, trying sendDocument: {resp.text[:200]}")
                             resp = await http.post(
                                 f"https://api.telegram.org/bot{bot_token}/sendDocument",
                                 data={"chat_id": str(owner.telegram_id), "caption": photo_caption},
                                 files={"document": (filename, file_content, content_type)},
                             )
                     if resp.status_code != 200:
-                        logger.error(f"Receipt photo send failed for booking {booking_id}: {resp.status_code} {resp.text}")
+                        logger.error(f"Receipt photo send failed for booking {booking.id}: {resp.status_code} {resp.text}")
 
                     # Step 2: send detailed text with buttons (same format as bot)
                     msg = await _build_prepayment_owner_msg(
@@ -1322,8 +1308,8 @@ async def upload_receipt(
                     )
                     prepay_kb = {
                         "inline_keyboard": [
-                            [{"text": "✅ Подтвердить оплату", "callback_data": f"confirm_prepayment:{booking_id}"}],
-                            [{"text": "❌ Отменить бронь / нет оплаты", "callback_data": f"reject_prepayment:{booking_id}"}]
+                            [{"text": "✅ Подтвердить оплату", "callback_data": f"confirm_prepayment:{booking.id}"}],
+                            [{"text": "❌ Отменить бронь / нет оплаты", "callback_data": f"reject_prepayment:{booking.id}"}]
                         ]
                     }
                     resp2 = await http.post(
@@ -1331,15 +1317,194 @@ async def upload_receipt(
                         json={"chat_id": owner.telegram_id, "text": msg, "parse_mode": "HTML", "reply_markup": prepay_kb},
                     )
                     if resp2.status_code != 200:
-                        logger.error(f"Receipt text send failed for booking {booking_id}: {resp2.status_code} {resp2.text}")
+                        logger.error(f"Receipt text send failed for booking {booking.id}: {resp2.status_code} {resp2.text}")
                     else:
-                        logger.info(f"Receipt notification sent to owner {owner.telegram_id} for booking {booking_id}")
+                        logger.info(f"Receipt notification sent to owner {owner.telegram_id} for booking {booking.id}")
             else:
-                logger.warning(f"No owner telegram_id for receipt booking {booking_id}")
+                logger.warning(f"No owner telegram_id for receipt booking {booking.id}")
         else:
-            logger.warning(f"No business/owner for receipt booking {booking_id}")
+            logger.warning(f"No business/owner for receipt booking {booking.id}")
 
     except Exception as e:
-        logger.error(f"Receipt notification error for booking {booking_id}: {e}", exc_info=True)
+        logger.error(f"Receipt notification error for booking {booking.id}: {e}", exc_info=True)
 
     return {"message": "Receipt uploaded and payment notification sent"}
+
+
+def _booking_lookup_options():
+    return (
+        selectinload(Booking.client),
+        selectinload(Booking.service),
+        selectinload(Booking.employee),
+        selectinload(Booking.business),
+    )
+
+
+# ---------- POST /bookings/{id}/prepayment-sent (authenticated) ----------
+
+@router.post("/bookings/{booking_id}/prepayment-sent")
+async def prepayment_sent(
+    booking_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Mark that the client has sent the prepayment and notify the owner."""
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    result = await db.execute(
+        select(Booking).options(*_booking_lookup_options()).where(Booking.id == booking_id)
+    )
+    booking = result.scalar_one_or_none()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    if booking.client_id != user.id:
+        raise HTTPException(status_code=403, detail="Not your booking")
+
+    return await _mark_prepayment_sent(booking, db)
+
+
+# ---------- POST /bookings/{id}/receipt (authenticated) ----------
+
+@router.post("/bookings/{booking_id}/receipt")
+async def upload_receipt(
+    booking_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Upload a receipt photo: forward it to the owner via Telegram and mark prepayment_sent."""
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    result = await db.execute(
+        select(Booking).options(*_booking_lookup_options()).where(Booking.id == booking_id)
+    )
+    booking = result.scalar_one_or_none()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    if booking.client_id != user.id:
+        raise HTTPException(status_code=403, detail="Not your booking")
+
+    return await _send_receipt_and_notify(booking, db, file)
+
+
+# ---------- POST /bookings/by-token/{token}/prepayment-sent (QR/guest, no auth) ----------
+
+@router.post("/bookings/by-token/{token}/prepayment-sent")
+async def prepayment_sent_by_token(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Same as prepayment_sent, but for clients who booked without a Telegram login.
+
+    Knowledge of the notify_token is itself the credential — no additional
+    ownership check is needed or meaningful here.
+    """
+    result = await db.execute(
+        select(Booking).options(*_booking_lookup_options()).where(Booking.notify_token == token)
+    )
+    booking = result.scalar_one_or_none()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    return await _mark_prepayment_sent(booking, db)
+
+
+# ---------- POST /bookings/by-token/{token}/receipt (QR/guest, no auth) ----------
+
+@router.post("/bookings/by-token/{token}/receipt")
+async def upload_receipt_by_token(
+    token: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Same as upload_receipt, but for clients who booked without a Telegram login."""
+    result = await db.execute(
+        select(Booking).options(*_booking_lookup_options()).where(Booking.notify_token == token)
+    )
+    booking = result.scalar_one_or_none()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    return await _send_receipt_and_notify(booking, db, file)
+
+
+# ---------- GET /bookings/by-token/{token} (QR/guest, no auth) ----------
+
+
+async def _find_visit_group(booking: Booking, db: AsyncSession) -> list:
+    """Все брони того же визита: тот же клиент/бизнес/мастер/дата/время и
+    текущий статус якорной брони (не только предоплатные — в отличие от
+    _build_prepayment_owner_msg, который группирует только pending_prepayment
+    + prepayment_sent, эта версия нужна и для confirmed/cancelled/completed)."""
+    result = await db.execute(
+        select(Booking).options(
+            selectinload(Booking.service),
+            selectinload(Booking.employee),
+        ).where(
+            Booking.client_id == booking.client_id,
+            Booking.business_id == booking.business_id,
+            Booking.employee_id == booking.employee_id,
+            Booking.booking_date == booking.booking_date,
+            Booking.booking_time == booking.booking_time,
+            Booking.status == booking.status,
+        )
+    )
+    group = list(result.scalars().all())
+    return group or [booking]
+
+
+@router.get("/bookings/by-token/{token}", response_model=PublicBookingOut)
+async def get_booking_by_token(token: str, db: AsyncSession = Depends(get_db)):
+    """Публичный статус брони по notify_token — без авторизации, без данных
+    клиента. Используется гостевой страницей /b/:token."""
+    result = await db.execute(
+        select(Booking).options(*_booking_lookup_options()).where(Booking.notify_token == token)
+    )
+    booking = result.scalar_one_or_none()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    group = await _find_visit_group(booking, db)
+    business = booking.business
+
+    from bot.utils.business_types import get_terminology, is_venue_rental_type
+    term = get_terminology(business.business_type)
+    is_venue = is_venue_rental_type(business.business_type)
+
+    services = [
+        PublicServiceItem(
+            name=b.service.name,
+            price=b.service.price,
+            is_additional=getattr(b.service, "is_additional", False),
+        )
+        for b in group if b.service
+    ]
+    total_price = sum(s.price or 0 for s in services)
+
+    prepay_pct = business.prepayment_percent or 100
+    computed_prepayment = booking.prepayment_amount or int(total_price * prepay_pct / 100)
+    is_prepay_pending = booking.status in ("pending_prepayment", "prepayment_sent")
+
+    return PublicBookingOut(
+        notify_token=booking.notify_token,
+        status=booking.status,
+        business_name=business.name,
+        business_address=business.address,
+        business_phone=business.phone,
+        business_directions=business.directions,
+        date=booking.booking_date,
+        time=booking.booking_time.strftime("%H:%M"),
+        employee_name=booking.employee.name if booking.employee else None,
+        employee_label="Помещение" if is_venue else term.get("employee", "Мастер"),
+        services=services,
+        total_price=total_price,
+        prepayment_enabled=getattr(business, "prepayment_enabled", False) or False,
+        prepayment_amount=computed_prepayment if is_prepay_pending else 0,
+        payment_phone=business.payment_phone,
+        payment_details=business.payment_details,
+        require_receipt_for_prepayment=getattr(business, "require_receipt_for_prepayment", False) or False,
+        cancellation_policy_text=getattr(business, "cancellation_policy_text", None),
+        cancellation_policy_photo=getattr(business, "cancellation_policy_photo", None),
+    )

@@ -68,6 +68,58 @@ body {
     display: none !important;
 }
 
+.web-auth-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 12px 16px;
+    padding: 12px;
+    border: 1px solid var(--tg-theme-hint-color);
+    border-radius: 8px;
+    background: var(--tg-theme-secondary-bg-color);
+}
+
+.web-auth-copy {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+}
+
+.web-auth-copy strong,
+.web-auth-copy span {
+    overflow-wrap: anywhere;
+}
+
+.web-auth-copy span {
+    color: var(--tg-theme-hint-color);
+}
+
+#telegram-login-widget {
+    flex-shrink: 0;
+}
+
+#web-auth-logout {
+    width: auto;
+    flex-shrink: 0;
+    padding: 8px 12px;
+}
+
+@media (max-width: 420px) {
+    .web-auth-panel {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    #telegram-login-widget,
+    #web-auth-logout {
+        align-self: flex-start;
+    }
+}
+
 /* Swipe Back Tooltip */
 .swipe-tooltip {
     position: fixed;

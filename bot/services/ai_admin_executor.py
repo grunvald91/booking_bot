@@ -2,7 +2,6 @@
 import datetime
 import json
 import logging
-import time
 from typing import Optional
 
 from sqlalchemy import select, and_
@@ -11,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from database.database import async_session_maker
 from database.models import Business, Booking, User, Service, Employee
+from database.crud import create_booking, get_or_create_guest_user
 
 logger = logging.getLogger(__name__)
 
@@ -261,28 +261,13 @@ async def _create_booking_for_client(s: AsyncSession, biz_id: int, args: dict, b
     if not service:
         return "\u274c \u0423\u0441\u043b\u0443\u0433\u0430 #" + str(svc_id) + " \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u0430"
 
-    # Find or create client user by phone
-    client = None
-    if client_phone:
-        res = await s.execute(select(User).where(User.phone == client_phone))
-        client = res.scalar_one_or_none()
-
-    if not client:
-        # Use unique negative ID for offline clients (telegram_id must be unique)
-        fake_tg_id = -(int(time.time() * 1000) % 10**12)
-        client = User(
-            telegram_id=fake_tg_id,
-            full_name=client_name,
-            phone=client_phone or None,
-            username=None,
-        )
-        s.add(client)
-        await s.flush()
-    elif client_name and client.full_name != client_name:
-        client.full_name = client_name
+    # Find or create guest client by phone (гостевой профиль, привязан к телефону)
+    client = await get_or_create_guest_user(s, client_name, client_phone or None)
 
     employee_id = args.get("employee_id")
-    booking = Booking(
+    # Проверка конфликтов и защита от дублей — внутри create_booking
+    booking = await create_booking(
+        s,
         business_id=biz_id,
         client_id=client.id,
         service_id=svc_id,
@@ -292,8 +277,6 @@ async def _create_booking_for_client(s: AsyncSession, biz_id: int, args: dict, b
         notes=args.get("notes"),
         status="confirmed",
     )
-    s.add(booking)
-    await s.flush()
 
     if bot:
         for notify_fn in (notify_master_new_booking, notify_owner_new_booking,

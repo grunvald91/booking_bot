@@ -24,8 +24,13 @@ from database.crud import (
     get_business_by_id,
     get_service_by_id,
     get_user_businesses,
-    get_employee_by_telegram_id
+    get_employee_by_telegram_id,
+    check_series_conflicts,
+    use_subscription_service,
+    release_subscription_usage,
+    get_subscription_remaining
 )
+from bot.utils.recurring import compute_recurring_dates
 from bot.states import BookingStates
 from bot.keyboards import client_kb
 from bot.config import ADMIN_IDS
@@ -473,8 +478,12 @@ async def time_chosen(callback: CallbackQuery, state: FSMContext):
         )
         await state.set_state(BookingStates.entering_phone)
     else:
-        # Переходим сразу к подтверждению
-        await show_confirmation(callback.message, state)
+        data = await state.get_data()
+        if data.get('client_subscription_id'):
+            # Запись по абонементу — без шага "Повторять?"
+            await show_confirmation(callback.message, state)
+        else:
+            await ask_repeat(callback.message, state)
 
     await callback.answer()
 
@@ -498,12 +507,94 @@ async def phone_received(message: Message, state: FSMContext):
         from database.crud import update_user_phone
         await update_user_phone(session, user.id, phone)
 
-    await show_confirmation(message, state)
+    data = await state.get_data()
+    if data.get('client_subscription_id'):
+        await show_confirmation(message, state)
+    else:
+        await ask_repeat(message, state)
+
+
+async def ask_repeat(message: Message, state: FSMContext):
+    """Показ экрана выбора повтора записи"""
+    await message.answer(
+        "Повторять эту запись каждую неделю?",
+        reply_markup=client_kb.get_repeat_toggle_keyboard()
+    )
+    await state.set_state(BookingStates.choosing_repeat)
+
+
+@router.callback_query(F.data == "repeat_skip", BookingStates.choosing_repeat)
+async def repeat_skip_chosen(callback: CallbackQuery, state: FSMContext):
+    """Пользователь отказался от повтора"""
+    await state.update_data(repeat_weeks=None)
+    await show_confirmation(callback.message, state)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "repeat_enable", BookingStates.choosing_repeat)
+async def repeat_enable_chosen(callback: CallbackQuery, state: FSMContext):
+    """Пользователь включил повтор — показываем степпер"""
+    await state.update_data(repeat_weeks_draft=2)
+    await callback.message.edit_text(
+        "Сколько недель повторять запись?",
+        reply_markup=client_kb.get_repeat_stepper_keyboard(2)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.in_(["repeat_dec", "repeat_inc"]), BookingStates.choosing_repeat)
+async def repeat_stepper_changed(callback: CallbackQuery, state: FSMContext):
+    """Изменение числа недель повтора степпером"""
+    data = await state.get_data()
+    weeks = data.get('repeat_weeks_draft', 2)
+    if callback.data == "repeat_dec":
+        weeks = max(2, weeks - 1)
+    else:
+        weeks = min(8, weeks + 1)
+    await state.update_data(repeat_weeks_draft=weeks)
+    await callback.message.edit_text(
+        "Сколько недель повторять запись?",
+        reply_markup=client_kb.get_repeat_stepper_keyboard(weeks)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "repeat_noop", BookingStates.choosing_repeat)
+async def repeat_noop_pressed(callback: CallbackQuery, state: FSMContext):
+    """Нажатие на лейбл степпера — просто гасим спиннер"""
+    await callback.answer()
+
+
+@router.callback_query(F.data == "repeat_cancel", BookingStates.choosing_repeat)
+async def repeat_stepper_cancelled(callback: CallbackQuery, state: FSMContext):
+    """Возврат от степпера к выбору без повтора / повторять"""
+    await callback.message.edit_text(
+        "Повторять эту запись каждую неделю?",
+        reply_markup=client_kb.get_repeat_toggle_keyboard()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "repeat_done", BookingStates.choosing_repeat)
+async def repeat_stepper_done(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение числа недель — переходим к подтверждению записи"""
+    data = await state.get_data()
+    await state.update_data(repeat_weeks=data.get('repeat_weeks_draft', 2))
+    await show_confirmation(callback.message, state)
+    await callback.answer()
 
 
 async def show_confirmation(message: Message, state: FSMContext):
     """Показ экрана подтверждения записи"""
     data = await state.get_data()
+
+    repeat_weeks = data.get('repeat_weeks')
+    repeat_line = f"\n🔁 Повторится ещё {repeat_weeks - 1} раз(а) — каждую неделю\n" if repeat_weeks and repeat_weeks > 1 else ""
+
+    subscription_name = data.get('subscription_name')
+    payment_line = f"🎫 Оплата: абонемент «{subscription_name}»" if subscription_name else (
+        f"💰 Цена: {data['service_price']}₽" if data.get('service_price') else ""
+    )
 
     confirmation_text = f"""
 📋 <b>Подтверждение записи</b>
@@ -511,11 +602,11 @@ async def show_confirmation(message: Message, state: FSMContext):
 🏢 Заведение: {data['business_name']}
 💼 Услуга: {data['service_name']}
 ⏱ Длительность: {data['service_duration']} мин
-{f"💰 Цена: {data['service_price']}₽" if data.get('service_price') else ""}
+{payment_line}
 👤 Мастер: {data['employee_name']}
 📅 Дата: {data['booking_date']}
 🕐 Время: {data['booking_time']}
-
+{repeat_line}
 Подтверждаете запись?
 """
 
@@ -531,12 +622,14 @@ async def show_confirmation(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "confirm_booking")
 async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
-    """Подтверждение и создание записи"""
+    """Подтверждение и создание записи (с поддержкой повтора по неделям)"""
     data = await state.get_data()
 
     # Парсим дату и время
     booking_date = datetime.strptime(data['booking_date'], "%d.%m.%Y").date()
     booking_time = datetime.strptime(data['booking_time'], "%H:%M").time()
+    repeat_weeks = data.get('repeat_weeks') or 1
+    occurrence_dates = compute_recurring_dates(booking_date, repeat_weeks)
 
     async with async_session_maker() as session:
         # Получаем пользователя
@@ -547,25 +640,44 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
             full_name=callback.from_user.full_name
         )
 
-        try:
-            # Создаем запись
-            booking = await create_booking(
-                session,
-                business_id=data['business_id'],
-                client_id=user.id,
-                service_id=data['service_id'],
-                booking_date=booking_date,
-                booking_time=booking_time,
-                employee_id=data.get('employee_id')
+        employee_id = data.get('employee_id')
+        service_id = data['service_id']
+
+        conflicts = await check_series_conflicts(
+            session, employee_id, occurrence_dates, [(service_id, booking_time)]
+        )
+        if conflicts:
+            conflict_text = ", ".join(d.strftime("%d.%m") for d in conflicts)
+            await callback.message.edit_text(
+                f"❌ Не удалось создать серию: слот занят на даты: {conflict_text}.\n\n"
+                "Ничего не создано — выберите другое время или уменьшите число повторов.",
+                reply_markup=client_kb.get_confirmation_keyboard()
             )
+            await callback.answer()
+            return
 
-            # Отправляем уведомления
-            from bot.services.notifications import notify_master_new_booking, notify_owner_new_booking
-            await notify_master_new_booking(callback.bot, booking)
-            await notify_owner_new_booking(callback.bot, booking)
-
+        created_bookings = []
+        try:
+            for occurrence_date in occurrence_dates:
+                booking = await create_booking(
+                    session,
+                    business_id=data['business_id'],
+                    client_id=user.id,
+                    service_id=service_id,
+                    booking_date=occurrence_date,
+                    booking_time=booking_time,
+                    employee_id=employee_id
+                )
+                created_bookings.append(booking)
         except ValueError as e:
-            # Время уже занято
+            if created_bookings:
+                from sqlalchemy import delete as sa_delete
+                from database.models import Booking
+                await session.execute(
+                    sa_delete(Booking).where(Booking.id.in_([b.id for b in created_bookings]))
+                )
+                await session.commit()
+
             show_admin, show_master = await get_user_roles(callback.from_user.id)
             await callback.message.edit_text(
                 f"❌ К сожалению, {str(e)}.\n\nПожалуйста, выберите другое время.",
@@ -578,6 +690,43 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
             await state.clear()
             await callback.answer()
             return
+
+        booking = created_bookings[0]
+
+        subscription_line = ""
+        client_subscription_id = data.get('client_subscription_id')
+        if client_subscription_id:
+            usage = await use_subscription_service(
+                session, client_subscription_id, service_id, booking_id=booking.id
+            )
+            if usage is None:
+                from sqlalchemy import delete as sa_delete
+                from database.models import Booking
+                await session.execute(
+                    sa_delete(Booking).where(Booking.id.in_([b.id for b in created_bookings]))
+                )
+                await session.commit()
+                await callback.message.edit_text(
+                    "❌ Не удалось списать визит — в абонементе не осталось "
+                    "доступных визитов для этой услуги. Ничего не создано.",
+                    reply_markup=None,
+                )
+                await state.clear()
+                await callback.answer()
+                return
+
+            booking.subscription_usage_id = usage.id
+            await session.commit()
+
+            remaining = await get_subscription_remaining(session, client_subscription_id)
+            left = remaining.get(service_id, {}).get('remaining')
+            if left is not None:
+                subscription_line = f"\n🎫 Списано с абонемента «{data.get('subscription_name', '')}», осталось: {left}\n"
+
+        # Отправляем уведомления (один раз, по первой записи серии)
+        from bot.services.notifications import notify_master_new_booking, notify_owner_new_booking
+        await notify_master_new_booking(callback.bot, booking)
+        await notify_owner_new_booking(callback.bot, booking)
 
         # Получаем информацию о бизнесе для ссылок
         from database.crud import get_business_by_id
@@ -608,6 +757,8 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
     else:
         reminder_text = "Мы отправим вам напоминание за день и за 2 часа до визита."
 
+    repeat_note = f"\n🔁 Повторится ещё {repeat_weeks - 1} раз(а) — каждую неделю\n" if repeat_weeks > 1 else ""
+
     confirmation_text = f"""
 ✅ <b>Запись успешно создана!</b>
 
@@ -616,7 +767,8 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
 💼 {data['service_name']}
 {address_text}
 {phone_text}
-
+{repeat_note}
+{subscription_line}
 {reminder_text}
 """
 
@@ -965,6 +1117,8 @@ async def cancel_booking_by_client(callback: CallbackQuery):
 
         # Отменяем запись
         booking.status = 'cancelled'
+        if booking.subscription_usage_id:
+            await release_subscription_usage(session, booking.subscription_usage_id)
         await session.commit()
 
         # Уведомляем владельца об отмене

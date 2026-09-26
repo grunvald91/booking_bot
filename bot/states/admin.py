@@ -24,8 +24,8 @@ class ServiceCreationStates(StatesGroup):
     entering_duration = State()
     entering_price = State()
     choosing_hourly = State()  # Цена за час? (для доп. услуг venue_rental)
-    choosing_pricing_type = State()  # Фиксированная / По кол-ву человек
-    entering_group_tier = State()  # Ввод тарифа: мин-макс чел, цена
+    choosing_pricing_type = State()   # Фиксированная / по кол-ву человек
+    entering_group_tier = State()     # Ввод тарифов мин-макс цена (per_person)
 
 
 class EmployeeCreationStates(StatesGroup):
@@ -57,8 +57,7 @@ class ServiceEditStates(StatesGroup):
     editing_description = State()
     editing_duration = State()
     editing_price = State()
-    choosing_pricing_type = State()  # Выбор типа ценообразования
-    entering_group_tier = State()  # Ввод тарифа группы
+    entering_group_tier = State()   # Ввод тарифов мин-макс цена (per_person) при редактировании
 
 
 class EmployeeEditStates(StatesGroup):

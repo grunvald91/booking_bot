@@ -49,6 +49,32 @@ def get_maps_link(address: str) -> str:
 logger = logging.getLogger(__name__)
 
 
+async def _format_payment_summary_block(booking: Booking) -> str:
+    """Строит блок текста с оплаченной/оставшейся суммой для уведомления,
+    или пустую строку, если у визита нет предоплаты. Открывает свою
+    короткую сессию — notify_* получают объекты booking из сессий
+    вызывающего кода, которые к моменту отправки уведомления могут быть
+    уже закрыты (booking.id/client_id/business_id/booking_date/
+    booking_time/status — обычные колонки, доступны и на detached
+    объекте благодаря expire_on_commit=False у async_session_maker)."""
+    from database.crud import get_booking_payment_summary
+
+    try:
+        async with async_session_maker() as session:
+            summary = await get_booking_payment_summary(session, booking)
+    except Exception as e:
+        logger.warning(f"Payment summary lookup failed for booking {booking.id}: {e}")
+        return ""
+
+    if summary["prepayment_amount"] == 0:
+        return ""
+    if summary["paid_amount"] > 0:
+        return f"\n💰 Оплачено: {summary['paid_amount']}₽ · Осталось при визите: {summary['remaining_amount']}₽\n"
+    if summary["claimed_amount"] > 0:
+        return f"\n💰 Клиент заявил об оплате {summary['claimed_amount']}₽ (ожидает подтверждения) · Останется доплатить: {summary['remaining_amount']}₽\n"
+    return f"\n💰 Требуется предоплата: {summary['prepayment_amount']}₽ · Полная сумма визита: {summary['total_price']}₽\n"
+
+
 async def send_24h_reminder(bot: Bot, booking: Booking, session: AsyncSession):
     """Отправка напоминания клиенту за 24 часа до записи (для одной записи - legacy)"""
     # Используем новую функцию с группировкой
@@ -377,6 +403,8 @@ async def notify_master_new_booking(bot: Bot, booking: Booking, services_list: O
                 message += f"\n🎫 <b>Оплачено по абонементу: {subscription_name}</b>"
             elif total_price > 0:
                 message += f"\n💰 Сумма: {total_price}₽"
+            if not is_subscription:
+                message += await _format_payment_summary_block(booking)
 
             if booking.notes:
                 message += f"\n\n💬 Комментарий: {booking.notes}"
@@ -462,6 +490,9 @@ async def notify_owner_new_booking(bot: Bot, booking: Booking, services_list: Op
                 emp_label = get_employee_label(business.business_type)
                 message += f"\n\n👔 {emp_label}: {employee.name}"
 
+        if not is_subscription:
+            message += await _format_payment_summary_block(booking)
+
         if booking.notes:
             message += f"\n\n💬 Комментарий: {booking.notes}"
 
@@ -516,6 +547,7 @@ async def notify_owner_cancelled_booking(bot: Bot, booking: Booking):
 💼 Услуга: {service.name}
 💰 Потеря: {service.price}₽
 """
+        message += await _format_payment_summary_block(booking)
 
         await bot.send_message(
             chat_id=owner.telegram_id,
@@ -565,6 +597,8 @@ async def notify_owner_rescheduled_booking(bot: Bot, booking: Booking, old_date,
         if employee:
             emp_label = get_employee_label(business.business_type)
             message += f"\n👔 {emp_label}: {employee.name}"
+
+        message += await _format_payment_summary_block(booking)
 
         # Уведомляем владельца
         try:
@@ -686,6 +720,9 @@ async def notify_administrator_new_booking(bot: Bot, booking: Booking, services_
             if employee:
                 emp_label = get_employee_label(business.business_type)
                 message += f"\n\n👔 {emp_label}: {employee.name}"
+
+        if not is_subscription:
+            message += await _format_payment_summary_block(booking)
 
         if booking.notes:
             message += f"\n\n💬 Комментарий: {booking.notes}"
@@ -1060,6 +1097,9 @@ async def notify_all_owners_new_booking(bot: Bot, booking: Booking, services_lis
                 emp_label = get_employee_label(business.business_type)
                 message += f"\n\n👔 {emp_label}: {employee.name}"
 
+        if not is_subscription:
+            message += await _format_payment_summary_block(booking)
+
         if booking.notes:
             message += f"\n\n💬 Комментарий: {booking.notes}"
 
@@ -1102,6 +1142,7 @@ async def notify_all_owners_cancelled_booking(bot: Bot, booking: Booking):
 💼 Услуга: {service.name}
 💰 Потеря: {service.price}₽
 """
+        message += await _format_payment_summary_block(booking)
 
         await notify_business_owners(bot, business.id, message)
 
