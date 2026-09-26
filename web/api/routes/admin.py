@@ -3,6 +3,7 @@ Admin routes: dashboard, booking management, analytics.
 All routes require the user to be a business owner.
 """
 from datetime import date, datetime, timedelta, time as dt_time
+from zoneinfo import ZoneInfo
 from typing import List, Optional
 import io
 import logging
@@ -82,8 +83,11 @@ def _admin_booking_out(b: Booking) -> AdminBookingOut:
         client_name=b.client.full_name if b.client else "Unknown",
         client_phone=b.client.phone if b.client else None,
         service_name=b.service.name if b.service else "",
-        service_duration=b.service.duration_minutes if b.service else None,
-        price=b.service.price if b.service else None,
+        service_duration=b.duration_minutes or (b.service.duration_minutes if b.service else None),
+        price=b.estimated_price if b.duration_minutes is not None else (b.service.price if b.service else None),
+        is_rental=b.duration_minutes is not None,
+        price_requires_confirmation=b.price_requires_confirmation,
+        prepayment_amount=b.prepayment_amount,
         employee_name=b.employee.name if b.employee else None,
         employee_id=b.employee.id if b.employee else None,
         date=b.booking_date,
@@ -599,6 +603,10 @@ async def update_booking_status(
         raise HTTPException(status_code=404, detail="Booking not found")
     if booking.business_id not in biz_ids:
         raise HTTPException(status_code=403, detail="Not your business")
+    if data.status == "confirmed" and booking.duration_minutes is not None and (
+        booking.price_requires_confirmation or booking.prepayment_amount is None
+    ):
+        raise HTTPException(status_code=409, detail="Укажите окончательную цену и предоплату (0 ₽, если не требуется)")
 
     booking.status = data.status
     await db.commit()
@@ -643,10 +651,25 @@ async def admin_reschedule_booking(
     except (ValueError, AttributeError):
         raise HTTPException(status_code=400, detail="Invalid time")
 
-    duration = booking.service.duration_minutes if booking.service else 30
+    duration = booking.duration_minutes or (booking.service.duration_minutes if booking.service else 30)
     slot_start = datetime.combine(data.date, new_time)
     slot_end = slot_start + timedelta(minutes=duration or 30)
     target_employee_id = data.employee_id if data.employee_id is not None else booking.employee_id
+    if booking.duration_minutes is not None:
+        if target_employee_id != booking.employee_id:
+            raise HTTPException(status_code=400, detail="Для смены судна создайте новую заявку")
+        business = await db.get(Business, booking.business_id)
+        from web.api.rental_logic import available_starts
+        if not business.working_hours_start or not business.working_hours_end:
+            raise HTTPException(status_code=409, detail="Расписание не настроено")
+        try:
+            allowed = available_starts(data.date, business.working_hours_start,
+                                       business.working_hours_end, duration, [],
+                                       now=datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if data.time not in allowed:
+            raise HTTPException(status_code=409, detail="Время вне рабочих часов или уже прошло")
 
     # Проверка пересечений с другими записями этого сотрудника
     if target_employee_id:
@@ -657,7 +680,7 @@ async def admin_reschedule_booking(
                     Booking.business_id == booking.business_id,
                     Booking.employee_id == target_employee_id,
                     Booking.booking_date == data.date,
-                    Booking.status.in_(["pending", "confirmed"]),
+                    Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent", "prepayment_confirmed"]),
                     Booking.id != booking.id,
                 )
             )
@@ -665,7 +688,7 @@ async def admin_reschedule_booking(
         )
         for eb in result.scalars().all():
             eb_start = datetime.combine(data.date, eb.booking_time)
-            eb_dur = (eb.service.duration_minutes if eb.service else 30) or 30
+            eb_dur = eb.duration_minutes or (eb.service.duration_minutes if eb.service else 30) or 30
             eb_end = eb_start + timedelta(minutes=eb_dur)
             if not (slot_end <= eb_start or slot_start >= eb_end):
                 raise HTTPException(status_code=409, detail="На это время уже есть запись")

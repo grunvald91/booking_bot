@@ -172,6 +172,9 @@ export interface AdminBooking {
   service_name: string;
   service_duration?: number;
   price?: number;
+  is_rental?: boolean;
+  price_requires_confirmation?: boolean;
+  prepayment_amount?: number | null;
   employee_name?: string;
   employee_id?: number;
   date: string;
@@ -473,6 +476,11 @@ export const api = {
     request<AdminBooking>(`/admin/bookings/${bookingId}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
+    }),
+  updateRentalQuote: (bookingId: number, estimatedPrice: number, prepaymentAmount: number) =>
+    request<AdminBooking>(`/admin/rental/bookings/${bookingId}/quote`, {
+      method: 'PATCH',
+      body: JSON.stringify({ estimated_price: estimatedPrice, prepayment_amount: prepaymentAmount }),
     }),
   adminReschedule: (bookingId: number, date: string, time: string, employeeId?: number) =>
     request<AdminBooking>(`/admin/bookings/${bookingId}/reschedule`, {

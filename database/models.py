@@ -201,6 +201,10 @@ class Booking(Base):
     # pending_prepayment (ожидает предоплату), prepayment_sent (клиент отправил), prepayment_confirmed (владелец подтвердил)
     status: Mapped[str] = mapped_column(String(50), default="pending")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Rental bookings have a per-booking duration/quote; ordinary services use service duration/price.
+    duration_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    estimated_price: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    price_requires_confirmation: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Предоплата
     prepayment_amount: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Сумма предоплаты

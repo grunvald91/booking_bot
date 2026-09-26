@@ -129,14 +129,20 @@ function BookingDetailModal({
   onClose,
   onStatusChange,
   onReschedule,
+  onQuote,
+  error,
   updating,
 }: {
   booking: AdminBooking
   onClose: () => void
   onStatusChange: (id: number, status: string) => void
   onReschedule: (b: AdminBooking) => void
+  onQuote: (id: number, price: number, prepayment: number) => void
+  error: string
   updating: boolean
 }) {
+  const [rentalPrice, setRentalPrice] = useState(String(booking.price ?? ''))
+  const [deposit, setDeposit] = useState(String(booking.prepayment_amount ?? 0))
   const endTime = calcEndTime(booking.time, booking.service_duration || 60)
   const sv = statusVar(booking.status)
   return (
@@ -171,10 +177,31 @@ function BookingDetailModal({
             {STATUS_LABELS[booking.status] || booking.status}
           </span>
         </div>
+        {booking.is_rental && booking.status !== 'cancelled' && booking.status !== 'completed' && (
+          <div className="mb-4 rounded-xl p-3 text-sm" style={{ background: 'var(--s-surface-2)' }}>
+            <div className="font-semibold mb-2">Стоимость аренды и предоплата</div>
+            {booking.price_requires_confirmation && <p className="mb-2">Требуется подтверждение цены менеджером.</p>}
+            <label>Итоговая стоимость, ₽
+              <input type="number" min="0" step="1" value={rentalPrice}
+                onChange={(e) => setRentalPrice(e.target.value)} className="w-full rounded-lg p-2 mt-1" />
+            </label>
+            <label className="block mt-2">Предоплата (до 20%), ₽
+              <input type="number" min="0" step="1" max={rentalPrice ? Math.floor(Number(rentalPrice) * 0.2) : undefined}
+                value={deposit} onChange={(e) => setDeposit(e.target.value)} className="w-full rounded-lg p-2 mt-1" />
+            </label>
+            <button className="ds-btn ds-btn--primary mt-2" disabled={updating || rentalPrice === '' ||
+              !Number.isInteger(Number(rentalPrice)) || !Number.isInteger(Number(deposit)) ||
+              Number(rentalPrice) < 0 || Number(deposit) < 0 || Number(deposit) > Number(rentalPrice) * 0.2}
+              onClick={() => onQuote(booking.id, Number(rentalPrice), Number(deposit))}>
+              Сохранить цену и предоплату
+            </button>
+          </div>
+        )}
+        {error && <p className="mb-3 text-sm" style={{ color: 'var(--st-cancelled)' }} role="alert">{error}</p>}
         {booking.status !== 'cancelled' && booking.status !== 'completed' && (
           <div className="grid grid-cols-2 gap-2">
             {booking.status === 'pending' && (
-              <button onClick={() => onStatusChange(booking.id, 'confirmed')} disabled={updating}
+              <button onClick={() => onStatusChange(booking.id, 'confirmed')} disabled={updating || !!booking.price_requires_confirmation || (booking.is_rental && booking.prepayment_amount == null)}
                 className="flex items-center justify-center gap-1.5 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
                 style={{ background: 'var(--st-confirmed)' }}>
                 <CheckCircle size={16} /> Подтвердить
@@ -545,6 +572,7 @@ export function SchedulePage() {
   const [bookings, setBookings] = useState<AdminBooking[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<AdminBooking | null>(null)
+  const [bookingError, setBookingError] = useState('')
   const [rescheduleBooking, setRescheduleBooking] = useState<AdminBooking | null>(null)
   const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false)
   const [rescheduleError, setRescheduleError] = useState('')
@@ -693,11 +721,28 @@ export function SchedulePage() {
 
   const handleStatusChange = async (bookingId: number, status: string) => {
     setUpdating(true)
+    setBookingError('')
     try {
       const updated = await api.updateBookingStatus(bookingId, status)
       setBookings((prev) => prev.map((b) => (b.id === bookingId ? updated : b)))
       setSelectedBooking(null)
-    } catch { /* ignore */ } finally {
+    } catch (e) {
+      setBookingError(e instanceof Error ? e.message : 'Не удалось изменить статус')
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const handleRentalQuote = async (bookingId: number, price: number, prepayment: number) => {
+    setUpdating(true)
+    setBookingError('')
+    try {
+      const updated = await api.updateRentalQuote(bookingId, price, prepayment)
+      setBookings((prev) => prev.map((b) => (b.id === bookingId ? updated : b)))
+      setSelectedBooking(updated)
+    } catch (e) {
+      setBookingError(e instanceof Error ? e.message : 'Не удалось сохранить стоимость')
+    } finally {
       setUpdating(false)
     }
   }
@@ -1109,7 +1154,7 @@ export function SchedulePage() {
           bookings={visibleBookings}
           empColor={empColor}
           onClose={() => setDaySheet(null)}
-          onPick={(b) => { setDaySheet(null); setSelectedBooking(b) }}
+          onPick={(b) => { setDaySheet(null); setBookingError(''); setSelectedBooking(b) }}
         />
       )}
 
@@ -1129,6 +1174,8 @@ export function SchedulePage() {
           booking={selectedBooking}
           onClose={() => setSelectedBooking(null)}
           onStatusChange={handleStatusChange}
+          onQuote={handleRentalQuote}
+          error={bookingError}
           onReschedule={(b) => { setRescheduleError(''); setRescheduleBooking(b) }}
           updating={updating}
         />

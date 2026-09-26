@@ -206,6 +206,9 @@ class AdminBookingOut(BaseModel):
     service_name: str
     service_duration: Optional[int] = None
     price: Optional[int] = None
+    is_rental: bool = False
+    price_requires_confirmation: bool = False
+    prepayment_amount: Optional[int] = None
     employee_name: Optional[str] = None
     employee_id: Optional[int] = None
     date: date
