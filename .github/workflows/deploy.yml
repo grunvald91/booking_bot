@@ -1,8 +1,9 @@
 name: Deploy webapp to server
 
-# Авто-деплой страницы расписания и прочего кода webapp/ на боевой сервор.
-# Сервер /opt/booking_bot НЕ git-репозиторий — поэтому файлы заливаются по SCP,
-# затем перезапускается сервис booking-bot (он же поднимает aiohttp-вебапп на :8080).
+# Ручной деплой файлов webapp/ на сервер. Автодеплой отключён: GitHub может
+# синхронизировать исходники с production без обратной перезаписи сервера.
+# Сервер /opt/booking_bot НЕ git-репозиторий — файлы заливаются по SCP
+# только при явном запуске workflow_dispatch.
 #
 # Деплоятся ТОЛЬКО файлы, изменённые в коммите (под webapp/**), чтобы не затирать
 # серверные файлы, которые могли расходиться с git. Для ручного деплоя конкретных
@@ -12,10 +13,6 @@ name: Deploy webapp to server
 # Опционально (repository variables): SERVER_HOST, SERVER_USER, SERVER_PORT.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'webapp/**'
   workflow_dispatch:
     inputs:
       files:
