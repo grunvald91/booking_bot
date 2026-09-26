@@ -81,6 +81,8 @@ jobs:
                   print('existing_demo_businesses='+repr(rows))
                   rows = (await session.execute(text('select id, username from users where is_admin=true order by id limit 5'))).all()
                   print('admin_user_candidates='+repr(rows))
+                  rows = (await session.execute(text('select b.id,b.name,b.owner_id,u.username from businesses b join users u on u.id=b.owner_id order by b.id limit 25'))).all()
+                  print('business_owners='+repr(rows))
           asyncio.run(run())
           REMOTE_PY
           printf 'frontend_dist='; test -d /opt/booking_bot/web/frontend/dist && echo present || echo absent
