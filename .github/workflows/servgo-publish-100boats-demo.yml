@@ -88,13 +88,25 @@ jobs:
               async with async_session_maker() as s:
                   q="select id,owner_id,is_active,prepayment_enabled,prepayment_percent,working_hours_start,working_hours_end from businesses where name='100boats — демонстрация ServGo'"
                   b=(await s.execute(text(q))).one()
-                  bid=b[0]
-                  print('business='+repr(b))
-                  for label,sql in [('vessels','select count(*) from employees where business_id=:bid'),('services','select count(*) from services where business_id=:bid'),('bookings','select count(*) from bookings where business_id=:bid')]:
-                      print(label+'='+str((await s.execute(text(sql),{'bid':bid})).scalar_one()))
+                  bid,owner,active,prepay,percent,start,end=b
+                  assert owner==1 and active is False and prepay is False and percent is None and start is None and end is None, 'business safety settings mismatch'
+                  vessel_names=(await s.execute(text('select name from employees where business_id=:bid order by name'),{'bid':bid})).scalars().all()
+                  expected={'Princess 45','Fairline Squadron 58','Azimut 39','Sunseeker 72','Princess 56','Fazerint 42','Lavezzi 40','Dufour Atoll 43','Bavaria 380 Sport'}
+                  assert set(vessel_names)==expected and len(vessel_names)==9, 'vessel set mismatch'
+                  services=(await s.execute(text('select name,price,is_additional from services where business_id=:bid'),{'bid':bid})).all()
+                  assert len(services)==5, 'service count mismatch'
+                  actual={name:(price,additional) for name,price,additional in services}
+                  assert actual['Аренда яхты / катера']==(None,False), 'generic booking price must remain unset'
+                  assert actual['Фотосессия / видеоролик на яхте']==(15000,True), 'photo price mismatch'
+                  assert actual['Премиальный трансфер из отеля']==(5000,True), 'transfer price mismatch'
+                  assert actual['Спорткар / кабриолет']==(None,True), 'car requires quote'
+                  assert actual['Вертолётная прогулка / трансфер']==(None,True), 'helicopter requires quote'
+                  bookings=(await s.execute(text('select count(*) from bookings where business_id=:bid'),{'bid':bid})).scalar_one()
+                  assert bookings==0, 'unexpected real bookings'
+                  print(f'verified_business_id={bid}; owner_id={owner}; inactive=true; vessels={len(vessel_names)}; services={len(services)}; bookings={bookings}')
           asyncio.run(run())
           VERIFY_PY''',
-                  "curl -sS --max-time 8 -o /dev/null -w 'static_local_http=%{http_code}\\n' -H 'Host: artur.grunvald1991.fvds.ru' http://127.0.0.1/demo-100boats.html",
+                  '''code=$(curl -kfsS --max-time 12 --resolve servgo.ru:443:127.0.0.1 -o /dev/null -w '%{http_code}' https://servgo.ru/demo-100boats.html) && [ "$code" = "200" ] && echo "static_local_https=$code"''',
               ]
               for command in commands:
                   _,out,err=client.exec_command(command,timeout=30)
