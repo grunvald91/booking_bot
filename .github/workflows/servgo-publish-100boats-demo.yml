@@ -1,0 +1,110 @@
+name: Publish isolated 100boats ServGo demo
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Upload static demo and seed inactive business
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64
+          import hashlib
+          import os
+          import pathlib
+          import time
+          import paramiko
+
+          EXPECTED='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class PinnedHostKey(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self, client, hostname, key):
+                  actual=base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  if actual != EXPECTED:
+                      raise paramiko.SSHException('Server host key mismatch')
+                  client.get_host_keys().add(hostname,key.get_name(),key)
+
+          client=None
+          for attempt in range(3):
+              candidate=paramiko.SSHClient()
+              candidate.set_missing_host_key_policy(PinnedHostKey())
+              try:
+                  candidate.connect('155.212.162.47', username='root', port=22,
+                                    password=os.environ['SERVER_PASSWORD'],
+                                    look_for_keys=False,allow_agent=False,
+                                    timeout=12,banner_timeout=25,auth_timeout=15)
+                  client=candidate
+                  break
+              except (paramiko.SSHException, OSError, EOFError) as exc:
+                  print(f'connect attempt={attempt+1} error={type(exc).__name__}',flush=True)
+                  candidate.close()
+                  if attempt==2:raise
+                  time.sleep(3)
+          try:
+              files=[
+                  ('web/frontend/public/demo-100boats.html',
+                   '/opt/booking_bot/web/frontend/dist/demo-100boats.html'),
+                  ('scripts/seed_100boats_demo.py',
+                   '/opt/booking_bot/scripts/seed_100boats_demo.py'),
+              ]
+              sftp=client.open_sftp()
+              for local,remote in files:
+                  data=pathlib.Path(local).read_bytes()
+                  # Existing files are never overwritten without a server-side backup.
+                  try:
+                      sftp.stat(remote)
+                  except FileNotFoundError:
+                      pass
+                  else:
+                      backup=f'{remote}.bak.{int(time.time())}'
+                      sftp.rename(remote,backup)
+                      print(f'backup={backup}',flush=True)
+                  sftp.put(local,remote)
+                  with sftp.open(remote,'rb') as saved:
+                      actual=hashlib.sha256(saved.read()).hexdigest()
+                  expected=hashlib.sha256(data).hexdigest()
+                  if actual!=expected:raise RuntimeError(f'upload hash mismatch for {remote}')
+                  print(f'uploaded={remote} sha256={actual}',flush=True)
+              sftp.close()
+              commands=[
+                  'cd /opt/booking_bot && ./venv/bin/python -m py_compile scripts/seed_100boats_demo.py',
+                  'cd /opt/booking_bot && ./venv/bin/python -m scripts.seed_100boats_demo',
+                  '''cd /opt/booking_bot && ./venv/bin/python - <<'VERIFY_PY'
+          import asyncio
+          from sqlalchemy import text
+          from database.database import async_session_maker
+          async def run():
+              async with async_session_maker() as s:
+                  q="select id,owner_id,is_active,prepayment_enabled,prepayment_percent,working_hours_start,working_hours_end from businesses where name='100boats — демонстрация ServGo'"
+                  b=(await s.execute(text(q))).one()
+                  bid=b[0]
+                  print('business='+repr(b))
+                  for label,sql in [('vessels','select count(*) from employees where business_id=:bid'),('services','select count(*) from services where business_id=:bid'),('bookings','select count(*) from bookings where business_id=:bid')]:
+                      print(label+'='+str((await s.execute(text(sql),{'bid':bid})).scalar_one()))
+          asyncio.run(run())
+          VERIFY_PY''',
+                  "curl -sS --max-time 8 -o /dev/null -w 'static_local_http=%{http_code}\\n' -H 'Host: artur.grunvald1991.fvds.ru' http://127.0.0.1/demo-100boats.html",
+              ]
+              for command in commands:
+                  _,out,err=client.exec_command(command,timeout=30)
+                  result=out.read().decode('utf-8','replace')
+                  error=err.read().decode('utf-8','replace')
+                  code=out.channel.recv_exit_status()
+                  print(result,flush=True)
+                  if code:
+                      print(f'command failed exit={code}: {error[-800:]}',flush=True)
+                      raise SystemExit(code)
+          finally:
+              client.close()
+          PY
