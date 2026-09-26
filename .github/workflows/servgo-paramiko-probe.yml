@@ -86,6 +86,7 @@ jobs:
           asyncio.run(run())
           REMOTE_PY
           printf 'frontend_dist='; test -d /opt/booking_bot/web/frontend/dist && echo present || echo absent
+          cd /opt/booking_bot && sha256sum database/models.py web/api/main.py web/api/routes/admin.py web/api/schemas.py scripts/seed_100boats_demo.py web/frontend/dist/index.html
           '''
                   _, inv_out, inv_err = client.exec_command(inventory, timeout=25)
                   print(inv_out.read().decode('utf-8', 'replace'), flush=True)
