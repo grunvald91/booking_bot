@@ -87,6 +87,24 @@ jobs:
           REMOTE_PY
           printf 'frontend_dist='; test -d /opt/booking_bot/web/frontend/dist && echo present || echo absent
           cd /opt/booking_bot && sha256sum database/models.py web/api/main.py web/api/routes/admin.py web/api/schemas.py scripts/seed_100boats_demo.py web/frontend/dist/index.html
+          ./venv/bin/python - <<'SOURCE_PY'
+          from pathlib import Path
+          paths={'web/api/main.py':['app.include_router(client.router'],
+                 'web/api/schemas.py':['class AdminBookingOut'],
+                 'web/api/routes/admin.py':['def _admin_booking_out','async def update_booking_status','async def admin_reschedule_booking']}
+          for path,markers in paths.items():
+              lines=Path(path).read_text().splitlines()
+              for marker in markers:
+                  hits=[i for i,line in enumerate(lines) if marker in line]
+                  print('SNIPPET',path,marker,'matches',len(hits))
+                  for i in hits:
+                      n=20 if marker.startswith('class ') else 110 if 'reschedule' in marker else 45 if 'status' in marker else 25
+                      for j in range(max(0,i-3),min(len(lines),i+n)):
+                          line=lines[j]
+                          if any(secret in line.lower() for secret in ('token=', 'password=', 'secret=', 'api_key=')):
+                              line='[REDACTED]'
+                          print(f'{j+1}: {line}')
+          SOURCE_PY
           '''
                   _, inv_out, inv_err = client.exec_command(inventory, timeout=25)
                   print(inv_out.read().decode('utf-8', 'replace'), flush=True)
