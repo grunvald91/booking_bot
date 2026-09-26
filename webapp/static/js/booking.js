@@ -34,6 +34,9 @@ const state = {
     prepaymentData: null,
 };
 
+let webAuthUser = null;
+const telegramLoginBot = document.body?.dataset.telegramBot || 'Sochiservice_bot';
+
 // Business type icons
 const businessIcons = {
     salon: '💇',
@@ -48,15 +51,127 @@ const businessIcons = {
 };
 
 // Initialize
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     if (tg) {
         tg.ready();
         tg.expand();
         applyTelegramTheme();
     }
+    await checkWebAuth();
     loadBusinesses();
     initSwipeGestures();
 });
+
+function hasAuthenticatedClient() {
+    return !!(tg && tg.initData) || !!webAuthUser;
+}
+
+async function checkWebAuth() {
+    if (tg?.initData) {
+        hideWebAuthPanel();
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/auth/me', { credentials: 'same-origin' });
+        if (response.ok) {
+            const data = await response.json();
+            webAuthUser = data.user || null;
+            updateWebAuthPanel();
+            return;
+        }
+    } catch (e) {
+        console.warn('Auth check failed', e);
+    }
+
+    webAuthUser = null;
+    updateWebAuthPanel();
+    loadTelegramLoginWidget();
+}
+
+function updateWebAuthPanel() {
+    const panel = document.getElementById('web-auth-panel');
+    const title = document.getElementById('web-auth-title');
+    const subtitle = document.getElementById('web-auth-subtitle');
+    const widget = document.getElementById('telegram-login-widget');
+    const logout = document.getElementById('web-auth-logout');
+    if (!panel) return;
+
+    panel.classList.remove('hidden');
+    if (webAuthUser) {
+        const name = webAuthUser.first_name || webAuthUser.username || 'Telegram';
+        title.textContent = `Вы вошли как ${name}`;
+        subtitle.textContent = 'Ваши записи и абонементы доступны на этом устройстве.';
+        if (widget) widget.classList.add('hidden');
+        if (logout) logout.classList.remove('hidden');
+    } else {
+        title.textContent = 'Войти через Telegram';
+        subtitle.textContent = 'Так вы сможете видеть свои записи и абонементы на сайте.';
+        if (widget) widget.classList.remove('hidden');
+        if (logout) logout.classList.add('hidden');
+    }
+}
+
+function hideWebAuthPanel() {
+    const panel = document.getElementById('web-auth-panel');
+    if (panel) panel.classList.add('hidden');
+}
+
+function loadTelegramLoginWidget() {
+    const container = document.getElementById('telegram-login-widget');
+    if (!container || container.querySelector('script')) return;
+
+    const script = document.createElement('script');
+    script.src = 'https://telegram.org/js/telegram-widget.js?22';
+    script.setAttribute('data-telegram-login', telegramLoginBot);
+    script.setAttribute('data-size', 'medium');
+    script.setAttribute('data-onauth', 'onTelegramAuth(user)');
+    script.setAttribute('data-request-access', 'write');
+    script.async = true;
+    container.appendChild(script);
+}
+
+window.onTelegramAuth = async function(user) {
+    try {
+        const response = await fetch('/api/auth/telegram', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify(user),
+        });
+        if (!response.ok) {
+            showError('Не удалось войти через Telegram');
+            return;
+        }
+        const data = await response.json();
+        webAuthUser = data.user || null;
+        updateWebAuthPanel();
+        await refreshAuthenticatedSections();
+    } catch (e) {
+        console.error('Telegram auth error', e);
+        showError('Ошибка авторизации через Telegram');
+    }
+};
+
+async function logoutWebAuth() {
+    await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+    }).catch(() => {});
+    webAuthUser = null;
+    const container = document.getElementById('telegram-login-widget');
+    if (container) container.innerHTML = '';
+    updateWebAuthPanel();
+    loadTelegramLoginWidget();
+}
+
+async function refreshAuthenticatedSections() {
+    if (state.currentStep === 'my-bookings') {
+        await showMyBookings();
+    } else if (state.currentStep === 'my-subscriptions') {
+        await showMySubscriptions();
+    }
+}
 
 // Swipe gesture support
 let swipeHintShown = false;
@@ -218,7 +333,7 @@ async function apiCall(endpoint, options = {}) {
         headers['X-Telegram-Init-Data'] = tg.initData;
     }
 
-    const response = await fetch(endpoint, { ...options, headers });
+    const response = await fetch(endpoint, { ...options, headers, credentials: 'same-origin' });
 
     // Try to parse JSON response
     let data;
@@ -248,16 +363,6 @@ async function loadBusinesses() {
         hideElement('skeleton-loader');
         renderBusinesses();
         showStep('business');
-
-        // Автовыбор бизнеса из URL-параметра (?business_id=N)
-        const urlBusinessId = new URLSearchParams(window.location.search).get('business_id');
-        if (urlBusinessId) {
-            const bId = parseInt(urlBusinessId);
-            if (state.businesses.find(b => b.id === bId)) {
-                await selectBusiness(bId);
-                return;
-            }
-        }
 
         // Check for last booking after businesses are loaded
         await checkLastBooking();
@@ -1484,8 +1589,8 @@ function renderConfirmation() {
     }
 
     // Если нет Telegram — показать поля для ввода имени и телефона
-    const hasTg = !!(tg && tg.initData);
-    if (!hasTg) {
+    const hasAuth = hasAuthenticatedClient();
+    if (!hasAuth) {
         html += `
             <div class="confirm-section-title">Ваши данные</div>
             <div class="confirm-row">
@@ -1516,10 +1621,10 @@ async function createBooking() {
         const notes = document.getElementById('booking-notes').value.trim();
 
         // Проверяем данные клиента для web-бронирования без Telegram
-        const hasTg = !!(tg && tg.initData);
+        const hasAuth = hasAuthenticatedClient();
         let clientName = '';
         let clientPhone = '';
-        if (!hasTg) {
+        if (!hasAuth) {
             const nameInput = document.getElementById('web-client-name');
             const phoneInput = document.getElementById('web-client-phone');
             clientName = nameInput ? nameInput.value.trim() : '';
@@ -1551,7 +1656,7 @@ async function createBooking() {
         };
 
         // Добавляем данные клиента для web-бронирования
-        if (!hasTg && clientName) {
+        if (!hasAuth && clientName) {
             bookingData.client_name = clientName;
             bookingData.client_phone = clientPhone;
         }
@@ -2794,7 +2899,8 @@ async function uploadReceipt(file) {
         const response = await fetch(`/api/client/subscription/${currentClientSubId}/upload-receipt`, {
             method: 'POST',
             body: formData,
-            headers: headers
+            headers: headers,
+            credentials: 'same-origin'
         });
 
         const data = await response.json();

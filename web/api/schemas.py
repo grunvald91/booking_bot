@@ -188,6 +188,37 @@ class BookingOut(BaseModel):
     created_at: Optional[datetime] = None
     can_cancel: bool = False
     can_reschedule: bool = False
+    notify_token: Optional[str] = None
+
+
+class PublicServiceItem(BaseModel):
+    name: str
+    price: Optional[int] = None
+    is_additional: bool = False
+
+
+class PublicBookingOut(BaseModel):
+    """Ответ GET /bookings/by-token/{token} — без данных клиента, только то,
+    что нужно гостю без Telegram-логина, чтобы увидеть статус своей брони."""
+    notify_token: str
+    status: str
+    business_name: str
+    business_address: Optional[str] = None
+    business_phone: Optional[str] = None
+    business_directions: Optional[str] = None
+    date: date
+    time: str
+    employee_name: Optional[str] = None
+    employee_label: str
+    services: List[PublicServiceItem]
+    total_price: int
+    prepayment_enabled: bool = False
+    prepayment_amount: int = 0
+    payment_phone: Optional[str] = None
+    payment_details: Optional[str] = None
+    require_receipt_for_prepayment: bool = False
+    cancellation_policy_text: Optional[str] = None
+    cancellation_policy_photo: Optional[str] = None
 
 
 # ---------- Admin ----------
@@ -256,6 +287,10 @@ class AnalyticsKPIs(BaseModel):
     bookings_prev: int
     avg_check_prev: int
     load_percent_prev: Optional[float] = None
+    cancellation_rate: float
+    cancelled_count: int
+    cancellation_rate_prev: float
+    cancelled_count_prev: int
 
 
 class AnalyticsTopItem(BaseModel):
@@ -270,6 +305,20 @@ class AnalyticsDailyPoint(BaseModel):
     date: date
     bookings: int
     revenue: int
+    cancelled: int
+
+
+class AnalyticsPrepaymentStats(BaseModel):
+    required_count: int
+    confirmed_count: int
+    conversion_rate: float
+    avg_confirmation_minutes: Optional[float] = None
+
+
+class AnalyticsHeatmapCell(BaseModel):
+    day_of_week: int
+    hour: int
+    count: int
 
 
 class AnalyticsOverviewOut(BaseModel):
@@ -277,6 +326,8 @@ class AnalyticsOverviewOut(BaseModel):
     top_services: List[AnalyticsTopItem]
     top_employees: List[AnalyticsTopItem]
     daily: List[AnalyticsDailyPoint]
+    prepayment: AnalyticsPrepaymentStats
+    heatmap: List[AnalyticsHeatmapCell]
 
 
 # ---------- Employee CRUD ----------

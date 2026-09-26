@@ -3873,6 +3873,17 @@ async def admin_cancel_booking(callback: CallbackQuery):
             logger = logging.getLogger(__name__)
             logger.error(f"Error notifying client about cancellation: {e}")
 
+        # Уведомляем совладельцев бизнеса (владелец, кликнувший отмену,
+        # получит уведомление и сам — приемлемо, зато сохладельцы теперь
+        # тоже узнают об отмене, чего раньше не происходило вообще)
+        try:
+            from bot.services.notifications import notify_all_owners_cancelled_booking
+            await notify_all_owners_cancelled_booking(callback.bot, booking)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error notifying co-owners about cancellation: {e}")
+
     await callback.answer("❌ Запись отменена, клиент уведомлен")
     # Перенаправляем обратно на детали записи
     await admin_booking_detail(callback)
@@ -5686,9 +5697,12 @@ async def confirm_prepayment_by_owner(callback: CallbackQuery, state: FSMContext
         if booking.business.directions:
             client_text += f"\n🚶 <b>Как добраться:</b>\n{booking.business.directions}\n"
 
+        from database.crud import get_booking_payment_summary
+        payment_summary = await get_booking_payment_summary(session, booking)
         client_text += (
-            f"\n💰 Предоплата получена: {booking.prepayment_amount}₽\n\n"
-            f"Ждём вас! 🎉"
+            f"\n💰 Предоплата получена: {payment_summary['paid_amount']}₽"
+            + (f" · Осталось при визите: {payment_summary['remaining_amount']}₽" if payment_summary['remaining_amount'] > 0 else "")
+            + f"\n\nЖдём вас! 🎉"
         )
 
         try:

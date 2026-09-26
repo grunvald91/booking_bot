@@ -2,7 +2,7 @@
 CRUD операции для работы с базой данных
 Create, Read, Update, Delete
 """
-from datetime import date, time
+from datetime import date, time, datetime
 from typing import List, Optional
 from sqlalchemy import select, and_, or_, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +53,40 @@ async def get_or_create_user(
         await session.commit()
         await session.refresh(user)
 
+    return user
+
+
+async def get_or_create_guest_user(
+    session: AsyncSession,
+    full_name: str,
+    phone: Optional[str] = None,
+) -> User:
+    """Найти существующего гостевого пользователя (telegram_id < 0) по
+    нормализованному телефону, либо создать нового с уникальным
+    отрицательным telegram_id.
+
+    Для ручных/безлоговых записей (владелец/мастер/веб-гость бронируют без
+    входа клиента в Telegram). НЕ используется для реальных
+    Telegram-пользователей — see get_or_create_user() для того случая.
+    Поиск по телефону намеренно ограничен telegram_id < 0, чтобы не задеть
+    ни реальный Telegram-аккаунт с тем же номером, ни legacy-строку с
+    telegram_id=0.
+    """
+    clean_phone = None
+    if phone:
+        clean_phone = phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+        result = await session.execute(
+            select(User).where(User.phone == clean_phone, User.telegram_id < 0).limit(1)
+        )
+        existing = result.scalars().first()
+        if existing:
+            return existing
+
+    guest_telegram_id = -int(datetime.now().timestamp() * 1_000_000)
+    user = User(telegram_id=guest_telegram_id, full_name=full_name, phone=clean_phone)
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
     return user
 
 
@@ -357,6 +391,105 @@ async def get_business_employees(session: AsyncSession, business_id: int) -> Lis
 
 # ===== BOOKING CRUD =====
 
+async def _has_conflict(
+    session: AsyncSession,
+    employee_id: Optional[int],
+    service_id: int,
+    booking_date: date,
+    booking_time: time,
+) -> bool:
+    """Есть ли у мастера пересечение по времени с существующей активной записью.
+
+    Та же логика, что была внутри `create_booking` до рефакторинга:
+    cross-midnight-safe запрос + поинтервальная проверка пересечения.
+    Ничего не создаёт и не бросает исключений — просто True/False.
+    """
+    from datetime import datetime, timedelta
+
+    if not employee_id:
+        return False
+
+    current_service = await session.execute(
+        select(Service).where(Service.id == service_id)
+    )
+    current_service = current_service.scalar_one_or_none()
+
+    if current_service and current_service.is_additional:
+        # An additional service occupies no exclusive master time of its
+        # own — the main booking of the same visit already reserves that
+        # slot. Without this, create_booking() falsely treats a visit's
+        # own additional-service booking as conflicting with that same
+        # visit's just-created main booking.
+        return False
+
+    current_duration = current_service.duration_minutes if current_service else 30
+
+    if current_duration <= 0:
+        return False
+
+    # Cross-midnight: проверяем также предыдущий и следующий день
+    prev_day = booking_date - timedelta(days=1)
+    next_day = booking_date + timedelta(days=1)
+    check_dates = [booking_date, prev_day, next_day]
+
+    conflict_check = await session.execute(
+        select(Booking)
+        .join(Service, Booking.service_id == Service.id)
+        .where(
+            and_(
+                Booking.employee_id == employee_id,
+                Booking.booking_date.in_(check_dates),
+                Booking.status.in_(['pending', 'confirmed', 'pending_prepayment', 'prepayment_sent']),
+                Service.is_additional == False,
+                Service.duration_minutes > 0
+            )
+        )
+    )
+    existing_bookings = conflict_check.scalars().all()
+
+    slot_start = datetime.combine(booking_date, booking_time)
+    slot_end = slot_start + timedelta(minutes=current_duration)
+
+    for existing in existing_bookings:
+        existing_service = await session.execute(
+            select(Service).where(Service.id == existing.service_id)
+        )
+        existing_service = existing_service.scalar_one_or_none()
+        existing_duration = existing_service.duration_minutes if existing_service else 30
+
+        booking_start = datetime.combine(existing.booking_date, existing.booking_time)
+        booking_end = booking_start + timedelta(minutes=existing_duration)
+
+        # Проверяем пересечение: НЕ (slot_end <= booking_start ИЛИ slot_start >= booking_end)
+        if not (slot_end <= booking_start or slot_start >= booking_end):
+            return True
+
+    return False
+
+
+async def check_series_conflicts(
+    session: AsyncSession,
+    employee_id: Optional[int],
+    occurrence_dates: List[date],
+    visit_slots: List,
+) -> List[date]:
+    """Read-only предпроверка конфликтов для серии повторяющихся дат.
+
+    `visit_slots` — список (service_id, время_начала) в порядке визита
+    (см. `bot.utils.recurring.build_visit_slots`). Возвращает список дат
+    из `occurrence_dates`, где хотя бы один слот визита пересекается
+    с существующей записью. Пустой список = конфликтов нет, ничего не
+    создаёт и не изменяет БД.
+    """
+    conflicting_dates = []
+    for occurrence_date in occurrence_dates:
+        for service_id, start_time in visit_slots:
+            if await _has_conflict(session, employee_id, service_id, occurrence_date, start_time):
+                conflicting_dates.append(occurrence_date)
+                break
+    return conflicting_dates
+
+
 async def create_booking(
     session: AsyncSession,
     business_id: int,
@@ -369,54 +502,9 @@ async def create_booking(
     **kwargs
 ) -> Booking:
     """Создать запись"""
-    from datetime import datetime, timedelta
-
-    # Получаем длительность текущей услуги
-    current_service = await session.execute(
-        select(Service).where(Service.id == service_id)
-    )
-    current_service = current_service.scalar_one_or_none()
-    current_duration = current_service.duration_minutes if current_service else 30
-
     # Проверка на двойное бронирование у мастера (с проверкой пересечения времени)
-    if employee_id and current_duration > 0:
-        # Cross-midnight: проверяем также предыдущий и следующий день
-        prev_day = booking_date - timedelta(days=1)
-        next_day = booking_date + timedelta(days=1)
-        check_dates = [booking_date, prev_day, next_day]
-
-        conflict_check = await session.execute(
-            select(Booking)
-            .join(Service, Booking.service_id == Service.id)
-            .where(
-                and_(
-                    Booking.employee_id == employee_id,
-                    Booking.booking_date.in_(check_dates),
-                    Booking.status.in_(['pending', 'confirmed', 'pending_prepayment', 'prepayment_sent']),
-                    Service.is_additional == False,
-                    Service.duration_minutes > 0
-                )
-            )
-        )
-        existing_bookings = conflict_check.scalars().all()
-
-        # Проверяем пересечение времени (абсолютные datetime)
-        slot_start = datetime.combine(booking_date, booking_time)
-        slot_end = slot_start + timedelta(minutes=current_duration)
-
-        for existing in existing_bookings:
-            existing_service = await session.execute(
-                select(Service).where(Service.id == existing.service_id)
-            )
-            existing_service = existing_service.scalar_one_or_none()
-            existing_duration = existing_service.duration_minutes if existing_service else 30
-
-            booking_start = datetime.combine(existing.booking_date, existing.booking_time)
-            booking_end = booking_start + timedelta(minutes=existing_duration)
-
-            # Проверяем пересечение: НЕ (slot_end <= booking_start ИЛИ slot_start >= booking_end)
-            if not (slot_end <= booking_start or slot_start >= booking_end):
-                raise ValueError(f"Время {booking_time.strftime('%H:%M')} пересекается с существующей записью")
+    if await _has_conflict(session, employee_id, service_id, booking_date, booking_time):
+        raise ValueError(f"Время {booking_time.strftime('%H:%M')} пересекается с существующей записью")
 
     # Проверка на дублирование записи одним клиентом (защита от двойного клика)
     client_duplicate_check = await session.execute(
@@ -459,6 +547,93 @@ async def create_booking(
         if "unique" in str(e).lower() or "duplicate" in str(e).lower():
             raise ValueError(f"Время {booking_time.strftime('%H:%M')} уже занято другим клиентом")
         raise
+
+
+async def get_booking_payment_summary(session: AsyncSession, booking: Booking) -> dict:
+    """Свести суммы по всему визиту (основная + доп. услуги — те же
+    client_id/business_id/booking_date/booking_time, статус не
+    cancelled/completed, паттерн из webapp/server.py:638-649) и вернуть
+    total/prepayment/paid/claimed/remaining для отображения в
+    уведомлениях. Ничего не пишет в БД — считается заново при каждом
+    вызове, чтобы не завести новый источник рассинхронизации.
+    """
+    group_result = await session.execute(
+        select(Booking)
+        .options(selectinload(Booking.service))
+        .where(
+            Booking.client_id == booking.client_id,
+            Booking.business_id == booking.business_id,
+            Booking.booking_date == booking.booking_date,
+            Booking.booking_time == booking.booking_time,
+            Booking.status.notin_(['cancelled', 'completed']),
+        )
+    )
+    group_bookings = list(group_result.scalars().all())
+
+    # The subject row itself may have just been cancelled/completed and
+    # therefore excluded by the status filter above, while its siblings
+    # (still active) are not — re-fetch it explicitly with the same
+    # eager-loading so it's always represented in its own summary,
+    # regardless of its current status.
+    if not any(b.id == booking.id for b in group_bookings):
+        subject_result = await session.execute(
+            select(Booking)
+            .options(selectinload(Booking.service))
+            .where(Booking.id == booking.id)
+        )
+        subject_row = subject_result.scalar_one_or_none()
+        if subject_row:
+            group_bookings.append(subject_row)
+
+    if not group_bookings:
+        group_bookings = [booking]
+
+    business_result = await session.execute(
+        select(Business).where(Business.id == booking.business_id)
+    )
+    business = business_result.scalar_one_or_none()
+    prepayment_percent = (business.prepayment_percent if business else None) or 100
+
+    total_price = 0
+    prepayment_amount = 0
+    this_row_status = booking.status
+    this_row_confirmed_at = None
+
+    for b in group_bookings:
+        price = b.service.price if b.service else 0
+        total_price += price or 0
+
+        if b.prepayment_amount:
+            prepayment_amount += b.prepayment_amount
+        elif price and price > 0 and (
+            b.status in ('pending_prepayment', 'prepayment_sent')
+            or b.prepayment_confirmed_at is not None
+        ):
+            # Legacy row created before this fix — back-fill an estimate
+            # only when there's a concrete signal it went through the
+            # prepayment flow (never fabricate an amount for a plain
+            # confirmed booking that never needed prepayment).
+            prepayment_amount += int(price * prepayment_percent / 100)
+
+        if b.id == booking.id:
+            this_row_status = b.status
+            this_row_confirmed_at = b.prepayment_confirmed_at
+
+    paid_amount = prepayment_amount if this_row_confirmed_at is not None else 0
+    claimed_amount = (
+        prepayment_amount
+        if this_row_status == 'prepayment_sent' and this_row_confirmed_at is None
+        else 0
+    )
+    remaining_amount = total_price - paid_amount
+
+    return {
+        "total_price": total_price,
+        "prepayment_amount": prepayment_amount,
+        "paid_amount": paid_amount,
+        "claimed_amount": claimed_amount,
+        "remaining_amount": remaining_amount,
+    }
 
 
 async def get_user_bookings(session: AsyncSession, user_id: int) -> List[Booking]:
@@ -1307,6 +1482,19 @@ async def use_subscription_service(
     booking_id: Optional[int] = None
 ) -> Optional[SubscriptionUsage]:
     """Использовать услугу из абонемента"""
+    # Защита от повторного списания при повторном вызове с тем же booking_id
+    # (например, двойной клик по кнопке подтверждения записи)
+    if booking_id is not None:
+        existing_usage_check = await session.execute(
+            select(SubscriptionUsage).where(
+                SubscriptionUsage.booking_id == booking_id
+            )
+        )
+        existing_usage = existing_usage_check.scalar_one_or_none()
+        if existing_usage:
+            # Возвращаем уже существующее списание вместо создания нового
+            return existing_usage
+
     # Проверяем доступность
     if not await check_subscription_service_available(session, client_subscription_id, service_id):
         return None
@@ -1327,6 +1515,34 @@ async def use_subscription_service(
         await update_client_subscription_status(session, client_subscription_id, "depleted")
 
     return usage
+
+
+async def release_subscription_usage(
+    session: AsyncSession,
+    usage_id: int
+) -> None:
+    """Освободить визит абонемента (например, при отмене связанной записи).
+
+    Удаляет запись об использовании; если абонемент был помечен
+    исчерпанным (`depleted`), но после удаления снова есть остаток хотя бы
+    по одной услуге — возвращает статус `active`.
+    """
+    result = await session.execute(
+        select(SubscriptionUsage).where(SubscriptionUsage.id == usage_id)
+    )
+    usage = result.scalar_one_or_none()
+    if not usage:
+        return
+
+    client_subscription_id = usage.client_subscription_id
+    await session.delete(usage)
+    await session.commit()
+
+    client_sub = await get_client_subscription_by_id(session, client_subscription_id)
+    if client_sub and client_sub.status == "depleted":
+        remaining = await get_subscription_remaining(session, client_subscription_id)
+        if any(r["remaining"] > 0 for r in remaining.values()):
+            await update_client_subscription_status(session, client_subscription_id, "active")
 
 
 async def get_client_available_services(

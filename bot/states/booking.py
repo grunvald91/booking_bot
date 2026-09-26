@@ -17,6 +17,7 @@ class BookingStates(StatesGroup):
     choosing_booking_format = State()  # Выбор формата: группа / соло
     entering_notes = State()           # Ввод комментария к записи
     entering_phone = State()         # Ввод номера телефона
+    choosing_repeat = State()        # Выбор повтора записи (2-8 недель)
     confirming = State()             # Подтверждение записи
     waiting_prepayment = State()     # Ожидание предоплаты от клиента
     uploading_receipt = State()      # Загрузка чека об оплате

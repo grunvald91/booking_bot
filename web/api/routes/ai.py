@@ -27,6 +27,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM
 
 # Import EmployeeService directly from models (not re-exported by web database)
 from database.models import EmployeeService
+from database.crud import create_booking
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -567,35 +568,67 @@ async def _exec_create_booking(db: AsyncSession, args: dict, client_id: int) -> 
     initial_status = "pending_prepayment" if need_prepayment else "confirmed"
 
     employee_id = int(args["employee_id"]) if args.get("employee_id") else None
-
-    booking = Booking(
-        business_id=biz_id,
-        client_id=client_id,
-        service_id=svc_id,
-        booking_date=book_date,
-        booking_time=book_time,
-        employee_id=employee_id,
-        notes=args.get("notes"),
-        status=initial_status,
-    )
-    db.add(booking)
-    await db.flush()
-
-    # Additional services
     additional_ids = args.get("additional_service_ids") or []
-    for add_id in additional_ids:
-        add_booking = Booking(
+
+    prepayment_amount = None
+    total_price = service.price or 0
+    if need_prepayment:
+        if additional_ids:
+            add_svc_result = await db.execute(
+                select(Service).where(Service.id.in_([int(a) for a in additional_ids]))
+            )
+            main_duration_hours = (service.duration_minutes or 60) / 60
+            for add_svc in add_svc_result.scalars().all():
+                if getattr(add_svc, 'is_hourly_price', False):
+                    total_price += int((add_svc.price or 0) * main_duration_hours)
+                else:
+                    total_price += add_svc.price or 0
+        pp_pct = business.prepayment_percent or 100
+        prepayment_amount = int(total_price * pp_pct / 100)
+
+    # Создать основную запись и записи для доп. услуг одной серией
+    # (проверка конфликтов и защита от дублей — внутри create_booking).
+    # Если конфликт возникнет на любом шаге — откатываем всю серию, а не
+    # только текущий вызов (create_booking коммитит на каждом вызове).
+    created_bookings = []
+    try:
+        booking = await create_booking(
+            db,
             business_id=biz_id,
             client_id=client_id,
-            service_id=int(add_id),
+            service_id=svc_id,
             booking_date=book_date,
             booking_time=book_time,
             employee_id=employee_id,
+            notes=args.get("notes"),
             status=initial_status,
+            notify_token=str(uuid.uuid4()),
+            prepayment_amount=prepayment_amount,
         )
-        db.add(add_booking)
+        created_bookings.append(booking)
 
-    await db.commit()
+        for add_id in additional_ids:
+            extra_booking = await create_booking(
+                db,
+                business_id=biz_id,
+                client_id=client_id,
+                service_id=int(add_id),
+                booking_date=book_date,
+                booking_time=book_time,
+                employee_id=employee_id,
+                status=initial_status,
+                notify_token=str(uuid.uuid4()),
+                prepayment_amount=prepayment_amount,
+            )
+            created_bookings.append(extra_booking)
+    except ValueError as e:
+        if created_bookings:
+            from sqlalchemy import delete as sa_delete
+            await db.execute(
+                sa_delete(Booking).where(Booking.id.in_([b.id for b in created_bookings]))
+            )
+            await db.commit()
+        return f"Ошибка: {e}"
 
     biz_name = args.get("business_name") or business.name
     svc_name = args.get("service_name") or service.name
@@ -604,16 +637,14 @@ async def _exec_create_booking(db: AsyncSession, args: dict, client_id: int) -> 
     _schedule_owner_notification(business, booking, service)
 
     if need_prepayment:
-        pp_pct = business.prepayment_percent or 100
-        pp_amount = int(service.price * pp_pct / 100)
         response = (
             f"Запись создана!\n"
             f"{biz_name}\n"
             f"{args['date']} в {args['time']}\n"
             f"{svc_name}\n"
             f"#{booking.id}\n\n"
-            f"Требуется предоплата: {pp_amount} руб."
-            + (f" ({pp_pct}% от {service.price} руб.)" if pp_pct < 100 else "")
+            f"Требуется предоплата: {prepayment_amount} руб."
+            + (f" (от {total_price} руб. за визит)" if total_price != service.price else "")
             + f"\nПеревести на номер: {business.payment_phone}"
         )
         if business.payment_details:

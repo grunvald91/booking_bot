@@ -12,6 +12,7 @@ class AdminBookingStates(StatesGroup):
     choosing_time = State()         # Выбор времени
     entering_client_name = State()  # Ввод имени клиента
     entering_client_phone = State() # Ввод телефона клиента
+    choosing_repeat = State()       # Выбор повтора записи (2-8 недель)
     confirming = State()            # Подтверждение записи
 
 
