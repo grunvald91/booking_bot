@@ -11,4 +11,5 @@ class ManualBookingStates(StatesGroup):
     entering_client_phone = State()
     choosing_date = State()
     choosing_time = State()
+    choosing_repeat = State()
     confirming = State()

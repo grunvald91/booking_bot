@@ -52,5 +52,5 @@ MLM_BOT_USERNAME = os.getenv("MLM_BOT_USERNAME", "MLMPartnerBot")
 # Booking Bot Username (для QR-кодов)
 BOT_USERNAME = os.getenv("BOT_USERNAME", "Sochiservice_bot")
 
-# OpenRouter AI Admin Key
+# Compatibility with bot.services.ai_admin, which imports this setting.
 OPENROUTER_AI_ADMIN_KEY = os.getenv("OPENROUTER_AI_ADMIN_KEY", "")

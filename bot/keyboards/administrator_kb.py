@@ -129,6 +129,27 @@ def get_bookings_list_keyboard(bookings: List[Booking]) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def get_admin_repeat_toggle_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора: повторять запись каждую неделю или нет"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Без повтора", callback_data="admin_repeat_skip")
+    builder.button(text="🔁 Повторять →", callback_data="admin_repeat_enable")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_admin_repeat_stepper_keyboard(weeks: int) -> InlineKeyboardMarkup:
+    """Клавиатура степпера числа недель повтора (2-8)"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="−", callback_data="admin_repeat_dec")
+    builder.button(text=f"{weeks} недель", callback_data="admin_repeat_noop")
+    builder.button(text="+", callback_data="admin_repeat_inc")
+    builder.button(text="✅ Готово", callback_data="admin_repeat_done")
+    builder.button(text="❌ Отмена", callback_data="admin_repeat_cancel")
+    builder.adjust(3, 1, 1)
+    return builder.as_markup()
+
+
 def get_admin_confirmation_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура подтверждения действия"""
     builder = InlineKeyboardBuilder()

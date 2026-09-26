@@ -424,6 +424,27 @@ def get_phone_request_keyboard() -> ReplyKeyboardMarkup:
     return keyboard
 
 
+def get_repeat_toggle_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора: повторять запись каждую неделю или нет"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Без повтора", callback_data="repeat_skip")
+    builder.button(text="🔁 Повторять →", callback_data="repeat_enable")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_repeat_stepper_keyboard(weeks: int) -> InlineKeyboardMarkup:
+    """Клавиатура степпера числа недель повтора (2-8)"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="−", callback_data="repeat_dec")
+    builder.button(text=f"{weeks} недель", callback_data="repeat_noop")
+    builder.button(text="+", callback_data="repeat_inc")
+    builder.button(text="✅ Готово", callback_data="repeat_done")
+    builder.button(text="❌ Отмена", callback_data="repeat_cancel")
+    builder.adjust(3, 1, 1)
+    return builder.as_markup()
+
+
 def get_confirmation_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для подтверждения записи"""
     builder = InlineKeyboardBuilder()

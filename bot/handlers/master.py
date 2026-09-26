@@ -20,12 +20,14 @@ from database.crud import (
     get_service_by_id,
     create_booking,
     get_or_create_user,
+    get_or_create_guest_user,
     get_business_bookings,
     get_master_bookings,
     update_booking_status,
     get_user_businesses
 )
 from bot.states.master import ManualBookingStates
+from bot.utils.recurring import compute_recurring_dates, build_visit_slots
 from bot.keyboards import master_kb
 from bot.keyboards.client_kb import get_main_menu_keyboard
 from bot.utils.validators import validate_phone, format_date_with_weekday, format_phone
@@ -336,17 +338,29 @@ async def date_chosen_by_master(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("master_time:"), ManualBookingStates.choosing_time)
 async def time_chosen_by_master(callback: CallbackQuery, state: FSMContext):
-    """Выбор времени мастером"""
+    """Выбор времени мастером — переход к выбору повтора записи"""
     time_str = callback.data.split(":")[1] + ":" + callback.data.split(":")[2]
     await state.update_data(booking_time=time_str)
+    await state.set_state(ManualBookingStates.choosing_repeat)
 
+    await callback.message.edit_text(
+        "Повторять эту запись каждую неделю?",
+        reply_markup=master_kb.get_master_repeat_toggle_keyboard()
+    )
+    await callback.answer()
+
+
+async def show_master_confirmation(message: Message, state: FSMContext):
+    """Показ экрана подтверждения ручной записи мастером"""
     data = await state.get_data()
 
-    # Формируем список услуг
     services_info = data.get('services_info', [])
     if services_info:
-        services_text = "\n".join([f"  • {s['name']} ({s['duration']} мин{f', {s["price"]}₽' if s['price'] else ''})"
-                                   for s in services_info])
+        services_text = "\n".join(
+            f"  • {s['name']} ({s['duration']} мин" +
+            (f", {s['price']}₽" if s['price'] else "") + ")"
+            for s in services_info
+        )
         total_duration = data.get('total_duration', 0)
         total_price = data.get('total_price', 0)
         price_text = f"💰 Общая стоимость: {total_price}₽\n" if total_price > 0 else ""
@@ -358,7 +372,9 @@ async def time_chosen_by_master(callback: CallbackQuery, state: FSMContext):
         total_price = data.get('service_price', 0)
         price_text = f"💰 Цена: {total_price}₽\n" if total_price else ""
 
-    # Показываем подтверждение
+    repeat_weeks = data.get('repeat_weeks')
+    repeat_line = f"🔁 Повторится ещё {repeat_weeks - 1} раз(а) — каждую неделю\n" if repeat_weeks and repeat_weeks > 1 else ""
+
     confirmation_text = f"""
 📋 <b>Подтверждение записи</b>
 
@@ -366,87 +382,145 @@ async def time_chosen_by_master(callback: CallbackQuery, state: FSMContext):
 💼 Услуги:
 {services_text}
 ⏱ Общая длительность: {total_duration} мин
-{price_text}👤 Клиент: {data['client_name']}
+{price_text}{repeat_line}👤 Клиент: {data['client_name']}
 📞 Телефон: {data['client_phone']}
 📅 Дата: {data['booking_date']}
-🕐 Время: {time_str}
+🕐 Время: {data['booking_time']}
 
 Подтверждаете запись?
 """
 
-    await callback.message.edit_text(
+    await message.edit_text(
         confirmation_text,
         parse_mode="HTML",
         reply_markup=master_kb.get_confirmation_keyboard_master()
     )
     await state.set_state(ManualBookingStates.confirming)
+
+
+@router.callback_query(F.data == "master_repeat_skip", ManualBookingStates.choosing_repeat)
+async def master_repeat_skip_chosen(callback: CallbackQuery, state: FSMContext):
+    """Мастер отказался от повтора"""
+    await state.update_data(repeat_weeks=None)
+    await show_master_confirmation(callback.message, state)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "master_repeat_enable", ManualBookingStates.choosing_repeat)
+async def master_repeat_enable_chosen(callback: CallbackQuery, state: FSMContext):
+    """Мастер включил повтор — показываем степпер"""
+    await state.update_data(repeat_weeks_draft=2)
+    await callback.message.edit_text(
+        "Сколько недель повторять запись?",
+        reply_markup=master_kb.get_master_repeat_stepper_keyboard(2)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.in_(["master_repeat_dec", "master_repeat_inc"]), ManualBookingStates.choosing_repeat)
+async def master_repeat_stepper_changed(callback: CallbackQuery, state: FSMContext):
+    """Изменение числа недель повтора степпером"""
+    data = await state.get_data()
+    weeks = data.get('repeat_weeks_draft', 2)
+    if callback.data == "master_repeat_dec":
+        weeks = max(2, weeks - 1)
+    else:
+        weeks = min(8, weeks + 1)
+    await state.update_data(repeat_weeks_draft=weeks)
+    await callback.message.edit_text(
+        "Сколько недель повторять запись?",
+        reply_markup=master_kb.get_master_repeat_stepper_keyboard(weeks)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "master_repeat_noop", ManualBookingStates.choosing_repeat)
+async def master_repeat_noop_pressed(callback: CallbackQuery, state: FSMContext):
+    """Нажатие на лейбл степпера — просто гасим спиннер"""
+    await callback.answer()
+
+
+@router.callback_query(F.data == "master_repeat_cancel", ManualBookingStates.choosing_repeat)
+async def master_repeat_stepper_cancelled(callback: CallbackQuery, state: FSMContext):
+    """Возврат от степпера к выбору без повтора / повторять"""
+    await callback.message.edit_text(
+        "Повторять эту запись каждую неделю?",
+        reply_markup=master_kb.get_master_repeat_toggle_keyboard()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "master_repeat_done", ManualBookingStates.choosing_repeat)
+async def master_repeat_stepper_done(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение числа недель — переходим к подтверждению записи"""
+    data = await state.get_data()
+    await state.update_data(repeat_weeks=data.get('repeat_weeks_draft', 2))
+    await show_master_confirmation(callback.message, state)
     await callback.answer()
 
 
 @router.callback_query(F.data == "confirm_manual_booking", ManualBookingStates.confirming)
 async def confirm_manual_booking(callback: CallbackQuery, state: FSMContext):
-    """Подтверждение ручной записи"""
+    """Подтверждение ручной записи (с поддержкой повтора по неделям)"""
     data = await state.get_data()
 
     # Парсим дату и время
     booking_date = datetime.strptime(data['booking_date'], "%d.%m.%Y").date()
     booking_time = datetime.strptime(data['booking_time'], "%H:%M").time()
+    repeat_weeks = data.get('repeat_weeks') or 1
+    occurrence_dates = compute_recurring_dates(booking_date, repeat_weeks)
 
     async with async_session_maker() as session:
-        # Создаем или находим пользователя по телефону
-        # Для ручной записи создаем временного пользователя с уникальным отрицательным ID
-        # Используем timestamp для гарантии уникальности
-        unique_telegram_id = -int(datetime.now().timestamp() * 1000000)  # Отрицательный ID на основе timestamp
-        user = await get_or_create_user(
+        # Создаем или находим гостевого клиента по телефону (один клиент на всю серию)
+        user = await get_or_create_guest_user(
             session,
-            telegram_id=unique_telegram_id,
-            username=None,
-            full_name=data['client_name']
+            full_name=data['client_name'],
+            phone=data.get('client_phone'),
         )
 
-        # Обновляем телефон если есть
-        from database.crud import update_user_phone
-        if data.get('client_phone'):
-            user = await update_user_phone(session, user.id, data['client_phone'])
+        # Получаем информацию о выбранных услугах
+        services_info = data.get('services_info', [])
+        if services_info:
+            visit_slots = build_visit_slots(services_info, booking_time)
+        else:
+            # Обратная совместимость - одна услуга (старый формат)
+            visit_slots = [(data['service_id'], booking_time)]
 
+        from database.crud import check_series_conflicts
+        conflicts = await check_series_conflicts(session, data['employee_id'], occurrence_dates, visit_slots)
+        if conflicts:
+            conflict_text = ", ".join(d.strftime("%d.%m") for d in conflicts)
+            await callback.message.edit_text(
+                f"❌ Не удалось создать серию: слот занят на даты: {conflict_text}.\n\n"
+                "Ничего не создано — выберите другое время или уменьшите число повторов.",
+                reply_markup=None
+            )
+            await callback.answer()
+            await state.clear()
+            return
+
+        created_bookings = []
         try:
-            # Получаем информацию о выбранных услугах
-            services_info = data.get('services_info', [])
-
-            # Если есть несколько услуг, создаем запись для каждой
-            if services_info:
-                created_bookings = []
-                current_time = booking_time
-
-                for service_info in services_info:
-                    # Создаем запись для каждой услуги
+            for occurrence_date in occurrence_dates:
+                for service_id, start_time in visit_slots:
                     booking = await create_booking(
                         session,
                         business_id=data['business_id'],
                         client_id=user.id,
-                        service_id=service_info['id'],
-                        booking_date=booking_date,
-                        booking_time=current_time,
+                        service_id=service_id,
+                        booking_date=occurrence_date,
+                        booking_time=start_time,
                         employee_id=data['employee_id']
                     )
                     created_bookings.append(booking)
-
-                    # Увеличиваем время для следующей услуги
-                    current_datetime = datetime.combine(booking_date, current_time)
-                    current_datetime += timedelta(minutes=service_info['duration'])
-                    current_time = current_datetime.time()
-            else:
-                # Обратная совместимость - одна услуга (старый формат)
-                booking = await create_booking(
-                    session,
-                    business_id=data['business_id'],
-                    client_id=user.id,
-                    service_id=data['service_id'],
-                    booking_date=booking_date,
-                    booking_time=booking_time,
-                    employee_id=data['employee_id']
-                )
         except ValueError as e:
+            if created_bookings:
+                from sqlalchemy import delete as sa_delete
+                from database.models import Booking
+                await session.execute(
+                    sa_delete(Booking).where(Booking.id.in_([b.id for b in created_bookings]))
+                )
+                await session.commit()
             await callback.message.edit_text(
                 f"❌ К сожалению, {str(e)}.\n\nПопробуйте выбрать другое время.",
                 reply_markup=None
@@ -455,10 +529,11 @@ async def confirm_manual_booking(callback: CallbackQuery, state: FSMContext):
             await state.clear()
             return
 
-        # Сохраняем ID первой записи для уведомления
-        first_booking_id = created_bookings[0].id if services_info else booking.id
+        # Сохраняем ID первой записи первого визита для уведомления
+        first_visit_bookings = created_bookings[:len(visit_slots)]
+        first_booking_id = first_visit_bookings[0].id
 
-    # Отправляем уведомление администратору
+    # Отправляем уведомление администратору (по первому визиту серии)
     try:
         from sqlalchemy.orm import selectinload
         from database.models import Booking
@@ -517,6 +592,8 @@ async def confirm_manual_booking(callback: CallbackQuery, state: FSMContext):
     else:
         services_display = f"💼 {data.get('service_name', 'Услуга')}"
 
+    repeat_line = f"\n🔁 Повторится ещё {repeat_weeks - 1} раз(а) — каждую неделю" if repeat_weeks > 1 else ""
+
     # Отправляем новое сообщение с результатом
     await callback.bot.send_message(
         chat_id=callback.from_user.id,
@@ -524,7 +601,8 @@ async def confirm_manual_booking(callback: CallbackQuery, state: FSMContext):
              f"📅 {data['booking_date']} в {data['booking_time']}\n"
              f"{services_display}\n"
              f"👤 Клиент: {data['client_name']}\n"
-             f"📞 {data['client_phone']}\n\n"
+             f"📞 {data['client_phone']}"
+             f"{repeat_line}\n\n"
              f"👨‍💼 Вы в режиме мастера",
         parse_mode="HTML",
         reply_markup=master_kb.get_master_menu_keyboard(show_owner_button=show_admin)
