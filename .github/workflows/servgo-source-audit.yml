@@ -27,7 +27,7 @@ jobs:
           tracked=[p for p in subprocess.check_output(['git','ls-files','-z']).decode().split('\0') if p]
           def allowed(p):
               segments=p.lower().split('/')
-              return not any(x in segments for x in ('.git','.github','venv','node_modules','dist','__pycache__','.env')) and not any(x in p.lower() for x in ('password','credential','private_key','.pem','.sqlite','.db','.log'))
+              return p!='.env.example' and not any(x in segments for x in ('.git','.github','venv','node_modules','dist','__pycache__','.env')) and not any(x in p.lower() for x in ('password','credential','private_key','.pem','.sqlite','.db','.log'))
           tracked=[p for p in tracked if allowed(p)]
           class Pinned(paramiko.MissingHostKeyPolicy):
               def missing_host_key(self, client, hostname, key):
@@ -60,16 +60,33 @@ jobs:
                       missing.append(p);continue
                   if hashlib.sha256(data).digest()==hashlib.sha256(pathlib.Path(p).read_bytes()).digest():same+=1
                   else:changed[p]=data
+              extras={}
+              source_roots=('bot','database','web/api','webapp','scripts','migrations')
+              source_extensions={'.py','.js','.ts','.tsx','.html','.css','.yaml','.yml','.sql'}
+              tracked_set=set(tracked)
+              def scan(directory):
+                  try:entries=sftp.listdir_attr(root+directory)
+                  except FileNotFoundError:return
+                  for entry in entries:
+                      path=directory+'/'+entry.filename
+                      if not allowed(path) or entry.filename.startswith('.') or entry.filename.endswith(('.bak','.old','.orig')):continue
+                      if stat.S_ISDIR(entry.st_mode):scan(path)
+                      elif (stat.S_ISREG(entry.st_mode) and path not in tracked_set and
+                            pathlib.Path(path).suffix in source_extensions and entry.st_size<=2_000_000):
+                          with sftp.open(root+path,'rb') as f:extras[path]=f.read()
+              for directory in source_roots:scan(directory)
               manifest={'tracked_checked':len(tracked),'matching':same,'missing_on_server':missing,
-                        'too_large':too_large,'changed':{p:{'server_sha256':hashlib.sha256(data).hexdigest(),
+                        'too_large':too_large,'extra_server_source':list(extras),
+                        'changed':{p:{'server_sha256':hashlib.sha256(data).hexdigest(),
                                                                'repo_sha256':hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest(),
                                                                'size':len(data)} for p,data in changed.items()}}
               print('checked=%d matching=%d changed=%d missing=%d oversized=%d' %
                     (len(tracked),same,len(changed),len(missing),len(too_large)))
               print('Changed paths:',*changed,sep='\n  ')
               print('Missing tracked paths:',*missing,sep='\n  ')
+              print('Additional server source:',*extras,sep='\n  ')
               with zipfile.ZipFile('source-changes.zip','w',compression=zipfile.ZIP_DEFLATED) as archive:
-                  for p,data in changed.items():archive.writestr(p,data)
+                  for p,data in {**changed,**extras}.items():archive.writestr(p,data)
               raw=pathlib.Path('source-changes.zip').read_bytes()
               ephemeral=x25519.X25519PrivateKey.generate()
               salt=os.urandom(32);nonce=os.urandom(12)
