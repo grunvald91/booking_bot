@@ -26,6 +26,13 @@ def demo_total(vessel_name: str) -> int:
     return VESSEL_RATES[vessel_name] * DEMO_HOURS
 
 
+def demo_description(vessel_name: str, original: str) -> str:
+    description = original.split(' Опубликовано от')[0]
+    description = description.split(' Демо-цена за 5 часов:')[0]
+    return (description + f' Демо-цена за 5 часов: {demo_total(vessel_name):,} ₽. '
+            'Окончательную цену подтверждает владелец.')
+
+
 async def configure(apply: bool) -> None:
     from sqlalchemy import select, func
     from database.database import async_session_maker
@@ -103,11 +110,7 @@ async def configure(apply: bool) -> None:
             vessel.booking_interval_minutes = 60
             vessel.min_booking_minutes = DEMO_HOURS * 60
             vessel.solo_price_per_hour = None  # Avoid a competing pricing mode in the existing UI.
-            description = (vessel.description or '').split(' Демо-цена за 5 часов:')[0]
-            vessel.description = (
-                description + f' Демо-цена за 5 часов: {demo_total(name):,} ₽. '
-                'Окончательную цену подтверждает владелец.'
-            )
+            vessel.description = demo_description(name, vessel.description or '')
             rule = existing_rules[vessel.id]
             if rule is None:
                 rule = VenueTimePricing(employee_id=vessel.id)
