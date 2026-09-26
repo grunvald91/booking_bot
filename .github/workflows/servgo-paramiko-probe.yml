@@ -35,8 +35,13 @@ jobs:
 
           logging.getLogger('paramiko').setLevel(logging.CRITICAL)
           host = '155.212.162.47'
-          # Historical ServGo deployment workflow uses password auth and did not
-          # pin a host key. Do not execute mutations in this discovery probe.
+          expected_fingerprint = 'uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class PinnedHostKey(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self, client, hostname, key):
+                  actual = base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  if actual != expected_fingerprint:
+                      raise paramiko.SSHException('Server host key fingerprint mismatch')
+                  client.get_host_keys().add(hostname, key.get_name(), key)
           command = (
               'printf "project="; '
               'test -d /opt/booking_bot && echo present || echo absent; '
@@ -48,7 +53,7 @@ jobs:
           )
           for attempt in range(1, 4):
               client = paramiko.SSHClient()
-              client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+              client.set_missing_host_key_policy(PinnedHostKey())
               try:
                   client.connect(
                       host, port=22, username='root',
@@ -63,6 +68,28 @@ jobs:
                   output = stdout.read().decode('utf-8', 'replace')
                   status = stdout.channel.recv_exit_status()
                   print(output, flush=True)
+                  inventory = '''cd /opt/booking_bot && ./venv/bin/python - <<'REMOTE_PY'
+          import asyncio
+          from sqlalchemy import text
+          from database.database import async_session_maker
+          async def run():
+              async with async_session_maker() as session:
+                  for table in ('businesses', 'employees', 'services', 'bookings', 'users'):
+                      rows = (await session.execute(text('select column_name from information_schema.columns where table_name=:table order by ordinal_position'), {'table': table})).scalars().all()
+                      print('columns_'+table+'='+','.join(rows))
+                  rows = (await session.execute(text("select id,name,business_type,owner_id from businesses where name ilike '%100boats%' order by id"))).all()
+                  print('existing_demo_businesses='+repr(rows))
+                  rows = (await session.execute(text('select id, username from users where is_admin=true order by id limit 5'))).all()
+                  print('admin_user_candidates='+repr(rows))
+          asyncio.run(run())
+          REMOTE_PY
+          printf 'frontend_dist='; test -d /opt/booking_bot/web/frontend/dist && echo present || echo absent
+          '''
+                  _, inv_out, inv_err = client.exec_command(inventory, timeout=25)
+                  print(inv_out.read().decode('utf-8', 'replace'), flush=True)
+                  if inv_out.channel.recv_exit_status() != 0:
+                      print('inventory failed; stderr suffix='+inv_err.read().decode('utf-8', 'replace')[-400:], flush=True)
+                      raise SystemExit(1)
                   if status:
                       print(f'read-only probe failed with exit={status}', flush=True)
                       raise SystemExit(status)
