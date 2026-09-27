@@ -1,0 +1,78 @@
+name: ServGo PR CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+        type: string
+      expected_sha:
+        description: Exact PR head commit to validate
+        required: true
+        type: string
+      base_sha:
+        description: PR base commit used for diff validation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: servgo-pr-ci-${{ inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Syntax and focused tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact PR commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 0
+
+      - name: Verify dispatched commit
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo "::error::Checked out $ACTUAL_SHA, expected $EXPECTED_SHA."
+            exit 1
+          fi
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git diff --check "$BASE_SHA...$EXPECTED_SHA"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install test runner
+        run: python -m pip install --disable-pip-version-check pytest
+
+      - name: Compile Python source
+        run: |
+          python -m compileall -q \
+            bot \
+            database \
+            web \
+            scripts \
+            create_deploy_archive.py
+
+      - name: Run deterministic regression tests
+        run: |
+          pytest -q \
+            tests/test_rental_logic.py \
+            tests/test_create_deploy_archive.py \
+            test_booking_utils.py \
+            test_schedule_business_guard.py
