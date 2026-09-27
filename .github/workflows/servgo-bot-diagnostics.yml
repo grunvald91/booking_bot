@@ -34,6 +34,20 @@ jobs:
               rc,out,err=command(['systemctl','show',unit,'-p','ActiveState','-p','SubState','-p','NRestarts','-p','ExecMainStatus','-p','ExecMainCode','-p','StateChangeTimestamp','-p','ExecMainStartTimestamp'])
               print('SERVICE',unit,'exit',rc)
               print(out.strip())
+          for family in ('-4','-6'):
+              for route in ('direct','environment'):
+                  args=['curl',family,'-sS','--connect-timeout','4','--max-time','8','-o','/dev/null','-w','http=%{http_code};remote_ip=%{remote_ip};time=%{time_total}']
+                  if route=='direct':args+=['--noproxy','*']
+                  rc,out,err=command(args+['https://api.telegram.org/'])
+                  print('TELEGRAM_REACHABILITY',family,route,'exit',rc,out.strip(),'error_type', ('connection_reset' if 'reset' in err.lower() else 'timeout' if 'timed out' in err.lower() else 'other' if err else 'none'))
+          rc,out,err=command(['systemctl','cat','booking-bot.service'])
+          for line in out.splitlines():
+              if line.startswith('EnvironmentFile='):
+                  print('BOT_ENV_FILE',line.split('=',1)[1].strip())
+              if line.startswith('ExecStart='):
+                  print('BOT_EXEC_START_CONFIGURED=yes')
+          rc,out,err=command(['ss','-lntp'])
+          print('POSSIBLE_LOCAL_PROXY_LISTENERS',','.join(line.split()[3] for line in out.splitlines() if line.split() and any(':'+str(port) in line.split()[3] for port in (1080,1081,2080,3128,7890,8080))))
           rc,out,err=command(['journalctl','-u','booking-bot.service','--since=-4h','-n','400','--no-pager','-o','short-iso'])
           print('BOT_JOURNAL_EXIT',rc,'LINES',len(out.splitlines()))
           pattern=re.compile(r'traceback|error|exception|failed|polling|unauthorized|conflict|restart|start request|stopp|terminated|api\.telegram|webhook|disconnect|connection|invalid|login|unhandled',re.I)
