@@ -38,14 +38,14 @@ print('polling_started_events='+str(sum('Run polling for bot' in s for s in mess
 print('network_error_events='+str(sum('TelegramNetworkError' in s or 'ClientConnectorError' in s for s in messages)))
 for n,msg in enumerate(messages):
     if 'Traceback (most recent call last):' not in msg: continue
-    block='\\n'.join(messages[n:min(n+16,len(messages))]).splitlines()
+    block='\\n'.join(messages[n:min(n+60,len(messages))]).splitlines()
     frames=[]; classes=[]
     for line in block:
         match=re.search(r'File "[^"\\n]*/([^/"\\n]+\\.py)", line ([0-9]+)',line)
         if match: frames.append(match.group(1)+':'+match.group(2))
         typ=re.match(r'^([A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception)):',line.strip())
         if typ: classes.append(typ.group(1))
-    print('safe_traceback='+str(n)+' frames='+','.join(frames[:12])+' types='+','.join(classes[:5]))
+    print('safe_traceback='+str(n)+' frames='+','.join(frames[:30])+' types='+','.join(classes[:8]))
 '''
 
 
