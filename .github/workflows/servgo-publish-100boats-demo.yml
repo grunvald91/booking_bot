@@ -1,122 +1,77 @@
-name: Publish isolated 100boats ServGo demo
-
+name: Publish 100boats demo link to working ServGo card
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 7
     env:
       SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - name: Install Paramiko
         run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
-      - name: Upload static demo and seed inactive business
+      - name: Back up and publish only the static redirect
         shell: bash
         run: |
           python - <<'PY'
-          import base64
-          import hashlib
-          import os
-          import pathlib
-          import time
+          import base64, hashlib, os, pathlib, time
           import paramiko
-
+          SOURCE='web/frontend/public/demo-100boats.html'
+          DEST='/opt/booking_bot/web/frontend/dist/demo-100boats.html'
           EXPECTED='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
-          class PinnedHostKey(paramiko.MissingHostKeyPolicy):
-              def missing_host_key(self, client, hostname, key):
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,client,hostname,key):
                   actual=base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
-                  if actual != EXPECTED:
-                      raise paramiko.SSHException('Server host key mismatch')
+                  if actual!=EXPECTED:raise paramiko.SSHException('Host key mismatch')
                   client.get_host_keys().add(hostname,key.get_name(),key)
-
-          client=None
+          data=pathlib.Path(SOURCE).read_bytes()
+          if b'url=/business/11' not in data or b"location.replace('/business/11')" not in data:
+              raise RuntimeError('Only the reviewed business-card redirect can be published')
+          if not os.environ.get('SERVER_PASSWORD'):raise RuntimeError('SSH secret unavailable')
+          ssh=None
           for attempt in range(3):
-              candidate=paramiko.SSHClient()
-              candidate.set_missing_host_key_policy(PinnedHostKey())
+              conn=paramiko.SSHClient();conn.set_missing_host_key_policy(Pinned())
               try:
-                  candidate.connect('155.212.162.47', username='root', port=22,
-                                    password=os.environ['SERVER_PASSWORD'],
-                                    look_for_keys=False,allow_agent=False,
-                                    timeout=12,banner_timeout=25,auth_timeout=15)
-                  client=candidate
-                  break
-              except (paramiko.SSHException, OSError, EOFError) as exc:
-                  print(f'connect attempt={attempt+1} error={type(exc).__name__}',flush=True)
-                  candidate.close()
+                  conn.connect('155.212.162.47',username='root',port=22,
+                               password=os.environ['SERVER_PASSWORD'],look_for_keys=False,allow_agent=False,
+                               timeout=12,banner_timeout=25,auth_timeout=15)
+                  ssh=conn;break
+              except (paramiko.SSHException,OSError,EOFError):
+                  conn.close()
                   if attempt==2:raise
                   time.sleep(3)
           try:
-              files=[
-                  ('web/frontend/public/demo-100boats.html',
-                   '/opt/booking_bot/web/frontend/dist/demo-100boats.html'),
-                  ('scripts/seed_100boats_demo.py',
-                   '/opt/booking_bot/scripts/seed_100boats_demo.py'),
-              ]
-              sftp=client.open_sftp()
-              for local,remote in files:
-                  data=pathlib.Path(local).read_bytes()
-                  # Existing files are never overwritten without a server-side backup.
-                  try:
-                      sftp.stat(remote)
-                  except FileNotFoundError:
-                      pass
-                  else:
-                      backup=f'{remote}.bak.{int(time.time())}'
-                      sftp.rename(remote,backup)
-                      print(f'backup={backup}',flush=True)
-                  sftp.put(local,remote)
-                  with sftp.open(remote,'rb') as saved:
-                      actual=hashlib.sha256(saved.read()).hexdigest()
-                  expected=hashlib.sha256(data).hexdigest()
-                  if actual!=expected:raise RuntimeError(f'upload hash mismatch for {remote}')
-                  print(f'uploaded={remote} sha256={actual}',flush=True)
+              sftp=ssh.open_sftp()
+              temp=DEST+'.tmp.'+str(int(time.time()))
+              backup=DEST+'.bak.'+str(int(time.time()))
+              sftp.put(SOURCE,temp)
+              with sftp.open(temp,'rb') as f: uploaded=f.read()
+              if hashlib.sha256(uploaded).digest()!=hashlib.sha256(data).digest():
+                  sftp.remove(temp)
+                  raise RuntimeError('Uploaded static file checksum mismatch')
+              try:
+                  sftp.stat(DEST)
+              except FileNotFoundError:
+                  backup=None
+              if backup:
+                  sftp.rename(DEST,backup)
+                  print('backed_up_previous_static_page=yes')
+              try:
+                  sftp.rename(temp,DEST)
+              except Exception:
+                  if backup:sftp.rename(backup,DEST)
+                  raise
+              print('published_static_redirect=yes; sha256='+hashlib.sha256(data).hexdigest())
               sftp.close()
-              commands=[
-                  'cd /opt/booking_bot && ./venv/bin/python -m py_compile scripts/seed_100boats_demo.py',
-                  'cd /opt/booking_bot && ./venv/bin/python -m scripts.seed_100boats_demo',
-                  '''cd /opt/booking_bot && ./venv/bin/python - <<'VERIFY_PY'
-          import asyncio
-          from sqlalchemy import text
-          from database.database import async_session_maker
-          async def run():
-              async with async_session_maker() as s:
-                  q="select id,owner_id,is_active,prepayment_enabled,prepayment_percent,working_hours_start,working_hours_end from businesses where name='100boats — демонстрация ServGo'"
-                  b=(await s.execute(text(q))).one()
-                  bid,owner,active,prepay,percent,start,end=b
-                  assert owner==1 and active is False and prepay is False and percent is None and start is None and end is None, 'business safety settings mismatch'
-                  vessel_names=(await s.execute(text('select name from employees where business_id=:bid order by name'),{'bid':bid})).scalars().all()
-                  expected={'Princess 45','Fairline Squadron 58','Azimut 39','Sunseeker 72','Princess 56','Fazerint 42','Lavezzi 40','Dufour Atoll 43','Bavaria 380 Sport'}
-                  assert set(vessel_names)==expected and len(vessel_names)==9, 'vessel set mismatch'
-                  services=(await s.execute(text('select name,price,is_additional from services where business_id=:bid'),{'bid':bid})).all()
-                  assert len(services)==5, 'service count mismatch'
-                  actual={name:(price,additional) for name,price,additional in services}
-                  assert actual['Аренда яхты / катера']==(None,False), 'generic booking price must remain unset'
-                  assert actual['Фотосессия / видеоролик на яхте']==(15000,True), 'photo price mismatch'
-                  assert actual['Премиальный трансфер из отеля']==(5000,True), 'transfer price mismatch'
-                  assert actual['Спорткар / кабриолет']==(None,True), 'car requires quote'
-                  assert actual['Вертолётная прогулка / трансфер']==(None,True), 'helicopter requires quote'
-                  bookings=(await s.execute(text('select count(*) from bookings where business_id=:bid'),{'bid':bid})).scalar_one()
-                  assert bookings==0, 'unexpected real bookings'
-                  print(f'verified_business_id={bid}; owner_id={owner}; inactive=true; vessels={len(vessel_names)}; services={len(services)}; bookings={bookings}')
-          asyncio.run(run())
-          VERIFY_PY''',
-                  '''code=$(curl -kfsS --max-time 12 --resolve servgo.ru:443:127.0.0.1 -o /dev/null -w '%{http_code}' https://servgo.ru/demo-100boats.html) && [ "$code" = "200" ] && echo "static_local_https=$code"''',
-              ]
-              for command in commands:
-                  _,out,err=client.exec_command(command,timeout=30)
-                  result=out.read().decode('utf-8','replace')
-                  error=err.read().decode('utf-8','replace')
-                  code=out.channel.recv_exit_status()
-                  print(result,flush=True)
-                  if code:
-                      print(f'command failed exit={code}: {error[-800:]}',flush=True)
-                      raise SystemExit(code)
+              command="curl -kfsS --max-time 15 --resolve servgo.ru:443:127.0.0.1 https://servgo.ru/demo-100boats.html"
+              _,out,err=ssh.exec_command(command,timeout=20)
+              body=out.read();status=out.channel.recv_exit_status()
+              if status or b'url=/business/11' not in body:
+                  raise RuntimeError('Static HTTPS verification failed')
+              print('local_https_redirect_verified=yes')
           finally:
-              client.close()
+              ssh.close()
           PY
