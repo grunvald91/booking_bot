@@ -2,6 +2,7 @@
 Обработчики для админ-панели
 Управление бизнесами, услугами, сотрудниками и записями
 """
+import asyncio
 import os
 import hashlib
 import logging
@@ -45,6 +46,36 @@ from bot.states import BusinessCreationStates, ServiceCreationStates, EmployeeCr
 from bot.keyboards import admin_kb, client_kb
 from bot.utils.validators import format_date_with_weekday, format_phone
 from bot.utils.message_utils import safe_edit_or_send
+
+_ROOM_PHOTO_ALBUM_SETTLE_SECONDS = 1.5
+_room_photo_album_pending = {}
+
+
+async def _send_room_photo_album_summary(key):
+    """Одно подтверждение после того, как Telegram закончил присылать альбом."""
+    try:
+        await asyncio.sleep(_ROOM_PHOTO_ALBUM_SETTLE_SECONDS)
+        batch = _room_photo_album_pending[key]
+        await batch["message"].answer(
+            f"✅ Добавлено {batch['count']} фото (всего: {batch['total']}).\n\n"
+            "Отправьте ещё или нажмите Готово.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Готово", callback_data=f"emp_photos_done:{key[3]}", style="success")]
+            ]),
+        )
+    finally:
+        batch = _room_photo_album_pending.get(key)
+        if batch and batch["task"] is asyncio.current_task():
+            _room_photo_album_pending.pop(key, None)
+
+
+def _cancel_room_photo_album_summaries(callback):
+    employee_id = int(callback.data.split(":")[1])
+    for key in list(_room_photo_album_pending):
+        if key[0] == callback.message.chat.id and key[1] == callback.from_user.id and key[3] == employee_id:
+            batch = _room_photo_album_pending.pop(key)
+            batch["task"].cancel()
+
 
 SUPER_ADMIN_ID = 437862772
 
@@ -6601,9 +6632,10 @@ async def emp_add_photo_receive(message: Message, state: FSMContext):
     # Берём фото максимального размера
     file_id = message.photo[-1].file_id
 
-    from database.crud import get_employee_by_id
+    from database import Employee
     async with async_session_maker() as session:
-        employee = await get_employee_by_id(session, employee_id)
+        result = await session.execute(select(Employee).where(Employee.id == employee_id).with_for_update())
+        employee = result.scalar_one_or_none()
         user = await get_user_by_telegram_id(session, message.from_user.id)
         if not employee or not user or not await is_business_owner(session, employee.business_id, user.id):
             await state.clear()
@@ -6619,9 +6651,24 @@ async def emp_add_photo_receive(message: Message, state: FSMContext):
         employee.photos = _pjson.dumps(photos)
         await session.commit()
 
-    # Кешируем фото для webapp
-    await _save_photo_to_cache(message.bot, file_id)
+    # Учитываем элемент альбома сразу после commit: сетевой web-кеш может задержать
+    # отдельные обработчики и не должен разбивать один альбом на два уведомления.
+    group_id = getattr(message, "media_group_id", None)
+    if group_id:
+        key = (message.chat.id, message.from_user.id, group_id, employee_id)
+        batch = _room_photo_album_pending.setdefault(key, {"count": 0})
+        batch["count"] += 1
+        batch["total"] = len(photos)
+        batch["message"] = message
+        previous = batch.get("task")
+        if previous and not previous.done():
+            previous.cancel()
+        batch["task"] = asyncio.create_task(_send_room_photo_album_summary(key))
+        await _save_photo_to_cache(message.bot, file_id)
+        return
 
+    # Кешируем одиночное фото для webapp.
+    await _save_photo_to_cache(message.bot, file_id)
     await message.answer(
         f"✅ Фото добавлено (всего: {len(photos)})\n\nОтправьте ещё или нажмите Готово.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -6633,6 +6680,7 @@ async def emp_add_photo_receive(message: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("emp_photos_done:"))
 async def emp_photos_done(callback: CallbackQuery, state: FSMContext):
     """Завершение добавления фото"""
+    _cancel_room_photo_album_summaries(callback)
     await state.clear()
     await edit_employee_menu(callback)
 
@@ -6640,6 +6688,7 @@ async def emp_photos_done(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("emp_photos_back:"))
 async def emp_photos_back(callback: CallbackQuery, state: FSMContext):
     """Вернуться к помещению и перестать принимать фотографии."""
+    _cancel_room_photo_album_summaries(callback)
     await state.clear()
     await edit_employee_menu(callback)
 
