@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timedelta
 import httpx
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from aiogram.types import Message, CallbackQuery, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -6529,6 +6529,10 @@ async def edit_emp_photos_menu(callback: CallbackQuery, state: FSMContext):
     from database.crud import get_employee_by_id
     async with async_session_maker() as session:
         employee = await get_employee_by_id(session, employee_id)
+        user = await get_user_by_telegram_id(session, callback.from_user.id)
+        if not employee or not user or not await is_business_owner(session, employee.business_id, user.id):
+            await callback.answer("Нет доступа к этому помещению", show_alert=True)
+            return
 
     photos = []
     if employee.photos:
@@ -6543,15 +6547,18 @@ async def edit_emp_photos_menu(callback: CallbackQuery, state: FSMContext):
     if photos:
         builder.button(text="👁 Посмотреть все фото", callback_data=f"emp_view_photos:{employee_id}")
         builder.button(text="🗑 Удалить все фото", callback_data=f"emp_clear_photos:{employee_id}", style="danger")
-    builder.button(text="◀️ Назад", callback_data=f"edit_employee:{employee_id}")
+    builder.button(text="◀️ Назад", callback_data=f"emp_photos_back:{employee_id}")
     builder.adjust(1)
 
     await callback.message.edit_text(
         f"📷 <b>Фото зала: {employee.name}</b>\n\n"
-        f"Загружено фото: {len(photos)}",
+        f"Загружено фото: {len(photos)}\n\n"
+        "Отправьте фото прямо в чат или нажмите «➕ Добавить фото».",
         parse_mode="HTML",
         reply_markup=builder.as_markup()
     )
+    await state.update_data(editing_employee_id=employee_id)
+    await state.set_state(EmployeeEditStates.adding_photo)
     await callback.answer()
 
 
@@ -6559,8 +6566,13 @@ async def edit_emp_photos_menu(callback: CallbackQuery, state: FSMContext):
 async def emp_add_photo_start(callback: CallbackQuery, state: FSMContext):
     """Начало добавления фото"""
     employee_id = int(callback.data.split(":")[1])
-    await state.update_data(editing_employee_id=employee_id)
-    await state.set_state(EmployeeEditStates.adding_photo)
+    from database.crud import get_employee_by_id
+    async with async_session_maker() as session:
+        employee = await get_employee_by_id(session, employee_id)
+        user = await get_user_by_telegram_id(session, callback.from_user.id)
+        if not employee or not user or not await is_business_owner(session, employee.business_id, user.id):
+            await callback.answer("Нет доступа к этому помещению", show_alert=True)
+            return
     await callback.message.edit_text(
         "📷 Отправьте <b>фото</b> зала.\n\n"
         "Можно отправить несколько фото сразу.\n"
@@ -6570,6 +6582,8 @@ async def emp_add_photo_start(callback: CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="✅ Готово", callback_data=f"emp_photos_done:{employee_id}", style="success")]
         ])
     )
+    await state.update_data(editing_employee_id=employee_id)
+    await state.set_state(EmployeeEditStates.adding_photo)
     await callback.answer()
 
 
@@ -6577,7 +6591,11 @@ async def emp_add_photo_start(callback: CallbackQuery, state: FSMContext):
 async def emp_add_photo_receive(message: Message, state: FSMContext):
     """Получение фото зала"""
     data = await state.get_data()
-    employee_id = data['editing_employee_id']
+    employee_id = data.get('editing_employee_id')
+    if not employee_id:
+        await state.clear()
+        await message.answer("Выберите помещение заново перед загрузкой фото.")
+        return
     import json as _pjson
 
     # Берём фото максимального размера
@@ -6586,6 +6604,11 @@ async def emp_add_photo_receive(message: Message, state: FSMContext):
     from database.crud import get_employee_by_id
     async with async_session_maker() as session:
         employee = await get_employee_by_id(session, employee_id)
+        user = await get_user_by_telegram_id(session, message.from_user.id)
+        if not employee or not user or not await is_business_owner(session, employee.business_id, user.id):
+            await state.clear()
+            await message.answer("Нет доступа к этому помещению. Выберите его заново.")
+            return
         photos = []
         if employee.photos:
             try:
@@ -6610,10 +6633,15 @@ async def emp_add_photo_receive(message: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("emp_photos_done:"))
 async def emp_photos_done(callback: CallbackQuery, state: FSMContext):
     """Завершение добавления фото"""
-    employee_id = int(callback.data.split(":")[1])
     await state.clear()
-    fake_cb = type('obj', (object,), {'data': f'edit_emp_photos:{employee_id}', 'message': callback.message, 'from_user': callback.from_user, 'answer': lambda *a, **kw: None})()
-    await edit_emp_photos_menu(fake_cb, state)
+    await edit_employee_menu(callback)
+
+
+@router.callback_query(F.data.startswith("emp_photos_back:"))
+async def emp_photos_back(callback: CallbackQuery, state: FSMContext):
+    """Вернуться к помещению и перестать принимать фотографии."""
+    await state.clear()
+    await edit_employee_menu(callback)
 
 
 @router.callback_query(F.data.startswith("emp_view_photos:"))
