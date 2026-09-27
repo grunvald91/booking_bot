@@ -1,6 +1,7 @@
 # Telegram Bot
 aiogram>=3.25.0
 aiohttp>=3.9.0
+aiohttp-socks~=0.10.1
 
 # Database
 SQLAlchemy>=2.0.25
