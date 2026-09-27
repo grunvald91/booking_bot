@@ -26,7 +26,18 @@ jobs:
                   client.get_host_keys().add(hostname,key.get_name(),key)
           if not os.environ.get('SERVER_PASSWORD'):raise RuntimeError('Missing SSH secret')
           source=r'''
-          import re,subprocess
+          import re,subprocess,socket,pathlib
+          ip='89.125.90.101'
+          try:
+              with socket.create_connection((ip,22),timeout=6) as sock:
+                  sock.settimeout(5)
+                  banner=sock.recv(128).decode('ascii','replace').splitlines()[0]
+              print('SSH_89_PORT_22', 'ssh_banner' if banner.startswith('SSH-2.0-') else 'unexpected_banner', 'server',banner[:70])
+          except (OSError,IndexError) as exc:
+              print('SSH_89_PORT_22',type(exc).__name__)
+          ssh_dir=pathlib.Path('/root/.ssh')
+          print('SSH_89_EXISTING_KNOWN_HOST', bool(ssh_dir.joinpath('known_hosts').exists() and ip in ssh_dir.joinpath('known_hosts').read_text(errors='replace')))
+          print('SSH_LOCAL_IDENTITY_PRESENT',any(ssh_dir.joinpath(name).is_file() for name in ('id_ed25519','id_rsa','id_ecdsa')))
           def command(args):
               p=subprocess.run(args,capture_output=True,text=True,timeout=15)
               return p.returncode,p.stdout,p.stderr
