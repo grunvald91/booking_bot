@@ -17,7 +17,7 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
-          import base64, hashlib, logging, os, socket, time
+          import base64, hashlib, logging, os, shlex, socket, time
           import paramiko
           logging.getLogger('paramiko').setLevel(logging.CRITICAL)
           IP='89.125.90.101'
@@ -47,6 +47,11 @@ jobs:
               if out.channel.recv_exit_status()!=0 or len(scan)!=1 or len(scan[0].split())!=3 or scan[0].split()[1]!='ssh-ed25519':
                   raise RuntimeError('ServGo-to-relay SSH host-key probe failed')
               servgo_key=base64.b64decode(scan[0].split()[2],validate=True)
+              source_probe="import importlib.util,subprocess,pathlib; p=subprocess.run(['curl','-4','-sS','--max-time','7','https://api.ipify.org'],capture_output=True,text=True,timeout=9); print('servgo_egress_ip='+p.stdout.strip() if p.returncode==0 else 'servgo_egress_ip=unavailable'); print('aiohttp_socks_present='+str(importlib.util.find_spec('aiohttp_socks') is not None)); print('dedicated_ssh_key_present='+str(pathlib.Path('/root/.ssh/servgo_89_ed25519').is_file()))"
+              _,probe_out,probe_err=servgo.exec_command('/opt/booking_bot/venv/bin/python -c '+shlex.quote(source_probe),timeout=15)
+              source_result=probe_out.read().decode('utf-8','replace')
+              if probe_out.channel.recv_exit_status():raise RuntimeError('ServGo route prerequisites unavailable')
+              print(source_result)
           finally:servgo.close()
           sock=socket.create_connection((IP,22),timeout=8)
           transport=paramiko.Transport(sock)
@@ -75,5 +80,10 @@ jobs:
               if out.channel.recv_exit_status():raise RuntimeError('Relay read-only check failed')
               print('relay_authenticated=yes')
               print(body)
+              relay_probe="import subprocess,pathlib; p=subprocess.run(['/usr/sbin/sshd','-T','-C','user=root,host=89.125.90.101,addr=155.212.162.47'],capture_output=True,text=True,timeout=7); print('sshd_check_exit='+str(p.returncode)); print('sshd_settings='+','.join(x for x in p.stdout.splitlines() if x.split(' ',1)[0] in ('permitrootlogin','allowtcpforwarding','pubkeyauthentication','authorizedkeysfile'))); path=pathlib.Path('/root/.ssh/authorized_keys'); print('authorized_keys_present='+str(path.is_file()))"
+              _,check_out,check_err=client.exec_command('python3 -c '+shlex.quote(relay_probe),timeout=12)
+              check_body=check_out.read().decode('utf-8','replace')
+              if check_out.channel.recv_exit_status():raise RuntimeError('Relay SSH setting inspection failed')
+              print(check_body)
           finally:client.close()
           PY
