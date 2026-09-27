@@ -76,7 +76,7 @@ async def start_booking(message: Message, state: FSMContext):
     show_admin, show_master = await get_user_roles(message.from_user.id)
 
     # Показываем Reply клавиатуру с кнопками переключения режимов
-    reply_keyboard = client_kb.get_mode_switch_keyboard(show_admin_button=show_admin, show_master_button=show_master)
+    reply_keyboard = client_kb.get_mode_switch_keyboard(show_owner_button=show_admin, show_employee_button=show_master)
 
     # Отправляем сообщение с inline клавиатурой для выбора и reply клавиатурой для переключения режимов
     await message.answer(
@@ -845,7 +845,7 @@ async def show_my_bookings(message: Message):
     show_admin, show_master = await get_user_roles(message.from_user.id)
 
     # Показываем Reply клавиатуру с кнопками переключения режимов
-    reply_keyboard = client_kb.get_mode_switch_keyboard(show_admin_button=show_admin, show_master_button=show_master)
+    reply_keyboard = client_kb.get_mode_switch_keyboard(show_owner_button=show_admin, show_employee_button=show_master)
 
     if not bookings:
         await message.answer("У вас пока нет записей.", reply_markup=reply_keyboard)
@@ -1232,7 +1232,7 @@ async def back_to_bookings_handler(callback: CallbackQuery):
     show_admin, show_master = await get_user_roles(callback.from_user.id)
 
     # Показываем Reply клавиатуру с кнопками переключения режимов
-    reply_keyboard = client_kb.get_mode_switch_keyboard(show_admin_button=show_admin, show_master_button=show_master)
+    reply_keyboard = client_kb.get_mode_switch_keyboard(show_owner_button=show_admin, show_employee_button=show_master)
 
     if not bookings:
         await callback.message.answer("У вас пока нет записей.", reply_markup=reply_keyboard)
@@ -1462,7 +1462,7 @@ async def quick_rebooking(message: Message, state: FSMContext):
 
     # Получаем роли пользователя для кнопок переключения
     show_admin, show_master = await get_user_roles(message.from_user.id)
-    reply_keyboard = client_kb.get_mode_switch_keyboard(show_admin_button=show_admin, show_master_button=show_master)
+    reply_keyboard = client_kb.get_mode_switch_keyboard(show_owner_button=show_admin, show_employee_button=show_master)
 
     if not completed_bookings:
         from aiogram.utils.keyboard import InlineKeyboardBuilder
