@@ -4,8 +4,15 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from bot.handlers import admin
 from bot.states import EmployeeEditStates
+
+
+@pytest.fixture(autouse=True)
+def reset_photo_sessions():
+    admin._room_photo_capture_sessions.clear()
 
 
 def _session(monkeypatch, employee, *, owner=True):
@@ -116,6 +123,7 @@ def test_room_photo_receive_rejects_non_owner_without_database_write(monkeypatch
         from_user=SimpleNamespace(id=437862772),
         bot=MagicMock(),
         answer=AsyncMock(),
+        chat=SimpleNamespace(id=10),
     )
     state = SimpleNamespace(get_data=AsyncMock(return_value={"editing_employee_id": 39}), clear=AsyncMock())
 
@@ -137,6 +145,7 @@ def test_room_photo_receive_saves_authorized_photo_and_acknowledges(monkeypatch)
         from_user=SimpleNamespace(id=437862772),
         bot=MagicMock(),
         answer=AsyncMock(),
+        chat=SimpleNamespace(id=10),
     )
     state = SimpleNamespace(get_data=AsyncMock(return_value={"editing_employee_id": 39}))
 
@@ -170,6 +179,8 @@ def test_parallel_photo_updates_do_not_overwrite_each_other(monkeypatch):
                     row_lock.release()
 
             async def execute(self, query):
+                from sqlalchemy.dialects import postgresql
+                assert "FOR UPDATE" in str(query.compile(dialect=postgresql.dialect()))
                 await row_lock.acquire()
                 self.locked = True
                 self.employee = SimpleNamespace(id=39, business_id=11, photos=stored["photos"])
@@ -282,3 +293,41 @@ def test_slow_cache_does_not_split_one_album_into_two_notifications(monkeypatch)
 
     messages = asyncio.run(exercise())
     assert sum(m.answer.await_count for m in messages) == 1
+
+
+@pytest.mark.parametrize("reopen", [False, True])
+def test_done_while_photo_waits_for_db_lock_has_no_late_notification(monkeypatch, reopen):
+    employee = SimpleNamespace(id=39, business_id=11, name="Test room", photos=None)
+    session = _session(monkeypatch, employee)
+    monkeypatch.setattr(admin, "_save_photo_to_cache", AsyncMock(return_value=True))
+    monkeypatch.setattr(admin, "_ROOM_PHOTO_ALBUM_SETTLE_SECONDS", 0.02)
+    monkeypatch.setattr(admin, "edit_employee_menu", AsyncMock())
+
+    async def exercise():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        original_execute = session.execute
+
+        async def locked_execute(query):
+            entered.set()
+            await release.wait()
+            return await original_execute(query)
+
+        session.execute = locked_execute
+        state = SimpleNamespace(get_data=AsyncMock(return_value={"editing_employee_id": 39}), clear=AsyncMock())
+        message = SimpleNamespace(photo=[SimpleNamespace(file_id="late-photo")],
+                                  from_user=SimpleNamespace(id=437862772), bot=MagicMock(), answer=AsyncMock(),
+                                  chat=SimpleNamespace(id=10), media_group_id="late-album")
+        receiving = asyncio.create_task(admin.emp_add_photo_receive(message, state))
+        await entered.wait()
+        await admin.emp_photos_done(_callback("emp_photos_done:39"), state)
+        if reopen:
+            admin._advance_room_photo_capture(10, 437862772, 39, True)
+        release.set()
+        await receiving
+        await asyncio.sleep(0.06)
+        return message
+
+    message = asyncio.run(exercise())
+    session.commit.assert_awaited_once()
+    message.answer.assert_not_awaited()

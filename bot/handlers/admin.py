@@ -49,6 +49,13 @@ from bot.utils.message_utils import safe_edit_or_send
 
 _ROOM_PHOTO_ALBUM_SETTLE_SECONDS = 1.5
 _room_photo_album_pending = {}
+_room_photo_capture_sessions = {}
+
+
+def _advance_room_photo_capture(chat_id, user_id, employee_id, open_capture):
+    key = (chat_id, user_id, employee_id)
+    generation, _ = _room_photo_capture_sessions.get(key, (0, True))
+    _room_photo_capture_sessions[key] = (generation + 1, open_capture)
 
 
 async def _send_room_photo_album_summary(key):
@@ -6588,6 +6595,7 @@ async def edit_emp_photos_menu(callback: CallbackQuery, state: FSMContext):
         parse_mode="HTML",
         reply_markup=builder.as_markup()
     )
+    _advance_room_photo_capture(callback.message.chat.id, callback.from_user.id, employee_id, True)
     await state.update_data(editing_employee_id=employee_id)
     await state.set_state(EmployeeEditStates.adding_photo)
     await callback.answer()
@@ -6613,6 +6621,7 @@ async def emp_add_photo_start(callback: CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="✅ Готово", callback_data=f"emp_photos_done:{employee_id}", style="success")]
         ])
     )
+    _advance_room_photo_capture(callback.message.chat.id, callback.from_user.id, employee_id, True)
     await state.update_data(editing_employee_id=employee_id)
     await state.set_state(EmployeeEditStates.adding_photo)
     await callback.answer()
@@ -6627,6 +6636,8 @@ async def emp_add_photo_receive(message: Message, state: FSMContext):
         await state.clear()
         await message.answer("Выберите помещение заново перед загрузкой фото.")
         return
+    capture_key = (message.chat.id, message.from_user.id, employee_id)
+    capture_generation, capture_open = _room_photo_capture_sessions.get(capture_key, (0, True))
     import json as _pjson
 
     # Берём фото максимального размера
@@ -6651,6 +6662,10 @@ async def emp_add_photo_receive(message: Message, state: FSMContext):
         employee.photos = _pjson.dumps(photos)
         await session.commit()
 
+    if not capture_open or _room_photo_capture_sessions.get(capture_key, (0, True)) != (capture_generation, True):
+        await _save_photo_to_cache(message.bot, file_id)
+        return
+
     # Учитываем элемент альбома сразу после commit: сетевой web-кеш может задержать
     # отдельные обработчики и не должен разбивать один альбом на два уведомления.
     group_id = getattr(message, "media_group_id", None)
@@ -6669,6 +6684,8 @@ async def emp_add_photo_receive(message: Message, state: FSMContext):
 
     # Кешируем одиночное фото для webapp.
     await _save_photo_to_cache(message.bot, file_id)
+    if _room_photo_capture_sessions.get(capture_key, (0, True)) != (capture_generation, True):
+        return
     await message.answer(
         f"✅ Фото добавлено (всего: {len(photos)})\n\nОтправьте ещё или нажмите Готово.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -6680,6 +6697,7 @@ async def emp_add_photo_receive(message: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("emp_photos_done:"))
 async def emp_photos_done(callback: CallbackQuery, state: FSMContext):
     """Завершение добавления фото"""
+    _advance_room_photo_capture(callback.message.chat.id, callback.from_user.id, int(callback.data.split(":")[1]), False)
     _cancel_room_photo_album_summaries(callback)
     await state.clear()
     await edit_employee_menu(callback)
@@ -6688,6 +6706,7 @@ async def emp_photos_done(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("emp_photos_back:"))
 async def emp_photos_back(callback: CallbackQuery, state: FSMContext):
     """Вернуться к помещению и перестать принимать фотографии."""
+    _advance_room_photo_capture(callback.message.chat.id, callback.from_user.id, int(callback.data.split(":")[1]), False)
     _cancel_room_photo_album_summaries(callback)
     await state.clear()
     await edit_employee_menu(callback)
