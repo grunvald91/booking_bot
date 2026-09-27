@@ -67,6 +67,11 @@ for center in (722,733,773,833):
         elif 'ERROR' in msg: kind='error'
         else: kind='other'
         print('event_near_photo='+str(i)+' kind='+kind+' level='+str(entries[i].get('PRIORITY','?')))
+for center in (775,835):
+    block='\n'.join(str(e.get('MESSAGE','')) for e in entries[center:min(center+55,len(entries))])
+    frames=re.findall(r'File "[^"\n]*/([^/"\n]+\.py)", line (\d+)',block)
+    classes=re.findall(r'(?m)^\s*(?:[A-Za-z_][A-Za-z0-9_.]*\.)?([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)):',block)
+    print('photo_callback_error='+str(center)+' frames='+','.join(f+':'+n for f,n in frames[:20])+' types='+','.join(classes[:8]))
 async def check():
     async with async_session_maker() as session:
         rows=await session.execute(text("SELECT b.id,e.id,e.photos FROM businesses b JOIN employees e ON e.business_id=b.id WHERE b.name ILIKE '%100boats%' ORDER BY e.id"))
