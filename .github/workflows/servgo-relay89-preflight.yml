@@ -57,6 +57,11 @@ jobs:
               state_body=state_out.read().decode('utf-8','replace')
               if state_out.channel.recv_exit_status():raise RuntimeError('ServGo relay state inspection failed')
               print(state_body)
+              code_probe="import pathlib,hashlib,subprocess; p=pathlib.Path('/opt/booking_bot/bot/main.py'); print('production_main_sha256='+hashlib.sha256(p.read_bytes()).hexdigest()); print('production_transport_file_present='+str(pathlib.Path('/opt/booking_bot/bot/telegram_transport.py').exists())); [print('bot_'+k+'='+subprocess.run(['systemctl','show','booking-bot.service','--value','-p',k],capture_output=True,text=True,timeout=5).stdout.strip()) for k in ('User','WorkingDirectory','DropInPaths')]; p=subprocess.run(['curl','-4','-sS','--proxy','socks5h://127.0.0.1:1089','--noproxy','','--max-time','12','-o','/dev/null','-w','%{http_code}','https://api.telegram.org/'],capture_output=True,text=True,timeout=15); print('socks_telegram_http='+p.stdout.strip()+' curl_exit='+str(p.returncode))"
+              _,code_out,code_err=servgo.exec_command('/opt/booking_bot/venv/bin/python -c '+shlex.quote(code_probe),timeout=25)
+              code_body=code_out.read().decode('utf-8','replace')
+              if code_out.channel.recv_exit_status():raise RuntimeError('Production bot source inspection failed')
+              print(code_body)
           finally:servgo.close()
           sock=socket.create_connection((IP,22),timeout=8)
           transport=paramiko.Transport(sock)
