@@ -25,13 +25,6 @@ function BookRedirect() {
   return <Navigate to="/" replace />
 }
 
-function DemoRentalRedirect() {
-  useEffect(() => {
-    window.location.replace('/demo-100boats.html' + window.location.search)
-  }, [])
-  return null
-}
-
 /** Redirect /schedule, /analytics, /calendar → admin routes */
 function LegacyAdminRedirect({ to }: { to: string }) {
   return <Navigate to={to} replace />
@@ -87,7 +80,6 @@ function App() {
         {/* Client routes */}
         <Route path="/" element={<HomePage />} />
         <Route path="/business/:id" element={<BusinessPage />} />
-        <Route path="/book/11" element={<DemoRentalRedirect />} />
         <Route path="/book/:businessId" element={<BookingPage />} />
         <Route
           path="/my"
