@@ -1,9 +1,13 @@
 """Read-only, redacted production photo diagnostics. Dispatch manually."""
 import base64
+import difflib
 import hashlib
 import logging
 import os
+from pathlib import Path
+import re
 import shlex
+import subprocess
 import time
 
 import paramiko
@@ -106,6 +110,19 @@ def main():
             if status:
                 raise RuntimeError("Read-only remote diagnostics failed; stderr suppressed")
             print(body)
+            with client.open_sftp() as sftp:
+                with sftp.open("/opt/booking_bot/web/api/routes/admin.py", "rb") as source:
+                    production = source.read().decode("utf-8", "replace")
+            reviewed = subprocess.check_output(
+                ["git", "show", "8cc9ba1:web/api/routes/admin.py"], text=True, encoding="utf-8"
+            )
+            delta = list(difflib.unified_diff(reviewed.splitlines(), production.splitlines(),
+                                              fromfile="reviewed_admin", tofile="production_admin", n=2))
+            print("admin_diff_lines=" + str(len(delta)))
+            for line in delta[:150]:
+                if re.search(r"token|password|secret|key\s*=|\d{7,12}:[A-Za-z0-9_-]{15,}", line, re.I):
+                    line = line[:1] + "[REDACTED LINE]"
+                print("admin_diff " + line)
             return
         except (paramiko.SSHException, OSError, EOFError):
             if attempt == 2:
