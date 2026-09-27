@@ -21,11 +21,17 @@ class PinnedKey(paramiko.MissingHostKeyPolicy):
         client.get_host_keys().add(hostname, key.get_name(), key)
 
 
-REMOTE = r'''import asyncio, hashlib, json, pathlib, re, subprocess
+REMOTE = r'''import ast, asyncio, datetime, hashlib, json, pathlib, re, subprocess
 from sqlalchemy import text
 from database.database import async_session_maker
 path=pathlib.Path('/opt/booking_bot/bot/handlers/admin.py')
 print('admin_sha256='+hashlib.sha256(path.read_bytes()).hexdigest())
+source=path.read_text()
+tree=ast.parse(source)
+for name in ('edit_emp_photos_menu','emp_add_photo_start','emp_add_photo_receive','emp_photos_done','edit_employee_menu'):
+    node=next(n for n in ast.walk(tree) if isinstance(n,ast.AsyncFunctionDef) and n.name==name)
+    segment=ast.get_source_segment(source,node)
+    print('handler_sha256 '+name+'='+hashlib.sha256(segment.encode()).hexdigest())
 for unit in ('booking-bot.service','booking-bot-relay89.service'):
     p=subprocess.run(['systemctl','is-active',unit],capture_output=True,text=True)
     print(unit+'_state='+p.stdout.strip())
@@ -33,6 +39,13 @@ p=subprocess.run(['journalctl','-u','booking-bot.service','--since','-8 hours','
 if p.returncode: raise RuntimeError('journal unavailable')
 entries=[json.loads(line) for line in p.stdout.splitlines() if line.strip().startswith('{')]
 print('journal_entries='+str(len(entries)))
+for i,entry in enumerate(entries):
+    msg=str(entry.get('MESSAGE',''))
+    if 'Update id=' not in msg: continue
+    stamp=datetime.datetime.fromtimestamp(int(entry.get('__REALTIME_TIMESTAMP',0))/1000000,datetime.timezone(datetime.timedelta(hours=3)))
+    if stamp.hour==15 and 20<=stamp.minute<=40:
+        kind='unhandled' if 'not handled' in msg else 'handled'
+        print('photo_window_update='+str(i)+' msk='+stamp.strftime('%H:%M:%S')+' '+kind)
 for i,entry in enumerate(entries):
     msg=str(entry.get('MESSAGE',''))
     if 'emp_add_photo:' in msg or 'emp_photos_done:' in msg or 'edit_emp_photos:' in msg:
