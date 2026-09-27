@@ -50,13 +50,23 @@ for i,entry in enumerate(entries):
     msg=str(entry.get('MESSAGE',''))
     if 'emp_add_photo:' in msg or 'emp_photos_done:' in msg or 'edit_emp_photos:' in msg:
         matched=re.search(r'(emp_add_photo|emp_photos_done|edit_emp_photos):',msg)
-        print('photo_callback='+str(i)+' kind='+matched.group(1))
+        stamp=datetime.datetime.fromtimestamp(int(entry.get('__REALTIME_TIMESTAMP',0))/1000000,datetime.timezone(datetime.timedelta(hours=3)))
+        print('photo_callback='+str(i)+' msk='+stamp.strftime('%H:%M:%S')+' kind='+matched.group(1))
     if 'Traceback (most recent call last)' in msg or 'TypeError:' in msg or 'TelegramBadRequest:' in msg:
         block='\n'.join(str(e.get('MESSAGE','')) for e in entries[i:min(i+35,len(entries))])
         frames=re.findall(r'File "[^"\n]*/([^/"\n]+\.py)", line (\d+)',block)
         classes=re.findall(r'(?m)^([A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception)):',block)
         if any('admin.py'==f for f,n in frames) or 'TypeError' in msg:
             print('bot_error='+str(i)+' frames='+','.join(f+':'+n for f,n in frames[-8:])+' types='+','.join(classes[:3]))
+for center in (722,733,773,833):
+    for i in range(center-2,min(center+3,len(entries))):
+        msg=str(entries[i].get('MESSAGE',''))
+        if 'Callback: data=' in msg: kind='callback'
+        elif 'Update id=' in msg: kind='unhandled' if 'not handled' in msg else 'handled'
+        elif 'Traceback' in msg: kind='traceback'
+        elif 'ERROR' in msg: kind='error'
+        else: kind='other'
+        print('event_near_photo='+str(i)+' kind='+kind+' level='+str(entries[i].get('PRIORITY','?')))
 async def check():
     async with async_session_maker() as session:
         rows=await session.execute(text("SELECT b.id,e.id,e.photos FROM businesses b JOIN employees e ON e.business_id=b.id WHERE b.name ILIKE '%100boats%' ORDER BY e.id"))
