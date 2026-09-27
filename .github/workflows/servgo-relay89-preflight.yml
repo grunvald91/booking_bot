@@ -52,6 +52,11 @@ jobs:
               source_result=probe_out.read().decode('utf-8','replace')
               if probe_out.channel.recv_exit_status():raise RuntimeError('ServGo route prerequisites unavailable')
               print(source_result)
+              state_probe="import pathlib,subprocess; names={'known_hosts':'/etc/booking-bot-relay89/known_hosts','known_hosts_tmp':'/etc/booking-bot-relay89/known_hosts.tmp','relay_unit':'/etc/systemd/system/booking-bot-relay89.service'}; [print(n+'_exists='+str(pathlib.Path(p).exists())+' size='+str(pathlib.Path(p).stat().st_size if pathlib.Path(p).exists() else 0)) for n,p in names.items()]; [print(u+'_'+a+'='+subprocess.run(['systemctl',a,u],capture_output=True,text=True,timeout=5).stdout.strip()) for u in ('booking-bot-relay89.service','booking-bot.service') for a in ('is-active','is-enabled')]; s=subprocess.run(['ss','-lnt'],capture_output=True,text=True,timeout=5); print('socks_listener='+str('127.0.0.1:1089' in s.stdout))"
+              _,state_out,state_err=servgo.exec_command('/opt/booking_bot/venv/bin/python -c '+shlex.quote(state_probe),timeout=20)
+              state_body=state_out.read().decode('utf-8','replace')
+              if state_out.channel.recv_exit_status():raise RuntimeError('ServGo relay state inspection failed')
+              print(state_body)
           finally:servgo.close()
           sock=socket.create_connection((IP,22),timeout=8)
           transport=paramiko.Transport(sock)
@@ -85,5 +90,10 @@ jobs:
               check_body=check_out.read().decode('utf-8','replace')
               if check_out.channel.recv_exit_status():raise RuntimeError('Relay SSH setting inspection failed')
               print(check_body)
+              key_probe="import pathlib; p=pathlib.Path('/root/.ssh/authorized_keys'); lines=p.read_text().splitlines() if p.is_file() else []; matching=[line for line in lines if line.endswith(' servgo-bot-egress-89')]; print('restricted_key_count='+str(len(matching))); print('restricted_key_scoped='+str(len(matching)==1 and matching[0].startswith('from=\"155.212.162.47\",restrict,port-forwarding,permitopen=\"api.telegram.org:443\" ssh-ed25519 ')))"
+              _,key_out,key_err=client.exec_command('python3 -c '+shlex.quote(key_probe),timeout=12)
+              key_body=key_out.read().decode('utf-8','replace')
+              if key_out.channel.recv_exit_status():raise RuntimeError('Relay key inspection failed')
+              print(key_body)
           finally:client.close()
           PY
