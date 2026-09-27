@@ -40,6 +40,9 @@ jobs:
                   if route=='direct':args+=['--noproxy','*']
                   rc,out,err=command(args+['https://api.telegram.org/'])
                   print('TELEGRAM_REACHABILITY',family,route,'exit',rc,out.strip(),'error_type', ('connection_reset' if 'reset' in err.lower() else 'timeout' if 'timed out' in err.lower() else 'other' if err else 'none'))
+          for domain in ('www.google.com','api.github.com'):
+              rc,out,err=command(['curl','-4','-sS','--noproxy','*','--connect-timeout','4','--max-time','8','-o','/dev/null','-w','http=%{http_code};time=%{time_total}','https://'+domain+'/'])
+              print('CONTROL_HTTPS',domain,'exit',rc,out.strip(),'error_type', ('connection_reset' if 'reset' in err.lower() else 'timeout' if 'timed out' in err.lower() else 'other' if err else 'none'))
           rc,out,err=command(['systemctl','cat','booking-bot.service'])
           for line in out.splitlines():
               if line.startswith('EnvironmentFile='):
