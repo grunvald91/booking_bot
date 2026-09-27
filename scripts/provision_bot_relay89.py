@@ -4,6 +4,7 @@ import hashlib
 import logging
 import os
 import shlex
+import stat
 import time
 
 import paramiko
@@ -73,7 +74,15 @@ def ensure_file(client, path, expected, mode):
                 raise RuntimeError(f"Unexpected existing file at {path}; refusing overwrite")
             return
         temp = path + ".tmp"
-        with sftp.open(temp, "xb") as f:
+        try:
+            leftover = sftp.lstat(temp)
+        except FileNotFoundError:
+            pass
+        else:
+            if not stat.S_ISREG(leftover.st_mode) or leftover.st_size != 0:
+                raise RuntimeError(f"Unexpected nonempty or nonregular temporary file at {temp}")
+            sftp.remove(temp)
+        with sftp.open(temp, "wx") as f:
             f.write(expected.encode())
         sftp.chmod(temp, mode)
         sftp.rename(temp, path)
