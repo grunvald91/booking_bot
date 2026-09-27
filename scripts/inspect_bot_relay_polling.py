@@ -26,6 +26,7 @@ root=pathlib.Path('/opt/booking_bot')
 for name,path in [('main',root/'bot/main.py'),('transport',root/'bot/telegram_transport.py'),('dropin',pathlib.Path('/etc/systemd/system/booking-bot.service.d/relay89.conf'))]:
     print(name+'_present='+str(path.is_file()))
     if name=='main' and path.is_file(): print('main_sha256='+hashlib.sha256(path.read_bytes()).hexdigest())
+print('client_sha256='+hashlib.sha256((root/'bot/handlers/client.py').read_bytes()).hexdigest())
 for unit in ('booking-bot.service','booking-bot-relay89.service'):
     p=subprocess.run(['systemctl','is-active',unit],capture_output=True,text=True,timeout=5)
     print(unit+'_state='+p.stdout.strip())
