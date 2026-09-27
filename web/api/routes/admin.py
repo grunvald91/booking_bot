@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from typing import List, Optional
 import io
 import logging
+import os
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
@@ -17,6 +18,7 @@ from sqlalchemy import select, func, and_, case, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ..photo_transport import create_photo_client
 from ..database import (
     get_db, Business, Service, Employee, Booking, User, BusinessOwner,
     VenueTimePricing, Subscription, SubscriptionService, EmployeeService,
@@ -982,14 +984,16 @@ async def upload_business_photo(
     if not business:
         raise HTTPException(status_code=404, detail="Business not found")
 
-    bot_token = "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM50"
+    bot_token = os.getenv("BOT_TOKEN")
+    if not bot_token:
+        raise HTTPException(status_code=500, detail="Bot token not configured")
     file_content = await file.read()
     content_type = file.content_type or "image/jpeg"
     filename = file.filename or "photo.jpg"
 
     # Upload to Telegram to get file_id (send to owner, then delete)
     chat_id = user.telegram_id if user.telegram_id and user.telegram_id > 0 else 437862772
-    async with httpx.AsyncClient() as http:
+    async with create_photo_client() as http:
         resp = await http.post(
             f"https://api.telegram.org/bot{bot_token}/sendPhoto",
             data={"chat_id": str(chat_id)},
@@ -1006,7 +1010,7 @@ async def upload_business_photo(
     file_id = photos_arr[-1]["file_id"]  # largest size
 
     # Delete the temp message
-    async with httpx.AsyncClient() as http:
+    async with create_photo_client() as http:
         await http.post(
             f"https://api.telegram.org/bot{bot_token}/deleteMessage",
             json={"chat_id": chat_id, "message_id": msg_id},
@@ -1083,13 +1087,15 @@ async def upload_employee_photo(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    bot_token = "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM50"
+    bot_token = os.getenv("BOT_TOKEN")
+    if not bot_token:
+        raise HTTPException(status_code=500, detail="Bot token not configured")
     file_content = await file.read()
     content_type = file.content_type or "image/jpeg"
     filename = file.filename or "photo.jpg"
 
     chat_id = user.telegram_id if user.telegram_id and user.telegram_id > 0 else 437862772
-    async with httpx.AsyncClient() as http:
+    async with create_photo_client() as http:
         resp = await http.post(
             f"https://api.telegram.org/bot{bot_token}/sendPhoto",
             data={"chat_id": str(chat_id)},
@@ -1104,7 +1110,7 @@ async def upload_employee_photo(
     photos_arr = data["result"]["photo"]
     file_id = photos_arr[-1]["file_id"]
 
-    async with httpx.AsyncClient() as http:
+    async with create_photo_client() as http:
         await http.post(
             f"https://api.telegram.org/bot{bot_token}/deleteMessage",
             json={"chat_id": chat_id, "message_id": msg_id},

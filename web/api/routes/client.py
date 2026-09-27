@@ -18,6 +18,7 @@ from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ..photo_transport import create_photo_client
 from ..database import get_db, Business, Service, Employee, Booking, User, VenueTimePricing
 from ..deps import get_current_user, get_current_user_optional
 from database.crud import get_or_create_guest_user
@@ -1177,11 +1178,11 @@ async def reschedule_booking(
 async def get_telegram_photo(file_id: str):
     """Proxy a Telegram photo by file_id — streams through server to hide bot token."""
     from fastapi.responses import StreamingResponse
-    bot_token = os.getenv("BOT_TOKEN", "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM50")
+    bot_token = os.getenv("BOT_TOKEN")
     if not bot_token:
         raise HTTPException(status_code=500, detail="Bot token not configured")
 
-    async with httpx.AsyncClient() as client:
+    async with create_photo_client() as client:
         resp = await client.get(
             f"https://api.telegram.org/bot{bot_token}/getFile",
             params={"file_id": file_id},
@@ -1196,7 +1197,7 @@ async def get_telegram_photo(file_id: str):
 
     # Stream the file through server instead of redirecting
     async def _stream():
-        async with httpx.AsyncClient() as client:
+        async with create_photo_client() as client:
             async with client.stream("GET", url) as resp:
                 async for chunk in resp.aiter_bytes(4096):
                     yield chunk
