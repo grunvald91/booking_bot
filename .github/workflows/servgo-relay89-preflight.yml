@@ -47,7 +47,7 @@ jobs:
               if out.channel.recv_exit_status()!=0 or len(scan)!=1 or len(scan[0].split())!=3 or scan[0].split()[1]!='ssh-ed25519':
                   raise RuntimeError('ServGo-to-relay SSH host-key probe failed')
               servgo_key=base64.b64decode(scan[0].split()[2],validate=True)
-              source_probe="import importlib.util,subprocess,pathlib; p=subprocess.run(['curl','-4','-sS','--max-time','7','https://api.ipify.org'],capture_output=True,text=True,timeout=9); print('servgo_egress_ip='+p.stdout.strip() if p.returncode==0 else 'servgo_egress_ip=unavailable'); print('aiohttp_socks_present='+str(importlib.util.find_spec('aiohttp_socks') is not None)); print('dedicated_ssh_key_present='+str(pathlib.Path('/root/.ssh/servgo_89_ed25519').is_file()))"
+              source_probe="import importlib.util,importlib.metadata,subprocess,pathlib; p=subprocess.run(['ip','-4','route','get','89.125.90.101'],capture_output=True,text=True,timeout=5); print('route_to_89='+p.stdout.strip() if p.returncode==0 else 'route_to_89=unavailable'); print('aiogram_version='+importlib.metadata.version('aiogram')); print('aiohttp_socks_present='+str(importlib.util.find_spec('aiohttp_socks') is not None)); print('dedicated_ssh_key_present='+str(pathlib.Path('/root/.ssh/servgo_89_ed25519').is_file()))"
               _,probe_out,probe_err=servgo.exec_command('/opt/booking_bot/venv/bin/python -c '+shlex.quote(source_probe),timeout=15)
               source_result=probe_out.read().decode('utf-8','replace')
               if probe_out.channel.recv_exit_status():raise RuntimeError('ServGo route prerequisites unavailable')
