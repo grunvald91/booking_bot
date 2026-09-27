@@ -5,11 +5,12 @@
 import asyncio
 import logging
 import os
-from aiogram import Bot, Dispatcher
+from aiogram import Dispatcher
 from aiogram.types import Update
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import BOT_TOKEN, WEBAPP_HOST, WEBAPP_PORT, WEBAPP_URL
+from bot.telegram_transport import create_bot
 from bot.handlers import common, client, admin, master, admin_management, administrator, subscription_admin, subscription_client, inline_mode
 from database import init_db
 from bot.services.scheduler import ReminderScheduler
@@ -59,7 +60,7 @@ async def main():
     logger.info("Запуск бота...")
 
     # Инициализация бота и диспетчера
-    bot = Bot(token=BOT_TOKEN)
+    bot = create_bot(BOT_TOKEN, os.getenv("BOT_PROXY_URL"))
     storage = await _build_storage()
     dp = Dispatcher(storage=storage)
 
