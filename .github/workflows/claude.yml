@@ -156,7 +156,7 @@ jobs:
           set -euo pipefail
           gh workflow run pr-ci.yml \
             --repo "$REPOSITORY" \
-            --ref "$CLAUDE_BRANCH" \
+            --ref "${{ github.event.repository.default_branch }}" \
             -f pr_number="$PR_NUMBER" \
             -f expected_sha="$HEAD_SHA" \
             -f base_sha="$BASE_SHA"
