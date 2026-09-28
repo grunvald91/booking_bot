@@ -1,0 +1,40 @@
+name: BandBook Import — GPT-6 Sol
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  import:
+    if: github.actor == 'grunvald91' && startsWith(github.event.issue.title, '[BandBook Import]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    env:
+      ANTHROPIC_BASE_URL: https://api.claudehub.fun
+
+    steps:
+      - name: Verify ClaudeHub API secret
+        env:
+          CLAUDEHUB_API_KEY: ${{ secrets.API }}
+        run: |
+          if [ -z "$CLAUDEHUB_API_KEY" ]; then
+            echo "::error::Repository Actions secret API is missing."
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run GPT-6 Sol through ClaudeHub
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.API }}
+          github_token: ${{ github.token }}
+          trigger_phrase: "@bandbook-import"
+          claude_args: |
+            --model gpt-6-sol
+            --max-turns 40
+            --allowedTools Read,Bash
