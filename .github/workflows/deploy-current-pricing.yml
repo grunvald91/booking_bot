@@ -1,0 +1,51 @@
+name: Deploy current ServGo pricing
+
+on:
+  push:
+    branches:
+      - ops/deploy-current-pricing
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard
+        run: '[ -n "$SSHPASS" ] || exit 1'
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Deploy pricing template
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          REMOTE="$SERVER_USER@$SERVER_HOST"
+          ROOT=/opt/booking_bot
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$REMOTE" "cp '$ROOT/webapp/templates/landing.html' /tmp/landing.html.before-pricing"
+          rollback() {
+            sshpass -e ssh $OPTS -p "$SERVER_PORT" "$REMOTE" "cp /tmp/landing.html.before-pricing '$ROOT/webapp/templates/landing.html'; systemctl restart booking-bot.service || true"
+          }
+          trap rollback ERR
+          sshpass -e scp $OPTS -P "$SERVER_PORT" webapp/templates/landing.html "$REMOTE:$ROOT/webapp/templates/landing.html"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$REMOTE" '
+            set -e
+            systemctl restart booking-bot.service
+            for i in $(seq 1 15); do
+              if systemctl is-active --quiet booking-bot.service && curl -fsS --max-time 4 http://127.0.0.1:8080/ >/tmp/servgo-pricing.html; then break; fi
+              sleep 2
+            done
+            systemctl is-active booking-bot.service
+            grep -q "9 900 ₽" /tmp/servgo-pricing.html
+            grep -q "1 490 ₽/мес" /tmp/servgo-pricing.html
+            grep -q "3 000 ₽/мес" /tmp/servgo-pricing.html
+            rm -f /tmp/landing.html.before-pricing
+          '
+          trap - ERR
