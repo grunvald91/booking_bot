@@ -1,0 +1,57 @@
+name: Check ServGo marketing lead baseline
+
+on:
+  push:
+    branches:
+      - ops/verify-servgo-attribution
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Guard
+        run: '[ -n "$SSHPASS" ] || exit 1'
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Count marketing leads without exposing PII
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/booking_bot
+          ./venv/bin/python - <<'PY'
+          import asyncio
+          from sqlalchemy import func, select
+          from database.database import async_session_maker
+          from database.models import MarketingLead
+
+          async def main():
+              async with async_session_maker() as s:
+                  total=(await s.execute(select(func.count(MarketingLead.id)))).scalar_one()
+                  exp001=(await s.execute(
+                      select(func.count(MarketingLead.id)).where(
+                          MarketingLead.experiment_id == "EXP-SERVGO-001"
+                      )
+                  )).scalar_one()
+                  smoke=(await s.execute(
+                      select(func.count(MarketingLead.id)).where(
+                          MarketingLead.experiment_id == "EXP-SERVGO-SMOKE"
+                      )
+                  )).scalar_one()
+                  print(f"marketing_leads_total={total}")
+                  print(f"exp_servgo_001_leads={exp001}")
+                  print(f"smoke_rows_remaining={smoke}")
+                  assert smoke == 0
+          asyncio.run(main())
+          PY
+          REMOTE
