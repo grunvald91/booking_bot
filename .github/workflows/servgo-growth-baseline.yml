@@ -1,4 +1,4 @@
-name: ServGo growth baseline audit
+name: ServGo target source safety check
 
 on:
   push:
@@ -9,124 +9,38 @@ permissions:
   contents: read
 
 jobs:
-  baseline:
+  compare:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
       SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
 
     steps:
+      - uses: actions/checkout@v4
       - name: Install Paramiko
         run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
-
-      - name: Read aggregate SaaS baseline
+      - name: Compare target files with production
         shell: bash
         run: |
           python - <<'PY'
-          import base64, hashlib, os, shlex, time
+          import base64, hashlib, os, pathlib, time
           import paramiko
 
+          files=[
+              "database/models.py",
+              "database/__init__.py",
+              "webapp/server.py",
+              "webapp/templates/landing.html",
+              "webapp/static/js/landing.js",
+          ]
           EXPECTED='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
           class Pinned(paramiko.MissingHostKeyPolicy):
-              def missing_host_key(self, client, hostname, key):
+              def missing_host_key(self,client,hostname,key):
                   actual=base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
                   if actual != EXPECTED:
                       raise paramiko.SSHException('SSH host key mismatch')
                   client.get_host_keys().add(hostname,key.get_name(),key)
 
-          source=r'''
-          import asyncio, json
-          from sqlalchemy import text
-          from database.database import async_session_maker
-
-          async def scalar(session, sql, params=None):
-              return (await session.execute(text(sql), params or {})).scalar()
-
-          async def rows(session, sql, params=None):
-              return [list(r) for r in (await session.execute(text(sql), params or {})).all()]
-
-          async def run():
-              out={
-                  "baseline_kind":"aggregate_saas_only",
-                  "website_traffic":"UNKNOWN",
-                  "marketing_leads":"UNKNOWN",
-                  "demo_requests":"UNKNOWN",
-                  "acquisition_cost":"UNKNOWN",
-                  "lead_source_attribution":"ABSENT_IN_SCHEMA",
-              }
-              async with async_session_maker() as session:
-                  demo_filter = """
-                  lower(name) like '%demo%' or lower(name) like '%example%'
-                  or lower(name) like '%пример%' or lower(name) like '%тест%'
-                  """
-                  out["businesses"]={
-                      "total": await scalar(session, "select count(*) from businesses"),
-                      "non_demo_total": await scalar(session, f"select count(*) from businesses where not ({demo_filter})"),
-                      "demo_or_test_total": await scalar(session, f"select count(*) from businesses where ({demo_filter})"),
-                      "active_non_demo": await scalar(session, f"select count(*) from businesses where is_active=true and not ({demo_filter})"),
-                  }
-                  out["owners"]={
-                      "distinct_all": await scalar(session, "select count(distinct owner_id) from businesses"),
-                      "distinct_non_demo": await scalar(session, f"select count(distinct owner_id) from businesses where not ({demo_filter})"),
-                      "active_subscription_users": await scalar(session, "select count(*) from users where subscription_status='active'"),
-                      "trial_subscription_users": await scalar(session, "select count(*) from users where subscription_status='trial'"),
-                  }
-                  out["business_creation_by_month"]=await rows(session, f"""
-                      select to_char(date_trunc('month',created_at),'YYYY-MM') m, count(*)
-                      from businesses where not ({demo_filter})
-                      group by 1 order by 1
-                  """)
-                  out["non_demo_booking_activity"]={
-                      "total_bookings": await scalar(session, f"""
-                          select count(*) from bookings bk join businesses b on b.id=bk.business_id
-                          where not ({demo_filter})
-                      """),
-                      "confirmed_completed_total": await scalar(session, f"""
-                          select count(*) from bookings bk join businesses b on b.id=bk.business_id
-                          where not ({demo_filter}) and bk.status in ('confirmed','completed')
-                      """),
-                      "distinct_end_clients": await scalar(session, f"""
-                          select count(distinct bk.client_id) from bookings bk join businesses b on b.id=bk.business_id
-                          where not ({demo_filter})
-                      """),
-                  }
-                  for days in (7,30,90):
-                      out[f"non_demo_last_{days}_days"]={
-                          "new_businesses": await scalar(session, f"""
-                              select count(*) from businesses
-                              where created_at >= now() - (:days || ' days')::interval
-                              and not ({demo_filter})
-                          """, {"days":str(days)}),
-                          "bookings_created": await scalar(session, f"""
-                              select count(*) from bookings bk join businesses b on b.id=bk.business_id
-                              where bk.created_at >= now() - (:days || ' days')::interval
-                              and not ({demo_filter})
-                          """, {"days":str(days)}),
-                          "confirmed_completed": await scalar(session, f"""
-                              select count(*) from bookings bk join businesses b on b.id=bk.business_id
-                              where bk.created_at >= now() - (:days || ' days')::interval
-                              and bk.status in ('confirmed','completed')
-                              and not ({demo_filter})
-                          """, {"days":str(days)}),
-                          "active_businesses_with_bookings": await scalar(session, f"""
-                              select count(distinct bk.business_id) from bookings bk join businesses b on b.id=bk.business_id
-                              where bk.created_at >= now() - (:days || ' days')::interval
-                              and not ({demo_filter})
-                          """, {"days":str(days)}),
-                      }
-                  # Aggregate names only to classify likely real/demo businesses; no owner/client data.
-                  out["business_inventory"]=await rows(session, """
-                      select id,name,business_type,is_active,
-                             to_char(created_at,'YYYY-MM-DD') created_date
-                      from businesses order by id
-                  """)
-              print(json.dumps(out,ensure_ascii=False,indent=2,default=str))
-          asyncio.run(run())
-          '''
-          encoded=base64.b64encode(source.encode()).decode()
-          remote="/opt/booking_bot/venv/bin/python -c "+shlex.quote("import base64;exec(base64.b64decode('"+encoded+"'))")
-          if not os.environ.get('SERVER_PASSWORD'):
-              raise RuntimeError('Missing SSH secret')
           ssh=None
           for attempt in range(3):
               c=paramiko.SSHClient();c.set_missing_host_key_policy(Pinned())
@@ -138,13 +52,19 @@ jobs:
                   c.close()
                   if attempt==2: raise
                   time.sleep(3)
+          sftp=ssh.open_sftp()
           try:
-              _,stdout,stderr=ssh.exec_command("cd /opt/booking_bot && "+remote,timeout=45)
-              result=stdout.read().decode('utf-8','replace')
-              status=stdout.channel.recv_exit_status()
-              if status:
-                  raise RuntimeError('Aggregate audit failed')
-              print(result)
+              mismatches=[]
+              for path in files:
+                  local=pathlib.Path(path).read_bytes()
+                  with sftp.open('/opt/booking_bot/'+path,'rb') as fh:
+                      remote=fh.read()
+                  same=hashlib.sha256(local).digest()==hashlib.sha256(remote).digest()
+                  print(path, "MATCH" if same else "DIFF")
+                  if not same:mismatches.append(path)
+              print("TARGET_MISMATCH_COUNT",len(mismatches))
+              if mismatches:
+                  print("TARGET_MISMATCHES",",".join(mismatches))
           finally:
-              ssh.close()
+              sftp.close();ssh.close()
           PY
