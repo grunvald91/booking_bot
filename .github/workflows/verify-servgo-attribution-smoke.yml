@@ -1,0 +1,107 @@
+name: Smoke test ServGo attribution
+
+on:
+  push:
+    branches:
+      - ops/verify-servgo-attribution
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Guard
+        run: '[ -n "$SSHPASS" ] || exit 1'
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Run non-notifying attribution smoke
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT=/opt/booking_bot
+
+          echo "=== PUBLIC LANDING WITH TRACKING QUERY ==="
+          URL='https://promo.servgo.ru/?experiment_id=EXP-SERVGO-SMOKE&utm_source=smoke&utm_medium=ci&utm_campaign=smoke&utm_content=SG-SMOKE'
+          code=$(curl -L -sS -o /tmp/servgo-smoke.html -w '%{http_code}' --max-time 12 "$URL")
+          echo "http_status=$code"
+          test "$code" = "200"
+          grep -q 'landing.js?v=7' /tmp/servgo-smoke.html
+          grep -q 'name="self_reported_source"' /tmp/servgo-smoke.html
+
+          echo "=== FRONTEND CAPTURE CONTRACT ==="
+          grep -q 'params.get("experiment_id")' "$ROOT/webapp/static/js/landing.js"
+          grep -q 'params.get("utm_source")' "$ROOT/webapp/static/js/landing.js"
+          grep -q 'params.get("utm_campaign")' "$ROOT/webapp/static/js/landing.js"
+          grep -q 'params.get("utm_content")' "$ROOT/webapp/static/js/landing.js"
+          grep -q 'sessionStorage.setItem' "$ROOT/webapp/static/js/landing.js"
+          echo "frontend_capture_contract=ok"
+
+          echo "=== BACKEND PERSISTENCE + CLEANUP ==="
+          cd "$ROOT"
+          ./venv/bin/python - <<'PY'
+          import asyncio
+          from sqlalchemy import delete, select
+          from database.database import async_session_maker
+          from database.models import MarketingLead
+          from webapp.server import validate_landing_request_payload, persist_landing_marketing_lead
+
+          async def main():
+              marker = "EXP-SERVGO-SMOKE"
+              content = "SG-SMOKE"
+              payload = validate_landing_request_payload({
+                  "name": "ServGo attribution smoke",
+                  "email": "smoke@example.invalid",
+                  "phone": "",
+                  "comment": "temporary CI smoke row; delete after assertion",
+                  "self_reported_source": "ci-smoke",
+                  "experiment_id": marker,
+                  "utm_source": "smoke",
+                  "utm_medium": "ci",
+                  "utm_campaign": "smoke",
+                  "utm_content": content,
+                  "utm_term": "",
+                  "referrer": "https://example.invalid/smoke",
+                  "landing_path": "/?experiment_id=EXP-SERVGO-SMOKE",
+              })
+              lead_id = None
+              try:
+                  lead_id = await persist_landing_marketing_lead(payload)
+                  async with async_session_maker() as s:
+                      row = (await s.execute(
+                          select(MarketingLead).where(MarketingLead.id == lead_id)
+                      )).scalar_one()
+                      assert row.experiment_id == marker
+                      assert row.utm_source == "smoke"
+                      assert row.utm_medium == "ci"
+                      assert row.utm_campaign == "smoke"
+                      assert row.utm_content == content
+                      assert row.self_reported_source == "ci-smoke"
+                      assert row.attribution_confidence == "high"
+                      print(f"persistence_assertion=ok lead_id={lead_id}")
+              finally:
+                  async with async_session_maker() as s:
+                      await s.execute(delete(MarketingLead).where(
+                          MarketingLead.experiment_id == marker,
+                          MarketingLead.utm_content == content,
+                      ))
+                      await s.commit()
+                  async with async_session_maker() as s:
+                      left = (await s.execute(select(MarketingLead.id).where(
+                          MarketingLead.experiment_id == marker,
+                          MarketingLead.utm_content == content,
+                      ))).scalars().all()
+                      assert not left
+                      print("cleanup_assertion=ok")
+          asyncio.run(main())
+          PY
+          REMOTE
