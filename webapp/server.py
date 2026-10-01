@@ -38,6 +38,7 @@ from bot.services.notifications import (
     notify_owner_rescheduled_booking,
 )
 from database import async_session_maker
+from database.models import MarketingLead
 from database.crud import (
     get_administrator_by_telegram_id,
     get_administrators_by_telegram_id,
@@ -92,6 +93,7 @@ def validate_landing_request_payload(data: dict) -> dict:
     phone = _clean_landing_field(data.get("phone"), 80)
     email = _clean_landing_field(data.get("email"), 160)
     comment = _clean_landing_field(data.get("comment"), 1200)
+    self_reported_source = _clean_landing_field(data.get("self_reported_source"), 500)
 
     if not name:
         raise ValueError("Укажите имя")
@@ -105,6 +107,15 @@ def validate_landing_request_payload(data: dict) -> dict:
         "phone": phone,
         "email": email,
         "comment": comment,
+        "self_reported_source": self_reported_source,
+        "experiment_id": _clean_landing_field(data.get("experiment_id"), 100),
+        "utm_source": _clean_landing_field(data.get("utm_source"), 255),
+        "utm_medium": _clean_landing_field(data.get("utm_medium"), 255),
+        "utm_campaign": _clean_landing_field(data.get("utm_campaign"), 255),
+        "utm_content": _clean_landing_field(data.get("utm_content"), 255),
+        "utm_term": _clean_landing_field(data.get("utm_term"), 255),
+        "referrer": _clean_landing_field(data.get("referrer"), 2000),
+        "landing_path": _clean_landing_field(data.get("landing_path"), 500),
         "recipient": os.getenv("LANDING_REQUEST_EMAIL", LANDING_REQUEST_RECIPIENT),
         "created_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC"),
     }
@@ -118,11 +129,47 @@ def format_landing_request_message(payload: dict) -> str:
         f"Телефон: {payload['phone'] or 'не указан'}",
         f"Email: {payload['email'] or 'не указан'}",
         f"Комментарий: {payload['comment'] or 'не указан'}",
+        f"Откуда узнали: {payload.get('self_reported_source') or 'не указано'}",
+        "",
+        "Атрибуция:",
+        f"Experiment: {payload.get('experiment_id') or 'нет'}",
+        f"UTM: source={payload.get('utm_source') or '-'}; medium={payload.get('utm_medium') or '-'}; campaign={payload.get('utm_campaign') or '-'}",
+        f"Landing: {payload.get('landing_path') or '-'}",
+        f"Referrer: {payload.get('referrer') or '-'}",
         "",
         f"Получатель email: {payload['recipient']}",
         f"Время: {payload['created_at']}",
     ]
     return "\n".join(lines)
+
+
+async def persist_landing_marketing_lead(payload: dict) -> int:
+    """Persist the lead before notification so experiment attribution is queryable."""
+    confidence = "high" if payload.get("experiment_id") or payload.get("utm_campaign") else (
+        "medium" if payload.get("self_reported_source") or payload.get("referrer") else "low"
+    )
+    async with async_session_maker() as session:
+        lead = MarketingLead(
+            name=payload["name"],
+            phone=payload.get("phone") or None,
+            email=payload.get("email") or None,
+            comment=payload.get("comment") or None,
+            experiment_id=payload.get("experiment_id") or None,
+            utm_source=payload.get("utm_source") or None,
+            utm_medium=payload.get("utm_medium") or None,
+            utm_campaign=payload.get("utm_campaign") or None,
+            utm_content=payload.get("utm_content") or None,
+            utm_term=payload.get("utm_term") or None,
+            referrer=payload.get("referrer") or None,
+            landing_path=payload.get("landing_path") or None,
+            self_reported_source=payload.get("self_reported_source") or None,
+            attribution_confidence=confidence,
+            status="new",
+        )
+        session.add(lead)
+        await session.commit()
+        await session.refresh(lead)
+        return lead.id
 
 
 def send_landing_request_email(payload: dict) -> bool:
@@ -225,6 +272,14 @@ async def api_landing_connect_request(request: web.Request) -> web.Response:
 
     email_sent = False
     telegram_sent = False
+    tracking_saved = False
+    lead_id = None
+
+    try:
+        lead_id = await persist_landing_marketing_lead(payload)
+        tracking_saved = True
+    except Exception as exc:
+        logger.error(f"Landing request attribution persistence failed: {exc}")
 
     try:
         email_sent = await asyncio.to_thread(send_landing_request_email, payload)
@@ -242,6 +297,8 @@ async def api_landing_connect_request(request: web.Request) -> web.Response:
                 "error": "Не удалось отправить заявку в Telegram. Попробуйте написать в Telegram.",
                 "email_sent": email_sent,
                 "telegram_sent": telegram_sent,
+                "tracking_saved": tracking_saved,
+                "lead_id": lead_id,
             },
             status=502,
         )
@@ -257,6 +314,8 @@ async def api_landing_connect_request(request: web.Request) -> web.Response:
             "success": True,
             "email_sent": email_sent,
             "telegram_sent": telegram_sent,
+            "tracking_saved": tracking_saved,
+            "lead_id": lead_id,
         }
     )
 
