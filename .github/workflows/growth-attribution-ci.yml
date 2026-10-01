@@ -23,7 +23,7 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements.txt
-      - run: python -m pip install --disable-pip-version-check -r requirements.txt greenlet
+      - run: python -m pip install --disable-pip-version-check -r requirements.txt greenlet jinja2
       - name: Compile changed source
         run: python -m compileall -q database webapp
       - name: Validate attribution contract
