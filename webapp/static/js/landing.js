@@ -1,3 +1,48 @@
+const ATTRIBUTION_STORAGE_KEY = "servgo_growth_attribution_v1";
+
+function readGrowthAttribution() {
+    const params = new URLSearchParams(window.location.search);
+    const current = {
+        experiment_id: params.get("experiment_id") || params.get("exp") || "",
+        utm_source: params.get("utm_source") || "",
+        utm_medium: params.get("utm_medium") || "",
+        utm_campaign: params.get("utm_campaign") || "",
+        utm_content: params.get("utm_content") || "",
+        utm_term: params.get("utm_term") || "",
+        referrer: document.referrer || "",
+        landing_path: window.location.pathname || "/",
+    };
+
+    const hasCampaignData = Boolean(
+        current.experiment_id ||
+        current.utm_source ||
+        current.utm_medium ||
+        current.utm_campaign ||
+        current.utm_content ||
+        current.utm_term
+    );
+
+    if (hasCampaignData) {
+        try {
+            sessionStorage.setItem(ATTRIBUTION_STORAGE_KEY, JSON.stringify(current));
+        } catch (_) {}
+        return current;
+    }
+
+    try {
+        const stored = JSON.parse(sessionStorage.getItem(ATTRIBUTION_STORAGE_KEY) || "null");
+        if (stored && typeof stored === "object") {
+            return {
+                ...stored,
+                landing_path: current.landing_path,
+                referrer: stored.referrer || current.referrer,
+            };
+        }
+    } catch (_) {}
+
+    return current;
+}
+
 document.querySelectorAll('a[href^="#"]').forEach((link) => {
     link.addEventListener("click", (event) => {
         const target = document.querySelector(link.getAttribute("href"));
@@ -93,11 +138,14 @@ connectForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     const formData = new FormData(connectForm);
+    const attribution = readGrowthAttribution();
     const payload = {
         name: String(formData.get("name") || "").trim(),
         phone: String(formData.get("phone") || "").trim(),
         email: String(formData.get("email") || "").trim(),
         comment: String(formData.get("comment") || "").trim(),
+        self_reported_source: String(formData.get("self_reported_source") || "").trim(),
+        ...attribution,
     };
 
     if (!payload.name) {
