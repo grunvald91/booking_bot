@@ -88,6 +88,31 @@ class Business(Base):
     client_subscriptions: Mapped[List["ClientSubscription"]] = relationship(back_populates="business", cascade="all, delete-orphan")
 
 
+class MarketingLead(Base):
+    """Inbound ServGo business lead with minimal growth-attribution data."""
+    __tablename__ = "marketing_leads"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    phone: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    experiment_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    utm_source: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    utm_medium: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    utm_campaign: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    utm_content: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    utm_term: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    referrer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    landing_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    self_reported_source: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    attribution_confidence: Mapped[str] = mapped_column(String(20), default="unverified")
+    status: Mapped[str] = mapped_column(String(30), default="new", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
 class BusinessOwner(Base):
     """Множественные владельцы бизнеса"""
     __tablename__ = "business_owners"
