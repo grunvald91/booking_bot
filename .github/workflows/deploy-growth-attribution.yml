@@ -1,0 +1,110 @@
+name: Deploy ServGo growth attribution
+
+on:
+  push:
+    branches:
+      - ops/deploy-growth-attribution
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard
+        run: '[ -n "$SSHPASS" ] || { echo "::error::Missing SERVER_SSH_PASSWORD"; exit 1; }'
+
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Prepare MarketingLead model fragment
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text=Path("database/models.py").read_text()
+          start=text.index("class MarketingLead(Base):")
+          end=text.index("class BusinessOwner(Base):", start)
+          Path("/tmp/marketing_lead_model.py").write_text(text[start:end])
+          PY
+
+      - name: Backup, patch, upload and verify
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          REMOTE="$SERVER_USER@$SERVER_HOST"
+          ROOT="/opt/booking_bot"
+          BACKUP="$ROOT/.growth-attribution-backup-$GITHUB_RUN_ID"
+
+          rollback() {
+            echo "::warning::Rolling back ServGo attribution deployment"
+            sshpass -e ssh $OPTS -p "$SERVER_PORT" "$REMOTE" "if [ -d '$BACKUP' ]; then cp -a '$BACKUP'/database/models.py '$ROOT/database/models.py'; cp -a '$BACKUP'/database/__init__.py '$ROOT/database/__init__.py'; cp -a '$BACKUP'/webapp/server.py '$ROOT/webapp/server.py'; cp -a '$BACKUP'/webapp/templates/landing.html '$ROOT/webapp/templates/landing.html'; cp -a '$BACKUP'/webapp/static/js/landing.js '$ROOT/webapp/static/js/landing.js'; systemctl restart booking-bot.service || true; fi"
+          }
+          trap rollback ERR
+
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$REMOTE" "mkdir -p '$BACKUP/database' '$BACKUP/webapp/templates' '$BACKUP/webapp/static/js'; cp '$ROOT/database/models.py' '$BACKUP/database/models.py'; cp '$ROOT/database/__init__.py' '$BACKUP/database/__init__.py'; cp '$ROOT/webapp/server.py' '$BACKUP/webapp/server.py'; cp '$ROOT/webapp/templates/landing.html' '$BACKUP/webapp/templates/landing.html'; cp '$ROOT/webapp/static/js/landing.js' '$BACKUP/webapp/static/js/landing.js'"
+
+          sshpass -e scp $OPTS -P "$SERVER_PORT" /tmp/marketing_lead_model.py "$REMOTE:/tmp/marketing_lead_model.py"
+          for f in database/__init__.py webapp/server.py webapp/templates/landing.html webapp/static/js/landing.js; do
+            sshpass -e scp $OPTS -P "$SERVER_PORT" "$f" "$REMOTE:$ROOT/$f"
+          done
+
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$REMOTE" "ROOT='$ROOT' bash -s" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          cd "$ROOT"
+          ./venv/bin/python - <<'PY'
+          from pathlib import Path
+          target=Path("database/models.py")
+          text=target.read_text()
+          if "class MarketingLead(Base):" not in text:
+              fragment=Path("/tmp/marketing_lead_model.py").read_text()
+              marker="class BusinessOwner(Base):"
+              if marker not in text:
+                  raise SystemExit("BusinessOwner marker missing; refusing patch")
+              text=text.replace(marker,fragment+marker,1)
+              target.write_text(text)
+              print("MarketingLead model inserted")
+          else:
+              print("MarketingLead model already present")
+          PY
+
+          ./venv/bin/python -m py_compile database/models.py database/__init__.py webapp/server.py
+          systemctl restart booking-bot.service
+
+          for i in $(seq 1 20); do
+            if systemctl is-active --quiet booking-bot.service && curl -fsS --max-time 4 http://127.0.0.1:8080/ >/tmp/servgo-home.html; then
+              break
+            fi
+            sleep 2
+          done
+          systemctl is-active booking-bot.service
+          grep -q 'name="self_reported_source"' /tmp/servgo-home.html
+          grep -q 'landing.js?v=7' /tmp/servgo-home.html
+
+          ./venv/bin/python - <<'PY'
+          import asyncio
+          from sqlalchemy import text
+          from database.database import async_session_maker
+          async def main():
+              async with async_session_maker() as s:
+                  exists=(await s.execute(text("select to_regclass('public.marketing_leads')"))).scalar()
+                  count=(await s.execute(text("select count(*) from marketing_leads"))).scalar() if exists else None
+                  print("MARKETING_LEADS_TABLE", exists)
+                  print("MARKETING_LEADS_COUNT", count)
+                  if not exists:
+                      raise SystemExit("marketing_leads table missing")
+          asyncio.run(main())
+          PY
+          REMOTE_SCRIPT
+
+          trap - ERR
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$REMOTE" "rm -rf '$BACKUP' /tmp/marketing_lead_model.py"
