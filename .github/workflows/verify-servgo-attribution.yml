@@ -1,0 +1,54 @@
+name: Verify ServGo attribution readiness
+
+on:
+  push:
+    branches:
+      - ops/verify-servgo-attribution
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Guard
+        run: '[ -n "$SSHPASS" ] || exit 1'
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Inspect production attribution paths read-only
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo "=== HTTP STATUS FROM SERVER ==="
+          for url in https://servgo.ru https://promo.servgo.ru; do
+            code=$(curl -L -sS -o /dev/null -w '%{http_code}' --max-time 12 "$url" || true)
+            echo "$url status=$code"
+          done
+
+          echo "=== NGINX SERVER NAMES / ROOTS / PROXIES ==="
+          if command -v nginx >/dev/null 2>&1; then
+            nginx -T 2>/dev/null | grep -E 'server_name|root |proxy_pass' | sed -E 's/[[:space:]]+/ /g' | head -n 160 || true
+          else
+            echo "nginx_not_installed"
+          fi
+
+          echo "=== TRACKING TOKENS UNDER SERVGO APP ==="
+          ROOT=/opt/booking_bot
+          if [ -d "$ROOT" ]; then
+            grep -RIlE 'utm_source|utm_campaign|experiment_id|attribution|promo\.servgo\.ru' "$ROOT"               --exclude-dir=.git --exclude='*.db' --exclude='*.sqlite*' --exclude='*.log' 2>/dev/null               | sed "s#^$ROOT/##" | head -n 100 || true
+          else
+            echo "app_root_missing"
+          fi
+
+          echo "=== PROMO-LIKE DIRECTORIES ==="
+          find /var/www /opt -maxdepth 4 -type d \( -iname '*promo*' -o -iname '*servgo*' \) 2>/dev/null             | head -n 100 || true
+          REMOTE
