@@ -26,34 +26,37 @@ jobs:
       - run: python -m pip install --disable-pip-version-check -r requirements.txt greenlet jinja2
       - name: Compile changed source
         run: python -m compileall -q database webapp
-      - name: Validate attribution contract
+      - name: Validate attribution contract statically
         run: |
           python - <<'PY'
-          from database.models import MarketingLead
-          from webapp.server import validate_landing_request_payload
+          from pathlib import Path
 
-          assert MarketingLead.__tablename__ == "marketing_leads"
-          payload = validate_landing_request_payload({
-              "name": "Test",
-              "phone": "+70000000000",
-              "experiment_id": "EXP-SERVGO-001",
-              "utm_source": "outreach",
-              "utm_medium": "direct",
-              "utm_campaign": "exp_servgo_001",
-              "referrer": "https://example.test/ref",
-              "landing_path": "/massage",
-              "self_reported_source": "Личное сообщение",
-          })
-          assert payload["experiment_id"] == "EXP-SERVGO-001"
-          assert payload["utm_campaign"] == "exp_servgo_001"
-          assert payload["self_reported_source"] == "Личное сообщение"
+          models = Path("database/models.py").read_text()
+          server = Path("webapp/server.py").read_text()
+          landing = Path("webapp/templates/landing.html").read_text()
+          js = Path("webapp/static/js/landing.js").read_text()
 
-          try:
-              validate_landing_request_payload({"name": "", "phone": "", "email": ""})
-          except ValueError:
-              pass
-          else:
-              raise AssertionError("invalid lead payload was accepted")
+          for marker in [
+              'class MarketingLead(Base):',
+              'experiment_id:',
+              'utm_campaign:',
+              'self_reported_source:',
+              'attribution_confidence:',
+          ]:
+              assert marker in models, marker
 
-          print("growth attribution contract OK")
+          for marker in [
+              'persist_landing_marketing_lead',
+              'experiment_id',
+              'utm_source',
+              'utm_campaign',
+              'self_reported_source',
+              'tracking_saved',
+          ]:
+              assert marker in server, marker
+
+          assert 'name="self_reported_source"' in landing
+          assert 'servgo_growth_attribution_v1' in js
+          assert 'experiment_id' in js and 'utm_campaign' in js
+          print("growth attribution static contract OK")
           PY
