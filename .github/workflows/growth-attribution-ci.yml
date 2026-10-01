@@ -1,0 +1,59 @@
+name: Temporary growth attribution CI
+
+on:
+  push:
+    branches:
+      - feature/growth-attribution
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      BOT_TOKEN: "123456:TESTTOKEN"
+      DB_TYPE: "postgresql"
+      DB_PASSWORD: "test"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Compile changed source
+        run: python -m compileall -q database webapp
+      - name: Validate attribution contract
+        run: |
+          python - <<'PY'
+          from database.models import MarketingLead
+          from webapp.server import validate_landing_request_payload
+
+          assert MarketingLead.__tablename__ == "marketing_leads"
+          payload = validate_landing_request_payload({
+              "name": "Test",
+              "phone": "+70000000000",
+              "experiment_id": "EXP-SERVGO-001",
+              "utm_source": "outreach",
+              "utm_medium": "direct",
+              "utm_campaign": "exp_servgo_001",
+              "referrer": "https://example.test/ref",
+              "landing_path": "/massage",
+              "self_reported_source": "Личное сообщение",
+          })
+          assert payload["experiment_id"] == "EXP-SERVGO-001"
+          assert payload["utm_campaign"] == "exp_servgo_001"
+          assert payload["self_reported_source"] == "Личное сообщение"
+
+          try:
+              validate_landing_request_payload({"name": "", "phone": "", "email": ""})
+          except ValueError:
+              pass
+          else:
+              raise AssertionError("invalid lead payload was accepted")
+
+          print("growth attribution contract OK")
+          PY
