@@ -815,15 +815,20 @@ def _group_bookings_by_visit(bookings: list) -> dict:
 
 
 async def check_and_send_reminders(bot: Bot):
-    """Проверка и отправка напоминаний о предстоящих записях (с группировкой по визитам)"""
+    """Send due reminders without relying on a narrow +/-5 minute window.
+
+    A restart can no longer permanently skip a reminder merely because the
+    process was down at the exact target minute. Business times are currently
+    interpreted in SERVGO_TIMEZONE (Europe/Moscow by default).
+    """
     try:
         async with async_session_maker() as session:
-            now = datetime.now()  # Используем локальное время
-
-            # === Напоминания за 24 часа ===
-            time_24h_from_now = now + timedelta(hours=24)
-            time_24h_window_start = time_24h_from_now - timedelta(minutes=5)
-            time_24h_window_end = time_24h_from_now + timedelta(minutes=5)
+            timezone_name = os.getenv("SERVGO_TIMEZONE", "Europe/Moscow")
+            try:
+                now = datetime.now(ZoneInfo(timezone_name)).replace(tzinfo=None)
+            except Exception:
+                logger.warning("Invalid SERVGO_TIMEZONE=%s; falling back to Europe/Moscow", timezone_name)
+                now = datetime.now(ZoneInfo("Europe/Moscow")).replace(tzinfo=None)
 
             result = await session.execute(
                 select(Booking)
@@ -831,56 +836,47 @@ async def check_and_send_reminders(bot: Bot):
                     selectinload(Booking.client),
                     selectinload(Booking.business),
                     selectinload(Booking.service),
-                    selectinload(Booking.employee)
+                    selectinload(Booking.employee),
                 )
                 .where(Booking.status.in_(["pending", "confirmed"]))
-                .where(Booking.reminder_24h_sent == False)
             )
-            bookings_24h = list(result.scalars().all())
+            active_bookings = list(result.scalars().all())
 
-            # Фильтруем по времени
-            bookings_24h_filtered = []
-            for booking in bookings_24h:
+            due_24h = []
+            due_2h = []
+            two_hours = now + timedelta(hours=2)
+            twenty_four_hours = now + timedelta(hours=24)
+
+            for booking in active_bookings:
                 booking_datetime = datetime.combine(booking.booking_date, booking.booking_time)
-                if time_24h_window_start <= booking_datetime <= time_24h_window_end:
-                    bookings_24h_filtered.append(booking)
+                if booking_datetime <= now:
+                    continue
 
-            # Группируем по визитам и отправляем
-            groups_24h = _group_bookings_by_visit(bookings_24h_filtered)
-            for group_key, group_bookings in groups_24h.items():
+                if (
+                    not booking.reminder_24h_sent
+                    and two_hours < booking_datetime <= twenty_four_hours
+                ):
+                    due_24h.append(booking)
+
+                if (
+                    not booking.reminder_2h_sent
+                    and now < booking_datetime <= two_hours
+                ):
+                    due_2h.append(booking)
+
+            groups_24h = _group_bookings_by_visit(due_24h)
+            for group_bookings in groups_24h.values():
                 await send_grouped_24h_reminder(bot, group_bookings, session)
 
-            # === Напоминания за 2 часа ===
-            time_2h_from_now = now + timedelta(hours=2)
-            time_2h_window_start = time_2h_from_now - timedelta(minutes=5)
-            time_2h_window_end = time_2h_from_now + timedelta(minutes=5)
-
-            result = await session.execute(
-                select(Booking)
-                .options(
-                    selectinload(Booking.client),
-                    selectinload(Booking.business),
-                    selectinload(Booking.service),
-                    selectinload(Booking.employee)
-                )
-                .where(Booking.status.in_(["pending", "confirmed"]))
-                .where(Booking.reminder_2h_sent == False)
-            )
-            bookings_2h = list(result.scalars().all())
-
-            # Фильтруем по времени
-            bookings_2h_filtered = []
-            for booking in bookings_2h:
-                booking_datetime = datetime.combine(booking.booking_date, booking.booking_time)
-                if time_2h_window_start <= booking_datetime <= time_2h_window_end:
-                    bookings_2h_filtered.append(booking)
-
-            # Группируем по визитам и отправляем
-            groups_2h = _group_bookings_by_visit(bookings_2h_filtered)
-            for group_key, group_bookings in groups_2h.items():
+            groups_2h = _group_bookings_by_visit(due_2h)
+            for group_bookings in groups_2h.values():
                 await send_grouped_2h_reminder(bot, group_bookings, session)
 
-            logger.info(f"Checked reminders: {len(groups_24h)} visits for 24h, {len(groups_2h)} visits for 2h")
+            logger.info(
+                "Checked reminders: %s visits due <=24h, %s visits due <=2h",
+                len(groups_24h),
+                len(groups_2h),
+            )
 
     except Exception as e:
         logger.error(f"Error checking reminders: {e}")
