@@ -502,6 +502,7 @@ export function MyBookingsPage() {
     const canCancel = booking.can_cancel !== undefined ? booking.can_cancel : statusAllowsModify
     const canReschedule = booking.can_reschedule !== undefined ? booking.can_reschedule : statusAllowsModify
     const canModify = canCancel || canReschedule
+    const canAddCalendar = booking.status !== 'cancelled' && booking.status !== 'completed' && !isPast(booking.date)
     const isRescheduling = reschedulingId === booking.id
 
     return (
