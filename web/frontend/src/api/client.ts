@@ -120,6 +120,9 @@ export interface Booking {
   created_at: string;
   can_cancel?: boolean;
   can_reschedule?: boolean;
+  notify_token?: string;
+  business_address?: string;
+  duration_minutes?: number;
 }
 
 export interface SubscriptionServiceItem {
