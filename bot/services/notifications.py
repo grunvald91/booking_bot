@@ -323,19 +323,42 @@ async def send_grouped_2h_reminder(bot: Bot, bookings: list, session: AsyncSessi
 
             message += "\n\n✨ Ждём вас! 😊"
 
-        await bot.send_message(
-            chat_id=client.telegram_id,
-            text=message,
-            parse_mode="HTML"
-        )
+        telegram_sent = False
+        if client and client.telegram_id and client.telegram_id > 0:
+            try:
+                await bot.send_message(
+                    chat_id=client.telegram_id,
+                    text=message,
+                    parse_mode="HTML"
+                )
+                telegram_sent = True
+            except Exception as telegram_error:
+                logger.warning(
+                    "Telegram 2h reminder failed for user %s: %s",
+                    client.telegram_id,
+                    telegram_error,
+                )
 
-        # Отмечаем для ВСЕХ записей группы
-        for b in bookings:
-            b.reminder_2h_sent = True
-        await session.commit()
+        push_sent = False
+        try:
+            push_sent = await send_booking_webpush(bookings, session, "2h") > 0
+        except Exception as push_error:
+            logger.warning("Web Push 2h reminder failed: %s", push_error)
+
+        if telegram_sent or push_sent:
+            for b in bookings:
+                b.reminder_2h_sent = True
+            await session.commit()
+        else:
+            await session.rollback()
 
         booking_ids = [b.id for b in bookings]
-        logger.info(f"Sent grouped 2h reminder for bookings {booking_ids} to user {client.telegram_id}")
+        logger.info(
+            "2h reminder bookings=%s telegram=%s webpush=%s",
+            booking_ids,
+            telegram_sent,
+            push_sent,
+        )
 
     except Exception as e:
         booking_ids = [b.id for b in bookings]
