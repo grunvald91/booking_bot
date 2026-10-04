@@ -14,16 +14,20 @@ function pad(value: number) {
   return String(value).padStart(2, '0')
 }
 
-function icsDate(date: Date) {
+function wallClockIcs(date: Date) {
   return [
-    date.getFullYear(),
-    pad(date.getMonth() + 1),
-    pad(date.getDate()),
+    date.getUTCFullYear(),
+    pad(date.getUTCMonth() + 1),
+    pad(date.getUTCDate()),
     'T',
-    pad(date.getHours()),
-    pad(date.getMinutes()),
-    pad(date.getSeconds()),
+    pad(date.getUTCHours()),
+    pad(date.getUTCMinutes()),
+    pad(date.getUTCSeconds()),
   ].join('')
+}
+
+function utcIcs(date: Date) {
+  return wallClockIcs(date) + 'Z'
 }
 
 function escapeIcs(value: string) {
@@ -37,8 +41,11 @@ function escapeIcs(value: string) {
 export function downloadBookingIcs(booking: CalendarBooking) {
   const [year, month, day] = booking.date.split('-').map(Number)
   const [hours, minutes] = booking.time.split(':').map(Number)
-  const start = new Date(year, month - 1, day, hours, minutes, 0)
-  const end = new Date(start.getTime() + Math.max(booking.durationMinutes || 60, 15) * 60_000)
+
+  // UTC constructors are used only as timezone-independent wall-clock arithmetic.
+  // The resulting components are written with TZID=Europe/Moscow below.
+  const startWall = new Date(Date.UTC(year, month - 1, day, hours, minutes, 0))
+  const endWall = new Date(startWall.getTime() + Math.max(booking.durationMinutes || 60, 15) * 60_000)
 
   const uid = `servgo-${booking.date}-${booking.time.replace(':', '')}-${Date.now()}@servgo`
   const title = `${booking.businessName} — ${booking.serviceName}`
@@ -48,11 +55,21 @@ export function downloadBookingIcs(booking: CalendarBooking) {
     'PRODID:-//ServGo//Booking Calendar//RU',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
+    'BEGIN:VTIMEZONE',
+    `TZID:${DEFAULT_TIMEZONE}`,
+    `X-LIC-LOCATION:${DEFAULT_TIMEZONE}`,
+    'BEGIN:STANDARD',
+    'TZOFFSETFROM:+0300',
+    'TZOFFSETTO:+0300',
+    'TZNAME:MSK',
+    'DTSTART:19700101T000000',
+    'END:STANDARD',
+    'END:VTIMEZONE',
     'BEGIN:VEVENT',
     `UID:${uid}`,
-    `DTSTAMP:${icsDate(new Date())}Z`,
-    `DTSTART;TZID=${DEFAULT_TIMEZONE}:${icsDate(start)}`,
-    `DTEND;TZID=${DEFAULT_TIMEZONE}:${icsDate(end)}`,
+    `DTSTAMP:${utcIcs(new Date())}`,
+    `DTSTART;TZID=${DEFAULT_TIMEZONE}:${wallClockIcs(startWall)}`,
+    `DTEND;TZID=${DEFAULT_TIMEZONE}:${wallClockIcs(endWall)}`,
     `SUMMARY:${escapeIcs(title)}`,
     booking.address ? `LOCATION:${escapeIcs(booking.address)}` : '',
     booking.description ? `DESCRIPTION:${escapeIcs(booking.description)}` : '',
