@@ -16,6 +16,7 @@ from database.models import Booking, User, Business, Employee
 from database.crud import get_business_owners
 from bot.utils.validators import format_date_with_weekday, format_phone
 from bot.utils.business_types import get_terminology, is_venue_rental_type
+from bot.services.webpush import send_booking_webpush
 
 
 def get_employee_label(business_type: str) -> str:
