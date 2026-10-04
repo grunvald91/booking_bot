@@ -10,6 +10,8 @@ import {
 import { api, type Booking } from '../../api/client'
 import { hapticSelection, hapticSuccess, hapticError } from '../../utils/telegram'
 import { ClientShell } from '../../components/ClientShell'
+import { NotificationSetup } from '../../components/NotificationSetup'
+import { downloadBookingIcs } from '../../utils/calendar'
 import { useNavigate } from 'react-router-dom'
 
 // ── Status config ──
