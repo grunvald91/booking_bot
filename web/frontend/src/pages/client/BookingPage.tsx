@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef, Component, type ReactNode } from 'react'
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { ClientShell } from '../../components/ClientShell'
+import { NotificationSetup } from '../../components/NotificationSetup'
+import { downloadBookingIcs } from '../../utils/calendar'
 import './booking.css'
 
 // Защита от белого экрана: если в success-рендере что-то падает,
