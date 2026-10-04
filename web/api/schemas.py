@@ -180,6 +180,8 @@ class BookingOut(BaseModel):
     business_name: str
     service_name: str
     service_price: Optional[int] = None
+    business_address: Optional[str] = None
+    duration_minutes: Optional[int] = None
     date: date
     time: str
     status: str
