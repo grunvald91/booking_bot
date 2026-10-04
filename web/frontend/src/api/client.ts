@@ -383,6 +383,19 @@ export const api = {
     }),
   getMe: () => request<AuthResponse['user']>('/auth/me'),
 
+  // PWA / Web Push
+  getPushPublicKey: () =>
+    request<{ public_key: string }>('/notifications/vapid-public-key'),
+  subscribePush: (data: {
+    endpoint: string;
+    keys: { p256dh: string; auth: string };
+    notify_token?: string;
+  }) =>
+    request<{ ok: boolean }>('/notifications/subscribe', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   // Client
   getBusinesses: () => request<Business[]>('/businesses'),
   getBusiness: (id: number) => request<BusinessDetail>(`/businesses/${id}`),
