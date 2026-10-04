@@ -613,6 +613,7 @@ export function MyBookingsPage() {
 
   return (
     <ClientShell title="Мои записи">
+      <NotificationSetup />
       {renderSection('Сегодня', groupedBookings.today)}
       {renderSection('Предстоящие', groupedBookings.upcoming)}
       {renderSection('Прошедшие', groupedBookings.past)}
