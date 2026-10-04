@@ -16,6 +16,7 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { Logo } from './Logo'
+import { PwaInstallPrompt } from './PwaInstallPrompt'
 
 const clientNav = [
   { to: '/', label: 'Главная', icon: Home },
