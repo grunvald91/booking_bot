@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from database.models import (  # noqa: F401
     Base, User, Business, Service, Employee, Booking, VenueTimePricing,
     BusinessOwner, Subscription, SubscriptionService, ClientSubscription, SubscriptionUsage,
-    EmployeeService, EmployeeDayOff,
+    EmployeeService, EmployeeDayOff, PushSubscription,
 )
 
 DATABASE_URL = os.getenv(
