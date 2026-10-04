@@ -204,6 +204,8 @@ export function Layout() {
         <Outlet />
       </main>
 
+      {!isAdmin && <PwaInstallPrompt />}
+
       {/* Mobile bottom tab bar (client + admin) */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-50">
         {/* Profile panel — client only */}
