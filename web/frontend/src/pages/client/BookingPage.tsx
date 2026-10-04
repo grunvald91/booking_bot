@@ -824,7 +824,31 @@ function BookingPageInner() {
             </div>
           </div>
 
-          {/* Bot subscribe — чтобы анонимный web-клиент мог получать уведомления о подтверждении */}
+          <NotificationSetup notifyToken={createdNotifyToken} />
+
+          {selectedDate && selectedTime && business && (
+            <button
+              type="button"
+              onClick={() => downloadBookingIcs({
+                businessName: business.name,
+                serviceName: mainServiceLabel || 'Запись',
+                date: selectedDate,
+                time: selectedTime,
+                durationMinutes: totalDuration || selectedService?.duration_minutes || 60,
+                address: business.address,
+                description: selectedRoomOrEmployee
+                  ? `${mainServiceLabel} · ${selectedRoomOrEmployee.name}`
+                  : mainServiceLabel,
+              })}
+              className="ds-btn ds-btn--ghost ds-btn--block"
+              style={{ marginTop: 12 }}
+            >
+              <Calendar size={17} />
+              Добавить в календарь
+            </button>
+          )}
+
+          {/* Bot subscribe — дополнительный канал, не единственная доставка */}
           {createdNotifyToken && (
             <a
               href={`https://t.me/Sochiservice_bot?start=notify_${createdNotifyToken}`}
