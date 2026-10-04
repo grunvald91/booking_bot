@@ -190,6 +190,8 @@ def _booking_to_out(b: Booking, can_cancel: bool = False, can_reschedule: bool =
         business_name=b.business.name if b.business else "",
         service_name=b.service.name if b.service else "",
         service_price=b.service.price if b.service else None,
+        business_address=b.business.address if b.business else None,
+        duration_minutes=(b.duration_minutes or (b.service.duration_minutes if b.service else None)),
         date=b.booking_date,
         time=b.booking_time.strftime("%H:%M"),
         status=b.status,
