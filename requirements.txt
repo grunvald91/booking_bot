@@ -10,7 +10,7 @@ alembic>=1.13.1
 
 # Utilities
 python-dotenv>=1.0.1
-pywebpush>=2.0.3
+pywebpush>=2.5.0
 pytz>=2024.1
 qrcode[pil]>=7.4.2
 
