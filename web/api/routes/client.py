@@ -1149,6 +1149,9 @@ async def reschedule_booking(
     for b in chain:
         b.booking_date = body.date
         b.booking_time = current_dt.time()
+        # A moved visit needs fresh reminders for the new date/time.
+        b.reminder_24h_sent = False
+        b.reminder_2h_sent = False
         svc_dur = b.service.duration_minutes if b.service else 30
         current_dt += timedelta(minutes=svc_dur)
 
