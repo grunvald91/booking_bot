@@ -1033,11 +1033,10 @@ async def reschedule_booking(
     for item in chain:
         item.booking_date = body.date
         item.booking_time = current_dt.time()
-        item.reminder_24h_sent = False
-        item.reminder_2h_sent = False
-        item.staff_reminder_24h_sent = False
-        item.staff_reminder_2h_sent = False
         current_dt += timedelta(minutes=booking_resource_duration(item))
+
+    from bot.services.notification_events import clear_upcoming_reminder_deliveries
+    await clear_upcoming_reminder_deliveries(chain, db)
 
     try:
         await db.commit()
