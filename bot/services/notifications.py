@@ -1,7 +1,6 @@
 """
 Модуль для отправки уведомлений клиентам, мастерам и владельцам
 """
-import json
 import logging
 import os
 from datetime import datetime, timedelta
@@ -18,6 +17,11 @@ from database import async_session_maker
 from database.models import Booking, User, Business, Employee, NotificationDelivery
 from database.crud import get_business_owners
 from database.booking_safety import booking_resource_duration
+from notification_rules import (
+    due_reminder_offset,
+    format_reminder_offset,
+    normalize_reminder_minutes,
+)
 from bot.utils.validators import format_date_with_weekday, format_phone
 from bot.utils.business_types import get_terminology, is_venue_rental_type
 from bot.services.webpush import send_booking_webpush, send_staff_booking_webpush
@@ -369,45 +373,6 @@ async def send_grouped_2h_reminder(bot: Bot, bookings: list, session: AsyncSessi
         logger.error(f"Error sending grouped 2h reminder for bookings {booking_ids}: {e}")
 
 
-def _format_reminder_offset(minutes: int) -> str:
-    if minutes % 1440 == 0:
-        days = minutes // 1440
-        return f"{days} дн."
-    if minutes % 60 == 0:
-        hours = minutes // 60
-        return f"{hours} ч."
-    return f"{minutes} мин."
-
-
-def _parse_staff_reminder_offsets(raw) -> list[int]:
-    if not raw:
-        return [1440, 120]
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            return [1440, 120]
-    if not isinstance(raw, (list, tuple)):
-        return [1440, 120]
-    values: list[int] = []
-    for item in raw:
-        try:
-            minutes = int(item)
-        except (TypeError, ValueError):
-            continue
-        if 5 <= minutes <= 10080 and minutes not in values:
-            values.append(minutes)
-    return sorted(values, reverse=True)[:6] or [1440, 120]
-
-
-def _due_staff_offset(remaining_minutes: float, offsets: list[int]) -> int | None:
-    """Pick only the nearest configured reminder that is already due."""
-    if remaining_minutes <= 0:
-        return None
-    eligible = [offset for offset in offsets if remaining_minutes <= offset]
-    return min(eligible) if eligible else None
-
-
 def _staff_reminder_dedupe_key(
     bookings: list[Booking],
     audience: str,
@@ -476,7 +441,7 @@ async def send_grouped_staff_reminder(
 
     audience_label = "владельцу" if audience == "owner" else "мастеру"
     message = (
-        f"⏰ <b>Запись через {_format_reminder_offset(offset_minutes)}</b>\n\n"
+        f"⏰ <b>Запись через {format_reminder_offset(offset_minutes)}</b>\n\n"
         f"🏢 {business.name}\n"
         f"📅 {format_date_with_weekday(first.booking_date)}\n"
         f"🕐 {first.booking_time.strftime('%H:%M')}\n"
@@ -1134,10 +1099,10 @@ async def check_and_send_reminders(bot: Bot):
                     continue
 
                 if getattr(business, "owner_reminders_enabled", True):
-                    owner_offsets = _parse_staff_reminder_offsets(
+                    owner_offsets = normalize_reminder_minutes(
                         getattr(business, "owner_reminder_minutes", None)
                     )
-                    owner_due = _due_staff_offset(remaining_minutes, owner_offsets)
+                    owner_due = due_reminder_offset(remaining_minutes, owner_offsets)
                     if owner_due is not None:
                         key = _staff_reminder_dedupe_key(
                             group_bookings,
@@ -1155,10 +1120,10 @@ async def check_and_send_reminders(bot: Bot):
                             owner_count += 1
 
                 if getattr(business, "master_reminders_enabled", True):
-                    master_offsets = _parse_staff_reminder_offsets(
+                    master_offsets = normalize_reminder_minutes(
                         getattr(business, "master_reminder_minutes", None)
                     )
-                    master_due = _due_staff_offset(remaining_minutes, master_offsets)
+                    master_due = due_reminder_offset(remaining_minutes, master_offsets)
                     if master_due is not None:
                         key = _staff_reminder_dedupe_key(
                             group_bookings,
