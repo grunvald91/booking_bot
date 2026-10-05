@@ -766,7 +766,7 @@ async def admin_reschedule_booking(
     user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Перенос записи владельцем/админом (drag&drop или кнопка «Перенести»)."""
+    """Move a booking under serialized source/target resource locks."""
     biz_ids = await _get_owner_business_ids(db, user)
 
     result = await db.execute(
@@ -777,26 +777,37 @@ async def admin_reschedule_booking(
             selectinload(Booking.service),
             selectinload(Booking.employee),
         )
+        .with_for_update()
     )
     booking = result.scalar_one_or_none()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     if booking.business_id not in biz_ids:
         raise HTTPException(status_code=403, detail="Not your business")
-    if booking.status not in ("pending", "confirmed"):
+    if booking.status not in ACTIVE_BOOKING_STATUSES:
         raise HTTPException(status_code=400, detail="Эту запись нельзя перенести")
 
-    # Parse target slot
     try:
         h, m = map(int, data.time.split(":"))
         new_time = dt_time(h, m)
     except (ValueError, AttributeError):
         raise HTTPException(status_code=400, detail="Invalid time")
 
-    duration = booking.duration_minutes or (booking.service.duration_minutes if booking.service else 30)
-    slot_start = datetime.combine(data.date, new_time)
-    slot_end = slot_start + timedelta(minutes=duration or 30)
     target_employee_id = data.employee_id if data.employee_id is not None else booking.employee_id
+    if target_employee_id:
+        target_employee = (
+            await db.execute(
+                select(Employee).where(
+                    Employee.id == target_employee_id,
+                    Employee.business_id == booking.business_id,
+                    Employee.is_active.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if not target_employee:
+            raise HTTPException(status_code=404, detail="Employee/resource not found")
+
+    duration = booking_resource_duration(booking)
     if booking.duration_minutes is not None:
         if target_employee_id != booking.employee_id:
             raise HTTPException(status_code=400, detail="Для смены судна создайте новую заявку")
@@ -805,44 +816,60 @@ async def admin_reschedule_booking(
         if not business.working_hours_start or not business.working_hours_end:
             raise HTTPException(status_code=409, detail="Расписание не настроено")
         try:
-            allowed = available_starts(data.date, business.working_hours_start,
-                                       business.working_hours_end, duration, [],
-                                       now=datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None))
+            allowed = available_starts(
+                data.date,
+                business.working_hours_start,
+                business.working_hours_end,
+                duration,
+                [],
+                now=datetime.now(ZoneInfo("Europe/Moscow")).replace(tzinfo=None),
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if data.time not in allowed:
             raise HTTPException(status_code=409, detail="Время вне рабочих часов или уже прошло")
 
-    # Проверка пересечений с другими записями этого сотрудника
-    if target_employee_id:
-        result = await db.execute(
-            select(Booking)
-            .where(
-                and_(
-                    Booking.business_id == booking.business_id,
-                    Booking.employee_id == target_employee_id,
-                    Booking.booking_date == data.date,
-                    Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent", "prepayment_confirmed"]),
-                    Booking.id != booking.id,
-                )
-            )
-            .options(selectinload(Booking.service))
+    # Lock both source and target resources in deterministic order so two
+    # simultaneous drag&drop operations cannot swap into each other.
+    resource_ids = sorted(
+        {
+            resource_id
+            for resource_id in (booking.employee_id, target_employee_id)
+            if resource_id is not None
+        }
+    )
+    for resource_id in resource_ids:
+        await lock_resource_days(db, resource_id, [booking.booking_date, data.date])
+
+    try:
+        await ensure_resource_available(
+            db,
+            employee_id=target_employee_id,
+            booking_date=data.date,
+            booking_time=new_time,
+            duration_minutes=duration,
+            exclude_booking_ids=[booking.id],
+            acquire_lock=False,
         )
-        for eb in result.scalars().all():
-            eb_start = datetime.combine(data.date, eb.booking_time)
-            eb_dur = eb.duration_minutes or (eb.service.duration_minutes if eb.service else 30) or 30
-            eb_end = eb_start + timedelta(minutes=eb_dur)
-            if not (slot_end <= eb_start or slot_start >= eb_end):
-                raise HTTPException(status_code=409, detail="На это время уже есть запись")
+    except BookingConflictError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="На это время уже есть запись") from exc
 
     booking.booking_date = data.date
     booking.booking_time = new_time
-    # A moved visit needs fresh reminders for the new date/time.
     booking.reminder_24h_sent = False
     booking.reminder_2h_sent = False
     if data.employee_id is not None:
         booking.employee_id = target_employee_id
-    await db.commit()
+
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        message = str(exc).lower()
+        if "bookings_no_active_resource_overlap" in message or "exclusion" in message:
+            raise HTTPException(status_code=409, detail="На это время уже есть запись") from exc
+        raise
 
     result = await db.execute(
         select(Booking)
