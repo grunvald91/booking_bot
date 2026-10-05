@@ -9,6 +9,7 @@ on:
       - 'bot/services/webpush.py'
       - 'database/models.py'
       - 'database/booking_safety.py'
+      - 'booking_intervals.py'
       - 'tests/test_booking_safety.py'
       - 'requirements.txt'
       - 'migrations/add_push_subscriptions.sql'
@@ -57,6 +58,7 @@ jobs:
             bot/services/notifications.py \
             bot/services/webpush.py \
             database/models.py \
+            booking_intervals.py \
             database/booking_safety.py \
             database/crud.py \
             web/api/main.py \
