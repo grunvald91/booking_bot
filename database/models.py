@@ -44,6 +44,22 @@ class User(Base):
     client_subscriptions: Mapped[List["ClientSubscription"]] = relationship(back_populates="client", cascade="all, delete-orphan")
 
 
+class PushSubscription(Base):
+    """Web Push subscription for an installed/browser ServGo client."""
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    endpoint: Mapped[str] = mapped_column(Text, unique=True)
+    p256dh: Mapped[str] = mapped_column(Text)
+    auth: Mapped[str] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Business(Base):
     """Бизнесы (салон красоты, автосервис и т.д.)"""
     __tablename__ = "businesses"
@@ -63,6 +79,8 @@ class Business(Base):
     photos: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON массив file_id фотографий
     video: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Telegram file_id видеообзора
     directions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Как добраться
+    booking_labels: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON: кастомные названия шагов записи
+    booking_flow_order: Mapped[str] = mapped_column(String(32), default="service_first")  # service_first | resource_first
 
     # Настройки предоплаты
     prepayment_enabled: Mapped[bool] = mapped_column(Boolean, default=False)  # Включена ли предоплата
@@ -181,6 +199,7 @@ class Employee(Base):
     min_booking_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Минимальное время бронирования
     solo_price_per_hour: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Спецтариф соло (₽/час)
     photos: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON список file_id фото
+    primary_photo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # выбранный file_id главного фото
     video: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # file_id видео
     on_duty_date: Mapped[Optional[datetime.date]] = mapped_column(Date, nullable=True)  # Дата дежурства
     duty_schedule: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON: ["2026-03-25","2026-03-26",...] — график дежурств

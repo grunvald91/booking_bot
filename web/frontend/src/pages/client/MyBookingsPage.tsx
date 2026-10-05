@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import {
   ClipboardList,
   RefreshCw,
+  Calendar,
   ChevronLeft,
   ChevronRight,
   User,
@@ -9,6 +10,8 @@ import {
 import { api, type Booking } from '../../api/client'
 import { hapticSelection, hapticSuccess, hapticError } from '../../utils/telegram'
 import { ClientShell } from '../../components/ClientShell'
+import { NotificationSetup } from '../../components/NotificationSetup'
+import { downloadBookingIcs } from '../../utils/calendar'
 import { useNavigate } from 'react-router-dom'
 
 // ── Status config ──
@@ -499,6 +502,7 @@ export function MyBookingsPage() {
     const canCancel = booking.can_cancel !== undefined ? booking.can_cancel : statusAllowsModify
     const canReschedule = booking.can_reschedule !== undefined ? booking.can_reschedule : statusAllowsModify
     const canModify = canCancel || canReschedule
+    const canAddCalendar = booking.status !== 'cancelled' && booking.status !== 'completed' && !isPast(booking.date)
     const isRescheduling = reschedulingId === booking.id
 
     return (
@@ -534,8 +538,26 @@ export function MyBookingsPage() {
           </p>
         )}
 
-        {canModify && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--s-line)' }}>
+        {(canModify || canAddCalendar) && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--s-line)', flexWrap: 'wrap' }}>
+            {canAddCalendar && (
+              <button
+                onClick={() => downloadBookingIcs({
+                  businessName: booking.business_name,
+                  serviceName: booking.service_name,
+                  date: booking.date,
+                  time: booking.time,
+                  durationMinutes: booking.duration_minutes || 60,
+                  address: booking.business_address,
+                  description: booking.employee_name ? `${booking.service_name} · ${booking.employee_name}` : booking.service_name,
+                })}
+                className="ds-sub ds-accent"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 650, display: 'flex', alignItems: 'center', gap: 5 }}
+              >
+                <Calendar size={14} />
+                В календарь
+              </button>
+            )}
             {canReschedule && (
               <button
                 onClick={() => {
@@ -591,6 +613,7 @@ export function MyBookingsPage() {
 
   return (
     <ClientShell title="Мои записи">
+      <NotificationSetup />
       {renderSection('Сегодня', groupedBookings.today)}
       {renderSection('Предстоящие', groupedBookings.upcoming)}
       {renderSection('Прошедшие', groupedBookings.past)}

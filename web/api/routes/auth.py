@@ -37,7 +37,7 @@ from servgo_auth import (
     verify_telegram_login,
 )
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "***REMOVED***")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -162,6 +162,9 @@ async def _token_for_telegram_user(
 
 async def _send_code_via_telegram(phone: str, code: str, db: AsyncSession) -> bool:
     """Try to send verification code via Telegram bot. Returns True if sent."""
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN is not configured; Telegram OTP delivery is unavailable")
+        return False
     try:
         result = await db.execute(select(User).where(User.phone == phone))
         user = result.scalar_one_or_none()

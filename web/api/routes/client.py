@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..photo_transport import create_photo_client
-from ..database import get_db, Business, Service, Employee, Booking, User, VenueTimePricing
+from ..database import get_db, Business, Service, Employee, EmployeeService, Booking, User, VenueTimePricing
 from ..deps import get_current_user, get_current_user_optional
 from database.crud import get_or_create_guest_user
 from ..booking_utils import compute_recurring_dates
@@ -43,6 +43,25 @@ router = APIRouter()
 
 
 # ---------- helpers ----------
+
+
+BOOKING_LABEL_KEYS = {"service", "resource", "additional_services", "date", "time"}
+
+
+def _parse_booking_labels(raw) -> dict[str, str]:
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, str] = {}
+    for key, label in value.items():
+        if key in BOOKING_LABEL_KEYS and isinstance(label, str) and label.strip():
+            result[key] = label.strip()[:80]
+    return result
 
 
 async def _build_prepayment_owner_msg(booking: Booking, db: AsyncSession, receipt_note: str = None) -> str:
@@ -190,6 +209,8 @@ def _booking_to_out(b: Booking, can_cancel: bool = False, can_reschedule: bool =
         business_name=b.business.name if b.business else "",
         service_name=b.service.name if b.service else "",
         service_price=b.service.price if b.service else None,
+        business_address=b.business.address if b.business else None,
+        duration_minutes=(b.duration_minutes or (b.service.duration_minutes if b.service else None)),
         date=b.booking_date,
         time=b.booking_time.strftime("%H:%M"),
         status=b.status,
@@ -250,6 +271,8 @@ def _employee_to_out(e: Employee, pricing_rules: list = None) -> EmployeeOut:
         area_sqm=getattr(e, 'area_sqm', None),
         solo_price_per_hour=getattr(e, 'solo_price_per_hour', None),
         photos=getattr(e, 'photos', None),
+        primary_photo=getattr(e, 'primary_photo', None),
+        service_ids=[link.service_id for link in getattr(e, 'employee_services', [])],
         venue_time_pricing=tp_list,
     )
 
@@ -298,7 +321,7 @@ async def get_business(business_id: int, db: AsyncSession = Depends(get_db)):
         .where(Business.id == business_id)
         .options(
             selectinload(Business.services),
-            selectinload(Business.employees),
+            selectinload(Business.employees).selectinload(Employee.employee_services),
         )
     )
     biz = result.scalar_one_or_none()
@@ -343,7 +366,14 @@ async def get_business(business_id: int, db: AsyncSession = Depends(get_db)):
         payment_phone=getattr(biz, 'payment_phone', None),
         payment_details=getattr(biz, 'payment_details', None),
         cancellation_policy_photo=getattr(biz, 'cancellation_policy_photo', None),
+        cancellation_policy_text=getattr(biz, 'cancellation_policy_text', None),
         require_receipt_for_prepayment=getattr(biz, 'require_receipt_for_prepayment', False) or False,
+        booking_labels=_parse_booking_labels(getattr(biz, 'booking_labels', None)),
+        booking_flow_order=(
+            getattr(biz, 'booking_flow_order', 'service_first')
+            if getattr(biz, 'booking_flow_order', 'service_first') in ("service_first", "resource_first")
+            else "service_first"
+        ),
     )
 
 
@@ -551,6 +581,27 @@ async def create_booking(
         svc_ids = [body.service_id]
     if not svc_ids:
         raise HTTPException(status_code=400, detail="No service specified")
+
+    # Validate the selected resource and its explicit service links. An employee/resource
+    # with no links keeps the legacy "works with all services" behaviour.
+    if body.employee_id:
+        emp_result = await db.execute(
+            select(Employee).where(
+                Employee.id == body.employee_id,
+                Employee.business_id == body.business_id,
+                Employee.is_active == True,
+            )
+        )
+        selected_employee = emp_result.scalar_one_or_none()
+        if not selected_employee:
+            raise HTTPException(status_code=404, detail="Employee/resource not found")
+        links_result = await db.execute(
+            select(EmployeeService.service_id).where(EmployeeService.employee_id == body.employee_id)
+        )
+        linked_service_ids = {row[0] for row in links_result.all()}
+        incompatible = [service_id for service_id in svc_ids if linked_service_ids and service_id not in linked_service_ids]
+        if incompatible:
+            raise HTTPException(status_code=422, detail="Selected resource does not provide one or more selected services")
 
     # Parse start time
     try:
@@ -1147,6 +1198,9 @@ async def reschedule_booking(
     for b in chain:
         b.booking_date = body.date
         b.booking_time = current_dt.time()
+        # A moved visit needs fresh reminders for the new date/time.
+        b.reminder_24h_sent = False
+        b.reminder_2h_sent = False
         svc_dur = b.service.duration_minutes if b.service else 30
         current_dt += timedelta(minutes=svc_dur)
 

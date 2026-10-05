@@ -56,6 +56,7 @@ export interface Employee {
   min_booking_minutes?: number;
   solo_price_per_hour?: number;
   photos?: string;
+  primary_photo?: string;
   on_duty_date?: string;
   service_ids?: number[];
 }
@@ -101,6 +102,8 @@ export interface BusinessDetail extends Business {
   cancellation_policy_photo?: string;
   cancellation_policy_text?: string;
   require_receipt_for_prepayment?: boolean;
+  booking_labels?: Record<string, string>;
+  booking_flow_order?: 'service_first' | 'resource_first';
 }
 
 export interface Booking {
@@ -120,6 +123,9 @@ export interface Booking {
   created_at: string;
   can_cancel?: boolean;
   can_reschedule?: boolean;
+  notify_token?: string;
+  business_address?: string;
+  duration_minutes?: number;
 }
 
 export interface SubscriptionServiceItem {
@@ -263,6 +269,8 @@ export interface BusinessAdminDetail {
   cancellation_policy_photo?: string;
   cancellation_policy_text?: string;
   require_receipt_for_prepayment: boolean;
+  booking_labels?: Record<string, string>;
+  booking_flow_order?: 'service_first' | 'resource_first';
 }
 
 export interface BusinessUpdateData {
@@ -282,6 +290,8 @@ export interface BusinessUpdateData {
   payment_details?: string;
   cancellation_policy_text?: string;
   require_receipt_for_prepayment?: boolean;
+  booking_labels?: Record<string, string>;
+  booking_flow_order?: 'service_first' | 'resource_first';
 }
 
 export interface OwnerInfo {
@@ -380,12 +390,26 @@ export const api = {
     }),
   getMe: () => request<AuthResponse['user']>('/auth/me'),
 
+  // PWA / Web Push
+  getPushPublicKey: () =>
+    request<{ public_key: string }>('/notifications/vapid-public-key'),
+  subscribePush: (data: {
+    endpoint: string;
+    keys: { p256dh: string; auth: string };
+    notify_token?: string;
+  }) =>
+    request<{ ok: boolean }>('/notifications/subscribe', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   // Client
   getBusinesses: () => request<Business[]>('/businesses'),
   getBusiness: (id: number) => request<BusinessDetail>(`/businesses/${id}`),
-  getSlots: async (bizId: number, serviceId: number, date: string) => {
+  getSlots: async (bizId: number, serviceId: number, date: string, employeeId?: number) => {
+    const employeeQuery = employeeId ? `&employee_id=${employeeId}` : '';
     const data = await request<Array<{ time: string } | string>>(
-      `/businesses/${bizId}/slots?service_id=${serviceId}&date=${date}`
+      `/businesses/${bizId}/slots?service_id=${serviceId}&date=${date}${employeeQuery}`
     );
     // Normalize: API returns [{time:"09:00"},...] but we need ["09:00",...]
     return data.map((s) => (typeof s === 'string' ? s : s.time));
@@ -632,7 +656,7 @@ export const api = {
     request<{ photos: string[] }>(`/admin/businesses/${bizId}/photo/${photoIndex}`, { method: 'DELETE' }),
 
   // Employee photo management
-  uploadEmployeePhoto: async (bizId: number, empId: number, file: File): Promise<{ file_id: string; photos: string[] }> => {
+  uploadEmployeePhoto: async (bizId: number, empId: number, file: File): Promise<{ file_id: string; photos: string[]; primary_photo?: string }> => {
     const formData = new FormData();
     formData.append('file', file);
     const token = localStorage.getItem('token');
@@ -652,7 +676,12 @@ export const api = {
     return res.json();
   },
   deleteEmployeePhoto: (bizId: number, empId: number, photoIndex: number) =>
-    request<{ photos: string[] }>(`/admin/businesses/${bizId}/employees/${empId}/photo/${photoIndex}`, { method: 'DELETE' }),
+    request<{ photos: string[]; primary_photo?: string }>(`/admin/businesses/${bizId}/employees/${empId}/photo/${photoIndex}`, { method: 'DELETE' }),
+  setEmployeePrimaryPhoto: (bizId: number, empId: number, fileId: string) =>
+    request<{ photos: string[]; primary_photo: string }>(`/admin/businesses/${bizId}/employees/${empId}/primary-photo`, {
+      method: 'PUT',
+      body: JSON.stringify({ file_id: fileId }),
+    }),
 
   // AI Chat
   aiChat: (message: string, businessId?: number) =>

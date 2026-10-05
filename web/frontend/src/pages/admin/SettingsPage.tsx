@@ -99,6 +99,19 @@ export function SettingsPage() {
   const [qrTelegram, setQrTelegram] = useState<string | null>(null)
   const [qrWebapp, setQrWebapp] = useState<string | null>(null)
 
+  const handleSetEmpPrimaryPhoto = async (empId: number, fileId: string) => {
+    if (!businessId) return
+    try {
+      const res = await api.setEmployeePrimaryPhoto(businessId, empId, fileId)
+      setEmployees((prev) =>
+        prev.map((e) => (e.id === empId ? { ...e, primary_photo: res.primary_photo } : e))
+      )
+      showToast('Главное фото изменено')
+    } catch (e) {
+      alert('Ошибка выбора главного фото: ' + (e instanceof Error ? e.message : String(e)))
+    }
+  }
+
   // Owners
   const [owners, setOwners] = useState<OwnerInfo[]>([])
   const [ownerModalOpen, setOwnerModalOpen] = useState(false)
@@ -172,6 +185,8 @@ export function SettingsPage() {
           payment_details: biz.payment_details || '',
           cancellation_policy_text: biz.cancellation_policy_text || '',
           require_receipt_for_prepayment: biz.require_receipt_for_prepayment ?? false,
+          booking_labels: biz.booking_labels || {},
+          booking_flow_order: biz.booking_flow_order || 'service_first',
         })
         try {
           setPhotos(biz.photos ? JSON.parse(biz.photos) : [])
@@ -221,6 +236,27 @@ export function SettingsPage() {
       showToast('Профиль сохранён')
     } catch (e) {
       alert('Ошибка при сохранении: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleSaveBookingFlow = async () => {
+    if (!businessId) return
+    setSaving(true)
+    try {
+      const updated = await api.updateBusiness(businessId, {
+        booking_labels: form.booking_labels || {},
+        booking_flow_order: form.booking_flow_order || 'service_first',
+      })
+      setForm((prev) => ({
+        ...prev,
+        booking_labels: updated.booking_labels || {},
+        booking_flow_order: updated.booking_flow_order || 'service_first',
+      }))
+      showToast('Сценарий записи сохранён')
+    } catch (e) {
+      alert('Ошибка при сохранении сценария: ' + (e instanceof Error ? e.message : String(e)))
     } finally {
       setSaving(false)
     }
@@ -283,7 +319,9 @@ export function SettingsPage() {
       const res = await api.uploadEmployeePhoto(businessId, empId, file)
       setEmployees((prev) =>
         prev.map((e) =>
-          e.id === empId ? { ...e, photos: JSON.stringify(res.photos) } : e
+          e.id === empId
+            ? { ...e, photos: JSON.stringify(res.photos), primary_photo: res.primary_photo ?? e.primary_photo }
+            : e
         )
       )
       showToast('Фото загружено')
@@ -303,7 +341,11 @@ export function SettingsPage() {
       setEmployees((prev) =>
         prev.map((e) =>
           e.id === empId
-            ? { ...e, photos: res.photos.length > 0 ? JSON.stringify(res.photos) : undefined }
+            ? {
+                ...e,
+                photos: res.photos.length > 0 ? JSON.stringify(res.photos) : undefined,
+                primary_photo: res.primary_photo,
+              }
             : e
         )
       )
@@ -519,7 +561,76 @@ export function SettingsPage() {
           </button>
         </section>
 
-        {/* === 2. Photos === */}
+        {/* === 2. Booking flow === */}
+        <section className="ds-card" style={{ padding: 14 }}>
+          <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <DoorOpen size={18} style={{ color: 'var(--s-accent)' }} />
+            Сценарий записи
+          </h2>
+          <p className="ds-sub" style={{ marginBottom: 14 }}>
+            Названия увидит клиент. Можно использовать свои термины: «яхта», «зал», «мастер», «процедура» и т.д.
+          </p>
+
+          {([
+            ['resource', isVenueRental ? 'Зал' : 'Мастер', 'Ресурс / сотрудник'],
+            ['service', 'Услуга', 'Услуги'],
+            ['additional_services', 'Доп. услуги', 'Дополнительные услуги'],
+            ['date', 'Дата', 'Дата'],
+            ['time', 'Время', 'Время'],
+          ] as const).map(([key, placeholder, label]) => (
+            <div className="ds-field" key={key}>
+              <label className="ds-label">{label}</label>
+              <input
+                type="text"
+                maxLength={80}
+                value={form.booking_labels?.[key] || ''}
+                placeholder={placeholder}
+                onChange={(e) =>
+                  updateField('booking_labels', {
+                    ...(form.booking_labels || {}),
+                    [key]: e.target.value,
+                  })
+                }
+                className="ds-input"
+              />
+            </div>
+          ))}
+
+          <div className="ds-field" style={{ marginBottom: 0 }}>
+            <label className="ds-label">Что клиент выбирает сначала</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {([
+                ['service_first', 'Сначала услугу'],
+                ['resource_first', isVenueRental ? 'Сначала зал / яхту' : 'Сначала мастера'],
+              ] as const).map(([value, label]) => {
+                const selected = (form.booking_flow_order || 'service_first') === value
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => updateField('booking_flow_order', value)}
+                    className={selected ? 'ds-btn ds-btn--primary' : 'ds-btn'}
+                    aria-pressed={selected}
+                    style={{ minHeight: 42 }}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <button
+            onClick={handleSaveBookingFlow}
+            disabled={saving}
+            className="ds-btn ds-btn--primary ds-btn--block"
+            style={{ marginTop: 14 }}
+          >
+            {saving ? 'Сохранение...' : 'Сохранить сценарий'}
+          </button>
+        </section>
+
+        {/* === 3. Photos === */}
         <section className="ds-card" style={{ padding: 14 }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <Camera size={18} style={{ color: 'var(--s-accent)' }} />
@@ -712,6 +823,8 @@ export function SettingsPage() {
                             borderRadius: 8,
                             overflow: 'hidden',
                             background: 'var(--s-surface-2)',
+                            outline: emp.primary_photo === fid ? '2px solid var(--s-accent)' : 'none',
+                            outlineOffset: emp.primary_photo === fid ? 1 : 0,
                           }}
                         >
                           <img
@@ -720,6 +833,43 @@ export function SettingsPage() {
                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                             loading="lazy"
                           />
+                          {emp.primary_photo === fid ? (
+                            <span
+                              style={{
+                                position: 'absolute',
+                                left: 4,
+                                bottom: 4,
+                                padding: '3px 6px',
+                                borderRadius: 999,
+                                background: 'var(--s-accent)',
+                                color: '#fff',
+                                fontSize: 9,
+                                fontWeight: 700,
+                              }}
+                            >
+                              Главное
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleSetEmpPrimaryPhoto(emp.id, fid)}
+                              style={{
+                                position: 'absolute',
+                                left: 4,
+                                bottom: 4,
+                                padding: '3px 6px',
+                                borderRadius: 999,
+                                border: 'none',
+                                background: 'rgba(0,0,0,0.65)',
+                                color: '#fff',
+                                fontSize: 9,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Сделать главной
+                            </button>
+                          )}
                           <button
                             onClick={() => handleEmpPhotoDelete(emp.id, idx)}
                             aria-label="Удалить"

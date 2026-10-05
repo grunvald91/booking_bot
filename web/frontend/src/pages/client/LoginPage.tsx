@@ -57,6 +57,7 @@ export function LoginPage() {
           localStorage.setItem('token', res.token)
           localStorage.setItem('userRole', res.role)
           localStorage.setItem('userName', res.user.full_name)
+          sessionStorage.removeItem('servgoExplicitLogout')
           navigate(res.role === 'admin' || res.role === 'owner' ? '/admin' : '/')
         } catch {
           setError('Неверный код. Попробуйте снова.')
@@ -76,6 +77,7 @@ export function LoginPage() {
   }
 
   const handleTelegramLogin = () => {
+    sessionStorage.removeItem('servgoExplicitLogout')
     window.open('https://t.me/Sochiservice_bot?start=login', '_blank')
   }
 
