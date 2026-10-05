@@ -1135,118 +1135,105 @@ async def get_telegram_photo(file_id: str):
 # ---------- Shared prepayment/receipt logic (used by both id-based and token-based routes) ----------
 
 async def _mark_prepayment_sent(booking: Booking, db: AsyncSession) -> dict:
-    """Mark that the client has sent the prepayment and notify the owner."""
+    """Mark payment as sent and request owner confirmation via Telegram + PWA."""
     booking.status = "prepayment_sent"
     await db.commit()
+    await db.refresh(booking)
 
-    # Notify owner — SAME format as bot (_build_prepayment_owner_text + get_booking_admin_actions_keyboard)
     try:
-        business = booking.business
-        if business and business.owner_id:
-            owner_result = await db.execute(select(User).where(User.id == business.owner_id))
-            owner = owner_result.scalar_one_or_none()
-            if owner and owner.telegram_id:
-                msg = await _build_prepayment_owner_msg(booking, db)
-                prepay_kb = {
-                    "inline_keyboard": [
-                        [{"text": "✅ Подтвердить оплату", "callback_data": f"confirm_prepayment:{booking.id}"}],
-                        [{"text": "❌ Отменить бронь / нет оплаты", "callback_data": f"reject_prepayment:{booking.id}"}]
-                    ]
-                }
-                bot_token = os.getenv("BOT_TOKEN", "").strip()
-                async with httpx.AsyncClient(timeout=30) as http:
-                    resp = await http.post(
-                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                        json={"chat_id": owner.telegram_id, "text": msg, "parse_mode": "HTML", "reply_markup": prepay_kb},
-                    )
-                    if resp.status_code != 200:
-                        logger.error(f"Telegram sendMessage failed for prepayment booking {booking.id}: {resp.status_code} {resp.text}")
-                    else:
-                        logger.info(f"Prepayment notification sent to owner {owner.telegram_id} for booking {booking.id}")
-            else:
-                logger.warning(f"No owner telegram_id for booking {booking.id}")
-        else:
-            logger.warning(f"No business/owner for booking {booking.id}")
-    except Exception as e:
-        logger.error(f"Prepayment notification error for booking {booking.id}: {e}", exc_info=True)
+        from bot.services.notification_events import dispatch_booking_event
+        await dispatch_booking_event(
+            [booking],
+            db,
+            "prepayment_submitted",
+            include_client=False,
+            staff_audience="owner",
+            prepayment_actions=True,
+        )
+    except Exception as notification_error:
+        logger.error(
+            "Prepayment-submitted notification failed for booking %s: %s",
+            booking.id,
+            notification_error,
+            exc_info=True,
+        )
 
     return {"message": "Payment notification recorded"}
 
 
 async def _send_receipt_and_notify(booking: Booking, db: AsyncSession, file: UploadFile) -> dict:
-    """Upload a receipt photo: forward it to the owner via Telegram and mark prepayment_sent."""
+    """Upload a receipt to owners, then request confirmation through both channels."""
     booking.status = "prepayment_sent"
     await db.commit()
+    await db.refresh(booking)
 
-    # Send receipt to owner — same flow as bot:
-    # 1. Send photo/document with short caption
-    # 2. Send detailed text message with confirm/reject buttons
-    try:
-        business = booking.business
-        if business and business.owner_id:
-            owner_result = await db.execute(select(User).where(User.id == business.owner_id))
-            owner = owner_result.scalar_one_or_none()
-            if owner and owner.telegram_id:
-                bot_token = os.getenv("BOT_TOKEN", "").strip()
+    file_content = await file.read()
+    content_type = file.content_type or "image/jpeg"
+    filename = file.filename or "receipt.jpg"
+    is_pdf = content_type == "application/pdf" or filename.lower().endswith(".pdf")
+    bot_token = os.getenv("BOT_TOKEN", "").strip()
 
-                file_content = await file.read()
-                content_type = file.content_type or "image/jpeg"
-                filename = file.filename or "receipt.jpg"
-                is_pdf = content_type == "application/pdf" or (filename and filename.lower().endswith(".pdf"))
-
-                async with httpx.AsyncClient(timeout=30) as http:
-                    # Step 1: send photo/document with short caption (same as bot)
-                    photo_caption = "📸 Чек от клиента"
+    if bot_token and ":" in bot_token:
+        try:
+            from database.crud import get_business_owners
+            owners = await get_business_owners(db, booking.business_id)
+            async with httpx.AsyncClient(timeout=30) as http:
+                for owner in owners:
+                    if not owner.telegram_id or int(owner.telegram_id) <= 0:
+                        continue
                     if is_pdf:
                         resp = await http.post(
                             f"https://api.telegram.org/bot{bot_token}/sendDocument",
-                            data={"chat_id": str(owner.telegram_id), "caption": photo_caption},
+                            data={"chat_id": str(owner.telegram_id), "caption": "📸 Чек от клиента"},
                             files={"document": (filename, file_content, content_type)},
                         )
                     else:
                         resp = await http.post(
                             f"https://api.telegram.org/bot{bot_token}/sendPhoto",
-                            data={"chat_id": str(owner.telegram_id), "caption": photo_caption},
+                            data={"chat_id": str(owner.telegram_id), "caption": "📸 Чек от клиента"},
                             files={"photo": (filename, file_content, content_type)},
                         )
                         if resp.status_code != 200:
-                            logger.warning(f"sendPhoto failed for booking {booking.id}, trying sendDocument: {resp.text[:200]}")
                             resp = await http.post(
                                 f"https://api.telegram.org/bot{bot_token}/sendDocument",
-                                data={"chat_id": str(owner.telegram_id), "caption": photo_caption},
+                                data={"chat_id": str(owner.telegram_id), "caption": "📸 Чек от клиента"},
                                 files={"document": (filename, file_content, content_type)},
                             )
                     if resp.status_code != 200:
-                        logger.error(f"Receipt photo send failed for booking {booking.id}: {resp.status_code} {resp.text}")
+                        logger.warning(
+                            "Receipt upload Telegram delivery failed booking=%s owner=%s status=%s",
+                            booking.id,
+                            owner.id,
+                            resp.status_code,
+                        )
+        except Exception as receipt_error:
+            logger.error(
+                "Receipt file delivery failed for booking %s: %s",
+                booking.id,
+                receipt_error,
+                exc_info=True,
+            )
 
-                    # Step 2: send detailed text with buttons (same format as bot)
-                    msg = await _build_prepayment_owner_msg(
-                        booking, db,
-                        receipt_note="📸 <b>Клиент прикрепил чек (см. фото выше)</b>"
-                    )
-                    prepay_kb = {
-                        "inline_keyboard": [
-                            [{"text": "✅ Подтвердить оплату", "callback_data": f"confirm_prepayment:{booking.id}"}],
-                            [{"text": "❌ Отменить бронь / нет оплаты", "callback_data": f"reject_prepayment:{booking.id}"}]
-                        ]
-                    }
-                    resp2 = await http.post(
-                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                        json={"chat_id": owner.telegram_id, "text": msg, "parse_mode": "HTML", "reply_markup": prepay_kb},
-                    )
-                    if resp2.status_code != 200:
-                        logger.error(f"Receipt text send failed for booking {booking.id}: {resp2.status_code} {resp2.text}")
-                    else:
-                        logger.info(f"Receipt notification sent to owner {owner.telegram_id} for booking {booking.id}")
-            else:
-                logger.warning(f"No owner telegram_id for receipt booking {booking.id}")
-        else:
-            logger.warning(f"No business/owner for receipt booking {booking.id}")
-
-    except Exception as e:
-        logger.error(f"Receipt notification error for booking {booking.id}: {e}", exc_info=True)
+    try:
+        from bot.services.notification_events import dispatch_booking_event
+        await dispatch_booking_event(
+            [booking],
+            db,
+            "prepayment_submitted",
+            include_client=False,
+            staff_audience="owner",
+            prepayment_actions=True,
+        )
+    except Exception as notification_error:
+        logger.error(
+            "Receipt prepayment notification failed for booking %s: %s",
+            booking.id,
+            notification_error,
+            exc_info=True,
+        )
 
     return {"message": "Receipt uploaded and payment notification sent"}
+
 
 
 def _booking_lookup_options():
