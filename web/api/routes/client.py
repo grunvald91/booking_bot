@@ -598,36 +598,51 @@ async def create_booking(
     db: AsyncSession = Depends(get_db),
     user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """Create new booking(s). Supports multiple services with sequential times."""
-    # Validate business
+    """Create a complete visit atomically under one resource lock."""
     biz_result = await db.execute(select(Business).where(Business.id == body.business_id))
     business = biz_result.scalar_one_or_none()
     if not business:
         raise HTTPException(status_code=404, detail="Business not found")
 
-    # Resolve user: authenticated or find/create by phone
     booking_user = user
     if not booking_user:
         if not body.client_phone:
             raise HTTPException(status_code=401, detail="Authentication required or provide client_phone")
-        # Find or create guest client by phone (гостевой профиль, привязан к телефону)
-        booking_user = await get_or_create_guest_user(db, body.client_name or "Web Client", body.client_phone)
+        booking_user = await get_or_create_guest_user(
+            db,
+            body.client_name or "Web Client",
+            body.client_phone,
+        )
 
-    # Determine service IDs list
     svc_ids = list(body.service_ids) if body.service_ids else []
     if not svc_ids and body.service_id:
         svc_ids = [body.service_id]
     if not svc_ids:
         raise HTTPException(status_code=400, detail="No service specified")
+    if len(svc_ids) != len(set(svc_ids)):
+        raise HTTPException(status_code=400, detail="Duplicate services are not allowed")
 
-    # Validate the selected resource and its explicit service links. An employee/resource
-    # with no links keeps the legacy "works with all services" behaviour.
+    services_result = await db.execute(
+        select(Service).where(
+            Service.id.in_(svc_ids),
+            Service.business_id == body.business_id,
+            Service.is_active.is_(True),
+        )
+    )
+    service_map = {service.id: service for service in services_result.scalars().all()}
+    missing_services = [service_id for service_id in svc_ids if service_id not in service_map]
+    if missing_services:
+        raise HTTPException(status_code=404, detail=f"Service {missing_services[0]} not found")
+    main_services = [service_map[service_id] for service_id in svc_ids]
+    if any(service.is_additional for service in main_services):
+        raise HTTPException(status_code=400, detail="Additional service cannot be a main booking service")
+
     if body.employee_id:
         emp_result = await db.execute(
             select(Employee).where(
                 Employee.id == body.employee_id,
                 Employee.business_id == body.business_id,
-                Employee.is_active == True,
+                Employee.is_active.is_(True),
             )
         )
         selected_employee = emp_result.scalar_one_or_none()
@@ -637,147 +652,127 @@ async def create_booking(
             select(EmployeeService.service_id).where(EmployeeService.employee_id == body.employee_id)
         )
         linked_service_ids = {row[0] for row in links_result.all()}
-        incompatible = [service_id for service_id in svc_ids if linked_service_ids and service_id not in linked_service_ids]
+        incompatible = [
+            service_id
+            for service_id in svc_ids
+            if linked_service_ids and service_id not in linked_service_ids
+        ]
         if incompatible:
-            raise HTTPException(status_code=422, detail="Selected resource does not provide one or more selected services")
+            raise HTTPException(
+                status_code=422,
+                detail="Selected resource does not provide one or more selected services",
+            )
 
-    # Parse start time
     try:
         booking_time = datetime.strptime(body.time, "%H:%M").time()
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid time format, expected HH:MM")
 
-    # Повтор: тот же день недели/время, 2-8 повторов включая первый (без repeat_weeks — 1 дата, как раньше).
     occurrence_dates = compute_recurring_dates(body.date, body.repeat_weeks or 1)
-    created_bookings = []
+    created_bookings: list[Booking] = []
 
-    # Pre-compute additional services info for notes
-    addon_notes_parts = []
+    addon_notes_parts: list[str] = []
     addon_total_price = 0
-    if body.additional_service_ids:
-        for addon_id in body.additional_service_ids:
-            addon_res = await db.execute(
-                select(Service).where(Service.id == addon_id, Service.business_id == body.business_id)
+    addon_ids = list(body.additional_service_ids or [])
+    if len(addon_ids) != len(set(addon_ids)):
+        raise HTTPException(status_code=400, detail="Duplicate additional services are not allowed")
+    if addon_ids:
+        addon_result = await db.execute(
+            select(Service).where(
+                Service.id.in_(addon_ids),
+                Service.business_id == body.business_id,
+                Service.is_active.is_(True),
+                Service.is_additional.is_(True),
             )
-            addon_svc = addon_res.scalar_one_or_none()
-            if addon_svc:
-                hours = (body.additional_service_hours or {}).get(str(addon_id), 1)
-                price = (addon_svc.price or 0) * hours
-                addon_total_price += price
-                addon_notes_parts.append(f"+ {addon_svc.name} ({price}₽)")
+        )
+        addon_map = {service.id: service for service in addon_result.scalars().all()}
+        if len(addon_map) != len(addon_ids):
+            raise HTTPException(status_code=400, detail="Additional service not found")
+        for addon_id in addon_ids:
+            addon_svc = addon_map[addon_id]
+            hours = (body.additional_service_hours or {}).get(str(addon_id), 1)
+            price = (addon_svc.price or 0) * hours
+            addon_total_price += price
+            addon_notes_parts.append(f"+ {addon_svc.name} ({price}₽)")
 
-    # Build notes with addon info
     booking_notes = body.notes or ""
     if addon_notes_parts:
         if booking_notes:
             booking_notes += "\n"
         booking_notes += "Доп. услуги: " + ", ".join(addon_notes_parts)
 
-    # Precompute prepayment amount for the visit (same services repeat on
-    # every occurrence date if repeat_weeks is set — one amount applies to
-    # every booking row created below, matching the pattern already used
-    # in webapp/server.py::api_client_create_booking).
     visit_prepayment_amount = None
-    if getattr(business, 'prepayment_enabled', False):
-        main_services_result = await db.execute(
-            select(Service).where(Service.id.in_(svc_ids), Service.business_id == body.business_id)
-        )
-        main_services_price_total = sum((s.price or 0) for s in main_services_result.scalars().all())
-        visit_total_price = main_services_price_total + addon_total_price
+    if getattr(business, "prepayment_enabled", False):
+        visit_total_price = sum((service.price or 0) for service in main_services) + addon_total_price
         prepayment_percent = business.prepayment_percent or 100
         visit_prepayment_amount = int(visit_total_price * prepayment_percent / 100)
 
-    # Phase 1: проверка конфликтов по ВСЕМ датам повтора, без записи в БД.
-    # Атомарность: если конфликтует хоть одна дата — не создаём ничего.
-    if len(occurrence_dates) > 1:
-        conflicts = []
-        for occ_date in occurrence_dates:
-            check_time = datetime.combine(occ_date, booking_time)
-            for svc_id in svc_ids:
-                svc_result = await db.execute(
-                    select(Service).where(
-                        Service.id == svc_id,
-                        Service.business_id == body.business_id,
-                        Service.is_active == True,
-                    )
-                )
-                service = svc_result.scalar_one_or_none()
-                if not service:
-                    raise HTTPException(status_code=404, detail=f"Service {svc_id} not found")
-                bt = check_time.time()
-                conflict_filter = [
-                    Booking.business_id == body.business_id,
-                    Booking.booking_date == occ_date,
-                    Booking.booking_time == bt,
-                    Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"]),
-                ]
-                if body.employee_id:
-                    conflict_filter.append(Booking.employee_id == body.employee_id)
-                conflict_result = await db.execute(select(Booking).where(and_(*conflict_filter)))
-                if conflict_result.scalar_one_or_none():
-                    conflicts.append(f"{occ_date.strftime('%d.%m')} {bt.strftime('%H:%M')}")
-                check_time += timedelta(minutes=service.duration_minutes or 30)
-        if conflicts:
-            raise HTTPException(status_code=409, detail="Занято: " + ", ".join(conflicts))
+    # One lock per resource/day window for the whole recurring series. The
+    # second concurrent request waits here, then re-checks availability after
+    # the first request commits.
+    await lock_resource_days(db, body.employee_id, occurrence_dates)
 
-    # Phase 2: создание записей по каждой дате повтора.
+    visit_duration = sum((service.duration_minutes or 30) for service in main_services)
+    for occ_date in occurrence_dates:
+        try:
+            await ensure_resource_available(
+                db,
+                employee_id=body.employee_id,
+                booking_date=occ_date,
+                booking_time=booking_time,
+                duration_minutes=visit_duration,
+                acquire_lock=False,
+            )
+        except BookingConflictError as exc:
+            await db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail=f"Занято: {occ_date.strftime('%d.%m')} {booking_time.strftime('%H:%M')}",
+            ) from exc
+
+    initial_status = (
+        "pending_prepayment"
+        if getattr(business, "prepayment_enabled", False)
+        else "pending"
+    )
+
     for occ_date in occurrence_dates:
         current_time = datetime.combine(occ_date, booking_time)
-        for svc_id in svc_ids:
-            # Validate service
-            svc_result = await db.execute(
-                select(Service).where(
-                    Service.id == svc_id,
-                    Service.business_id == body.business_id,
-                    Service.is_active == True,
-                )
-            )
-            service = svc_result.scalar_one_or_none()
-            if not service:
-                raise HTTPException(status_code=404, detail=f"Service {svc_id} not found")
-
-            bt = current_time.time()
-
-            # Check for conflicts with row locking to prevent race conditions
-            conflict_filter = [
-                Booking.business_id == body.business_id,
-                Booking.booking_date == occ_date,
-                Booking.booking_time == bt,
-                Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"]),
-            ]
-            if body.employee_id:
-                conflict_filter.append(Booking.employee_id == body.employee_id)
-
-            conflict_result = await db.execute(
-                select(Booking).where(and_(*conflict_filter)).with_for_update(skip_locked=True)
-            )
-            if conflict_result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Time slot {bt.strftime('%H:%M')} is already taken",
-                )
-
-            # Use pending_prepayment status when prepayment is enabled (matches bot flow)
-            initial_status = "pending_prepayment" if getattr(business, 'prepayment_enabled', False) else "pending"
+        for service in main_services:
+            resource_duration = service.duration_minutes or 30
             booking = Booking(
                 business_id=body.business_id,
                 client_id=booking_user.id,
-                service_id=svc_id,
+                service_id=service.id,
                 employee_id=body.employee_id,
                 booking_date=occ_date,
-                booking_time=bt,
+                booking_time=current_time.time(),
                 status=initial_status,
                 notes=booking_notes or None,
                 notify_token=str(uuid.uuid4()),
-                prepayment_amount=visit_prepayment_amount if initial_status == "pending_prepayment" else None,
+                prepayment_amount=(
+                    visit_prepayment_amount
+                    if initial_status == "pending_prepayment"
+                    else None
+                ),
+                resource_duration_minutes=resource_duration,
+                occupies_resource=service_occupies_resource(service),
             )
             db.add(booking)
             created_bookings.append(booking)
+            current_time += timedelta(minutes=resource_duration)
 
-            # Advance time by service duration for sequential bookings
-            current_time += timedelta(minutes=service.duration_minutes or 30)
-
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        message = str(exc).lower()
+        if "bookings_no_active_resource_overlap" in message or "exclusion" in message:
+            raise HTTPException(
+                status_code=409,
+                detail="Выбранное время только что занял другой клиент. Выберите другой слот.",
+            ) from exc
+        raise
 
     # Reload with relationships
     result_bookings = []
