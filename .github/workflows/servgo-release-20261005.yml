@@ -1,4 +1,4 @@
-name: ServGo production drift provenance
+name: ServGo production unique-drift check
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  provenance:
+  check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -20,25 +20,29 @@ jobs:
           fetch-depth: 0
       - name: Install SSH client library
         run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
-      - name: Identify production source provenance
+      - name: Find production-only semantic lines
         shell: bash
         run: |
           python - <<'PY'
-          import base64, hashlib, os, subprocess, tempfile, time
+          import base64, difflib, hashlib, os, pathlib, re, subprocess, time
           import paramiko
-
           HOST='155.212.162.47'; ROOT='/opt/booking_bot'
+          BASE='439b5e9dddfe76dc73e355404ee78b9f06a4318c'
           FP='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
           PATHS=['database/models.py','requirements.txt','web/api/database.py','web/api/main.py','web/api/routes/admin.py','web/api/schemas.py']
-
+          secret=re.compile(r'(password|passwd|secret|token|api[_-]?key|private[_-]?key|credential)',re.I)
+          def norm(data):
+              return data.decode('utf-8','replace').replace('\r\n','\n').replace('\r','\n').splitlines()
+          def safe(line):
+              if secret.search(line) and ('=' in line or ':' in line): return '[REDACTED]'
+              return line[:300]
           class Pinned(paramiko.MissingHostKeyPolicy):
               def missing_host_key(self,c,h,k):
-                  actual=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
-                  if actual!=FP: raise paramiko.SSHException('host key mismatch')
+                  a=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if a!=FP: raise paramiko.SSHException('host key mismatch')
                   c.get_host_keys().add(h,k.get_name(),k)
-
           ssh=None
-          for attempt in range(3):
+          for n in range(3):
               c=paramiko.SSHClient(); c.set_missing_host_key_policy(Pinned())
               try:
                   c.connect(HOST,port=22,username='root',password=os.environ['SERVER_PASSWORD'],
@@ -46,24 +50,37 @@ jobs:
                   ssh=c; break
               except (paramiko.SSHException,OSError,EOFError):
                   c.close()
-                  if attempt==2: raise
+                  if n==2: raise
                   time.sleep(3)
           sftp=ssh.open_sftp()
           try:
               for path in PATHS:
-                  with sftp.open(ROOT+'/'+path,'rb') as rf: data=rf.read()
-                  blob=subprocess.check_output(['git','hash-object','--stdin'],input=data).decode().strip()
-                  hits=subprocess.run(['git','log','--all','--format=%H|%cs|%s','--find-object='+blob,'--',path],
-                                      capture_output=True,text=True).stdout.strip().splitlines()
-                  print(path)
-                  print('  production_blob='+blob)
-                  if hits:
-                      print('  historical_match=yes')
-                      for h in hits[:4]: print('  commit='+h)
-                  else:
-                      print('  historical_match=no')
-                  current=subprocess.check_output(['git','hash-object',path]).decode().strip()
-                  print('  current_blob='+current)
+                  try: base=norm(subprocess.check_output(['git','show',BASE+':'+path],stderr=subprocess.DEVNULL))
+                  except subprocess.CalledProcessError: base=[]
+                  with sftp.open(ROOT+'/'+path,'rb') as rf: prod=norm(rf.read())
+                  cur=pathlib.Path(path).read_text(errors='replace').replace('\r\n','\n').replace('\r','\n').splitlines()
+                  sm=difflib.SequenceMatcher(a=base,b=prod,autojunk=False)
+                  prod_changed=[]
+                  base_removed=[]
+                  for tag,i1,i2,j1,j2 in sm.get_opcodes():
+                      if tag in ('replace','insert'): prod_changed.extend(prod[j1:j2])
+                      if tag in ('replace','delete'): base_removed.extend(base[i1:i2])
+                  cur_stripped={x.strip() for x in cur if x.strip()}
+                  unique=[]
+                  seen=set()
+                  for line in prod_changed:
+                      s=line.strip()
+                      if not s or s in cur_stripped or s in seen: continue
+                      seen.add(s); unique.append(line)
+                  restored=sum(1 for x in base_removed if x.strip() and x.strip() in cur_stripped)
+                  print('\n'+path)
+                  print('  base_lines='+str(len(base))+' production_lines='+str(len(prod))+' current_lines='+str(len(cur)))
+                  print('  production_changed_lines='+str(len(prod_changed)))
+                  print('  production_unique_lines_missing_from_current='+str(len(unique)))
+                  print('  base_lines_removed_on_production_but_present_in_current='+str(restored))
+                  for line in unique[:120]:
+                      print('  UNIQUE> '+safe(line))
+                  if len(unique)>120: print('  ... truncated ...')
           finally:
               sftp.close(); ssh.close()
           PY
