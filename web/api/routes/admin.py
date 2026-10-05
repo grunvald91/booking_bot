@@ -66,6 +66,46 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+BOOKING_LABEL_KEYS = {"service", "resource", "additional_services", "date", "time"}
+
+
+def _parse_booking_labels(raw) -> dict[str, str]:
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, str] = {}
+    for key, label in value.items():
+        if key in BOOKING_LABEL_KEYS and isinstance(label, str) and label.strip():
+            result[key] = label.strip()[:80]
+    return result
+
+
+def _normalize_booking_labels(value: Optional[dict[str, str]]) -> dict[str, str]:
+    if not value:
+        return {}
+    result: dict[str, str] = {}
+    for key, label in value.items():
+        if key not in BOOKING_LABEL_KEYS or not isinstance(label, str):
+            continue
+        clean = label.strip()
+        if clean:
+            result[key] = clean[:80]
+    return result
+
+
+def _business_admin_out(business: Business) -> BusinessAdminDetailOut:
+    data = {column.name: getattr(business, column.name) for column in Business.__table__.columns}
+    data["booking_labels"] = _parse_booking_labels(getattr(business, "booking_labels", None))
+    order = getattr(business, "booking_flow_order", "service_first") or "service_first"
+    data["booking_flow_order"] = order if order in ("service_first", "resource_first") else "service_first"
+    return BusinessAdminDetailOut(**data)
+
+
 async def _get_owner_business_ids(
     db: AsyncSession, user: User
 ) -> List[int]:
@@ -1129,7 +1169,47 @@ async def upload_employee_photo(
     employee.photos = json.dumps(existing_photos)
     await db.commit()
 
-    return {"file_id": file_id, "photos": existing_photos}
+    if not employee.primary_photo:
+        employee.primary_photo = file_id
+        await db.commit()
+
+    return {"file_id": file_id, "photos": existing_photos, "primary_photo": employee.primary_photo}
+
+
+@router.put("/businesses/{business_id}/employees/{employee_id}/primary-photo")
+async def set_employee_primary_photo(
+    business_id: int,
+    employee_id: int,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_admin),
+):
+    """Choose one of the already uploaded employee/resource photos as the preview."""
+    owner_biz_ids = await _get_owner_business_ids(db, user)
+    if business_id not in owner_biz_ids:
+        raise HTTPException(status_code=403, detail="Not your business")
+
+    result = await db.execute(
+        select(Employee).where(Employee.id == employee_id, Employee.business_id == business_id)
+    )
+    employee = result.scalar_one_or_none()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    file_id = payload.get("file_id") if isinstance(payload, dict) else None
+    if not isinstance(file_id, str) or not file_id:
+        raise HTTPException(status_code=422, detail="file_id is required")
+
+    try:
+        photos = json.loads(employee.photos) if employee.photos else []
+    except (json.JSONDecodeError, TypeError):
+        photos = []
+    if not isinstance(photos, list) or file_id not in photos:
+        raise HTTPException(status_code=422, detail="Photo is not uploaded for this resource")
+
+    employee.primary_photo = file_id
+    await db.commit()
+    return {"photos": photos, "primary_photo": file_id}
 
 
 @router.delete("/businesses/{business_id}/employees/{employee_id}/photo/{photo_index}")
@@ -1164,11 +1244,13 @@ async def delete_employee_photo(
     if photo_index < 0 or photo_index >= len(existing_photos):
         raise HTTPException(status_code=404, detail="Photo not found")
 
-    existing_photos.pop(photo_index)
+    removed_photo = existing_photos.pop(photo_index)
     employee.photos = json.dumps(existing_photos) if existing_photos else None
+    if employee.primary_photo == removed_photo or employee.primary_photo not in existing_photos:
+        employee.primary_photo = existing_photos[0] if existing_photos else None
     await db.commit()
 
-    return {"photos": existing_photos}
+    return {"photos": existing_photos, "primary_photo": employee.primary_photo}
 
 
 # ---------- GET /admin/businesses/{id}/detail ----------
@@ -1191,7 +1273,7 @@ async def get_business_detail(
     if not business:
         raise HTTPException(status_code=404, detail="Business not found")
 
-    return BusinessAdminDetailOut.model_validate(business)
+    return _business_admin_out(business)
 
 
 # ---------- PUT /admin/businesses/{id} ----------
@@ -1216,6 +1298,16 @@ async def update_business(
         raise HTTPException(status_code=404, detail="Business not found")
 
     updates = data.model_dump(exclude_unset=True)
+    if "booking_labels" in updates:
+        updates["booking_labels"] = json.dumps(
+            _normalize_booking_labels(updates["booking_labels"]),
+            ensure_ascii=False,
+        )
+    if "booking_flow_order" in updates:
+        order = updates["booking_flow_order"] or "service_first"
+        if order not in ("service_first", "resource_first"):
+            raise HTTPException(status_code=422, detail="Invalid booking_flow_order")
+        updates["booking_flow_order"] = order
     # Convert time strings to time objects. Accept both "HH:MM" and "HH:MM:SS"
     # (the API serializes Time columns as "HH:MM:SS", and an unedited <input type="time">
     # round-trips that exact string back to us).
@@ -1235,7 +1327,7 @@ async def update_business(
 
     await db.commit()
     await db.refresh(business)
-    return BusinessAdminDetailOut.model_validate(business)
+    return _business_admin_out(business)
 
 
 # ---------- Service Reorder ----------
