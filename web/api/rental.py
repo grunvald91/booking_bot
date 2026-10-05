@@ -1,6 +1,4 @@
 """Real resource-based rental requests for venue_rental businesses."""
-import asyncio
-import html
 import logging
 import os
 import secrets
@@ -94,18 +92,6 @@ async def rental_slots(business_id: int, date: date, employee_id: int,
     total, needs_quote, _ = price_quote(employee.solo_price_per_hour, duration_hours, [])
     return {'slots': slots, 'hourly_rate': employee.solo_price_per_hour,
             'base_price': total, 'price_requires_confirmation': needs_quote}
-
-
-async def _notify_owner(owner_telegram_id: int, text: str):
-    token = os.getenv('BOT_TOKEN', '')
-    if not token or ':' not in token or not owner_telegram_id:
-        return
-    try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            await client.post(f'https://api.telegram.org/bot{token}/sendMessage',
-                              json={'chat_id': owner_telegram_id, 'text': text, 'parse_mode': 'HTML'})
-    except Exception:
-        log.exception('Unable to notify rental owner')
 
 
 @router.post('/businesses/{business_id}/rental/bookings', status_code=201)
@@ -236,14 +222,23 @@ async def create_rental_booking(business_id: int, body: RentalRequest,
         raise
 
     await db.refresh(booking)
-    owner = await db.get(User, business.owner_id)
-    if owner:
-        msg = (f'🛥 Новая заявка: <b>{html.escape(business.name)}</b> №{booking.id}\n'
-               f'{html.escape(employee.name)} · {body.date:%d.%m.%Y} {body.time} · {body.duration_hours} ч\n'
-               f'Клиент: {html.escape(client_name)} · {html.escape(client_phone)}\n'
-               f'{"Цена требует подтверждения" if needs_quote else f"Предварительно {total} ₽"}\n'
-               f'Откройте ServGo → Расписание для подтверждения.')
-        asyncio.create_task(_notify_owner(owner.telegram_id, msg))
+    try:
+        from bot.services.booking_events import notify_booking_event
+        await notify_booking_event(
+            db,
+            [booking.id],
+            "rental_request",
+            notify_client=False,
+            notify_staff=True,
+            staff_owners_only=True,
+        )
+    except Exception as notify_error:
+        log.error(
+            "Rental request notification failed booking=%s: %s",
+            booking.id,
+            notify_error,
+            exc_info=True,
+        )
     return {**_public_status(booking), 'tracking_token': booking.notify_token}
 
 
