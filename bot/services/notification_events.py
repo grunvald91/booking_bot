@@ -225,6 +225,9 @@ def _client_message(
                 f"\n\nБыло: {old_date.strftime('%d.%m.%Y')} "
                 f"в {old_time.strftime('%H:%M')}"
             )
+    elif event_kind == "prepayment_rejected":
+        header = "❌ <b>Предоплата не подтверждена</b>"
+        tail = "\n\nПроверьте реквизиты и отправьте подтверждение оплаты ещё раз."
     else:
         header = "🔔 <b>Статус записи обновлён</b>"
         tail = ""
@@ -355,6 +358,24 @@ async def dispatch_booking_event(
             and client.telegram_id
             and int(client.telegram_id) > 0
         ):
+            client_markup = None
+            if event_kind == "prepayment_rejected":
+                client_markup = {
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": "✅ Оплата отправлена",
+                                "callback_data": f"prepay_sent:{first.id}",
+                            }
+                        ],
+                        [
+                            {
+                                "text": "📸 Прикрепить чек",
+                                "callback_data": f"prepay_attach_receipt:{first.id}",
+                            }
+                        ],
+                    ]
+                }
             if await _telegram_send(
                 int(client.telegram_id),
                 _client_message(
@@ -363,6 +384,7 @@ async def dispatch_booking_event(
                     old_date=old_date,
                     old_time=old_time,
                 ),
+                reply_markup=client_markup,
             ):
                 client_telegram = 1
         if send_client_webpush:
