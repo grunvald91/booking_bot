@@ -11,16 +11,23 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from .database import get_db, Business, Service, Employee, Booking, User, BusinessOwner
 from .deps import get_current_admin
 from .rental_logic import available_starts, price_quote
+from database.booking_safety import (
+    ACTIVE_BOOKING_STATUSES,
+    BookingConflictError,
+    ensure_resource_available,
+    lock_resource_days,
+)
 
 router = APIRouter()
 log = logging.getLogger(__name__)
-ACTIVE = ('pending', 'confirmed', 'pending_prepayment', 'prepayment_sent', 'prepayment_confirmed')
+ACTIVE = ACTIVE_BOOKING_STATUSES
 LOCAL_TZ = ZoneInfo('Europe/Moscow')
 
 
@@ -104,22 +111,51 @@ async def _notify_owner(owner_telegram_id: int, text: str):
 @router.post('/businesses/{business_id}/rental/bookings', status_code=201)
 async def create_rental_booking(business_id: int, body: RentalRequest,
                                 db: AsyncSession = Depends(get_db)):
-    business, employee = await _rental_context(db, business_id, body.employee_id, lock=True)
+    business, employee = await _rental_context(db, business_id, body.employee_id)
     try:
         requested_time = time.fromisoformat(body.time)
     except ValueError as exc:
         raise HTTPException(400, 'Invalid time') from exc
     if requested_time.second or requested_time.minute or requested_time.microsecond:
         raise HTTPException(400, 'Choose a whole-hour start')
+
+    duration_minutes = body.duration_hours * 60
+
+    # Use the same stable transaction lock as ordinary bookings. This lock
+    # exists even while the requested slot has no booking row yet.
+    await lock_resource_days(db, employee.id, [body.date])
+    try:
+        await ensure_resource_available(
+            db,
+            employee_id=employee.id,
+            booking_date=body.date,
+            booking_time=requested_time,
+            duration_minutes=duration_minutes,
+            acquire_lock=False,
+        )
+    except BookingConflictError as exc:
+        await db.rollback()
+        raise HTTPException(409, 'The vessel is unavailable for the full interval') from exc
+
+    # Schedule/past-time validation stays in the rental-specific pure helper,
+    # but availability is re-read only after the resource lock is held.
     busy = await _booked_intervals(db, business_id, employee.id, body.date)
     try:
-        slots = available_starts(body.date, business.working_hours_start, business.working_hours_end,
-                                 body.duration_hours * 60, busy,
-                                 now=datetime.now(LOCAL_TZ).replace(tzinfo=None))
+        slots = available_starts(
+            body.date,
+            business.working_hours_start,
+            business.working_hours_end,
+            duration_minutes,
+            busy,
+            now=datetime.now(LOCAL_TZ).replace(tzinfo=None),
+        )
     except ValueError as exc:
+        await db.rollback()
         raise HTTPException(400, str(exc)) from exc
     if body.time not in slots:
+        await db.rollback()
         raise HTTPException(409, 'The vessel is unavailable for the full interval')
+
     if len(body.additional_service_ids) != len(set(body.additional_service_ids)) or len(body.additional_service_ids) > 8:
         raise HTTPException(400, 'Invalid additional services')
     addon_names = []
@@ -137,40 +173,68 @@ async def create_rental_booking(business_id: int, body: RentalRequest,
                 quoted_addon = True
             else:
                 fixed.append(addon.price)
+
     main = (await db.execute(select(Service).where(
         Service.business_id == business_id, Service.is_additional.is_(False),
         Service.is_active.is_(True)).order_by(Service.id))).scalars().first()
     if main is None:
         raise HTTPException(409, 'Rental service not configured')
+
     total, needs_quote, addon_fixed = price_quote(employee.solo_price_per_hour, body.duration_hours, fixed)
     needs_quote = needs_quote or quoted_addon
     if quoted_addon:
-        total = None  # Never present an incomplete quote as the final price.
+        total = None
+
     client_phone = body.client_phone.strip()
     client_name = body.client_name.strip()
     digits = ''.join(c for c in client_phone if c.isdigit())
     if len(client_name) < 2 or not (10 <= len(digits) <= 15):
         raise HTTPException(400, 'Valid name and phone are required')
-    # A web guest is a distinct requester: reusing an existing account by phone alone
-    # can show another person's name in the owner's schedule.
-    client = User(telegram_id=-secrets.randbelow(2**60)-1, full_name=client_name,
-                  phone=('+' if client_phone.startswith('+') else '') + digits)
+
+    client = User(
+        telegram_id=-secrets.randbelow(2**60)-1,
+        full_name=client_name,
+        phone=('+' if client_phone.startswith('+') else '') + digits,
+    )
     db.add(client)
     await db.flush()
-    notes = [f'Аренда {body.duration_hours} ч. Судно: {employee.name}.',
-             'Доп. услуги: ' + ', '.join(addon_names) if addon_names else '',
-             f'Фиксированные доп. услуги: {addon_fixed} ₽.' if addon_fixed else '',
-             'Требуется подтверждение цены менеджером.' if needs_quote else f'Предварительная сумма: {total} ₽.',
-             'Предоплата: до 20%, точную сумму подтверждает владелец.',
-             f'Комментарий клиента: {body.notes.strip()}' if body.notes.strip() else '']
-    booking = Booking(business_id=business_id, client_id=client.id, service_id=main.id,
-                      employee_id=employee.id, booking_date=body.date, booking_time=requested_time,
-                      duration_minutes=body.duration_hours*60, estimated_price=total,
-                      price_requires_confirmation=needs_quote, prepayment_amount=None,
-                      status='pending', notes='\n'.join(x for x in notes if x),
-                      notify_token=secrets.token_urlsafe(32))
+
+    notes = [
+        f'Аренда {body.duration_hours} ч. Судно: {employee.name}.',
+        'Доп. услуги: ' + ', '.join(addon_names) if addon_names else '',
+        f'Фиксированные доп. услуги: {addon_fixed} ₽.' if addon_fixed else '',
+        'Требуется подтверждение цены менеджером.' if needs_quote else f'Предварительная сумма: {total} ₽.',
+        'Предоплата: до 20%, точную сумму подтверждает владелец.',
+        f'Комментарий клиента: {body.notes.strip()}' if body.notes.strip() else '',
+    ]
+    booking = Booking(
+        business_id=business_id,
+        client_id=client.id,
+        service_id=main.id,
+        employee_id=employee.id,
+        booking_date=body.date,
+        booking_time=requested_time,
+        duration_minutes=duration_minutes,
+        resource_duration_minutes=duration_minutes,
+        occupies_resource=True,
+        estimated_price=total,
+        price_requires_confirmation=needs_quote,
+        prepayment_amount=None,
+        status='pending',
+        notes='\n'.join(x for x in notes if x),
+        notify_token=secrets.token_urlsafe(32),
+    )
     db.add(booking)
-    await db.commit()
+
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        message = str(exc).lower()
+        if "bookings_no_active_resource_overlap" in message or "exclusion" in message:
+            raise HTTPException(409, 'The vessel is unavailable for the full interval') from exc
+        raise
+
     await db.refresh(booking)
     owner = await db.get(User, business.owner_id)
     if owner:
