@@ -1314,234 +1314,259 @@ function BookingPageInner() {
       )}
 
       {/* ═══════════════════════════════════════ */}
-      {/* VENUE RENTAL FLOW                       */}
+      {/* VENUE RENTAL FLOW */}
       {/* ═══════════════════════════════════════ */}
 
       {isVenue && (
         <>
-          {/* 1. Service selection (multi) — first */}
-          <div ref={refVenueServices} className="bk-section">
-            <SectionHeader
-              icon={<Scissors size={20} />}
-              title="Выберите услуги"
-              subtitle="можно несколько"
-            />
-            <div className="bk-option-list">
-              {services.map((svc) => {
-                const isSelected = selectedServices.some((s) => s.id === svc.id)
-                return (
-                  <button
-                    key={svc.id}
-                    onClick={() => {
-                      setSelectedServices((prev) =>
-                        prev.some((s) => s.id === svc.id)
-                          ? prev.filter((s) => s.id !== svc.id)
-                          : [...prev, svc]
-                      )
-                    }}
-                    className={`bk-option ${isSelected ? 'is-selected' : ''}`}
-                  >
-                    <div style={{ flex: 1, textAlign: 'left' }}>
-                      <h3 className="bk-option-title">
-                        {svc.name}
-                      </h3>
-                      {svc.description && (
-                        <p className="bk-option-desc">{svc.description}</p>
-                      )}
-                      {formatDuration(svc.duration_minutes) && (
-                        <div className="bk-option-meta">
-                          <span className="bk-option-meta-item">
-                            {formatDuration(svc.duration_minutes)}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    <div className={`bk-check ${isSelected ? 'is-on' : ''}`}>
-                      {isSelected && <Check size={14} strokeWidth={3} />}
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-
-            {/* Summary */}
-            {selectedServices.length > 0 && (
-              <div className="bk-summary-row">
-                <div className="ds-sub">
-                  {selectedServices.length} услуг
-                  {selectedServices.reduce((sum, s) => sum + (s.duration_minutes ?? 0), 0) > 0 &&
-                    ` \u00B7 ${formatDuration(selectedServices.reduce((sum, s) => sum + (s.duration_minutes ?? 0), 0))}`}
-                </div>
-                <button
-                  onClick={() => scrollToRef(refRoom, 100)}
-                  className="lnk"
-                >
-                  Далее ↓
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* 2. Date — after services */}
-          {showDateSection && (
-            <div ref={refDate} className="bk-section bk-fade-in">
-              <SectionHeader
-                icon={<Calendar size={20} />}
-                title="Выберите дату"
-              />
-              <CalendarPicker
-                selected={selectedDate}
-                onSelect={(date) => {
-                  setSelectedDate(date)
-                  setSelectedTime(null)
-                  setPriceData(null)
-                  scrollToRef(refRoom)
-                }}
-              />
-            </div>
-          )}
-
-          {/* 3. Room selection — after date */}
-          {showRoomSection && (
-            <div ref={refRoom} className="bk-section bk-fade-in">
-              <SectionHeader
-                icon={<DoorOpen size={20} />}
-                title="Выберите зал"
-              />
+          {flowOrder === 'resource_first' && showRoomSection && (
+            <div ref={refRoom} className="bk-section">
+              <SectionHeader icon={<DoorOpen size={20} />} title={`Выберите: ${labels.resource}`} />
               <div className="bk-option-grid bk-option-grid--2">
                 {employees.map((room) => {
                   const isSelected = selectedRoom?.id === room.id
                   const priceRange = getRoomPriceRange(room)
                   const photoIds = parsePhotos(room.photos)
-                  const cover = photoIds[0]
+                  const cover = room.primary_photo || photoIds[0]
                   return (
-                    <button
-                      key={room.id}
-                      onClick={() => {
-                        setSelectedRoom(room)
-                        scrollToRef(refTime)
-                      }}
-                      className={`bk-option bk-room-card ${isSelected ? 'is-selected' : ''}`}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                        <div className="bk-room-thumb">
-                          {cover ? (
-                            <img
-                              src={`/api/telegram-photo/${encodeURIComponent(cover)}`}
-                              alt={room.name}
-                              loading="lazy"
-                            />
-                          ) : (
-                            <Music size={20} />
-                          )}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <h3 className="bk-option-title">
-                            {room.name}
-                          </h3>
-                          {room.description && (
-                            <p className="bk-option-desc" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                              {room.description}
-                            </p>
-                          )}
-                          <div className="bk-option-meta">
-                            {room.capacity && (
-                              <span className="bk-option-meta-item">
-                                <Users size={12} />
-                                до {room.capacity} чел.
-                              </span>
-                            )}
-                            {priceRange && (
-                              <span className="bk-option-price">
-                                {priceRange}
-                              </span>
+                    <div key={room.id} style={{ position: 'relative' }}>
+                      <button
+                        type="button"
+                        onClick={() => chooseRoom(room)}
+                        className={`bk-option bk-room-card ${isSelected ? 'is-selected' : ''}`}
+                        style={{ width: '100%', paddingRight: 42 }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                          <div className="bk-room-thumb">
+                            {cover ? (
+                              <img src={`/api/telegram-photo/${encodeURIComponent(cover)}`} alt={room.name} loading="lazy" />
+                            ) : (
+                              <Music size={20} />
                             )}
                           </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <h3 className="bk-option-title">{room.name}</h3>
+                            {room.description && (
+                              <p className="bk-option-desc" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                {room.description}
+                              </p>
+                            )}
+                            <div className="bk-option-meta">
+                              {room.capacity && <span className="bk-option-meta-item"><Users size={12} />до {room.capacity} чел.</span>}
+                              {priceRange && <span className="bk-option-price">{priceRange}</span>}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </button>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); showResourceInfo(room) }}
+                        className="ds-icon-btn bordered"
+                        aria-label={`Подробнее: ${room.name}`}
+                        title="Подробнее"
+                        style={{ position: 'absolute', top: 8, right: 8, width: 30, height: 30, zIndex: 2 }}
+                      >
+                        <Info size={15} />
+                      </button>
+                    </div>
                   )
                 })}
               </div>
             </div>
           )}
 
-          {/* 4. Time */}
+          {showServiceSection && (
+            <div ref={refVenueServices} className="bk-section bk-fade-in">
+              <SectionHeader
+                icon={<Scissors size={20} />}
+                title={`Выберите: ${labels.service}`}
+                subtitle="можно несколько"
+              />
+              <div className="bk-option-list">
+                {availableServices.length === 0 && (
+                  <div className="bk-slot-empty">
+                    <p>Для выбранного «{labels.resource.toLowerCase()}» нет доступных услуг.</p>
+                  </div>
+                )}
+                {availableServices.map((svc) => {
+                  const isSelected = selectedServices.some((item) => item.id === svc.id)
+                  return (
+                    <div key={svc.id} style={{ position: 'relative' }}>
+                      <button
+                        type="button"
+                        onClick={() => toggleVenueService(svc)}
+                        className={`bk-option ${isSelected ? 'is-selected' : ''}`}
+                        style={{ width: '100%', paddingRight: 44 }}
+                      >
+                        <div style={{ flex: 1, textAlign: 'left' }}>
+                          <h3 className="bk-option-title">{svc.name}</h3>
+                          {svc.description && (
+                            <p className="bk-option-desc" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                              {svc.description}
+                            </p>
+                          )}
+                          {formatDuration(svc.duration_minutes) && (
+                            <div className="bk-option-meta"><span className="bk-option-meta-item">{formatDuration(svc.duration_minutes)}</span></div>
+                          )}
+                        </div>
+                        <div className={`bk-check ${isSelected ? 'is-on' : ''}`}>{isSelected && <Check size={14} strokeWidth={3} />}</div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); showServiceInfo(svc) }}
+                        className="ds-icon-btn bordered"
+                        aria-label={`Подробнее: ${svc.name}`}
+                        title="Подробнее"
+                        style={{ position: 'absolute', top: 8, right: 8, width: 30, height: 30, zIndex: 2 }}
+                      >
+                        <Info size={15} />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+              {selectedServices.length > 0 && (
+                <div className="bk-summary-row">
+                  <div className="ds-sub">
+                    {selectedServices.length} выбрано
+                    {selectedServices.reduce((sum, item) => sum + (item.duration_minutes ?? 0), 0) > 0 &&
+                      ` · ${formatDuration(selectedServices.reduce((sum, item) => sum + (item.duration_minutes ?? 0), 0))}`}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => scrollToRef(flowOrder === 'service_first' ? refRoom : refDate, 100)}
+                    className="lnk"
+                  >
+                    Далее ↓
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {flowOrder === 'service_first' && showRoomSection && (
+            <div ref={refRoom} className="bk-section bk-fade-in">
+              <SectionHeader icon={<DoorOpen size={20} />} title={`Выберите: ${labels.resource}`} />
+              {availableResources.length === 0 ? (
+                <div className="bk-slot-empty"><p>Нет {labels.resource.toLowerCase()}, совместимых со всеми выбранными услугами.</p></div>
+              ) : (
+                <div className="bk-option-grid bk-option-grid--2">
+                  {availableResources.map((room) => {
+                    const isSelected = selectedRoom?.id === room.id
+                    const priceRange = getRoomPriceRange(room)
+                    const photoIds = parsePhotos(room.photos)
+                    const cover = room.primary_photo || photoIds[0]
+                    return (
+                      <div key={room.id} style={{ position: 'relative' }}>
+                        <button
+                          type="button"
+                          onClick={() => chooseRoom(room)}
+                          className={`bk-option bk-room-card ${isSelected ? 'is-selected' : ''}`}
+                          style={{ width: '100%', paddingRight: 42 }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                            <div className="bk-room-thumb">
+                              {cover ? <img src={`/api/telegram-photo/${encodeURIComponent(cover)}`} alt={room.name} loading="lazy" /> : <Music size={20} />}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <h3 className="bk-option-title">{room.name}</h3>
+                              {room.description && (
+                                <p className="bk-option-desc" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{room.description}</p>
+                              )}
+                              <div className="bk-option-meta">
+                                {room.capacity && <span className="bk-option-meta-item"><Users size={12} />до {room.capacity} чел.</span>}
+                                {priceRange && <span className="bk-option-price">{priceRange}</span>}
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); showResourceInfo(room) }}
+                          className="ds-icon-btn bordered"
+                          aria-label={`Подробнее: ${room.name}`}
+                          title="Подробнее"
+                          style={{ position: 'absolute', top: 8, right: 8, width: 30, height: 30, zIndex: 2 }}
+                        >
+                          <Info size={15} />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {showDateSection && (
+            <div ref={refDate} className="bk-section bk-fade-in">
+              <SectionHeader icon={<Calendar size={20} />} title={`Выберите: ${labels.date}`} />
+              <CalendarPicker
+                selected={selectedDate}
+                onSelect={(date) => {
+                  setSelectedDate(date)
+                  setSelectedTime(null)
+                  setPriceData(null)
+                  scrollToRef(refTime)
+                }}
+              />
+            </div>
+          )}
+
           {showTimeSection && (
             <div ref={refTime} className="bk-section bk-fade-in">
               <SectionHeader
                 icon={<Clock size={20} />}
-                title="Выберите время"
+                title={`Выберите: ${labels.time}`}
                 subtitle={selectedDate ? formatDateRu(selectedDate) : undefined}
+                onInfo={() => setInfoModal({
+                  title: labels.time,
+                  description: 'Здесь показаны только свободные слоты на выбранную дату. Если выбран конкретный зал или ресурс, занятость учитывается именно для него.',
+                })}
+                infoLabel={`Подробнее: ${labels.time}`}
               />
               {loadingSlots ? (
-                <div className="bk-slot-grid">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className="skeleton" style={{ height: 48, borderRadius: 'var(--r-md)' }} />
-                  ))}
-                </div>
+                <div className="bk-slot-grid">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton" style={{ height: 48, borderRadius: 'var(--r-md)' }} />)}</div>
               ) : slots.length === 0 ? (
                 <div className="bk-slot-empty">
                   <Clock size={32} style={{ color: 'var(--s-muted)', margin: '0 auto 12px' }} />
                   <p>Нет свободных слотов на эту дату</p>
-                  <button
-                    onClick={() => scrollToRef(refDate, 100)}
-                    className="lnk"
-                  >
-                    Выбрать другую дату
-                  </button>
+                  <button type="button" onClick={() => scrollToRef(refDate, 100)} className="lnk">Выбрать другую дату</button>
                 </div>
               ) : (
                 <>
                   <div className="bk-slot-grid">
                     {slots.map((time) => (
                       <button
+                        type="button"
                         key={time}
                         onClick={() => {
                           setSelectedTime(time)
-                          const nextRef = selectedRoom?.solo_price_per_hour ? refFormat : (additionalServices.length > 0 ? refAddons : refConfirm)
-                          scrollToRef(nextRef)
+                          const next = selectedRoom?.solo_price_per_hour ? refFormat : (additionalServices.length > 0 ? refAddons : refConfirm)
+                          scrollToRef(next)
                         }}
                         className={`bk-slot ${selectedTime === time ? 'is-selected' : ''}`}
-                      >
-                        {time}
-                      </button>
+                      >{time}</button>
                     ))}
                   </div>
-
-                  {/* Price breakdown */}
                   {selectedTime && (
                     <div className="ds-card bk-price-card">
                       {priceLoading ? (
-                        <div className="bk-price-loading">
-                          <span className="bk-spinner" />
-                          Рассчитываем цену...
-                        </div>
+                        <div className="bk-price-loading"><span className="bk-spinner" />Рассчитываем цену...</div>
                       ) : priceData && priceData.segments.length > 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                           {priceData.segments.map((seg, i) => (
                             <div key={i} className="bk-price-row">
-                              <span className="lbl">
-                                {seg.time_from}{'\u2013'}{seg.time_to} ({formatDuration(seg.minutes)}) {'\u00D7'} {formatPrice(seg.price_per_hour, true)}
-                              </span>
+                              <span className="lbl">{seg.time_from}–{seg.time_to} ({formatDuration(seg.minutes)}) × {formatPrice(seg.price_per_hour, true)}</span>
                               <span className="val">{formatPrice(seg.subtotal)}</span>
                             </div>
                           ))}
-                          <div className="bk-price-total">
-                            <span className="lbl">Итого</span>
-                            <span className="val">{formatPrice(priceData.total)}</span>
-                          </div>
+                          <div className="bk-price-total"><span className="lbl">Итого</span><span className="val">{formatPrice(priceData.total)}</span></div>
                         </div>
                       ) : priceData && priceData.total > 0 ? (
-                        <div className="bk-price-row">
-                          <span className="lbl">Стоимость</span>
-                          <span className="val">{formatPrice(priceData.total)}</span>
-                        </div>
+                        <div className="bk-price-row"><span className="lbl">Стоимость</span><span className="val">{formatPrice(priceData.total)}</span></div>
                       ) : totalPrice > 0 ? (
-                        <div className="bk-price-row">
-                          <span className="lbl">Стоимость</span>
-                          <span className="val">{formatPrice(totalPrice)}</span>
-                        </div>
+                        <div className="bk-price-row"><span className="lbl">Стоимость</span><span className="val">{formatPrice(totalPrice)}</span></div>
                       ) : null}
                     </div>
                   )}
@@ -1550,58 +1575,26 @@ function BookingPageInner() {
             </div>
           )}
 
-          {/* 5. Format (solo vs group) */}
           {showFormatSection && (
             <div ref={refFormat} className="bk-section bk-fade-in">
-              <SectionHeader
-                icon={<Users size={20} />}
-                title="Формат занятия"
-              />
+              <SectionHeader icon={<Users size={20} />} title="Формат занятия" />
               {(() => {
                 const hours = Math.max(1, totalDuration / 60)
                 const groupPrice = priceData?.total ?? 0
                 const soloPrice = (selectedRoom?.solo_price_per_hour ?? 0) * hours
                 return (
                   <div className="bk-option-list">
-                    <button
-                      onClick={() => {
-                        setIsSoloPricing(false)
-                        scrollToRef(additionalServices.length > 0 ? refAddons : refConfirm)
-                      }}
-                      className={`bk-option ${!isSoloPricing ? 'is-selected' : ''}`}
-                    >
+                    <button type="button" onClick={() => { setIsSoloPricing(false); scrollToRef(additionalServices.length > 0 ? refAddons : refConfirm) }} className={`bk-option ${!isSoloPricing ? 'is-selected' : ''}`}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
-                        <div className={`bk-emp-ava ${!isSoloPricing ? 'is-selected' : ''}`} style={{ borderRadius: 'var(--r-md)' }}>
-                          <Users size={18} />
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <h3 className="bk-option-title">
-                            Групповое занятие
-                          </h3>
-                          <p className="bk-option-desc">Цена по времени суток</p>
-                        </div>
+                        <div className={`bk-emp-ava ${!isSoloPricing ? 'is-selected' : ''}`} style={{ borderRadius: 'var(--r-md)' }}><Users size={18} /></div>
+                        <div style={{ flex: 1 }}><h3 className="bk-option-title">Групповое занятие</h3><p className="bk-option-desc">Цена по времени суток</p></div>
                         <span className="bk-option-price">{formatPrice(groupPrice)}</span>
                       </div>
                     </button>
-                    <button
-                      onClick={() => {
-                        setIsSoloPricing(true)
-                        scrollToRef(additionalServices.length > 0 ? refAddons : refConfirm)
-                      }}
-                      className={`bk-option ${isSoloPricing ? 'is-selected' : ''}`}
-                    >
+                    <button type="button" onClick={() => { setIsSoloPricing(true); scrollToRef(additionalServices.length > 0 ? refAddons : refConfirm) }} className={`bk-option ${isSoloPricing ? 'is-selected' : ''}`}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
-                        <div className={`bk-emp-ava ${isSoloPricing ? 'is-selected' : ''}`} style={{ borderRadius: 'var(--r-md)' }}>
-                          <UserCheck size={18} />
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <h3 className="bk-option-title">
-                            Индивидуальное
-                          </h3>
-                          <p className="bk-option-desc">
-                            {formatPrice(selectedRoom?.solo_price_per_hour, true)} {'\u00D7'} {hours} ч
-                          </p>
-                        </div>
+                        <div className={`bk-emp-ava ${isSoloPricing ? 'is-selected' : ''}`} style={{ borderRadius: 'var(--r-md)' }}><UserCheck size={18} /></div>
+                        <div style={{ flex: 1 }}><h3 className="bk-option-title">Индивидуальное</h3><p className="bk-option-desc">{formatPrice(selectedRoom?.solo_price_per_hour, true)} × {hours} ч</p></div>
                         <span className="bk-option-price">{formatPrice(soloPrice)}</span>
                       </div>
                     </button>
@@ -1610,160 +1603,111 @@ function BookingPageInner() {
               })()}
             </div>
           )}
-
         </>
       )}
 
       {/* ═══════════════════════════════════════ */}
-      {/* SIMPLE (NON-VENUE) FLOW                 */}
+      {/* SIMPLE (NON-VENUE) FLOW */}
       {/* ═══════════════════════════════════════ */}
 
       {!isVenue && (
         <>
-          {/* 1. Service selection */}
-          <div ref={refService} className="bk-section">
-            <SectionHeader
-              icon={<Scissors size={20} />}
-              title="Выберите услугу"
-            />
-            <div className="bk-option-list">
-              {services.map((service) => {
-                const isSelected = selectedService?.id === service.id
-                return (
-                  <button
-                    key={service.id}
-                    onClick={() => {
-                      setSelectedService(service)
-                      setSelectedDate(null)
-                      setSelectedTime(null)
-                      scrollToRef(refDate)
-                    }}
-                    className={`bk-option ${isSelected ? 'is-selected' : ''}`}
-                    style={{ display: 'block' }}
-                  >
-                    <h3 className="bk-option-title">{service.name}</h3>
-                    {service.description && (
-                      <p className="bk-option-desc">{service.description}</p>
-                    )}
-                    <div className="bk-option-meta">
-                      {service.price != null && (
-                        <span className="bk-option-price">
-                          {formatPrice(service.price, service.is_hourly_price)}
-                        </span>
-                      )}
-                      {formatDuration(service.duration_minutes) && (
-                        <span className="bk-option-meta-item">
-                          {formatDuration(service.duration_minutes)}
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* 2. Date — after service */}
-          {showDateSection && (
-            <div ref={refDate} className="bk-section bk-fade-in">
-              <SectionHeader
-                icon={<Calendar size={20} />}
-                title="Выберите дату"
-                subtitle={selectedService?.name}
-              />
-              <CalendarPicker
-                selected={selectedDate}
-                onSelect={(date) => {
-                  setSelectedDate(date)
-                  setSelectedTime(null)
-                  scrollToRef(employees.length > 0 ? refEmployee : refTime)
-                }}
-              />
-            </div>
-          )}
-
-          {/* 3. Employee selection — after date */}
-          {showEmployeeSection && (
-            <div ref={refEmployee} className="bk-section bk-fade-in">
-              <SectionHeader
-                icon={<User size={20} />}
-                title="Выберите специалиста"
-                subtitle="необязательно"
-              />
+          {flowOrder === 'resource_first' && showEmployeeSection && (
+            <div ref={refEmployee} className="bk-section">
+              <SectionHeader icon={<User size={20} />} title={`Выберите: ${labels.resource}`} />
               <div className="bk-emp-grid">
                 {employees.map((emp) => {
                   const isSelected = selectedEmployee?.id === emp.id
                   const photoIds = parsePhotos(emp.photos)
-                  const cover = photoIds[0]
+                  const cover = emp.primary_photo || photoIds[0]
                   return (
-                    <button
-                      key={emp.id}
-                      onClick={() => {
-                        setSelectedEmployee(isSelected ? null : emp)
-                      }}
-                      className={`bk-option bk-emp-card ${isSelected ? 'is-selected' : ''}`}
-                      style={{ minHeight: 60 }}
-                    >
-                      <div className="bk-emp-ava">
-                        {cover ? (
-                          <img
-                            src={`/api/telegram-photo/${encodeURIComponent(cover)}`}
-                            alt={emp.name}
-                            loading="lazy"
-                          />
-                        ) : (
-                          <User size={18} />
-                        )}
-                      </div>
-                      <span className="bk-emp-name">
-                        {emp.name}
-                      </span>
-                    </button>
+                    <div key={emp.id} style={{ position: 'relative' }}>
+                      <button type="button" onClick={() => chooseEmployee(emp)} className={`bk-option bk-emp-card ${isSelected ? 'is-selected' : ''}`} style={{ minHeight: 60, width: '100%', paddingRight: 38 }}>
+                        <div className="bk-emp-ava">{cover ? <img src={`/api/telegram-photo/${encodeURIComponent(cover)}`} alt={emp.name} loading="lazy" /> : <User size={18} />}</div>
+                        <span className="bk-emp-name">{emp.name}</span>
+                      </button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); showResourceInfo(emp) }} className="ds-icon-btn bordered" aria-label={`Подробнее: ${emp.name}`} title="Подробнее" style={{ position: 'absolute', top: 8, right: 8, width: 28, height: 28, zIndex: 2 }}><Info size={14} /></button>
+                    </div>
                   )
                 })}
               </div>
             </div>
           )}
 
-          {/* 4. Time */}
+          {showServiceSection && (
+            <div ref={refService} className="bk-section bk-fade-in">
+              <SectionHeader icon={<Scissors size={20} />} title={`Выберите: ${labels.service}`} />
+              <div className="bk-option-list">
+                {availableServices.length === 0 && <div className="bk-slot-empty"><p>Для выбранного «{labels.resource.toLowerCase()}» нет доступных услуг.</p></div>}
+                {availableServices.map((service) => {
+                  const isSelected = selectedService?.id === service.id
+                  return (
+                    <div key={service.id} style={{ position: 'relative' }}>
+                      <button type="button" onClick={() => chooseService(service)} className={`bk-option ${isSelected ? 'is-selected' : ''}`} style={{ display: 'block', width: '100%', paddingRight: 44, textAlign: 'left' }}>
+                        <h3 className="bk-option-title">{service.name}</h3>
+                        {service.description && <p className="bk-option-desc" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{service.description}</p>}
+                        <div className="bk-option-meta">
+                          {service.price != null && <span className="bk-option-price">{formatPrice(service.price, service.is_hourly_price)}</span>}
+                          {formatDuration(service.duration_minutes) && <span className="bk-option-meta-item">{formatDuration(service.duration_minutes)}</span>}
+                        </div>
+                      </button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); showServiceInfo(service) }} className="ds-icon-btn bordered" aria-label={`Подробнее: ${service.name}`} title="Подробнее" style={{ position: 'absolute', top: 8, right: 8, width: 30, height: 30, zIndex: 2 }}><Info size={15} /></button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {flowOrder === 'service_first' && showEmployeeSection && (
+            <div ref={refEmployee} className="bk-section bk-fade-in">
+              <SectionHeader icon={<User size={20} />} title={`Выберите: ${labels.resource}`} subtitle="необязательно" />
+              {availableResources.length === 0 ? (
+                <div className="bk-slot-empty"><p>Нет специалистов, связанных с выбранной услугой. Можно продолжить без выбора специалиста.</p></div>
+              ) : (
+                <div className="bk-emp-grid">
+                  {availableResources.map((emp) => {
+                    const isSelected = selectedEmployee?.id === emp.id
+                    const photoIds = parsePhotos(emp.photos)
+                    const cover = emp.primary_photo || photoIds[0]
+                    return (
+                      <div key={emp.id} style={{ position: 'relative' }}>
+                        <button type="button" onClick={() => chooseEmployee(emp)} className={`bk-option bk-emp-card ${isSelected ? 'is-selected' : ''}`} style={{ minHeight: 60, width: '100%', paddingRight: 38 }}>
+                          <div className="bk-emp-ava">{cover ? <img src={`/api/telegram-photo/${encodeURIComponent(cover)}`} alt={emp.name} loading="lazy" /> : <User size={18} />}</div>
+                          <span className="bk-emp-name">{emp.name}</span>
+                        </button>
+                        <button type="button" onClick={(e) => { e.stopPropagation(); showResourceInfo(emp) }} className="ds-icon-btn bordered" aria-label={`Подробнее: ${emp.name}`} title="Подробнее" style={{ position: 'absolute', top: 8, right: 8, width: 28, height: 28, zIndex: 2 }}><Info size={14} /></button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {showDateSection && (
+            <div ref={refDate} className="bk-section bk-fade-in">
+              <SectionHeader icon={<Calendar size={20} />} title={`Выберите: ${labels.date}`} subtitle={selectedService?.name} />
+              <CalendarPicker selected={selectedDate} onSelect={(date) => { setSelectedDate(date); setSelectedTime(null); scrollToRef(refTime) }} />
+            </div>
+          )}
+
           {showTimeSection && (
             <div ref={refTime} className="bk-section bk-fade-in">
               <SectionHeader
                 icon={<Clock size={20} />}
-                title="Выберите время"
+                title={`Выберите: ${labels.time}`}
                 subtitle={selectedDate ? formatDateRu(selectedDate) : undefined}
+                onInfo={() => setInfoModal({ title: labels.time, description: 'Показываются только свободные слоты. Если выбран конкретный мастер, его занятость учитывается при расчёте доступного времени.' })}
+                infoLabel={`Подробнее: ${labels.time}`}
               />
               {loadingSlots ? (
-                <div className="bk-slot-grid">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className="skeleton" style={{ height: 48, borderRadius: 'var(--r-md)' }} />
-                  ))}
-                </div>
+                <div className="bk-slot-grid">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton" style={{ height: 48, borderRadius: 'var(--r-md)' }} />)}</div>
               ) : slots.length === 0 ? (
-                <div className="bk-slot-empty">
-                  <Clock size={32} style={{ color: 'var(--s-muted)', margin: '0 auto 12px' }} />
-                  <p>Нет свободных слотов на эту дату</p>
-                  <button
-                    onClick={() => scrollToRef(refDate, 100)}
-                    className="lnk"
-                  >
-                    Выбрать другую дату
-                  </button>
-                </div>
+                <div className="bk-slot-empty"><Clock size={32} style={{ color: 'var(--s-muted)', margin: '0 auto 12px' }} /><p>Нет свободных слотов на эту дату</p><button type="button" onClick={() => scrollToRef(refDate, 100)} className="lnk">Выбрать другую дату</button></div>
               ) : (
                 <div className="bk-slot-grid">
-                  {slots.map((time) => (
-                    <button
-                      key={time}
-                      onClick={() => {
-                        setSelectedTime(time)
-                        scrollToRef(refConfirm)
-                      }}
-                      className={`bk-slot ${selectedTime === time ? 'is-selected' : ''}`}
-                    >
-                      {time}
-                    </button>
-                  ))}
+                  {slots.map((time) => <button type="button" key={time} onClick={() => { setSelectedTime(time); scrollToRef(additionalServices.length > 0 ? refAddons : refConfirm) }} className={`bk-slot ${selectedTime === time ? 'is-selected' : ''}`}>{time}</button>)}
                 </div>
               )}
             </div>
