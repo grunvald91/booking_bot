@@ -893,6 +893,12 @@ async def cancel_booking(
     await db.commit()
     await db.refresh(booking)
 
+    try:
+        from bot.services.booking_events import notify_booking_event
+        await notify_booking_event(db, [booking.id], "cancelled")
+    except Exception as notify_error:
+        logger.error("Cancellation notification failed for booking %s: %s", booking.id, notify_error)
+
     return _booking_to_out(booking)
 
 
@@ -989,6 +995,7 @@ async def reschedule_booking(
 
     target_employee_id = booking.employee_id
     old_date = booking.booking_date
+    old_time = booking.booking_time
     await lock_resource_days(db, target_employee_id, [old_date, body.date])
 
     visit_duration = sum(
@@ -1050,6 +1057,18 @@ async def reschedule_booking(
         loaded = full.scalar_one()
         can_c, can_r = _can_modify_booking(loaded)
         result_bookings.append(_booking_to_out(loaded, can_cancel=can_c, can_reschedule=can_r))
+
+    try:
+        from bot.services.booking_events import notify_booking_event
+        await notify_booking_event(
+            db,
+            [item.id for item in chain],
+            "rescheduled",
+            old_date=old_date,
+            old_time=old_time,
+        )
+    except Exception as notify_error:
+        logger.error("Reschedule notification failed for booking %s: %s", booking_id, notify_error)
 
     return result_bookings
 
