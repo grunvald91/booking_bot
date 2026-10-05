@@ -1,4 +1,4 @@
-name: Staff reminders live delivery check
+name: Staff reminder recipient audit
 
 on:
   push:
@@ -8,15 +8,15 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 6
     env:
       SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
     steps:
       - name: Install SSH library
         run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
-      - name: Run scheduler once and inspect flags
+      - name: Audit booking 2751 recipients
         shell: bash
         run: |
           python - <<'PY'
@@ -41,56 +41,64 @@ jobs:
                   time.sleep(3)
           cmd=r'''set -e
           cd /opt/booking_bot
-          ./venv/bin/python - <<'CHECK'
-          import asyncio, os
-          from datetime import datetime, timedelta
-          from zoneinfo import ZoneInfo
-          from aiogram import Bot
+          ./venv/bin/python - <<'AUDIT'
+          import asyncio
           from sqlalchemy import text
-          from dotenv import load_dotenv
           from database.database import async_session_maker
-          from bot.services.notifications import check_and_send_reminders
-
-          load_dotenv('/opt/booking_bot/.env')
 
           async def main():
-              bot=Bot(token=os.environ['BOT_TOKEN'])
-              try:
-                  await check_and_send_reminders(bot)
-              finally:
-                  await bot.session.close()
-
-              now=datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None)
               async with async_session_maker() as s:
-                  rows=(await s.execute(text("""
-                    SELECT b.id,b.reminder_24h_sent,b.reminder_2h_sent,
-                           b.staff_reminder_24h_sent,b.staff_reminder_2h_sent,
-                           b.booking_date,b.booking_time
-                    FROM bookings b
-                    JOIN users u ON u.id=b.client_id
-                    WHERE b.status IN ('pending','confirmed','prepayment_sent','prepayment_confirmed')
-                      AND (b.booking_date+b.booking_time) > :now
-                      AND (b.booking_date+b.booking_time) <= :horizon
-                      AND NOT (u.telegram_id BETWEEN -880026100048 AND -880026100001)
-                    ORDER BY b.booking_date,b.booking_time
-                  """),{'now':now,'horizon':now+timedelta(hours=24)})).mappings().all()
-                  print('real_due_rows='+str(len(rows)))
-                  for row in rows:
-                      print(
-                        'booking='+str(row['id'])
-                        +' client24='+str(row['reminder_24h_sent'])
-                        +' client2='+str(row['reminder_2h_sent'])
-                        +' staff24='+str(row['staff_reminder_24h_sent'])
-                        +' staff2='+str(row['staff_reminder_2h_sent'])
+                  row=(await s.execute(text("""
+                    SELECT b.business_id,b.employee_id,b.staff_reminder_2h_sent
+                    FROM bookings b WHERE b.id=2751
+                  """))).mappings().one()
+
+                  owner_tg=(await s.execute(text("""
+                    SELECT COUNT(DISTINCT u.id)
+                    FROM users u
+                    WHERE u.telegram_id>0
+                      AND (
+                        EXISTS(SELECT 1 FROM businesses b WHERE b.id=:bid AND b.owner_id=u.id)
+                        OR EXISTS(SELECT 1 FROM business_owners bo WHERE bo.business_id=:bid AND bo.user_id=u.id)
                       )
+                  """),{'bid':row['business_id']})).scalar() or 0
+
+                  owner_push=(await s.execute(text("""
+                    SELECT COUNT(DISTINCT ps.id)
+                    FROM push_subscriptions ps
+                    WHERE ps.is_active=TRUE
+                      AND (
+                        EXISTS(SELECT 1 FROM businesses b WHERE b.id=:bid AND b.owner_id=ps.user_id)
+                        OR EXISTS(SELECT 1 FROM business_owners bo WHERE bo.business_id=:bid AND bo.user_id=ps.user_id)
+                      )
+                  """),{'bid':row['business_id']})).scalar() or 0
+
+                  master_tg=(await s.execute(text("""
+                    SELECT CASE WHEN telegram_id IS NOT NULL AND telegram_id>0 THEN 1 ELSE 0 END
+                    FROM employees WHERE id=:eid
+                  """),{'eid':row['employee_id']})).scalar() or 0
+
+                  master_push=(await s.execute(text("""
+                    SELECT COUNT(DISTINCT ps.id)
+                    FROM employees e
+                    JOIN users u ON u.telegram_id=e.telegram_id
+                    JOIN push_subscriptions ps ON ps.user_id=u.id AND ps.is_active=TRUE
+                    WHERE e.id=:eid
+                  """),{'eid':row['employee_id']})).scalar() or 0
+
+                  print('staff2_flag='+str(row['staff_reminder_2h_sent']))
+                  print('owner_telegram_targets='+str(owner_tg))
+                  print('owner_push_targets='+str(owner_push))
+                  print('master_telegram_target='+str(master_tg))
+                  print('master_push_targets='+str(master_push))
           asyncio.run(main())
-          CHECK
+          AUDIT
           '''
-          _,out,err=ssh.exec_command(cmd,timeout=120)
+          _,out,err=ssh.exec_command(cmd,timeout=60)
           print(out.read().decode('utf-8','replace'))
           status=out.channel.recv_exit_status()
           if status:
-              print(err.read().decode('utf-8','replace')[-1600:])
+              print(err.read().decode('utf-8','replace')[-1200:])
               raise SystemExit(status)
           ssh.close()
           PY
