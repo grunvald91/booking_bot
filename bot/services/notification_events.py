@@ -258,6 +258,10 @@ async def dispatch_booking_event(
     old_date: date | None = None,
     old_time: time | None = None,
     prepayment_actions: bool = False,
+    send_staff_telegram: bool = True,
+    send_staff_webpush: bool = True,
+    send_client_telegram: bool = True,
+    send_client_webpush: bool = True,
 ) -> dict[str, int]:
     """Send one immediate booking event through Telegram and Web Push.
 
@@ -297,32 +301,39 @@ async def dispatch_booking_event(
         }
 
     staff_telegram = 0
-    for telegram_id in staff_targets:
-        if await _telegram_send(
-            telegram_id,
-            staff_message,
-            reply_markup=reply_markup,
-        ):
-            staff_telegram += 1
+    if send_staff_telegram:
+        for telegram_id in staff_targets:
+            if await _telegram_send(
+                telegram_id,
+                staff_message,
+                reply_markup=reply_markup,
+            ):
+                staff_telegram += 1
 
     staff_webpush = 0
-    try:
-        staff_webpush, _ = await send_staff_event_webpush(
-            loaded,
-            session,
-            event_kind,
-            audience=staff_audience,
-            old_date=old_date,
-            old_time=old_time,
-        )
-    except Exception as exc:
-        logger.warning("Staff Web Push event %s failed: %s", event_kind, exc)
+    if send_staff_webpush:
+        try:
+            staff_webpush, _ = await send_staff_event_webpush(
+                loaded,
+                session,
+                event_kind,
+                audience=staff_audience,
+                old_date=old_date,
+                old_time=old_time,
+            )
+        except Exception as exc:
+            logger.warning("Staff Web Push event %s failed: %s", event_kind, exc)
 
     client_telegram = 0
     client_webpush = 0
     if include_client and event_kind != "prepayment_submitted":
         client = first.client
-        if client and client.telegram_id and int(client.telegram_id) > 0:
+        if (
+            send_client_telegram
+            and client
+            and client.telegram_id
+            and int(client.telegram_id) > 0
+        ):
             if await _telegram_send(
                 int(client.telegram_id),
                 _client_message(
@@ -333,16 +344,17 @@ async def dispatch_booking_event(
                 ),
             ):
                 client_telegram = 1
-        try:
-            client_webpush = await send_client_event_webpush(
-                loaded,
-                session,
-                event_kind,
-                old_date=old_date,
-                old_time=old_time,
-            )
-        except Exception as exc:
-            logger.warning("Client Web Push event %s failed: %s", event_kind, exc)
+        if send_client_webpush:
+            try:
+                client_webpush = await send_client_event_webpush(
+                    loaded,
+                    session,
+                    event_kind,
+                    old_date=old_date,
+                    old_time=old_time,
+                )
+            except Exception as exc:
+                logger.warning("Client Web Push event %s failed: %s", event_kind, exc)
 
     try:
         await session.commit()
