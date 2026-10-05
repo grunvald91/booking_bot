@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, func, and_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -22,6 +23,15 @@ from ..photo_transport import create_photo_client
 from ..database import get_db, Business, Service, Employee, EmployeeService, Booking, User, VenueTimePricing
 from ..deps import get_current_user, get_current_user_optional
 from database.crud import get_or_create_guest_user
+from database.booking_safety import (
+    ACTIVE_BOOKING_STATUSES,
+    BookingConflictError,
+    busy_resource_intervals,
+    ensure_resource_available,
+    lock_resource_days,
+    service_occupies_resource,
+    service_resource_duration,
+)
 from ..booking_utils import compute_recurring_dates
 from ..schemas import (
     BusinessOut,
