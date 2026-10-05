@@ -273,6 +273,7 @@ async def notify_booking_event(
     old_date: Optional[date] = None,
     old_time: Optional[time] = None,
     staff_reply_markup: Optional[dict] = None,
+    staff_text_override: Optional[str] = None,
 ) -> dict:
     """Deliver one immediate booking lifecycle event across available channels."""
     loaded = await _load_bookings(session, bookings)
@@ -299,7 +300,12 @@ async def notify_booking_event(
         if telegram_staff:
             result["telegram_staff"] = await _send_telegram_messages(
                 staff_telegram_ids,
-                _staff_message(loaded, event_kind, old_date=old_date, old_time=old_time),
+                staff_text_override or _staff_message(
+                    loaded,
+                    event_kind,
+                    old_date=old_date,
+                    old_time=old_time,
+                ),
                 reply_markup=staff_reply_markup,
             )
         if push_staff:
