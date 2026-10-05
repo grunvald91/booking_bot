@@ -725,7 +725,7 @@ async def update_booking_status(
     user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update booking status (confirm, complete, cancel)."""
+    """Update booking status without allowing a reactivated overlap."""
     if data.status not in ("confirmed", "completed", "cancelled", "pending"):
         raise HTTPException(status_code=400, detail="Invalid status")
 
@@ -739,6 +739,7 @@ async def update_booking_status(
             selectinload(Booking.service),
             selectinload(Booking.employee),
         )
+        .with_for_update()
     )
     booking = result.scalar_one_or_none()
     if not booking:
@@ -748,12 +749,46 @@ async def update_booking_status(
     if data.status == "confirmed" and booking.duration_minutes is not None and (
         booking.price_requires_confirmation or booking.prepayment_amount is None
     ):
-        raise HTTPException(status_code=409, detail="Укажите окончательную цену и предоплату (0 ₽, если не требуется)")
+        raise HTTPException(
+            status_code=409,
+            detail="Укажите окончательную цену и предоплату (0 ₽, если не требуется)",
+        )
+
+    target_is_active = data.status in ACTIVE_BOOKING_STATUSES
+    current_is_active = booking.status in ACTIVE_BOOKING_STATUSES
+    if target_is_active and not current_is_active and booking.occupies_resource:
+        await lock_resource_days(db, booking.employee_id, [booking.booking_date])
+        try:
+            await ensure_resource_available(
+                db,
+                employee_id=booking.employee_id,
+                booking_date=booking.booking_date,
+                booking_time=booking.booking_time,
+                duration_minutes=booking_resource_duration(booking),
+                exclude_booking_ids=[booking.id],
+                acquire_lock=False,
+            )
+        except BookingConflictError as exc:
+            await db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Нельзя вернуть запись: это время уже занято",
+            ) from exc
 
     booking.status = data.status
-    await db.commit()
-    await db.refresh(booking)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        message = str(exc).lower()
+        if "bookings_no_active_resource_overlap" in message or "exclusion" in message:
+            raise HTTPException(
+                status_code=409,
+                detail="Нельзя вернуть запись: это время уже занято",
+            ) from exc
+        raise
 
+    await db.refresh(booking)
     return _admin_booking_out(booking)
 
 
