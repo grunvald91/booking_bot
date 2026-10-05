@@ -446,6 +446,32 @@ function BookingPageInner() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const isVenue = business?.business_type === 'venue_rental'
+  const flowOrder = business?.booking_flow_order === 'resource_first' ? 'resource_first' : 'service_first'
+  const labels = useMemo(() => ({
+    service: business?.booking_labels?.service?.trim() || 'Услуга',
+    resource: business?.booking_labels?.resource?.trim() || (isVenue ? 'Зал' : 'Мастер'),
+    additional: business?.booking_labels?.additional_services?.trim() || 'Доп. услуги',
+    date: business?.booking_labels?.date?.trim() || 'Дата',
+    time: business?.booking_labels?.time?.trim() || 'Время',
+  }), [business?.booking_labels, isVenue])
+
+  const selectedResource = isVenue ? selectedRoom : selectedEmployee
+  const availableServices = useMemo(() => {
+    if (flowOrder !== 'resource_first' || !selectedResource) return services
+    return services.filter((service) => resourceSupportsService(selectedResource, service.id))
+  }, [flowOrder, selectedResource, services])
+
+  const availableResources = useMemo(() => {
+    if (flowOrder !== 'service_first') return employees
+    if (isVenue) {
+      if (selectedServices.length === 0) return employees
+      return employees.filter((resource) =>
+        selectedServices.every((service) => resourceSupportsService(resource, service.id))
+      )
+    }
+    if (!selectedService) return employees
+    return employees.filter((resource) => resourceSupportsService(resource, selectedService.id))
+  }, [flowOrder, employees, isVenue, selectedServices, selectedService])
 
   // Load business data
   useEffect(() => {
@@ -457,25 +483,21 @@ function BookingPageInner() {
         setServices(biz.services.filter((s: Service) => s.is_active && !s.is_additional))
         setAdditionalServices(biz.services.filter((s: Service) => s.is_active && s.is_additional))
         setEmployees(biz.employees || [])
-        if (preselectedServiceId) {
-          const found = biz.services.find((s: Service) => s.id === preselectedServiceId)
-          if (found) {
-            if (biz.business_type === 'venue_rental') {
-              setSelectedServices([found])
-            } else {
-              setSelectedService(found)
-            }
-          }
-        }
-        if (preselectedEmployeeId) {
-          const emp = (biz.employees || []).find((e) => e.id === preselectedEmployeeId)
-          if (emp) {
-            if (biz.business_type === 'venue_rental') {
-              setSelectedRoom(emp)
-            } else {
-              setSelectedEmployee(emp)
-            }
-          }
+        const found = preselectedServiceId
+          ? biz.services.find((service: Service) => service.id === preselectedServiceId)
+          : undefined
+        const emp = preselectedEmployeeId
+          ? (biz.employees || []).find((resource) => resource.id === preselectedEmployeeId)
+          : undefined
+        const order = biz.booking_flow_order === 'resource_first' ? 'resource_first' : 'service_first'
+        const compatible = !found || !emp || resourceSupportsService(emp, found.id)
+
+        if (biz.business_type === 'venue_rental') {
+          if (emp && (compatible || order === 'resource_first')) setSelectedRoom(emp)
+          if (found && (compatible || order === 'service_first')) setSelectedServices([found])
+        } else {
+          if (emp && (compatible || order === 'resource_first')) setSelectedEmployee(emp)
+          if (found && (compatible || order === 'service_first')) setSelectedService(found)
         }
       })
       .catch(() => {})
@@ -498,58 +520,55 @@ function BookingPageInner() {
     if (!serviceId) return
 
     setLoadingSlots(true)
+    const resourceId = isVenue ? selectedRoom?.id : selectedEmployee?.id
     api
-      .getSlots(Number(businessId), serviceId, selectedDate)
+      .getSlots(Number(businessId), serviceId, selectedDate, resourceId)
       .then(setSlots)
       .catch(() => setSlots([]))
       .finally(() => setLoadingSlots(false))
-  }, [businessId, selectedDate, isVenue, selectedServices, selectedService])
+  }, [businessId, selectedDate, isVenue, selectedServices, selectedService, selectedRoom, selectedEmployee])
 
-  // Auto-pick when single option (F2)
-  // 1) Non-venue: единственная услуга
+  // Auto-pick when a visible step has exactly one option.
   useEffect(() => {
-    if (isVenue) return
-    if (selectedService) return
-    if (services.length === 1) {
-      const only = services[0]
+    if (isVenue || selectedService) return
+    if (flowOrder === 'resource_first' && employees.length > 0 && !selectedEmployee) return
+    const candidates = flowOrder === 'resource_first' ? availableServices : services
+    if (candidates.length === 1) {
+      const only = candidates[0]
       setSelectedService(only)
-      flashAutoPick(`Услуга: ${only.name}`, refDate)
+      flashAutoPick(`${labels.service}: ${only.name}`, refDate)
     }
-  }, [isVenue, services, selectedService])
+  }, [isVenue, selectedService, flowOrder, employees.length, selectedEmployee, availableServices, services, labels.service])
 
-  // 2) Non-venue: единственный мастер (после выбора даты)
   useEffect(() => {
-    if (isVenue) return
-    if (!selectedDate) return
-    if (selectedEmployee) return
-    if (employees.length === 1) {
-      const only = employees[0]
+    if (isVenue || selectedEmployee) return
+    if (flowOrder === 'service_first' && !selectedService) return
+    const candidates = flowOrder === 'service_first' ? availableResources : employees
+    if (candidates.length === 1) {
+      const only = candidates[0]
       setSelectedEmployee(only)
-      flashAutoPick(`Специалист: ${only.name}`, refTime)
+      flashAutoPick(`${labels.resource}: ${only.name}`, flowOrder === 'resource_first' ? refService : refDate)
     }
-  }, [isVenue, selectedDate, employees, selectedEmployee])
+  }, [isVenue, selectedEmployee, flowOrder, selectedService, availableResources, employees, labels.resource])
 
-  // 3) Venue: единственное помещение
   useEffect(() => {
-    if (!isVenue) return
-    if (selectedRoom) return
-    if (employees.length === 1) {
-      const only = employees[0]
+    if (!isVenue || selectedRoom) return
+    if (flowOrder === 'service_first' && selectedServices.length === 0) return
+    const candidates = flowOrder === 'service_first' ? availableResources : employees
+    if (candidates.length === 1) {
+      const only = candidates[0]
       setSelectedRoom(only)
-      flashAutoPick(`Помещение: ${only.name}`, refDate)
+      flashAutoPick(`${labels.resource}: ${only.name}`, flowOrder === 'resource_first' ? refVenueServices : refDate)
     }
-  }, [isVenue, employees, selectedRoom])
+  }, [isVenue, selectedRoom, flowOrder, selectedServices.length, availableResources, employees, labels.resource])
 
-  // 4) Единственный слот времени
+  // Единственный слот времени
   useEffect(() => {
-    if (!selectedDate) return
-    if (selectedTime) return
-    if (slots.length === 1) {
-      const only = slots[0]
-      setSelectedTime(only)
-      flashAutoPick(`Время: ${only}`, refConfirm)
-    }
-  }, [selectedDate, slots, selectedTime])
+    if (!selectedDate || selectedTime || slots.length !== 1) return
+    const only = slots[0]
+    setSelectedTime(only)
+    flashAutoPick(`${labels.time}: ${only}`, refConfirm)
+  }, [selectedDate, slots, selectedTime, labels.time])
 
   // Calculate price for venue
   useEffect(() => {
@@ -617,6 +636,69 @@ function BookingPageInner() {
 
   const setAddonHourCount = (svcId: number, hours: number) => {
     setAddonHours((prev) => ({ ...prev, [svcId]: Math.max(1, hours) }))
+  }
+
+  const resetDownstream = () => {
+    setSelectedDate(null)
+    setSelectedTime(null)
+    setSlots([])
+    setPriceData(null)
+    setIsSoloPricing(false)
+    setSelectedAddons(new Set())
+    setAddonHours({})
+  }
+
+  const chooseEmployee = (employee: EmployeeWithPricing) => {
+    setSelectedEmployee(employee)
+    if (flowOrder === 'resource_first' && selectedService && !resourceSupportsService(employee, selectedService.id)) {
+      setSelectedService(null)
+    }
+    resetDownstream()
+    scrollToRef(flowOrder === 'resource_first' ? refService : refDate)
+  }
+
+  const chooseRoom = (room: EmployeeWithPricing) => {
+    setSelectedRoom(room)
+    if (flowOrder === 'resource_first') {
+      setSelectedServices((prev) => prev.filter((service) => resourceSupportsService(room, service.id)))
+    }
+    resetDownstream()
+    scrollToRef(flowOrder === 'resource_first' ? refVenueServices : refDate)
+  }
+
+  const chooseService = (service: Service) => {
+    setSelectedService(service)
+    if (flowOrder === 'service_first') setSelectedEmployee(null)
+    resetDownstream()
+    scrollToRef(employees.length > 0 && flowOrder === 'service_first' ? refEmployee : refDate)
+  }
+
+  const toggleVenueService = (service: Service) => {
+    setSelectedServices((prev) =>
+      prev.some((item) => item.id === service.id)
+        ? prev.filter((item) => item.id !== service.id)
+        : [...prev, service]
+    )
+    if (flowOrder === 'service_first') setSelectedRoom(null)
+    resetDownstream()
+  }
+
+  const showServiceInfo = (service: Service) => {
+    const details = [
+      service.price != null ? `Стоимость: ${formatPrice(service.price, service.is_hourly_price)}` : '',
+      formatDuration(service.duration_minutes) ? `Длительность: ${formatDuration(service.duration_minutes)}` : '',
+    ].filter(Boolean)
+    setInfoModal({ title: service.name, description: service.description, details })
+  }
+
+  const showResourceInfo = (resource: EmployeeWithPricing) => {
+    const details = [
+      resource.specialization ? `Специализация: ${resource.specialization}` : '',
+      resource.capacity ? `Вместимость: до ${resource.capacity} чел.` : '',
+      resource.area_sqm ? `Площадь: ${resource.area_sqm} м²` : '',
+      getRoomPriceRange(resource) ? `Стоимость: ${getRoomPriceRange(resource)}` : '',
+    ].filter(Boolean)
+    setInfoModal({ title: resource.name, description: resource.description, details })
   }
 
   // Список незаполненного для подсказки над кнопкой
@@ -751,34 +833,37 @@ function BookingPageInner() {
     : selectedService?.name ?? ''
 
   // ── Visibility conditions ──
-  // Order: Services → Date → Employee/Room → Time → ...
-  const showDateSection = isVenue
-    ? selectedServices.length > 0
-    : !!selectedService
-  const showEmployeeSection = !isVenue && employees.length > 0 && !!selectedDate
-  const showRoomSection = isVenue && selectedServices.length > 0 && !!selectedDate
-  const showTimeSection = isVenue
-    ? (!!selectedDate && !!selectedRoom)
-    : (!!selectedDate && !!selectedService)
+  const hasServiceSelection = isVenue ? selectedServices.length > 0 : !!selectedService
+  const resourceSatisfied = isVenue
+    ? !!selectedRoom
+    : (flowOrder === 'resource_first' && employees.length > 0 ? !!selectedEmployee : true)
+  const showServiceSection = flowOrder === 'service_first'
+    || (isVenue ? !!selectedRoom : employees.length === 0 || !!selectedEmployee)
+  const showEmployeeSection = !isVenue && employees.length > 0
+    && (flowOrder === 'resource_first' || !!selectedService)
+  const showRoomSection = isVenue && (flowOrder === 'resource_first' || selectedServices.length > 0)
+  const showDateSection = hasServiceSelection && resourceSatisfied
+  const showTimeSection = showDateSection && !!selectedDate
   const showFormatSection = isVenue && !!selectedTime && !!selectedRoom?.solo_price_per_hour
   const showAddonsSection = !!selectedTime && additionalServices.length > 0
-  const showConfirmSection = isVenue
-    ? (!!selectedRoom && selectedServices.length > 0 && !!selectedDate && !!selectedTime)
-    : (!!selectedService && !!selectedDate && !!selectedTime)
+  const showConfirmSection = hasServiceSelection && resourceSatisfied && !!selectedDate && !!selectedTime
 
-  // Next ref for the floating "Далее" button: the next required step that's
-  // not satisfied yet. Returns null when nothing is selected (button hidden)
-  // and when the user is already at the confirmation section.
   const nextRef = (() => {
     if (isVenue) {
-      if (selectedServices.length === 0) return null
+      if (flowOrder === 'resource_first') {
+        if (!selectedRoom) return null
+        if (selectedServices.length === 0) return refVenueServices
+      } else {
+        if (selectedServices.length === 0) return null
+        if (!selectedRoom) return refRoom
+      }
       if (!selectedDate) return refDate
-      if (!selectedRoom) return refRoom
       if (!selectedTime) return refTime
       if (selectedRoom?.solo_price_per_hour && !showConfirmSection) return refFormat
-      return null  // confirm already visible — sticky inline button handles it
+      return null
     }
-    if (!selectedService) return null
+    if (flowOrder === 'resource_first' && employees.length > 0 && !selectedEmployee) return null
+    if (!selectedService) return flowOrder === 'resource_first' ? refService : null
     if (!selectedDate) return refDate
     if (!selectedTime) return refTime
     return null
