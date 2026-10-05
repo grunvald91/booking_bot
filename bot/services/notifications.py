@@ -3,7 +3,6 @@
 """
 import json
 import logging
-import math
 import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -421,7 +420,21 @@ def _staff_reminder_dedupe_key(
 async def _staff_reminder_already_sent(
     session: AsyncSession,
     dedupe_key: str,
+    bookings: list[Booking],
+    offset_minutes: int,
 ) -> bool:
+    # Compatibility with the two legacy staff reminder flags. This prevents
+    # already-processed production/demo bookings from being re-notified when
+    # the configurable reminder engine is deployed.
+    if offset_minutes == 1440 and all(
+        getattr(item, "staff_reminder_24h_sent", False) for item in bookings
+    ):
+        return True
+    if offset_minutes == 120 and all(
+        getattr(item, "staff_reminder_2h_sent", False) for item in bookings
+    ):
+        return True
+
     result = await session.execute(
         select(NotificationDelivery.id).where(NotificationDelivery.dedupe_key == dedupe_key)
     )
@@ -447,7 +460,7 @@ async def send_grouped_staff_reminder(
         return
 
     dedupe_key = _staff_reminder_dedupe_key(bookings, audience, offset_minutes)
-    if await _staff_reminder_already_sent(session, dedupe_key):
+    if await _staff_reminder_already_sent(session, dedupe_key, bookings, offset_minutes):
         return
 
     service_names = list(
@@ -550,6 +563,12 @@ async def send_grouped_staff_reminder(
                 webpush_sent=push_sent,
             )
         )
+        if offset_minutes == 1440:
+            for item in bookings:
+                item.staff_reminder_24h_sent = True
+        elif offset_minutes == 120:
+            for item in bookings:
+                item.staff_reminder_2h_sent = True
         await session.commit()
     else:
         await session.rollback()
@@ -1125,7 +1144,7 @@ async def check_and_send_reminders(bot: Bot):
                             "owner",
                             owner_due,
                         )
-                        if not await _staff_reminder_already_sent(session, key):
+                        if not await _staff_reminder_already_sent(session, key, group_bookings, owner_due):
                             await send_grouped_staff_reminder(
                                 bot,
                                 group_bookings,
@@ -1146,7 +1165,7 @@ async def check_and_send_reminders(bot: Bot):
                             "master",
                             master_due,
                         )
-                        if not await _staff_reminder_already_sent(session, key):
+                        if not await _staff_reminder_already_sent(session, key, group_bookings, master_due):
                             await send_grouped_staff_reminder(
                                 bot,
                                 group_bookings,
