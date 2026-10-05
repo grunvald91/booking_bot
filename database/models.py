@@ -90,6 +90,17 @@ class Business(Base):
     cancellation_policy_photo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Telegram file_id фото условий отмены
     cancellation_policy_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Текст условий отмены
     require_receipt_for_prepayment: Mapped[bool] = mapped_column(Boolean, default=False)  # Требовать чек для подтверждения оплаты
+
+    # Настройки напоминаний владельцам / мастерам / администраторам.
+    # Мгновенные уведомления о создании/подтверждении записи всегда включены
+    # и этими настройками не отключаются.
+    staff_reminders_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    staff_reminder_first_hours: Mapped[int] = mapped_column(Integer, default=24, nullable=False)
+    staff_reminder_second_hours: Mapped[Optional[int]] = mapped_column(Integer, default=2, nullable=True)
+    staff_notify_owners: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    staff_notify_masters: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    staff_notify_admins: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
     ai_instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # AI-инструкция для бизнеса
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
