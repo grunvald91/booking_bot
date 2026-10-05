@@ -207,6 +207,20 @@ function BookingDetailModal({
                 <CheckCircle size={16} /> Подтвердить
               </button>
             )}
+            {booking.status === 'prepayment_sent' && (
+              <>
+                <button onClick={() => onStatusChange(booking.id, 'confirmed')} disabled={updating}
+                  className="flex items-center justify-center gap-1.5 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
+                  style={{ background: 'var(--st-confirmed)' }}>
+                  <CheckCircle size={16} /> Оплата получена
+                </button>
+                <button onClick={() => onStatusChange(booking.id, 'pending_prepayment')} disabled={updating}
+                  className="flex items-center justify-center gap-1.5 font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
+                  style={{ background: 'var(--s-surface-2)', color: 'var(--s-text)' }}>
+                  <AlertCircle size={16} /> Оплаты нет
+                </button>
+              </>
+            )}
             <button onClick={() => onStatusChange(booking.id, 'completed')} disabled={updating}
               className="flex items-center justify-center gap-1.5 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
               style={{ background: 'var(--st-completed)' }}>
