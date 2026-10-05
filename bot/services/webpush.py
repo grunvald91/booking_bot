@@ -371,6 +371,9 @@ async def send_client_event_webpush(
     if event_kind == "booking_created":
         title = "✅ Запись создана"
         body = f"{business_name} · {when}"
+    elif event_kind == "rental_request_created":
+        title = "🛥 Заявка на аренду создана"
+        body = f"{business_name} · {when}"
     elif event_kind == "booking_cancelled":
         title = "❌ Запись отменена"
         body = f"{business_name} · {when}"
