@@ -524,11 +524,11 @@ function BookingPageInner() {
     setLoadingSlots(true)
     const resourceId = isVenue ? selectedRoom?.id : selectedEmployee?.id
     api
-      .getSlots(Number(businessId), serviceId, selectedDate, resourceId)
+      .getSlots(Number(businessId), serviceId, selectedDate, resourceId, totalDuration)
       .then(setSlots)
       .catch(() => setSlots([]))
       .finally(() => setLoadingSlots(false))
-  }, [businessId, selectedDate, isVenue, selectedServices, selectedService, selectedRoom, selectedEmployee])
+  }, [businessId, selectedDate, isVenue, selectedServices, selectedService, selectedRoom, selectedEmployee, totalDuration])
 
   // Auto-pick when a visible step has exactly one option.
   useEffect(() => {
