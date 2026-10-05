@@ -128,6 +128,12 @@ class BusinessDetailOut(BusinessOut):
     cancellation_policy_photo: Optional[str] = None
     cancellation_policy_text: Optional[str] = None
     require_receipt_for_prepayment: bool = False
+    staff_reminders_enabled: bool = True
+    staff_reminder_first_hours: int = 24
+    staff_reminder_second_hours: Optional[int] = 2
+    staff_notify_owners: bool = True
+    staff_notify_masters: bool = True
+    staff_notify_admins: bool = True
     booking_labels: dict[str, str] = Field(default_factory=dict)
     booking_flow_order: str = "service_first"
 
@@ -449,6 +455,12 @@ class BusinessUpdateIn(BaseModel):
     payment_details: Optional[str] = None
     cancellation_policy_text: Optional[str] = None
     require_receipt_for_prepayment: Optional[bool] = None
+    staff_reminders_enabled: Optional[bool] = None
+    staff_reminder_first_hours: Optional[int] = Field(default=None, ge=1, le=168)
+    staff_reminder_second_hours: Optional[int] = Field(default=None, ge=1, le=168)
+    staff_notify_owners: Optional[bool] = None
+    staff_notify_masters: Optional[bool] = None
+    staff_notify_admins: Optional[bool] = None
     booking_labels: Optional[dict[str, str]] = None
     booking_flow_order: Optional[str] = None
 
@@ -475,6 +487,12 @@ class BusinessAdminDetailOut(BaseModel):
     cancellation_policy_photo: Optional[str] = None
     cancellation_policy_text: Optional[str] = None
     require_receipt_for_prepayment: bool = False
+    staff_reminders_enabled: bool = True
+    staff_reminder_first_hours: int = 24
+    staff_reminder_second_hours: Optional[int] = 2
+    staff_notify_owners: bool = True
+    staff_notify_masters: bool = True
+    staff_notify_admins: bool = True
     booking_labels: dict[str, str] = Field(default_factory=dict)
     booking_flow_order: str = "service_first"
 
