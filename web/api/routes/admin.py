@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
 from fastapi.responses import StreamingResponse
 import json
 import httpx
-from sqlalchemy import select, func, and_, case, delete as sa_delete
+from sqlalchemy import select, func, and_, case, delete as sa_delete, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -1405,6 +1405,59 @@ async def update_business(
         raise HTTPException(status_code=404, detail="Business not found")
 
     updates = data.model_dump(exclude_unset=True)
+
+    notification_fields = {
+        "staff_reminders_enabled",
+        "staff_reminder_first_hours",
+        "staff_reminder_second_hours",
+        "staff_notify_owners",
+        "staff_notify_masters",
+        "staff_notify_admins",
+    }
+    notification_settings_changed = bool(notification_fields.intersection(updates))
+
+    if notification_settings_changed:
+        first_hours = updates.get(
+            "staff_reminder_first_hours",
+            getattr(business, "staff_reminder_first_hours", 24),
+        )
+        second_hours = updates.get(
+            "staff_reminder_second_hours",
+            getattr(business, "staff_reminder_second_hours", 2),
+        )
+        enabled = updates.get(
+            "staff_reminders_enabled",
+            getattr(business, "staff_reminders_enabled", True),
+        )
+        notify_owners = updates.get(
+            "staff_notify_owners",
+            getattr(business, "staff_notify_owners", True),
+        )
+        notify_masters = updates.get(
+            "staff_notify_masters",
+            getattr(business, "staff_notify_masters", True),
+        )
+        notify_admins = updates.get(
+            "staff_notify_admins",
+            getattr(business, "staff_notify_admins", True),
+        )
+
+        if first_hours is None or not (1 <= int(first_hours) <= 168):
+            raise HTTPException(status_code=422, detail="Первое напоминание должно быть от 1 до 168 часов")
+        if second_hours is not None:
+            if not (1 <= int(second_hours) <= 168):
+                raise HTTPException(status_code=422, detail="Второе напоминание должно быть от 1 до 168 часов")
+            if int(second_hours) >= int(first_hours):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Второе напоминание должно быть ближе к визиту, чем первое",
+                )
+        if enabled and not (notify_owners or notify_masters or notify_admins):
+            raise HTTPException(
+                status_code=422,
+                detail="Выберите хотя бы одного получателя напоминаний",
+            )
+
     if "booking_labels" in updates:
         updates["booking_labels"] = json.dumps(
             _normalize_booking_labels(updates["booking_labels"]),
@@ -1431,6 +1484,22 @@ async def update_business(
 
     for field, value in updates.items():
         setattr(business, field, value)
+
+    if notification_settings_changed:
+        # Existing future bookings must follow the newly selected reminder
+        # schedule and recipients, not stale 24h/2h delivery flags.
+        await db.execute(
+            sa_update(Booking)
+            .where(
+                Booking.business_id == business_id,
+                Booking.booking_date >= date.today(),
+                Booking.status.in_(ACTIVE_BOOKING_STATUSES),
+            )
+            .values(
+                staff_reminder_24h_sent=False,
+                staff_reminder_2h_sent=False,
+            )
+        )
 
     await db.commit()
     await db.refresh(business)
