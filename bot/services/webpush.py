@@ -1,4 +1,4 @@
-"""Web Push transport for ServGo client reminders."""
+"""Web Push transport for ServGo client and staff reminders."""
 import json
 import logging
 import os
