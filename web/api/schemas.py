@@ -128,7 +128,7 @@ class BusinessDetailOut(BusinessOut):
     cancellation_policy_photo: Optional[str] = None
     cancellation_policy_text: Optional[str] = None
     require_receipt_for_prepayment: bool = False
-    booking_labels: dict[str, str] = {}
+    booking_labels: dict[str, str] = Field(default_factory=dict)
     booking_flow_order: str = "service_first"
 
 
@@ -468,7 +468,7 @@ class BusinessAdminDetailOut(BaseModel):
     cancellation_policy_photo: Optional[str] = None
     cancellation_policy_text: Optional[str] = None
     require_receipt_for_prepayment: bool = False
-    booking_labels: dict[str, str] = {}
+    booking_labels: dict[str, str] = Field(default_factory=dict)
     booking_flow_order: str = "service_first"
 
     class Config:
