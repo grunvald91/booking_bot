@@ -41,6 +41,7 @@ from database.crud import (
     get_owners_count,
     get_user_by_telegram_id,
     is_business_owner,
+    get_booking_visit_chain,
 )
 from bot.states import BusinessCreationStates, ServiceCreationStates, EmployeeCreationStates, BusinessEditStates, ServiceEditStates, EmployeeEditStates, EmployeeServicesStates, PrepaymentSettingsStates, BusinessOwnerStates, VenueTimePricingStates
 from bot.keyboards import admin_kb, client_kb
@@ -5602,277 +5603,180 @@ async def save_cancellation_text(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("confirm_prepayment:"))
 async def confirm_prepayment_by_owner(callback: CallbackQuery, state: FSMContext):
-    """Владелец подтверждает получение предоплаты"""
+    """Confirm payment for the whole visit, then emit the mandatory booking event."""
     booking_id = int(callback.data.split(":")[1])
 
     async with async_session_maker() as session:
-        from sqlalchemy.orm import selectinload
-        from sqlalchemy import and_
-        stmt = select(Booking).options(
-            selectinload(Booking.client),
-            selectinload(Booking.service),
-            selectinload(Booking.business),
-            selectinload(Booking.employee)
-        ).where(Booking.id == booking_id)
-        result = await session.execute(stmt)
+        result = await session.execute(
+            select(Booking)
+            .where(Booking.id == booking_id)
+            .options(
+                selectinload(Booking.client),
+                selectinload(Booking.business),
+                selectinload(Booking.service),
+                selectinload(Booking.employee),
+            )
+            .with_for_update()
+        )
         booking = result.scalar_one_or_none()
-
         if not booking:
             await callback.answer("Бронирование не найдено", show_alert=True)
+            return
+
+        actor = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name,
+        )
+        if not await is_business_owner(session, booking.business_id, actor.id):
+            await callback.answer("Нет прав для подтверждения этой оплаты", show_alert=True)
             return
 
         if booking.status not in ("prepayment_sent", "pending_prepayment"):
             await callback.answer("Статус бронирования уже изменён", show_alert=True)
             return
 
-        # Проверяем, не занято ли время другим подтверждённым бронированием
-        from datetime import timedelta as _td
-        from sqlalchemy.orm import selectinload as _sil
-        conflict_result = await session.execute(
-            select(Booking).options(_sil(Booking.service)).where(and_(
-                Booking.employee_id == booking.employee_id,
-                Booking.booking_date == booking.booking_date,
-                Booking.booking_time == booking.booking_time,
-                Booking.status.in_(['pending', 'confirmed']),
-                Booking.client_id != booking.client_id,
-            ))
+        related_bookings = await get_booking_visit_chain(
+            session,
+            booking,
+            statuses=["prepayment_sent", "pending_prepayment"],
+            lock=True,
         )
-        conflict_bookings = conflict_result.scalars().all()
-        if conflict_bookings:
-            await callback.answer(
-                "⚠️ Это время уже занято другой подтверждённой записью! Отмените одну из них.",
-                show_alert=True
-            )
-            return
-
-        # Находим все связанные бронирования (то же время — основная + доп. услуги)
-        related_result = await session.execute(
-            select(Booking).options(
-                selectinload(Booking.service),
-                selectinload(Booking.employee)
-            ).where(and_(
-                Booking.client_id == booking.client_id,
-                Booking.business_id == booking.business_id,
-                Booking.employee_id == booking.employee_id,
-                Booking.booking_date == booking.booking_date,
-                Booking.booking_time == booking.booking_time,
-                Booking.status.in_(['prepayment_sent', 'pending_prepayment']),
-            ))
-        )
-        related_bookings = related_result.scalars().all()
-
-        # Подтверждаем предоплату для всех связанных
-        from datetime import datetime
-        for rb in related_bookings:
-            rb.status = "confirmed"
-            rb.prepayment_confirmed_at = datetime.utcnow()
-        if booking.status != "confirmed":
-            booking.status = "confirmed"
-            booking.prepayment_confirmed_at = datetime.utcnow()
+        confirmed_at = datetime.utcnow()
+        for item in related_bookings:
+            item.status = "confirmed"
+            item.prepayment_confirmed_at = confirmed_at
         await session.commit()
 
-        # PWA/Web Push: browser/PWA clients must see the confirmation even
-        # when they booked without a Telegram account.
         try:
-            from bot.services.webpush import send_booking_status_webpush
-            await send_booking_status_webpush([booking], session, "prepayment_confirmed")
-            await session.commit()
-        except Exception as push_err:
-            logger.warning("Web Push confirmation failed for booking %s: %s", booking.id, push_err)
-
-        # Отправляем уведомление клиенту
-        from bot.utils.validators import format_phone as fmt_phone
-        from bot.utils.business_types import is_venue_rental_type
-        from urllib.parse import quote
-        from datetime import timedelta
-        import json
-
-        is_venue = is_venue_rental_type(booking.business.business_type)
-
-        # Собираем все услуги и общую длительность (дедупликация по service_id)
-        total_duration = 0
-        services_text = ""
-        seen_service_ids = set()
-        for rb in related_bookings:
-            if rb.service and rb.service.id not in seen_service_ids:
-                seen_service_ids.add(rb.service.id)
-                is_add = rb.service.is_additional if hasattr(rb.service, 'is_additional') else False
-                prefix = "  ➕" if is_add else "  📋"
-                price_txt = f" ({rb.service.price}₽)" if rb.service.price else ""
-                services_text += f"{prefix} {rb.service.name}{price_txt}\n"
-                if not is_add:
-                    total_duration += rb.service.duration_minutes or 0
-
-        if total_duration == 0:
-            total_duration = booking.service.duration_minutes if booking.service else 60
-
-        start_time = booking.booking_time
-        end_datetime = datetime.combine(booking.booking_date, start_time) + timedelta(minutes=total_duration)
-        end_time = end_datetime.time()
-
-        client_text = (
-            f"✅ <b>Ваше бронирование подтверждено!</b>\n\n"
-            f"🏢 {booking.business.name}\n"
-        )
-        if services_text:
-            client_text += f"📋 <b>Услуги:</b>\n{services_text}"
-        else:
-            price_text = f" ({booking.service.price}₽)" if booking.service and booking.service.price else ""
-            client_text += f"📋 {booking.service.name}{price_text}\n"
-
-        if booking.employee:
-            if is_venue:
-                client_text += f"🏠 Помещение: {booking.employee.name}\n"
-            else:
-                client_text += f"👤 Мастер: {booking.employee.name}\n"
-
-        client_text += (
-            f"📅 Дата: {booking.booking_date.strftime('%d.%m.%Y')}\n"
-            f"🕐 Время: {start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')}\n\n"
-        )
-
-        if booking.business.address:
-            encoded_address = quote(booking.business.address)
-            yandex_maps_url = f"https://yandex.ru/maps/?text={encoded_address}"
-            gis_url = f"https://2gis.ru/search/{encoded_address}"
-            client_text += f'📍 <b>Адрес:</b> <a href="{yandex_maps_url}">{booking.business.address}</a>\n'
-            client_text += f'🗺 <a href="{yandex_maps_url}">Яндекс.Карты</a> | <a href="{gis_url}">2ГИС</a>\n'
-
-        if booking.business.phone:
-            client_text += f"📞 Телефон для связи: {fmt_phone(booking.business.phone)}\n"
-
-        if booking.business.directions:
-            client_text += f"\n🚶 <b>Как добраться:</b>\n{booking.business.directions}\n"
-
-        from database.crud import get_booking_payment_summary
-        payment_summary = await get_booking_payment_summary(session, booking)
-        client_text += (
-            f"\n💰 Предоплата получена: {payment_summary['paid_amount']}₽"
-            + (f" · Осталось при визите: {payment_summary['remaining_amount']}₽" if payment_summary['remaining_amount'] > 0 else "")
-            + f"\n\nЖдём вас! 🎉"
-        )
-
-        try:
-            if booking.business.photos:
-                try:
-                    photos_data = json.loads(booking.business.photos)
-                    if photos_data:
-                        from aiogram.types import InputMediaPhoto
-                        media_group = []
-                        for i, photo_id in enumerate(photos_data[:5]):
-                            if i == 0:
-                                media_group.append(InputMediaPhoto(
-                                    media=photo_id,
-                                    caption=f"📷 {booking.business.name}"
-                                ))
-                            else:
-                                media_group.append(InputMediaPhoto(media=photo_id))
-                        await callback.bot.send_media_group(
-                            chat_id=booking.client.telegram_id,
-                            media=media_group
-                        )
-                except Exception as photo_err:
-                    print(f"Ошибка отправки фото: {photo_err}")
-
-            await callback.bot.send_message(
-                chat_id=booking.client.telegram_id,
-                text=client_text,
-                parse_mode="HTML",
-                disable_web_page_preview=True
+            from bot.services.booking_events import notify_booking_event
+            await notify_booking_event(
+                session,
+                [item.id for item in related_bookings],
+                "prepayment_confirmed",
             )
-        except Exception as e:
-            print(f"Ошибка отправки уведомления клиенту: {e}")
-
-        # Отправляем уведомления мастеру и администраторам о подтверждённой брони
-        try:
-            from database.crud import get_employee_by_id
-            employee = booking.employee or (await get_employee_by_id(session, booking.employee_id) if booking.employee_id else None)
-
-            services_list = []
-            for rb in related_bookings:
-                if rb.service:
-                    services_list.append({
-                        'name': rb.service.name,
-                        'duration': rb.service.duration_minutes,
-                        'price': rb.service.price or 0,
-                        'is_additional': getattr(rb.service, 'is_additional', False),
-                        'employee_id': booking.employee_id,
-                        'employee_name': employee.name if employee else 'Специалист',
-                        'employee_telegram_id': employee.telegram_id if employee else None,
-                    })
-
-            from bot.services.notifications import (
-                notify_master_new_booking,
-                notify_owner_new_booking,
-                notify_administrator_new_booking,
+        except Exception as notify_error:
+            logger.error(
+                "Prepayment confirmation notification failed booking=%s: %s",
+                booking_id,
+                notify_error,
+                exc_info=True,
             )
-            await notify_master_new_booking(callback.bot, booking, services_list)
-            await notify_administrator_new_booking(callback.bot, booking, services_list)
-        except Exception as notify_err:
-            print(f"Ошибка отправки уведомлений мастеру/админам: {notify_err}")
 
-    await callback.message.edit_text(
-        callback.message.text + "\n\n✅ <b>Предоплата подтверждена!</b>\nКлиент уведомлён.",
-        parse_mode="HTML"
-    )
+    await state.clear()
+    try:
+        await callback.message.edit_text(
+            callback.message.text
+            + "\n\n✅ <b>Предоплата подтверждена.</b>\n"
+              "Запись подтверждена, клиент и причастные сотрудники уведомлены.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
     await callback.answer("Предоплата подтверждена!")
 
 
 @router.callback_query(F.data.startswith("reject_prepayment:"))
 async def reject_prepayment_by_owner(callback: CallbackQuery, state: FSMContext):
-    """Владелец отклоняет предоплату (не получена)"""
+    """Reject the payment claim for the whole visit and tell the client."""
     booking_id = int(callback.data.split(":")[1])
 
     async with async_session_maker() as session:
-        from sqlalchemy.orm import selectinload
-        stmt = select(Booking).options(
-            selectinload(Booking.client),
-            selectinload(Booking.service),
-            selectinload(Booking.business)
-        ).where(Booking.id == booking_id)
-        result = await session.execute(stmt)
+        result = await session.execute(
+            select(Booking)
+            .where(Booking.id == booking_id)
+            .options(
+                selectinload(Booking.client),
+                selectinload(Booking.business),
+                selectinload(Booking.service),
+                selectinload(Booking.employee),
+            )
+            .with_for_update()
+        )
         booking = result.scalar_one_or_none()
-
         if not booking:
             await callback.answer("Бронирование не найдено", show_alert=True)
             return
 
-        # Возвращаем статус на ожидание предоплаты
-        booking.status = "pending_prepayment"
+        actor = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name,
+        )
+        if not await is_business_owner(session, booking.business_id, actor.id):
+            await callback.answer("Нет прав для отклонения этой оплаты", show_alert=True)
+            return
+
+        if booking.status not in ("prepayment_sent", "pending_prepayment"):
+            await callback.answer("Статус бронирования уже изменён", show_alert=True)
+            return
+
+        related_bookings = await get_booking_visit_chain(
+            session,
+            booking,
+            statuses=["prepayment_sent", "pending_prepayment"],
+            lock=True,
+        )
+        for item in related_bookings:
+            item.status = "pending_prepayment"
         await session.commit()
 
         try:
-            from bot.services.webpush import send_booking_status_webpush
-            await send_booking_status_webpush([booking], session, "prepayment_rejected")
-            await session.commit()
-        except Exception as push_err:
-            logger.warning("Web Push rejection failed for booking %s: %s", booking.id, push_err)
-
-        # Уведомляем клиента
-        client_text = (
-            f"❌ <b>Предоплата не подтверждена</b>\n\n"
-            f"Владелец {booking.business.name} не получил вашу предоплату.\n\n"
-            f"Пожалуйста, убедитесь, что вы отправили оплату по правильным реквизитам "
-            f"и нажмите 'Оплата отправлена' снова."
-        )
-
-        from bot.keyboards.client_kb import get_prepayment_confirmation_keyboard
-
-        try:
-            await callback.bot.send_message(
-                chat_id=booking.client.telegram_id,
-                text=client_text,
-                parse_mode="HTML",
-                reply_markup=get_prepayment_confirmation_keyboard(booking_id)
+            from bot.services.booking_events import notify_booking_event
+            await notify_booking_event(
+                session,
+                [item.id for item in related_bookings],
+                "prepayment_rejected",
+                notify_staff=False,
             )
-        except Exception as e:
-            print(f"Ошибка отправки уведомления клиенту: {e}")
+        except Exception as notify_error:
+            logger.error(
+                "Prepayment rejection notification failed booking=%s: %s",
+                booking_id,
+                notify_error,
+                exc_info=True,
+            )
 
-    await callback.message.edit_text(
-        callback.message.text + "\n\n❌ <b>Предоплата отклонена</b>\nКлиент уведомлён.",
-        parse_mode="HTML"
-    )
+        # Telegram client gets the action button as well as the common push.
+        if booking.client and booking.client.telegram_id and booking.client.telegram_id > 0:
+            try:
+                await callback.bot.send_message(
+                    chat_id=booking.client.telegram_id,
+                    text=(
+                        f"❌ <b>Предоплата не подтверждена</b>\n\n"
+                        f"Владелец {booking.business.name} пока не видит оплату. "
+                        "Проверьте реквизиты и сообщите об оплате ещё раз."
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=client_kb.get_prepayment_confirmation_keyboard(
+                        booking.id,
+                        require_receipt=getattr(
+                            booking.business,
+                            "require_receipt_for_prepayment",
+                            False,
+                        ),
+                    ),
+                )
+            except Exception as telegram_error:
+                logger.warning(
+                    "Telegram prepayment rejection client message failed booking=%s: %s",
+                    booking_id,
+                    telegram_error,
+                )
+
+    await state.clear()
+    try:
+        await callback.message.edit_text(
+            callback.message.text
+            + "\n\n❌ <b>Предоплата не подтверждена.</b>\nКлиент уведомлён.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
     await callback.answer("Предоплата отклонена")
+
 
 
 # ===== УПРАВЛЕНИЕ СОВЛАДЕЛЬЦАМИ =====
