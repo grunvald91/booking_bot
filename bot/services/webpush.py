@@ -251,7 +251,7 @@ async def send_staff_booking_webpush(
     payload = {
         "title": title,
         "body": body,
-        "url": "/admin/schedule",
+        "url": "/",
         "booking_id": first.id,
         "tag": f"servgo-staff-booking-{first.id}-{reminder_kind}",
     }
