@@ -1,0 +1,143 @@
+name: ServGo owner notification audit
+
+on:
+  push:
+    branches:
+      - audit/owner-notifications-20261005
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Inspect owner notification readiness
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, time
+          import paramiko
+          HOST='155.212.162.47'
+          FP='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  actual=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if actual!=FP: raise paramiko.SSHException('host key mismatch')
+                  c.get_host_keys().add(h,k.get_name(),k)
+          ssh=None
+          for attempt in range(3):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(Pinned())
+              try:
+                  c.connect(HOST,port=22,username='root',password=os.environ['SERVER_PASSWORD'],
+                            look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  ssh=c; break
+              except (paramiko.SSHException,OSError,EOFError):
+                  c.close()
+                  if attempt==2: raise
+                  time.sleep(3)
+
+          cmd=r'''set -e
+          cd /opt/booking_bot
+          ./venv/bin/python - <<'AUDIT_PY'
+          import asyncio, os
+          from datetime import date, datetime, timedelta
+          from sqlalchemy import text
+          from database.database import async_session_maker
+
+          async def main():
+              async with async_session_maker() as s:
+                  vapid=bool(os.getenv('VAPID_PUBLIC_KEY')) and bool(os.getenv('VAPID_PRIVATE_KEY')) and bool(os.getenv('VAPID_SUBJECT'))
+                  print('VAPID_CONFIGURED='+str(vapid).lower())
+
+                  rows=(await s.execute(text("""
+                    with owners as (
+                      select b.id business_id,b.name business_name,b.owner_id user_id
+                      from businesses b
+                      where b.is_active=true and b.owner_id is not null
+                      union
+                      select bo.business_id,b.name,bo.user_id
+                      from business_owners bo
+                      join businesses b on b.id=bo.business_id
+                      where b.is_active=true
+                    )
+                    select o.business_id,o.business_name,o.user_id,
+                           (u.telegram_id is not null and u.telegram_id > 0) as has_telegram,
+                           count(ps.id) filter (where ps.is_active) as active_push_subscriptions
+                    from owners o
+                    join users u on u.id=o.user_id
+                    left join push_subscriptions ps on ps.user_id=o.user_id
+                    group by o.business_id,o.business_name,o.user_id,u.telegram_id
+                    order by o.business_id,o.user_id
+                  """))).mappings().all()
+
+                  unique_users=set()
+                  users_with_tg=set()
+                  users_with_push=set()
+                  for r in rows:
+                      unique_users.add(r['user_id'])
+                      if r['has_telegram']: users_with_tg.add(r['user_id'])
+                      if int(r['active_push_subscriptions'] or 0)>0: users_with_push.add(r['user_id'])
+                      print(
+                        f"OWNER_READY|business={r['business_id']}|"
+                        f"tg={str(bool(r['has_telegram'])).lower()}|"
+                        f"push_subs={int(r['active_push_subscriptions'] or 0)}"
+                      )
+                  print('OWNER_USERS='+str(len(unique_users)))
+                  print('OWNER_USERS_WITH_TELEGRAM='+str(len(users_with_tg)))
+                  print('OWNER_USERS_WITH_PUSH='+str(len(users_with_push)))
+
+                  now=datetime.now()
+                  soon=now+timedelta(hours=24)
+                  demo_tg_base=-880026100000
+                  demo_ids=(await s.execute(text("""
+                    select id from users
+                    where telegram_id between :lo and :hi
+                  """),{'lo':demo_tg_base-100,'hi':demo_tg_base-1})).scalars().all()
+                  demo_soon=0
+                  if demo_ids:
+                      demo_soon=int((await s.execute(text("""
+                        select count(*)
+                        from bookings
+                        where client_id = any(:ids)
+                          and status in ('pending','confirmed','pending_prepayment','prepayment_sent','prepayment_confirmed')
+                          and (booking_date + booking_time) > :now
+                          and (booking_date + booking_time) <= :soon
+                      """),{'ids':list(demo_ids),'now':now,'soon':soon})).scalar() or 0)
+                  print('DEMO_ACTIVE_WITHIN_24H='+str(demo_soon))
+
+                  flags=(await s.execute(text("""
+                    select
+                      count(*) filter (where staff_reminder_24h_sent) as staff24,
+                      count(*) filter (where staff_reminder_2h_sent) as staff2,
+                      count(*) filter (where reminder_24h_sent) as client24,
+                      count(*) filter (where reminder_2h_sent) as client2
+                    from bookings
+                    where client_id = any(:ids)
+                  """),{'ids':list(demo_ids) if demo_ids else [-1]})).mappings().one()
+                  print('DEMO_FLAGS|staff24={}|staff2={}|client24={}|client2={}'.format(
+                    flags['staff24'],flags['staff2'],flags['client24'],flags['client2']
+                  ))
+          asyncio.run(main())
+          AUDIT_PY
+
+          echo '--- recent reminder logs ---'
+          journalctl -u booking-bot.service --since '45 minutes ago' --no-pager 2>/dev/null \
+            | grep -E 'Staff (24h|2h) reminder|Checked reminders|Web Push|Notified owner' \
+            | tail -n 80 || true
+          '''
+          _,out,err=ssh.exec_command(cmd,timeout=90)
+          stdout=out.read().decode('utf-8','replace')
+          stderr=err.read().decode('utf-8','replace')
+          print(stdout)
+          status=out.channel.recv_exit_status()
+          if status:
+              print(stderr[-2500:])
+              raise SystemExit(status)
+          ssh.close()
+          PY
