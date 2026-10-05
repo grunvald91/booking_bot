@@ -67,12 +67,25 @@ async def lock_resource_days(
 
     for lock_date in _expanded_lock_dates(dates):
         await session.execute(
-            text("SELECT pg_advisory_xact_lock(:resource_id, :day_key)"),
+            text(
+                "SELECT pg_advisory_xact_lock("
+                "CAST(:resource_id AS INTEGER), CAST(:day_key AS INTEGER))"
+            ),
             {
                 "resource_id": int(employee_id),
                 "day_key": int(lock_date.toordinal()),
             },
         )
+
+
+def intervals_overlap(
+    start: datetime,
+    end: datetime,
+    other_start: datetime,
+    other_end: datetime,
+) -> bool:
+    """Half-open interval overlap: touching endpoints are not a conflict."""
+    return start < other_end and other_start < end
 
 
 def booking_resource_duration(booking: Booking) -> int:
@@ -151,7 +164,7 @@ async def resource_overlap_exists(
             continue
         existing_start = datetime.combine(existing.booking_date, existing.booking_time)
         existing_end = existing_start + timedelta(minutes=existing_duration)
-        if requested_start < existing_end and existing_start < requested_end:
+        if intervals_overlap(requested_start, requested_end, existing_start, existing_end):
             return True
 
     return False
