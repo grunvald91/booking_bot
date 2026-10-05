@@ -541,6 +541,81 @@ async def create_booking(
         raise
 
 
+async def get_booking_visit_chain(
+    session: AsyncSession,
+    anchor: Booking,
+    *,
+    statuses: Optional[List[str]] = None,
+    lock: bool = False,
+) -> List[Booking]:
+    """Return the contiguous rows that form one multi-service visit.
+
+    ServGo historically stores each sequential service as its own Booking row.
+    This helper finds the contiguous chain around an anchor so lifecycle
+    changes can operate on the whole visit rather than just one row.
+    """
+    filters = [
+        Booking.client_id == anchor.client_id,
+        Booking.business_id == anchor.business_id,
+        Booking.employee_id == anchor.employee_id,
+        Booking.booking_date == anchor.booking_date,
+    ]
+    if statuses:
+        filters.append(Booking.status.in_(statuses))
+
+    stmt = (
+        select(Booking)
+        .where(and_(*filters))
+        .options(
+            selectinload(Booking.client),
+            selectinload(Booking.business),
+            selectinload(Booking.service),
+            selectinload(Booking.employee),
+        )
+        .order_by(Booking.booking_time.asc(), Booking.id.asc())
+    )
+    if lock:
+        stmt = stmt.with_for_update()
+
+    rows = list((await session.execute(stmt)).scalars().all())
+    if not rows:
+        return [anchor]
+
+    anchor_index = next((idx for idx, row in enumerate(rows) if row.id == anchor.id), None)
+    if anchor_index is None:
+        return [anchor]
+
+    chain = [rows[anchor_index]]
+
+    idx = anchor_index - 1
+    while idx >= 0:
+        prev = rows[idx]
+        first = chain[0]
+        prev_end = datetime.combine(prev.booking_date, prev.booking_time) + timedelta(
+            minutes=booking_resource_duration(prev)
+        )
+        first_start = datetime.combine(first.booking_date, first.booking_time)
+        if prev_end != first_start:
+            break
+        chain.insert(0, prev)
+        idx -= 1
+
+    idx = anchor_index + 1
+    while idx < len(rows):
+        last = chain[-1]
+        nxt = rows[idx]
+        last_end = datetime.combine(last.booking_date, last.booking_time) + timedelta(
+            minutes=booking_resource_duration(last)
+        )
+        next_start = datetime.combine(nxt.booking_date, nxt.booking_time)
+        if last_end != next_start:
+            break
+        chain.append(nxt)
+        idx += 1
+
+    return chain
+
+
 async def get_booking_payment_summary(session: AsyncSession, booking: Booking) -> dict:
     """Свести суммы по всему визиту (основная + доп. услуги — те же
     client_id/business_id/booking_date/booking_time, статус не
