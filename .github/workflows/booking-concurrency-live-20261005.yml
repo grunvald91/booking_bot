@@ -1,0 +1,229 @@
+name: ServGo live booking race test
+
+on:
+  push:
+    branches:
+      - audit/booking-concurrency-live-20261005
+
+permissions:
+  contents: read
+
+jobs:
+  race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Run two simultaneous public bookings and clean up
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, time
+          import paramiko
+
+          HOST='155.212.162.47'
+          FP='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  actual=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if actual!=FP:
+                      raise paramiko.SSHException('host key mismatch')
+                  c.get_host_keys().add(h,k.get_name(),k)
+
+          ssh=None
+          for attempt in range(3):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(Pinned())
+              try:
+                  c.connect(HOST,port=22,username='root',password=os.environ['SERVER_PASSWORD'],
+                            look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  ssh=c; break
+              except (paramiko.SSHException,OSError,EOFError):
+                  c.close()
+                  if attempt==2: raise
+                  time.sleep(3)
+
+          cmd=r'''set -e
+          cd /opt/booking_bot
+          ./venv/bin/python - <<'RACE_PY'
+          import asyncio, os, uuid
+          from datetime import date, datetime, time, timedelta
+          import asyncpg, httpx
+          from dotenv import load_dotenv
+
+          load_dotenv('/opt/booking_bot/.env')
+          ACTIVE=('pending','confirmed','pending_prepayment','prepayment_sent','prepayment_confirmed')
+          marker='RACE_TEST_'+uuid.uuid4().hex[:12]
+          phones=['+79990001101','+79990001102']
+
+          async def connect():
+              return await asyncpg.connect(
+                  host=os.getenv('DB_HOST','localhost'),
+                  port=int(os.getenv('DB_PORT','5432')),
+                  user=os.getenv('DB_USER','postgres'),
+                  password=os.getenv('DB_PASSWORD',''),
+                  database=os.getenv('DB_NAME','booking_bot'),
+              )
+
+          async def choose_candidate(conn):
+              rows=await conn.fetch("""
+                select b.id business_id,b.name business_name,b.business_type,
+                       e.id employee_id,e.name employee_name,
+                       s.id service_id,s.name service_name,
+                       coalesce(nullif(s.duration_minutes,0),30) duration_minutes,
+                       coalesce(b.working_hours_start,time '09:00') opens,
+                       coalesce(b.working_hours_end,time '18:00') closes,
+                       coalesce(e.booking_interval_minutes,b.booking_interval_minutes,30) step_minutes
+                from businesses b
+                join employees e on e.business_id=b.id and e.is_active=true
+                join services s on s.business_id=b.id and s.is_active=true and coalesce(s.is_additional,false)=false
+                where b.is_active=true
+                  and b.business_type <> 'venue_rental'
+                  and coalesce(e.role,'master') <> 'admin'
+                  and (
+                    not exists(select 1 from employee_services es0 where es0.employee_id=e.id)
+                    or exists(select 1 from employee_services es where es.employee_id=e.id and es.service_id=s.id)
+                  )
+                order by b.id,e.id,s.id
+              """)
+              today=date.today()
+              for row in rows:
+                  opens=row['opens']; closes=row['closes']
+                  if closes <= opens:
+                      continue
+                  duration=int(row['duration_minutes'])
+                  step=max(15,int(row['step_minutes'] or 30))
+                  for day_offset in range(1,8):
+                      day=today+timedelta(days=day_offset)
+                      cur=datetime.combine(day,opens)
+                      end=datetime.combine(day,closes)
+                      minute=((cur.minute+step-1)//step)*step
+                      if minute>=60:
+                          cur=cur.replace(minute=0,second=0,microsecond=0)+timedelta(hours=1)
+                      else:
+                          cur=cur.replace(minute=minute,second=0,microsecond=0)
+                      while cur+timedelta(minutes=duration) <= end:
+                          conflict=await conn.fetchval("""
+                            select exists(
+                              select 1 from bookings
+                              where employee_id=$1
+                                and occupies_resource
+                                and status=any($2::varchar[])
+                                and tsrange(
+                                      booking_date+booking_time,
+                                      booking_date+booking_time+resource_duration_minutes*interval '1 minute','[)'
+                                    ) &&
+                                    tsrange($3::date+$4::time,
+                                      $3::date+$4::time+$5*interval '1 minute','[)')
+                            )
+                          """,row['employee_id'],list(ACTIVE),day,cur.time(),duration)
+                          if not conflict:
+                              return dict(row),day,cur.time()
+                          cur+=timedelta(minutes=step)
+              raise RuntimeError('No free ordinary test slot found')
+
+          async def main():
+              conn=await connect()
+              try:
+                  row,day,start=await choose_candidate(conn)
+                  before=await conn.fetchval("""
+                    select count(*) from bookings
+                    where employee_id=$1 and booking_date=$2 and booking_time=$3
+                      and status=any($4::varchar[])
+                  """,row['employee_id'],day,start,list(ACTIVE))
+                  assert before==0
+                  print('candidate_business='+str(row['business_id']))
+                  print('candidate_resource='+str(row['employee_id']))
+                  print('candidate_service='+str(row['service_id']))
+                  print('candidate_date='+day.isoformat())
+                  print('candidate_time='+start.strftime('%H:%M'))
+
+                  base={
+                    'business_id':row['business_id'],
+                    'service_ids':[row['service_id']],
+                    'date':day.isoformat(),
+                    'time':start.strftime('%H:%M'),
+                    'employee_id':row['employee_id'],
+                    'notes':marker,
+                  }
+                  payloads=[
+                    {**base,'client_name':'Race Test A','client_phone':phones[0]},
+                    {**base,'client_name':'Race Test B','client_phone':phones[1]},
+                  ]
+                  async with httpx.AsyncClient(timeout=30) as client:
+                      responses=await asyncio.gather(*[
+                          client.post('https://servgo.ru/api/bookings',json=p)
+                          for p in payloads
+                      ])
+
+                  codes=sorted(r.status_code for r in responses)
+                  print('http_codes='+','.join(map(str,codes)))
+                  for idx,r in enumerate(responses,1):
+                      print(f'response_{idx}_status='+str(r.status_code))
+                      if r.status_code not in (200,409):
+                          print(f'response_{idx}_body='+r.text[:500])
+                  assert codes==[200,409], codes
+
+                  after=await conn.fetchval("""
+                    select count(*) from bookings
+                    where employee_id=$1 and booking_date=$2 and booking_time=$3
+                      and status=any($4::varchar[])
+                  """,row['employee_id'],day,start,list(ACTIVE))
+                  print('active_rows_after_race='+str(after))
+                  assert after==1
+
+                  overlaps=await conn.fetchval("""
+                    with active as (
+                      select id,employee_id,booking_date,booking_time,resource_duration_minutes
+                      from bookings
+                      where employee_id=$1
+                        and status=any($2::varchar[])
+                        and occupies_resource
+                    )
+                    select count(*)
+                    from active a join active b
+                      on a.id<b.id
+                     and tsrange(a.booking_date+a.booking_time,
+                                 a.booking_date+a.booking_time+a.resource_duration_minutes*interval '1 minute','[)')
+                         &&
+                         tsrange(b.booking_date+b.booking_time,
+                                 b.booking_date+b.booking_time+b.resource_duration_minutes*interval '1 minute','[)')
+                  """,row['employee_id'],list(ACTIVE))
+                  print('resource_overlap_pairs_after_race='+str(overlaps))
+                  assert overlaps==0
+
+                  booking_ids=await conn.fetch("""
+                    select id,client_id from bookings where notes=$1
+                  """,marker)
+                  client_ids=[r['client_id'] for r in booking_ids]
+                  await conn.execute("delete from bookings where notes=$1",marker)
+                  if client_ids:
+                      await conn.execute("""
+                        delete from users
+                        where id=any($1::int[])
+                          and telegram_id<0
+                          and not exists(select 1 from bookings b where b.client_id=users.id)
+                      """,client_ids)
+                  remaining=await conn.fetchval("select count(*) from bookings where notes=$1",marker)
+                  assert remaining==0
+                  print('cleanup=ok')
+                  print('race_test=success')
+              finally:
+                  await conn.close()
+
+          asyncio.run(main())
+          RACE_PY
+          '''
+          _,out,err=ssh.exec_command(cmd,timeout=120)
+          stdout=out.read().decode('utf-8','replace')
+          stderr=err.read().decode('utf-8','replace')
+          print(stdout)
+          status=out.channel.recv_exit_status()
+          if status:
+              print('stderr_suffix='+stderr[-2500:])
+              raise SystemExit(status)
+          ssh.close()
+          PY
