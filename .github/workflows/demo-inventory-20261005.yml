@@ -1,4 +1,4 @@
-name: ServGo demo inventory
+name: ServGo seed demo calendars
 
 on:
   push:
@@ -9,111 +9,597 @@ permissions:
   contents: read
 
 jobs:
-  inventory:
+  seed:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     env:
       SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
     steps:
       - name: Install Paramiko
         run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
-      - name: Inspect demo businesses
+
+      - name: Seed realistic future demo bookings
         shell: bash
         run: |
           python - <<'PY'
           import base64, hashlib, os, time
           import paramiko
+
           HOST='155.212.162.47'
           FP='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+
           class Pinned(paramiko.MissingHostKeyPolicy):
               def missing_host_key(self,c,h,k):
                   actual=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
-                  if actual!=FP: raise paramiko.SSHException('host key mismatch')
+                  if actual!=FP:
+                      raise paramiko.SSHException('host key mismatch')
                   c.get_host_keys().add(h,k.get_name(),k)
+
           ssh=None
           for attempt in range(3):
               c=paramiko.SSHClient(); c.set_missing_host_key_policy(Pinned())
               try:
                   c.connect(HOST,port=22,username='root',password=os.environ['SERVER_PASSWORD'],
                             look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
-                  ssh=c; break
+                  ssh=c
+                  break
               except (paramiko.SSHException,OSError,EOFError):
                   c.close()
-                  if attempt==2: raise
+                  if attempt==2:
+                      raise
                   time.sleep(3)
-          cmd=r'''set -e
-          cd /opt/booking_bot
-          ./venv/bin/python - <<'INV_PY'
-          import asyncio
-          from datetime import date, timedelta
-          from sqlalchemy import text
-          from database.database import async_session_maker
 
-          async def main():
-              start=date.today()+timedelta(days=1)
-              end=start+timedelta(days=30)
-              async with async_session_maker() as s:
-                  businesses=(await s.execute(text("""
-                    select id,name,business_type,is_active,working_hours_start,working_hours_end,
-                           booking_interval_minutes,prepayment_enabled
-                    from businesses
-                    where is_active=true
-                    order by id
-                  """))).mappings().all()
-                  print('ACTIVE_BUSINESSES='+str(len(businesses)))
-                  for b in businesses:
-                      print(
-                        'BUSINESS|id={id}|name={name}|type={business_type}|hours={working_hours_start}-{working_hours_end}|'
-                        'step={booking_interval_minutes}|prepay={prepayment_enabled}'.format(**b)
+          cmd=r'''set -Eeuo pipefail
+          cd /opt/booking_bot
+          ./venv/bin/python - <<'SEED_PY'
+          import asyncio
+          import uuid
+          from datetime import date, datetime, time, timedelta
+
+          from sqlalchemy import delete, select, text
+          from sqlalchemy.orm import selectinload
+
+          from database.database import async_session_maker
+          from database.models import (
+              Booking,
+              Business,
+              Employee,
+              EmployeeDayOff,
+              EmployeeService,
+              Service,
+              User,
+          )
+          from database.booking_safety import (
+              ACTIVE_BOOKING_STATUSES,
+              BookingConflictError,
+              ensure_resource_available,
+              lock_resource_days,
+              service_occupies_resource,
+          )
+
+          START = date.today() + timedelta(days=1)
+          END = START + timedelta(days=30)
+          DEMO_TG_BASE = -880026100000
+          DEMO_USER_COUNT = 48
+
+          NAMES = [
+              "Алексей Морозов", "Елена Волкова", "Иван Соколов", "Мария Орлова",
+              "Дмитрий Ковалёв", "Анна Лебедева", "Сергей Попов", "Ольга Кузнецова",
+              "Михаил Воронцов", "Наталья Белова", "Андрей Павлов", "Ирина Фёдорова",
+              "Роман Новиков", "Екатерина Смирнова", "Артём Никитин", "Татьяна Зайцева",
+              "Николай Громов", "Виктория Егорова", "Максим Данилов", "Юлия Власова",
+              "Павел Крылов", "Алина Комарова", "Евгений Титов", "Светлана Миронова",
+              "Илья Савельев", "Дарья Романова", "Константин Жуков", "Полина Макарова",
+              "Владимир Осипов", "Ксения Гусева", "Александр Фомин", "Вероника Тарасова",
+              "Степан Белов", "Марина Королёва", "Григорий Мельников", "Людмила Назарова",
+              "Денис Яковлев", "Софья Алексеева", "Олег Баранов", "Валерия Фролова",
+              "Вадим Семёнов", "Анастасия Котова", "Леонид Марков", "Надежда Виноградова",
+              "Кирилл Белов", "Елизавета Ларионова", "Арсений Козлов", "Диана Филиппова",
+          ]
+
+          NOTE_VARIANTS = [
+              "Первичная запись через ServGo",
+              "Повторный визит",
+              "Запись с сайта",
+              "Клиент выбрал удобное время онлайн",
+              "Запись по рекомендации",
+              "Плановый визит",
+          ]
+
+          def align_up(dt: datetime, step: int) -> datetime:
+              step = max(5, int(step or 30))
+              minutes = dt.hour * 60 + dt.minute
+              aligned = ((minutes + step - 1) // step) * step
+              day_shift, minute_of_day = divmod(aligned, 1440)
+              return datetime.combine(dt.date() + timedelta(days=day_shift), time.min) + timedelta(minutes=minute_of_day)
+
+          def opening_window(business: Business, day: date) -> tuple[datetime, datetime]:
+              opens = business.working_hours_start or time(9, 0)
+              closes = business.working_hours_end or time(18, 0)
+              start_dt = datetime.combine(day, opens)
+              end_dt = datetime.combine(day, closes)
+              if closes <= opens:
+                  end_dt += timedelta(days=1)
+              return start_dt, end_dt
+
+          def candidate_starts(
+              business: Business,
+              employee: Employee,
+              day: date,
+              duration: int,
+              salt: int,
+          ) -> list[datetime]:
+              start_dt, end_dt = opening_window(business, day)
+              step = employee.booking_interval_minutes or business.booking_interval_minutes or 30
+              current = align_up(start_dt, step)
+              values = []
+              while current + timedelta(minutes=duration) <= end_dt:
+                  # Keep the displayed booking date intuitive: for overnight
+                  # businesses we seed evening starts, not after-midnight starts.
+                  if current.date() == day:
+                      values.append(current)
+                  current += timedelta(minutes=step)
+
+              if not values:
+                  return []
+
+              # Prefer human-looking mid-day/evening slots rather than always
+              # filling the opening hour. Rotation is deterministic/idempotent.
+              preferred_hours = [11, 14, 17, 19, 10, 16, 12, 18]
+              preferred = preferred_hours[salt % len(preferred_hours)]
+              values.sort(
+                  key=lambda dt: (
+                      abs((dt.hour * 60 + dt.minute) - preferred * 60),
+                      (dt.hour * 60 + dt.minute + salt * 17) % 1440,
+                  )
+              )
+              return values
+
+          async def get_or_create_demo_users(session):
+              users = []
+              for idx, name in enumerate(NAMES[:DEMO_USER_COUNT], start=1):
+                  telegram_id = DEMO_TG_BASE - idx
+                  phone = f"+7999555{idx:04d}"
+                  user = (
+                      await session.execute(
+                          select(User).where(User.telegram_id == telegram_id)
                       )
-                      services=(await s.execute(text("""
-                        select id,name,duration_minutes,price,is_additional,is_active
-                        from services where business_id=:bid and is_active=true
-                        order by is_additional,id
-                      """),{'bid':b['id']})).mappings().all()
-                      for svc in services:
-                          print(
-                            ' SERVICE|id={id}|name={name}|dur={duration_minutes}|price={price}|add={is_additional}'.format(**svc)
-                          )
-                      employees=(await s.execute(text("""
-                        select id,name,role,booking_interval_minutes,solo_price_per_hour,is_active
-                        from employees
-                        where business_id=:bid and is_active=true
-                        order by id
-                      """),{'bid':b['id']})).mappings().all()
-                      for emp in employees:
-                          links=(await s.execute(text("""
-                            select service_id from employee_services where employee_id=:eid order by service_id
-                          """),{'eid':emp['id']})).scalars().all()
-                          dayoffs=(await s.execute(text("""
-                            select date from employee_days_off
-                            where employee_id=:eid and date between :start and :end
-                            order by date
-                          """),{'eid':emp['id'],'start':start,'end':end})).scalars().all()
-                          print(
-                            ' RESOURCE|id={id}|name={name}|role={role}|step={booking_interval_minutes}|'
-                            'solo={solo_price_per_hour}|links={links}|days_off={days}'.format(
-                              **emp, links=','.join(map(str,links)) or '*',
-                              days=','.join(d.isoformat() for d in dayoffs) or '-'
+                  ).scalar_one_or_none()
+                  if user is None:
+                      user = User(
+                          telegram_id=telegram_id,
+                          full_name=name,
+                          phone=phone,
+                          is_admin=False,
+                          tariff="standard",
+                          max_businesses=1,
+                          subscription_status="none",
+                          is_manual_owner=False,
+                      )
+                      session.add(user)
+                      await session.flush()
+                  else:
+                      user.full_name = name
+                      user.phone = phone
+                  users.append(user)
+              return users
+
+          async def clear_previous_seed(session, demo_users):
+              ids = [u.id for u in demo_users]
+              if not ids:
+                  return 0
+              existing = (
+                  await session.execute(
+                      select(Booking.id).where(
+                          Booking.client_id.in_(ids),
+                          Booking.booking_date >= START,
+                          Booking.booking_date <= END,
+                      )
+                  )
+              ).scalars().all()
+              if existing:
+                  await session.execute(
+                      delete(Booking).where(Booking.id.in_(list(existing)))
+                  )
+                  await session.flush()
+              return len(existing)
+
+          async def active_overlap_count(session):
+              return int(
+                  (
+                      await session.execute(
+                          text("""
+                            WITH active AS (
+                              SELECT id, employee_id, booking_date, booking_time, resource_duration_minutes
+                              FROM bookings
+                              WHERE employee_id IS NOT NULL
+                                AND occupies_resource
+                                AND status IN (
+                                  'pending','confirmed','pending_prepayment',
+                                  'prepayment_sent','prepayment_confirmed'
+                                )
                             )
+                            SELECT COUNT(*)
+                            FROM active a
+                            JOIN active b
+                              ON a.id < b.id
+                             AND a.employee_id = b.employee_id
+                             AND tsrange(
+                                   a.booking_date + a.booking_time,
+                                   a.booking_date + a.booking_time
+                                     + a.resource_duration_minutes * interval '1 minute',
+                                   '[)'
+                                 )
+                                 &&
+                                 tsrange(
+                                   b.booking_date + b.booking_time,
+                                   b.booking_date + b.booking_time
+                                     + b.resource_duration_minutes * interval '1 minute',
+                                   '[)'
+                                 )
+                          """)
+                      )
+                  ).scalar()
+                  or 0
+              )
+
+          async def seed():
+              async with async_session_maker() as session:
+                  demo_users = await get_or_create_demo_users(session)
+                  removed = await clear_previous_seed(session, demo_users)
+                  print(f'previous_demo_rows_removed={removed}')
+
+                  businesses = (
+                      await session.execute(
+                          select(Business)
+                          .where(Business.is_active.is_(True))
+                          .order_by(Business.id)
+                      )
+                  ).scalars().all()
+
+                  total_created = 0
+                  per_business = {}
+                  per_status = {}
+
+                  for business in businesses:
+                      main_services = (
+                          await session.execute(
+                              select(Service)
+                              .where(
+                                  Service.business_id == business.id,
+                                  Service.is_active.is_(True),
+                                  Service.is_additional.is_(False),
+                                  Service.duration_minutes > 0,
+                              )
+                              .order_by(Service.id)
                           )
-                      stats=(await s.execute(text("""
-                        select status,count(*) n
-                        from bookings
-                        where business_id=:bid and booking_date between :start and :end
-                        group by status order by status
-                      """),{'bid':b['id'],'start':start,'end':end})).all()
-                      print(' EXISTING_FUTURE|'+(','.join(f'{st}:{n}' for st,n in stats) if stats else 'none'))
-          asyncio.run(main())
-          INV_PY
+                      ).scalars().all()
+                      if not main_services:
+                          print(f'SKIP business={business.id} reason=no_main_services')
+                          continue
+
+                      employees = (
+                          await session.execute(
+                              select(Employee)
+                              .where(
+                                  Employee.business_id == business.id,
+                                  Employee.is_active.is_(True),
+                              )
+                              .order_by(Employee.id)
+                          )
+                      ).scalars().all()
+                      employees = [
+                          e for e in employees
+                          if (e.role or 'master') not in ('admin', 'administrator')
+                      ]
+
+                      business_created = 0
+
+                      for employee in employees:
+                          link_ids = set(
+                              (
+                                  await session.execute(
+                                      select(EmployeeService.service_id).where(
+                                          EmployeeService.employee_id == employee.id
+                                      )
+                                  )
+                              ).scalars().all()
+                          )
+                          compatible = [
+                              svc for svc in main_services
+                              if not link_ids or svc.id in link_ids
+                          ]
+                          if not compatible:
+                              print(
+                                  f'SKIP resource={employee.id} business={business.id} '
+                                  'reason=no_compatible_services'
+                              )
+                              continue
+
+                          days_off = set(
+                              (
+                                  await session.execute(
+                                      select(EmployeeDayOff.date).where(
+                                          EmployeeDayOff.employee_id == employee.id,
+                                          EmployeeDayOff.date >= START,
+                                          EmployeeDayOff.date <= END,
+                                      )
+                                  )
+                              ).scalars().all()
+                          )
+
+                          if business.business_type == 'venue_rental':
+                              max_duration = max(int(s.duration_minutes or 0) for s in compatible)
+                              target = 4 if max_duration >= 300 else 6
+                          else:
+                              target = 7
+
+                          offsets = list(range(0, 31))
+                          offsets.sort(
+                              key=lambda off: (
+                                  ((off + 1) * 37 + employee.id * 19 + business.id * 11) % 113,
+                                  off,
+                              )
+                          )
+
+                          resource_created = 0
+                          for off in offsets:
+                              if resource_created >= target:
+                                  break
+                              day = START + timedelta(days=off)
+                              if day in days_off:
+                                  continue
+
+                              svc = compatible[
+                                  (resource_created + employee.id + off) % len(compatible)
+                              ]
+                              duration = int(svc.duration_minutes or 30)
+                              if duration <= 0:
+                                  continue
+
+                              starts = candidate_starts(
+                                  business,
+                                  employee,
+                                  day,
+                                  duration,
+                                  salt=employee.id * 31 + off * 7 + resource_created,
+                              )
+                              if not starts:
+                                  continue
+
+                              chosen = None
+                              for start_dt in starts:
+                                  await lock_resource_days(session, employee.id, [start_dt.date()])
+                                  try:
+                                      await ensure_resource_available(
+                                          session,
+                                          employee_id=employee.id,
+                                          booking_date=start_dt.date(),
+                                          booking_time=start_dt.time(),
+                                          duration_minutes=duration,
+                                          acquire_lock=False,
+                                      )
+                                  except BookingConflictError:
+                                      continue
+                                  chosen = start_dt
+                                  break
+
+                              if chosen is None:
+                                  continue
+
+                              user_index = (
+                                  business.id * 17
+                                  + employee.id * 7
+                                  + off * 3
+                                  + resource_created
+                              ) % len(demo_users)
+                              client = demo_users[user_index]
+
+                              if business.business_type == 'venue_rental' and svc.price is None:
+                                  status = 'pending'
+                              elif business.prepayment_enabled:
+                                  status_cycle = [
+                                      'confirmed',
+                                      'pending_prepayment',
+                                      'confirmed',
+                                      'prepayment_sent',
+                                      'confirmed',
+                                  ]
+                                  status = status_cycle[
+                                      (employee.id + off + resource_created) % len(status_cycle)
+                                  ]
+                              else:
+                                  status = 'confirmed' if (off + employee.id) % 4 else 'pending'
+
+                              prepayment_amount = None
+                              if status in ('pending_prepayment', 'prepayment_sent'):
+                                  price = int(svc.price or 0)
+                                  pct = int(business.prepayment_percent or 100)
+                                  prepayment_amount = int(price * pct / 100)
+
+                              is_rental = business.business_type == 'venue_rental'
+                              estimated_price = int(svc.price) if is_rental and svc.price is not None else None
+                              needs_quote = bool(is_rental and svc.price is None)
+
+                              booking = Booking(
+                                  business_id=business.id,
+                                  client_id=client.id,
+                                  service_id=svc.id,
+                                  employee_id=employee.id,
+                                  booking_date=chosen.date(),
+                                  booking_time=chosen.time(),
+                                  status=status,
+                                  notes=NOTE_VARIANTS[
+                                      (employee.id + off + resource_created) % len(NOTE_VARIANTS)
+                                  ],
+                                  duration_minutes=duration if is_rental else None,
+                                  resource_duration_minutes=duration,
+                                  occupies_resource=service_occupies_resource(svc),
+                                  estimated_price=estimated_price,
+                                  price_requires_confirmation=needs_quote,
+                                  prepayment_amount=prepayment_amount,
+                                  notify_token=str(uuid.uuid4()),
+                                  reminder_24h_sent=False,
+                                  reminder_2h_sent=False,
+                                  created_at=datetime.utcnow()
+                                      - timedelta(days=(off + resource_created) % 5),
+                              )
+                              session.add(booking)
+                              await session.flush()
+
+                              resource_created += 1
+                              business_created += 1
+                              total_created += 1
+                              per_status[status] = per_status.get(status, 0) + 1
+
+                          print(
+                              f'RESOURCE_SEEDED|business={business.id}|resource={employee.id}|'
+                              f'created={resource_created}|target={target}'
+                          )
+
+                      per_business[business.id] = business_created
+                      print(
+                          f'BUSINESS_SEEDED|id={business.id}|name={business.name}|'
+                          f'created={business_created}'
+                      )
+
+                  # Add one non-blocking cancelled example per business when possible,
+                  # so the schedule also demonstrates a cancelled state.
+                  for business in businesses:
+                      employee = (
+                          await session.execute(
+                              select(Employee)
+                              .where(
+                                  Employee.business_id == business.id,
+                                  Employee.is_active.is_(True),
+                                  Employee.role.notin_(('admin', 'administrator')),
+                              )
+                              .order_by(Employee.id)
+                          )
+                      ).scalars().first()
+                      service = (
+                          await session.execute(
+                              select(Service)
+                              .where(
+                                  Service.business_id == business.id,
+                                  Service.is_active.is_(True),
+                                  Service.is_additional.is_(False),
+                                  Service.duration_minutes > 0,
+                              )
+                              .order_by(Service.id)
+                          )
+                      ).scalars().first()
+                      if not employee or not service:
+                          continue
+                      day = END
+                      starts = candidate_starts(
+                          business, employee, day, int(service.duration_minutes or 30),
+                          salt=business.id * 101
+                      )
+                      if not starts:
+                          continue
+                      client = demo_users[(business.id * 5) % len(demo_users)]
+                      duration = int(service.duration_minutes or 30)
+                      cancelled = Booking(
+                          business_id=business.id,
+                          client_id=client.id,
+                          service_id=service.id,
+                          employee_id=employee.id,
+                          booking_date=starts[-1].date(),
+                          booking_time=starts[-1].time(),
+                          status='cancelled',
+                          notes='Отменено клиентом заранее',
+                          duration_minutes=duration if business.business_type == 'venue_rental' else None,
+                          resource_duration_minutes=duration,
+                          occupies_resource=service_occupies_resource(service),
+                          estimated_price=(
+                              int(service.price)
+                              if business.business_type == 'venue_rental' and service.price is not None
+                              else None
+                          ),
+                          price_requires_confirmation=bool(
+                              business.business_type == 'venue_rental' and service.price is None
+                          ),
+                          notify_token=str(uuid.uuid4()),
+                          reminder_24h_sent=False,
+                          reminder_2h_sent=False,
+                      )
+                      session.add(cancelled)
+                      total_created += 1
+                      per_business[business.id] = per_business.get(business.id, 0) + 1
+                      per_status['cancelled'] = per_status.get('cancelled', 0) + 1
+
+                  await session.flush()
+
+                  overlaps = await active_overlap_count(session)
+                  if overlaps != 0:
+                      raise RuntimeError(f'Unexpected active overlaps before commit: {overlaps}')
+
+                  await session.commit()
+
+                  print(f'SEED_WINDOW={START.isoformat()}..{END.isoformat()}')
+                  print(f'TOTAL_CREATED={total_created}')
+                  print(
+                      'STATUS_COUNTS='
+                      + ','.join(f'{k}:{v}' for k,v in sorted(per_status.items()))
+                  )
+                  for business_id,count in sorted(per_business.items()):
+                      print(f'BUSINESS_COUNT|id={business_id}|count={count}')
+
+              # Verify in a fresh transaction after COMMIT.
+              async with async_session_maker() as verify:
+                  demo_tg_ids=[DEMO_TG_BASE-i for i in range(1,DEMO_USER_COUNT+1)]
+                  demo_user_ids=(
+                      await verify.execute(
+                          select(User.id).where(User.telegram_id.in_(demo_tg_ids))
+                      )
+                  ).scalars().all()
+                  committed = int(
+                      (
+                          await verify.execute(
+                              select(text('count(*)'))
+                              .select_from(Booking)
+                              .where(
+                                  Booking.client_id.in_(list(demo_user_ids)),
+                                  Booking.booking_date >= START,
+                                  Booking.booking_date <= END,
+                              )
+                          )
+                      ).scalar()
+                      or 0
+                  )
+                  overlaps = await active_overlap_count(verify)
+                  constraint_exists = bool(
+                      (
+                          await verify.execute(
+                              text("""
+                                SELECT EXISTS(
+                                  SELECT 1 FROM pg_constraint
+                                  WHERE conname='bookings_no_active_resource_overlap'
+                                )
+                              """)
+                          )
+                      ).scalar()
+                  )
+                  print(f'COMMITTED_DEMO_ROWS={committed}')
+                  print(f'ACTIVE_OVERLAP_PAIRS={overlaps}')
+                  print(f'EXCLUSION_CONSTRAINT={str(constraint_exists).lower()}')
+                  if committed == 0 or overlaps != 0 or not constraint_exists:
+                      raise RuntimeError('Post-commit demo seed verification failed')
+
+          asyncio.run(seed())
+          SEED_PY
+
+          curl -fsS --max-time 10 https://servgo.ru/api/health >/dev/null
+          echo 'public_api=200'
           '''
-          _,out,err=ssh.exec_command(cmd,timeout=60)
+          _,out,err=ssh.exec_command(cmd,timeout=300)
           stdout=out.read().decode('utf-8','replace')
           stderr=err.read().decode('utf-8','replace')
           print(stdout)
           status=out.channel.recv_exit_status()
           if status:
-              print(stderr[-2000:])
+              print('stderr_suffix='+stderr[-3000:])
               raise SystemExit(status)
           ssh.close()
           PY
