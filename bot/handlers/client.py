@@ -886,6 +886,231 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Запись создана!")
 
 
+@router.callback_query(F.data.startswith("prepay_sent:"))
+async def client_prepayment_sent(callback: CallbackQuery, state: FSMContext):
+    """Client says the prepayment was sent; owners must confirm receipt."""
+    booking_id = int(callback.data.split(":")[1])
+
+    async with async_session_maker() as session:
+        from sqlalchemy.orm import selectinload
+        from database.models import Booking
+
+        booking = (
+            await session.execute(
+                select(Booking)
+                .options(
+                    selectinload(Booking.client),
+                    selectinload(Booking.business),
+                    selectinload(Booking.service),
+                    selectinload(Booking.employee),
+                )
+                .where(Booking.id == booking_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+
+        if not booking:
+            await callback.answer("Запись не найдена", show_alert=True)
+            return
+        if not booking.client or booking.client.telegram_id != callback.from_user.id:
+            await callback.answer("Это не ваша запись", show_alert=True)
+            return
+        if booking.status == "prepayment_sent":
+            await callback.answer("Владелец уже получил запрос на подтверждение")
+            return
+        if booking.status != "pending_prepayment":
+            await callback.answer("Эта запись уже обработана", show_alert=True)
+            return
+
+        booking.status = "prepayment_sent"
+        await session.commit()
+
+        try:
+            from bot.services.notification_events import dispatch_booking_event
+            await dispatch_booking_event(
+                [booking],
+                session,
+                "prepayment_submitted",
+                include_client=False,
+                staff_audience="owner",
+                prepayment_actions=True,
+            )
+        except Exception as notification_error:
+            logger.error(
+                "Telegram prepayment notification failed booking=%s: %s",
+                booking.id,
+                notification_error,
+                exc_info=True,
+            )
+
+    await callback.message.edit_text(
+        callback.message.text
+        + "\n\n✅ <b>Сообщение об оплате отправлено владельцу.</b>\n"
+          "Запись будет подтверждена после проверки поступления.",
+        parse_mode="HTML",
+    )
+    await state.set_state(BookingStates.waiting_prepayment)
+    await callback.answer("Ожидаем подтверждение владельца")
+
+
+@router.callback_query(F.data.startswith("prepay_attach_receipt:"))
+async def client_prepayment_attach_receipt(callback: CallbackQuery, state: FSMContext):
+    booking_id = int(callback.data.split(":")[1])
+    await state.update_data(prepayment_booking_id=booking_id)
+    await state.set_state(BookingStates.uploading_receipt)
+    await callback.message.answer(
+        "📸 Отправьте фото чека или файл/PDF одним сообщением."
+    )
+    await callback.answer()
+
+
+@router.message(BookingStates.uploading_receipt)
+async def client_prepayment_receipt_uploaded(message: Message, state: FSMContext):
+    """Copy the receipt to all owners and request payment confirmation."""
+    data = await state.get_data()
+    booking_id = data.get("prepayment_booking_id")
+    if not booking_id:
+        await message.answer("Не удалось определить запись. Откройте её заново.")
+        await state.clear()
+        return
+    if not message.photo and not message.document:
+        await message.answer("Пришлите фото чека или документ/PDF.")
+        return
+
+    async with async_session_maker() as session:
+        from sqlalchemy.orm import selectinload
+        from database.models import Booking
+        from database.crud import get_business_owners
+
+        booking = (
+            await session.execute(
+                select(Booking)
+                .options(
+                    selectinload(Booking.client),
+                    selectinload(Booking.business),
+                    selectinload(Booking.service),
+                    selectinload(Booking.employee),
+                )
+                .where(Booking.id == int(booking_id))
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not booking:
+            await message.answer("Запись не найдена.")
+            await state.clear()
+            return
+        if not booking.client or booking.client.telegram_id != message.from_user.id:
+            await message.answer("Это не ваша запись.")
+            await state.clear()
+            return
+        if booking.status not in ("pending_prepayment", "prepayment_sent"):
+            await message.answer("Эта запись уже обработана.")
+            await state.clear()
+            return
+
+        booking.status = "prepayment_sent"
+        await session.commit()
+
+        owners = await get_business_owners(session, booking.business_id)
+        for owner in owners:
+            if not owner.telegram_id or int(owner.telegram_id) <= 0:
+                continue
+            try:
+                await message.bot.copy_message(
+                    chat_id=owner.telegram_id,
+                    from_chat_id=message.chat.id,
+                    message_id=message.message_id,
+                )
+            except Exception as copy_error:
+                logger.warning(
+                    "Receipt copy failed booking=%s owner=%s: %s",
+                    booking.id,
+                    owner.id,
+                    copy_error,
+                )
+
+        try:
+            from bot.services.notification_events import dispatch_booking_event
+            await dispatch_booking_event(
+                [booking],
+                session,
+                "prepayment_submitted",
+                include_client=False,
+                staff_audience="owner",
+                prepayment_actions=True,
+            )
+        except Exception as notification_error:
+            logger.error(
+                "Receipt confirmation request failed booking=%s: %s",
+                booking.id,
+                notification_error,
+                exc_info=True,
+            )
+
+    await message.answer(
+        "✅ Чек отправлен владельцу. Запись будет подтверждена после проверки."
+    )
+    await state.set_state(BookingStates.waiting_prepayment)
+
+
+@router.callback_query(F.data.startswith("cancel_prepay_booking:"))
+async def client_cancel_prepayment_booking(callback: CallbackQuery, state: FSMContext):
+    booking_id = int(callback.data.split(":")[1])
+
+    async with async_session_maker() as session:
+        from sqlalchemy.orm import selectinload
+        from database.models import Booking
+
+        booking = (
+            await session.execute(
+                select(Booking)
+                .options(
+                    selectinload(Booking.client),
+                    selectinload(Booking.business),
+                    selectinload(Booking.service),
+                    selectinload(Booking.employee),
+                )
+                .where(Booking.id == booking_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not booking:
+            await callback.answer("Запись не найдена", show_alert=True)
+            return
+        if not booking.client or booking.client.telegram_id != callback.from_user.id:
+            await callback.answer("Это не ваша запись", show_alert=True)
+            return
+        if booking.status not in ("pending_prepayment", "prepayment_sent"):
+            await callback.answer("Эта запись уже обработана", show_alert=True)
+            return
+
+        booking.status = "cancelled"
+        await session.commit()
+
+        try:
+            from bot.services.notification_events import dispatch_booking_event
+            await dispatch_booking_event(
+                [booking],
+                session,
+                "booking_cancelled",
+                include_client=True,
+                staff_audience="all",
+                send_client_telegram=False,
+                send_client_webpush=True,
+            )
+        except Exception as notification_error:
+            logger.error(
+                "Prepayment cancellation notification failed booking=%s: %s",
+                booking.id,
+                notification_error,
+                exc_info=True,
+            )
+
+    await callback.message.edit_text("❌ Бронирование отменено.")
+    await state.clear()
+    await callback.answer("Запись отменена")
+
+
 @router.callback_query(F.data == "cancel_booking")
 async def booking_cancelled(callback: CallbackQuery, state: FSMContext):
     """Отмена создания записи"""
