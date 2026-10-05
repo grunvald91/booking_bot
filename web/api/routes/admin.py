@@ -894,6 +894,8 @@ async def admin_reschedule_booking(
     booking.booking_time = new_time
     booking.reminder_24h_sent = False
     booking.reminder_2h_sent = False
+    booking.staff_reminder_24h_sent = False
+    booking.staff_reminder_2h_sent = False
     if data.employee_id is not None:
         booking.employee_id = target_employee_id
 

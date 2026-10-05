@@ -1248,6 +1248,8 @@ async def reschedule_booking(
         item.booking_time = current_dt.time()
         item.reminder_24h_sent = False
         item.reminder_2h_sent = False
+        item.staff_reminder_24h_sent = False
+        item.staff_reminder_2h_sent = False
         current_dt += timedelta(minutes=booking_resource_duration(item))
 
     try:
