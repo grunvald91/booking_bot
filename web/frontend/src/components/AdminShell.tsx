@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Clock, Scissors, Users, Settings, Moon, Sun } from 'lucide-react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { LayoutDashboard, Clock, Scissors, Users, Settings, Moon, Sun, LogOut } from 'lucide-react'
 import { useTheme } from '../hooks/useTheme'
 
 const NAV = [
@@ -31,6 +31,15 @@ export function AdminShell({
 }) {
   const [theme, toggleTheme] = useTheme()
   const { pathname } = useLocation()
+  const navigate = useNavigate()
+
+  const handleLogout = () => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('userRole')
+    localStorage.removeItem('userName')
+    sessionStorage.setItem('servgoExplicitLogout', '1')
+    navigate('/login', { replace: true })
+  }
   return createPortal(
     <div className="ds-screen" data-theme={theme}>
       <header className="ds-shell-header" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', flexShrink: 0 }}>
@@ -41,6 +50,9 @@ export function AdminShell({
         {headerExtra}
         <button className="ds-icon-btn bordered" onClick={toggleTheme} aria-label="Тема">
           {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+        </button>
+        <button className="ds-icon-btn bordered" onClick={handleLogout} aria-label="Выйти" title="Выйти">
+          <LogOut size={18} />
         </button>
       </header>
 
