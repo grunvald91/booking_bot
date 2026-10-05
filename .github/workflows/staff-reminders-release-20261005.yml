@@ -1,4 +1,4 @@
-name: Staff reminders release
+name: Staff reminders production audit
 
 on:
   push:
@@ -8,33 +8,20 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
+  audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 8
     env:
       SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Build frontend
-        working-directory: web/frontend
-        run: |
-          npm ci --legacy-peer-deps
-          npm run build
-      - name: Pack
-        run: |
-          tar -czf /tmp/release.tgz database/models.py bot/services/notifications.py bot/services/webpush.py web/api/routes/client.py web/api/routes/admin.py migrations/add_staff_reminder_fields.sql web/frontend/dist
       - name: Install SSH library
         run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
-      - name: Deploy
+      - name: Suppress demo reminders and audit recipients
         shell: bash
         run: |
           python - <<'PY'
           import base64, hashlib, os, time, paramiko
           HOST='155.212.162.47'
-          ROOT='/opt/booking_bot'
           FP='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
           class Pinned(paramiko.MissingHostKeyPolicy):
               def missing_host_key(self,c,h,k):
@@ -52,53 +39,88 @@ jobs:
                   c.close()
                   if n==2: raise
                   time.sleep(3)
-          stage=ROOT+'/.release_staging/staff-reminders-93f2451c'
-          ssh.exec_command("mkdir -p "+stage,timeout=10)[1].channel.recv_exit_status()
-          sftp=ssh.open_sftp(); sftp.put('/tmp/release.tgz',stage+'/release.tgz'); sftp.close()
-          cmd=r'''set -Eeuo pipefail
-          ROOT=/opt/booking_bot
-          STAGE=$ROOT/.release_staging/staff-reminders-93f2451c
-          PAYLOAD=$STAGE/payload
-          BACKUP=$ROOT/.release_backups/staff-reminders-93f2451c-$(date +%Y%m%d-%H%M%S)
-          rm -rf "$PAYLOAD"; mkdir -p "$PAYLOAD" "$BACKUP"
-          tar -xzf "$STAGE/release.tgz" -C "$PAYLOAD"
-          for f in database/models.py bot/services/notifications.py bot/services/webpush.py web/api/routes/client.py web/api/routes/admin.py; do
-            mkdir -p "$BACKUP/$(dirname "$f")"
-            cp -a "$ROOT/$f" "$BACKUP/$f"
-          done
-          cp -a "$ROOT/web/frontend/dist" "$BACKUP/frontend-dist"
-          cd "$ROOT"
-          STAGE_PAYLOAD="$PAYLOAD" ./venv/bin/python - <<'MIG'
-          import asyncio, os, asyncpg
-          from pathlib import Path
-          from dotenv import load_dotenv
-          load_dotenv('/opt/booking_bot/.env')
+          cmd=r'''set -e
+          cd /opt/booking_bot
+          ./venv/bin/python - <<'AUDIT'
+          import asyncio
+          from datetime import datetime, timedelta
+          from zoneinfo import ZoneInfo
+          from sqlalchemy import text
+          from database.database import async_session_maker
+
           async def main():
-              conn=await asyncpg.connect(host=os.getenv('DB_HOST','localhost'),port=int(os.getenv('DB_PORT','5432')),user=os.getenv('DB_USER','postgres'),password=os.getenv('DB_PASSWORD',''),database=os.getenv('DB_NAME','booking_bot'))
-              try:
-                  await conn.execute((Path(os.environ['STAGE_PAYLOAD'])/'migrations'/'add_staff_reminder_fields.sql').read_text())
-              finally: await conn.close()
+              async with async_session_maker() as s:
+                  demo=await s.execute(text("""
+                    UPDATE bookings b
+                    SET reminder_24h_sent=TRUE,
+                        reminder_2h_sent=TRUE,
+                        staff_reminder_24h_sent=TRUE,
+                        staff_reminder_2h_sent=TRUE
+                    FROM users u
+                    WHERE b.client_id=u.id
+                      AND u.telegram_id BETWEEN -880026100048 AND -880026100001
+                    RETURNING b.id
+                  """))
+                  demo_count=len(demo.all())
+                  await s.commit()
+
+                  owner_push=(await s.execute(text("""
+                    SELECT COUNT(DISTINCT ps.id)
+                    FROM push_subscriptions ps
+                    WHERE ps.is_active=TRUE
+                      AND (
+                        EXISTS(SELECT 1 FROM businesses b WHERE b.owner_id=ps.user_id)
+                        OR EXISTS(SELECT 1 FROM business_owners bo WHERE bo.user_id=ps.user_id)
+                      )
+                  """))).scalar() or 0
+
+                  master_telegram=(await s.execute(text("""
+                    SELECT COUNT(*) FROM employees
+                    WHERE is_active=TRUE AND telegram_id IS NOT NULL AND telegram_id>0
+                  """))).scalar() or 0
+
+                  master_push=(await s.execute(text("""
+                    SELECT COUNT(DISTINCT ps.id)
+                    FROM employees e
+                    JOIN users u ON u.telegram_id=e.telegram_id
+                    JOIN push_subscriptions ps ON ps.user_id=u.id AND ps.is_active=TRUE
+                    WHERE e.is_active=TRUE AND e.telegram_id IS NOT NULL AND e.telegram_id>0
+                  """))).scalar() or 0
+
+                  now=datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None)
+                  due=(await s.execute(text("""
+                    SELECT COUNT(*)
+                    FROM bookings b
+                    JOIN users u ON u.id=b.client_id
+                    WHERE b.status IN ('pending','confirmed','prepayment_sent','prepayment_confirmed')
+                      AND (b.booking_date + b.booking_time) > :now
+                      AND (b.booking_date + b.booking_time) <= :horizon
+                      AND NOT (u.telegram_id BETWEEN -880026100048 AND -880026100001)
+                  """),{'now':now,'horizon':now+timedelta(hours=24)})).scalar() or 0
+
+                  cols=(await s.execute(text("""
+                    SELECT COUNT(*) FROM information_schema.columns
+                    WHERE table_name='bookings'
+                      AND column_name IN ('staff_reminder_24h_sent','staff_reminder_2h_sent')
+                  """))).scalar() or 0
+
+                  print('staff_columns='+str(cols))
+                  print('demo_rows_suppressed='+str(demo_count))
+                  print('owner_push_subscriptions='+str(owner_push))
+                  print('masters_with_telegram='+str(master_telegram))
+                  print('master_push_subscriptions='+str(master_push))
+                  print('real_bookings_next_24h='+str(due))
           asyncio.run(main())
-          MIG
-          for f in database/models.py bot/services/notifications.py bot/services/webpush.py web/api/routes/client.py web/api/routes/admin.py; do install -m 0644 "$PAYLOAD/$f" "$ROOT/$f"; done
-          rm -rf "$ROOT/web/frontend/dist"
-          cp -a "$PAYLOAD/web/frontend/dist" "$ROOT/web/frontend/dist"
-          ./venv/bin/python -m py_compile database/models.py bot/services/notifications.py bot/services/webpush.py web/api/routes/client.py web/api/routes/admin.py
-          systemctl restart booking-web-api.service
-          systemctl restart booking-bot.service
-          sleep 4
-          test "$(systemctl is-active booking-web-api.service)" = active
-          test "$(systemctl is-active booking-bot.service)" = active
-          curl -fsS --max-time 8 http://127.0.0.1:8000/health >/dev/null
-          curl -fsS --max-time 10 https://servgo.ru/api/health >/dev/null
-          echo release_status=success
-          echo backup_dir=$BACKUP
+          AUDIT
+          systemctl is-active booking-bot.service
+          curl -fsS --max-time 8 https://servgo.ru/api/health >/dev/null
+          echo audit_status=success
           '''
-          _,out,err=ssh.exec_command(cmd,timeout=300)
+          _,out,err=ssh.exec_command(cmd,timeout=90)
           print(out.read().decode('utf-8','replace'))
           status=out.channel.recv_exit_status()
           if status:
-              print(err.read().decode('utf-8','replace')[-1800:])
+              print(err.read().decode('utf-8','replace')[-1500:])
               raise SystemExit(status)
           ssh.close()
           PY
