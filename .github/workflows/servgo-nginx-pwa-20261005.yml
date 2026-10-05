@@ -77,7 +77,7 @@ jobs:
           if rel < 0:
               raise SystemExit('ServGo SPA location not found')
           insert_at=start+rel
-          addition="\\n".join([
+          addition="\n".join([
               "    # PWA control files: always revalidate service worker and manifest.",
               "    location = /sw.js {",
               "        root /opt/booking_bot/web/frontend/dist;",
