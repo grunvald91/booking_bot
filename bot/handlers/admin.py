@@ -5719,57 +5719,106 @@ async def confirm_prepayment_by_owner(callback: CallbackQuery, state: FSMContext
 
 @router.callback_query(F.data.startswith("reject_prepayment:"))
 async def reject_prepayment_by_owner(callback: CallbackQuery, state: FSMContext):
-    """Владелец отклоняет предоплату (не получена)"""
+    """Owner rejects an unreceived prepayment for the whole visit."""
     booking_id = int(callback.data.split(":")[1])
 
     async with async_session_maker() as session:
         from sqlalchemy.orm import selectinload
-        stmt = select(Booking).options(
-            selectinload(Booking.client),
-            selectinload(Booking.service),
-            selectinload(Booking.business)
-        ).where(Booking.id == booking_id)
-        result = await session.execute(stmt)
-        booking = result.scalar_one_or_none()
+        from database.booking_safety import contiguous_visit_bookings
+        from database.crud import get_business_owners
+
+        booking = (
+            await session.execute(
+                select(Booking)
+                .options(
+                    selectinload(Booking.client),
+                    selectinload(Booking.service),
+                    selectinload(Booking.business),
+                    selectinload(Booking.employee),
+                )
+                .where(Booking.id == booking_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
 
         if not booking:
             await callback.answer("Бронирование не найдено", show_alert=True)
             return
 
-        # Возвращаем статус на ожидание предоплаты
-        booking.status = "pending_prepayment"
+        owners = await get_business_owners(session, booking.business_id)
+        owner_telegram_ids = {
+            int(owner.telegram_id)
+            for owner in owners
+            if owner.telegram_id and int(owner.telegram_id) > 0
+        }
+        if callback.from_user.id not in owner_telegram_ids:
+            await callback.answer("У вас нет прав отклонять эту оплату", show_alert=True)
+            return
+
+        if booking.status not in ("prepayment_sent", "pending_prepayment"):
+            await callback.answer("Статус бронирования уже изменён", show_alert=True)
+            return
+
+        related_bookings = await contiguous_visit_bookings(
+            session,
+            booking,
+            statuses=("prepayment_sent", "pending_prepayment"),
+        )
+        for item in related_bookings:
+            item.status = "pending_prepayment"
+            item.prepayment_confirmed_at = None
         await session.commit()
 
         try:
             from bot.services.webpush import send_booking_status_webpush
-            await send_booking_status_webpush([booking], session, "prepayment_rejected")
-            await session.commit()
-        except Exception as push_err:
-            logger.warning("Web Push rejection failed for booking %s: %s", booking.id, push_err)
-
-        # Уведомляем клиента
-        client_text = (
-            f"❌ <b>Предоплата не подтверждена</b>\n\n"
-            f"Владелец {booking.business.name} не получил вашу предоплату.\n\n"
-            f"Пожалуйста, убедитесь, что вы отправили оплату по правильным реквизитам "
-            f"и нажмите 'Оплата отправлена' снова."
-        )
-
-        from bot.keyboards.client_kb import get_prepayment_confirmation_keyboard
-
-        try:
-            await callback.bot.send_message(
-                chat_id=booking.client.telegram_id,
-                text=client_text,
-                parse_mode="HTML",
-                reply_markup=get_prepayment_confirmation_keyboard(booking_id)
+            await send_booking_status_webpush(
+                related_bookings,
+                session,
+                "prepayment_rejected",
             )
-        except Exception as e:
-            print(f"Ошибка отправки уведомления клиенту: {e}")
+            await session.commit()
+        except Exception as push_error:
+            logger.warning(
+                "Web Push rejection failed for booking %s: %s",
+                booking.id,
+                push_error,
+            )
+
+        if booking.client and booking.client.telegram_id and booking.client.telegram_id > 0:
+            from bot.keyboards.client_kb import get_prepayment_confirmation_keyboard
+
+            client_text = (
+                f"❌ <b>Предоплата не подтверждена</b>\n\n"
+                f"Владелец {booking.business.name} не получил вашу предоплату.\n\n"
+                "Проверьте реквизиты и отправьте подтверждение ещё раз."
+            )
+            try:
+                await callback.bot.send_message(
+                    chat_id=booking.client.telegram_id,
+                    text=client_text,
+                    parse_mode="HTML",
+                    reply_markup=get_prepayment_confirmation_keyboard(
+                        booking.id,
+                        require_receipt=bool(
+                            getattr(
+                                booking.business,
+                                "require_receipt_for_prepayment",
+                                False,
+                            )
+                        ),
+                    ),
+                )
+            except Exception as telegram_error:
+                logger.warning(
+                    "Telegram rejection notice failed booking=%s: %s",
+                    booking.id,
+                    telegram_error,
+                )
 
     await callback.message.edit_text(
-        callback.message.text + "\n\n❌ <b>Предоплата отклонена</b>\nКлиент уведомлён.",
-        parse_mode="HTML"
+        callback.message.text
+        + "\n\n❌ <b>Предоплата не подтверждена</b>\nКлиент уведомлён.",
+        parse_mode="HTML",
     )
     await callback.answer("Предоплата отклонена")
 
