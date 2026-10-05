@@ -26,6 +26,7 @@ from database.crud import get_or_create_guest_user
 from database.booking_safety import (
     ACTIVE_BOOKING_STATUSES,
     BookingConflictError,
+    booking_resource_duration,
     busy_resource_intervals,
     ensure_resource_available,
     lock_resource_days,
@@ -1115,8 +1116,7 @@ async def reschedule_booking(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Reschedule a booking (and its group) to a new date/time."""
-    # Load the target booking
+    """Reschedule a visit atomically under the same resource lock as creation."""
     result = await db.execute(
         select(Booking)
         .where(Booking.id == booking_id)
@@ -1125,6 +1125,7 @@ async def reschedule_booking(
             selectinload(Booking.service),
             selectinload(Booking.employee),
         )
+        .with_for_update()
     )
     booking = result.scalar_one_or_none()
     if not booking:
@@ -1136,14 +1137,13 @@ async def reschedule_booking(
     if not can_r:
         raise HTTPException(status_code=400, detail="Cannot reschedule this booking")
 
-    # Find booking group: same client, date, employee, consecutive times
     group_result = await db.execute(
         select(Booking)
         .where(
             Booking.client_id == user.id,
             Booking.booking_date == booking.booking_date,
             Booking.employee_id == booking.employee_id,
-            Booking.status.in_(["pending", "confirmed"]),
+            Booking.status.in_(ACTIVE_BOOKING_STATUSES),
         )
         .options(
             selectinload(Booking.business),
@@ -1151,101 +1151,105 @@ async def reschedule_booking(
             selectinload(Booking.employee),
         )
         .order_by(Booking.booking_time.asc())
+        .with_for_update()
     )
     group_bookings = list(group_result.scalars().all())
 
-    # Filter to consecutive bookings that include our target
-    # Sort by time and find consecutive chain containing our booking
     sorted_bookings = sorted(group_bookings, key=lambda b: b.booking_time)
-    chain = []
+    chain: list[Booking] = []
     found = False
-    for i, b in enumerate(sorted_bookings):
-        if b.id == booking_id:
-            found = True
-            # Walk back to find start of chain
-            chain = [b]
-            j = i - 1
-            while j >= 0:
-                prev = sorted_bookings[j]
-                prev_svc = prev.service
-                expected_end = datetime.combine(prev.booking_date, prev.booking_time) + timedelta(
-                    minutes=prev_svc.duration_minutes if prev_svc else 30
-                )
-                if expected_end.time() == chain[0].booking_time:
-                    chain.insert(0, prev)
-                    j -= 1
-                else:
-                    break
-            # Walk forward
-            j = i + 1
-            while j < len(sorted_bookings):
-                nxt = sorted_bookings[j]
-                last = chain[-1]
-                last_svc = last.service
-                expected_end = datetime.combine(last.booking_date, last.booking_time) + timedelta(
-                    minutes=last_svc.duration_minutes if last_svc else 30
-                )
-                if expected_end.time() == nxt.booking_time:
-                    chain.append(nxt)
-                    j += 1
-                else:
-                    break
-            break
+    for i, item in enumerate(sorted_bookings):
+        if item.id != booking_id:
+            continue
+        found = True
+        chain = [item]
+
+        j = i - 1
+        while j >= 0:
+            prev = sorted_bookings[j]
+            expected_end = datetime.combine(prev.booking_date, prev.booking_time) + timedelta(
+                minutes=booking_resource_duration(prev)
+            )
+            if expected_end == datetime.combine(chain[0].booking_date, chain[0].booking_time):
+                chain.insert(0, prev)
+                j -= 1
+            else:
+                break
+
+        j = i + 1
+        while j < len(sorted_bookings):
+            nxt = sorted_bookings[j]
+            last = chain[-1]
+            expected_end = datetime.combine(last.booking_date, last.booking_time) + timedelta(
+                minutes=booking_resource_duration(last)
+            )
+            if expected_end == datetime.combine(nxt.booking_date, nxt.booking_time):
+                chain.append(nxt)
+                j += 1
+            else:
+                break
+        break
 
     if not found:
         chain = [booking]
 
-    # Parse new time
     try:
         new_time = datetime.strptime(body.time, "%H:%M").time()
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid time format, expected HH:MM")
 
-    # Check new slots are available
-    current_dt = datetime.combine(body.date, new_time)
-    for b in chain:
-        bt = current_dt.time()
-        conflict_filter = [
-            Booking.business_id == b.business_id,
-            Booking.booking_date == body.date,
-            Booking.booking_time == bt,
-            Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"]),
-            Booking.id.notin_([x.id for x in chain]),
-        ]
-        if b.employee_id:
-            conflict_filter.append(Booking.employee_id == b.employee_id)
+    target_employee_id = booking.employee_id
+    old_date = booking.booking_date
+    await lock_resource_days(db, target_employee_id, [old_date, body.date])
 
-        conflict_result = await db.execute(
-            select(Booking).where(and_(*conflict_filter)).with_for_update(skip_locked=True)
+    visit_duration = sum(
+        booking_resource_duration(item)
+        for item in chain
+        if getattr(item, "occupies_resource", True)
+    )
+    try:
+        await ensure_resource_available(
+            db,
+            employee_id=target_employee_id,
+            booking_date=body.date,
+            booking_time=new_time,
+            duration_minutes=visit_duration,
+            exclude_booking_ids=[item.id for item in chain],
+            acquire_lock=False,
         )
-        if conflict_result.scalar_one_or_none():
+    except BookingConflictError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="На выбранное время уже есть другая запись",
+        ) from exc
+
+    current_dt = datetime.combine(body.date, new_time)
+    for item in chain:
+        item.booking_date = body.date
+        item.booking_time = current_dt.time()
+        item.reminder_24h_sent = False
+        item.reminder_2h_sent = False
+        current_dt += timedelta(minutes=booking_resource_duration(item))
+
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        message = str(exc).lower()
+        if "bookings_no_active_resource_overlap" in message or "exclusion" in message:
             raise HTTPException(
                 status_code=409,
-                detail=f"Time slot {bt.strftime('%H:%M')} on {body.date} is already taken",
-            )
-        svc_dur = b.service.duration_minutes if b.service else 30
-        current_dt += timedelta(minutes=svc_dur)
+                detail="На выбранное время уже есть другая запись",
+            ) from exc
+        raise
 
-    # Update all bookings in chain
-    current_dt = datetime.combine(body.date, new_time)
-    for b in chain:
-        b.booking_date = body.date
-        b.booking_time = current_dt.time()
-        # A moved visit needs fresh reminders for the new date/time.
-        b.reminder_24h_sent = False
-        b.reminder_2h_sent = False
-        svc_dur = b.service.duration_minutes if b.service else 30
-        current_dt += timedelta(minutes=svc_dur)
-
-    await db.commit()
-
-    # Reload and return
     result_bookings = []
-    for b in chain:
-        await db.refresh(b)
+    for item in chain:
+        await db.refresh(item)
         full = await db.execute(
             select(Booking)
-            .where(Booking.id == b.id)
+            .where(Booking.id == item.id)
             .options(
                 selectinload(Booking.business),
                 selectinload(Booking.service),
