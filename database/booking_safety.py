@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from database.models import Booking, Service
+from booking_intervals import intervals_overlap
 
 
 ACTIVE_BOOKING_STATUSES = (
@@ -76,16 +77,6 @@ async def lock_resource_days(
                 "day_key": int(lock_date.toordinal()),
             },
         )
-
-
-def intervals_overlap(
-    start: datetime,
-    end: datetime,
-    other_start: datetime,
-    other_end: datetime,
-) -> bool:
-    """Half-open interval overlap: touching endpoints are not a conflict."""
-    return start < other_end and other_start < end
 
 
 def booking_resource_duration(booking: Booking) -> int:
