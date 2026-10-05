@@ -57,6 +57,8 @@ import {
   Navigation,
   Paperclip,
   Repeat,
+  Info,
+  X,
 } from 'lucide-react'
 import {
   api,
@@ -228,17 +230,100 @@ function scrollToRef(ref: React.RefObject<HTMLDivElement | null>, delay = 300) {
 }
 
 // ── Section header ──
-function SectionHeader({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle?: string }) {
+function SectionHeader({
+  icon,
+  title,
+  subtitle,
+  onInfo,
+  infoLabel,
+}: {
+  icon: React.ReactNode
+  title: string
+  subtitle?: string
+  onInfo?: () => void
+  infoLabel?: string
+}) {
   return (
     <>
       <div className="bk-section-head">
         <span className="ico">{icon}</span>
-        <h2 className="ds-h2">{title}</h2>
+        <h2 className="ds-h2" style={{ flex: 1 }}>{title}</h2>
+        {onInfo && (
+          <button
+            type="button"
+            onClick={onInfo}
+            className="ds-icon-btn bordered"
+            aria-label={infoLabel || `Подробнее: ${title}`}
+            title="Подробнее"
+            style={{ width: 30, height: 30, flexShrink: 0 }}
+          >
+            <Info size={16} />
+          </button>
+        )}
       </div>
       {subtitle && <p className="ds-sub bk-section-sub">{subtitle}</p>}
       {!subtitle && <div className="bk-section-sub" />}
     </>
   )
+}
+
+type InfoModalData = {
+  title: string
+  description?: string
+  details?: string[]
+}
+
+function InfoModal({ data, onClose }: { data: InfoModalData; onClose: () => void }) {
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return (
+    <div
+      role="presentation"
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.55)',
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 12,
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={data.title}
+        onClick={(e) => e.stopPropagation()}
+        className="ds-card"
+        style={{ width: 'min(560px, 100%)', maxHeight: '80vh', overflowY: 'auto', padding: 18, borderRadius: 18 }}
+      >
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
+          <h2 className="ds-h2" style={{ flex: 1 }}>{data.title}</h2>
+          <button type="button" onClick={onClose} className="ds-icon-btn bordered" aria-label="Закрыть">
+            <X size={18} />
+          </button>
+        </div>
+        <p className="ds-text" style={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
+          {data.description?.trim() || 'Подробное описание пока не добавлено.'}
+        </p>
+        {data.details && data.details.length > 0 && (
+          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {data.details.filter(Boolean).map((detail, i) => (
+              <div key={i} className="ds-sub">{detail}</div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function resourceSupportsService(resource: EmployeeWithPricing | null | undefined, serviceId: number): boolean {
+  if (!resource) return true
+  const ids = resource.service_ids || []
+  return ids.length === 0 || ids.includes(serviceId)
 }
 
 // ── Main Component ──
@@ -260,6 +345,7 @@ function BookingPageInner() {
   const [services, setServices] = useState<Service[]>([])
   const [additionalServices, setAdditionalServices] = useState<Service[]>([])
   const [employees, setEmployees] = useState<EmployeeWithPricing[]>([])
+  const [infoModal, setInfoModal] = useState<InfoModalData | null>(null)
 
   // Selections
   const [selectedRoom, setSelectedRoom] = useState<EmployeeWithPricing | null>(null)
