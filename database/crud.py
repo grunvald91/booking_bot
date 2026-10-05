@@ -5,12 +5,21 @@ Create, Read, Update, Delete
 from datetime import date, time, datetime
 from typing import List, Optional
 from sqlalchemy import select, and_, or_, delete, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from database.models import (
     User, Business, BusinessOwner, Service, Employee, Booking, EmployeeDayOff, EmployeeService,
     Subscription, SubscriptionService, ClientSubscription, SubscriptionUsage, VenueTimePricing
+)
+from database.booking_safety import (
+    ACTIVE_BOOKING_STATUSES,
+    BookingConflictError,
+    ensure_resource_available,
+    resource_overlap_exists,
+    service_occupies_resource,
+    service_resource_duration,
 )
 
 
@@ -398,73 +407,25 @@ async def _has_conflict(
     booking_date: date,
     booking_time: time,
 ) -> bool:
-    """Есть ли у мастера пересечение по времени с существующей активной записью.
+    """Read-only overlap check used by previews/series validation.
 
-    Та же логика, что была внутри `create_booking` до рефакторинга:
-    cross-midnight-safe запрос + поинтервальная проверка пересечения.
-    Ничего не создаёт и не бросает исключений — просто True/False.
+    Final booking creation always repeats the check under the central
+    resource lock in create_booking(), so this helper is not the concurrency
+    boundary by itself.
     """
-    from datetime import datetime, timedelta
-
-    if not employee_id:
+    service = (
+        await session.execute(select(Service).where(Service.id == service_id))
+    ).scalar_one_or_none()
+    if not service_occupies_resource(service):
         return False
-
-    current_service = await session.execute(
-        select(Service).where(Service.id == service_id)
+    return await resource_overlap_exists(
+        session,
+        employee_id=employee_id,
+        booking_date=booking_date,
+        booking_time=booking_time,
+        duration_minutes=service_resource_duration(service),
+        acquire_lock=False,
     )
-    current_service = current_service.scalar_one_or_none()
-
-    if current_service and current_service.is_additional:
-        # An additional service occupies no exclusive master time of its
-        # own — the main booking of the same visit already reserves that
-        # slot. Without this, create_booking() falsely treats a visit's
-        # own additional-service booking as conflicting with that same
-        # visit's just-created main booking.
-        return False
-
-    current_duration = current_service.duration_minutes if current_service else 30
-
-    if current_duration <= 0:
-        return False
-
-    # Cross-midnight: проверяем также предыдущий и следующий день
-    prev_day = booking_date - timedelta(days=1)
-    next_day = booking_date + timedelta(days=1)
-    check_dates = [booking_date, prev_day, next_day]
-
-    conflict_check = await session.execute(
-        select(Booking)
-        .join(Service, Booking.service_id == Service.id)
-        .where(
-            and_(
-                Booking.employee_id == employee_id,
-                Booking.booking_date.in_(check_dates),
-                Booking.status.in_(['pending', 'confirmed', 'pending_prepayment', 'prepayment_sent']),
-                Service.is_additional == False,
-                Service.duration_minutes > 0
-            )
-        )
-    )
-    existing_bookings = conflict_check.scalars().all()
-
-    slot_start = datetime.combine(booking_date, booking_time)
-    slot_end = slot_start + timedelta(minutes=current_duration)
-
-    for existing in existing_bookings:
-        existing_service = await session.execute(
-            select(Service).where(Service.id == existing.service_id)
-        )
-        existing_service = existing_service.scalar_one_or_none()
-        existing_duration = existing_service.duration_minutes if existing_service else 30
-
-        booking_start = datetime.combine(existing.booking_date, existing.booking_time)
-        booking_end = booking_start + timedelta(minutes=existing_duration)
-
-        # Проверяем пересечение: НЕ (slot_end <= booking_start ИЛИ slot_start >= booking_end)
-        if not (slot_end <= booking_start or slot_start >= booking_end):
-            return True
-
-    return False
 
 
 async def check_series_conflicts(
@@ -473,13 +434,10 @@ async def check_series_conflicts(
     occurrence_dates: List[date],
     visit_slots: List,
 ) -> List[date]:
-    """Read-only предпроверка конфликтов для серии повторяющихся дат.
+    """Read-only preflight for recurring bookings.
 
-    `visit_slots` — список (service_id, время_начала) в порядке визита
-    (см. `bot.utils.recurring.build_visit_slots`). Возвращает список дат
-    из `occurrence_dates`, где хотя бы один слот визита пересекается
-    с существующей записью. Пустой список = конфликтов нет, ничего не
-    создаёт и не изменяет БД.
+    Creation rechecks every date under transaction-scoped locks, so a clean
+    preflight cannot race another client into a double booking.
     """
     conflicting_dates = []
     for occurrence_date in occurrence_dates:
@@ -498,15 +456,44 @@ async def create_booking(
     booking_date: date,
     booking_time: time,
     employee_id: Optional[int] = None,
-    status: str = "confirmed",  # По умолчанию записи автоматически подтверждаются
+    status: str = "confirmed",
     **kwargs
 ) -> Booking:
-    """Создать запись"""
-    # Проверка на двойное бронирование у мастера (с проверкой пересечения времени)
-    if await _has_conflict(session, employee_id, service_id, booking_date, booking_time):
-        raise ValueError(f"Время {booking_time.strftime('%H:%M')} пересекается с существующей записью")
+    """Create one booking with serialized resource-overlap protection."""
+    service = (
+        await session.execute(
+            select(Service).where(
+                Service.id == service_id,
+                Service.business_id == business_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if not service:
+        raise ValueError("Услуга не найдена")
 
-    # Проверка на дублирование записи одним клиентом (защита от двойного клика)
+    occupies_resource = service_occupies_resource(service)
+    resource_duration = (
+        int(kwargs.get("duration_minutes"))
+        if kwargs.get("duration_minutes") is not None
+        else service_resource_duration(service)
+    )
+
+    if occupies_resource:
+        try:
+            await ensure_resource_available(
+                session,
+                employee_id=employee_id,
+                booking_date=booking_date,
+                booking_time=booking_time,
+                duration_minutes=resource_duration,
+            )
+        except BookingConflictError as exc:
+            raise ValueError(
+                f"Время {booking_time.strftime('%H:%M')} пересекается с существующей записью"
+            ) from exc
+
+    # Idempotency for a repeated click by the same client. This happens after
+    # the resource lock so two simultaneous clicks cannot both pass it.
     client_duplicate_check = await session.execute(
         select(Booking).where(
             and_(
@@ -515,13 +502,12 @@ async def create_booking(
                 Booking.service_id == service_id,
                 Booking.booking_date == booking_date,
                 Booking.booking_time == booking_time,
-                Booking.status.in_(['pending', 'confirmed'])
+                Booking.status.in_(ACTIVE_BOOKING_STATUSES),
             )
         )
     )
     duplicate_booking = client_duplicate_check.scalar_one_or_none()
     if duplicate_booking:
-        # Возвращаем существующую запись вместо создания новой
         return duplicate_booking
 
     booking = Booking(
@@ -532,7 +518,9 @@ async def create_booking(
         booking_date=booking_date,
         booking_time=booking_time,
         status=status,
-        **kwargs
+        resource_duration_minutes=max(0, resource_duration),
+        occupies_resource=occupies_resource,
+        **kwargs,
     )
     session.add(booking)
 
@@ -540,12 +528,16 @@ async def create_booking(
         await session.commit()
         await session.refresh(booking)
         return booking
-    except Exception as e:
+    except IntegrityError as exc:
         await session.rollback()
-        # Если произошла ошибка при commit (например, race condition с дублированием)
-        # Проверяем еще раз на конфликт и выдаем понятное сообщение
-        if "unique" in str(e).lower() or "duplicate" in str(e).lower():
-            raise ValueError(f"Время {booking_time.strftime('%H:%M')} уже занято другим клиентом")
+        message = str(exc).lower()
+        if "bookings_no_active_resource_overlap" in message or "exclusion" in message:
+            raise ValueError(
+                f"Время {booking_time.strftime('%H:%M')} уже занято другим клиентом"
+            ) from exc
+        raise
+    except Exception:
+        await session.rollback()
         raise
 
 
