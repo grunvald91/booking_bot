@@ -107,9 +107,39 @@ def _normalize_booking_labels(value: Optional[dict[str, str]]) -> dict[str, str]
     return result
 
 
+def _normalize_reminder_minutes(value) -> list[int]:
+    """Normalize reminder offsets to 5 minutes..7 days, unique, max 6 values."""
+    if value is None:
+        return [1440, 120]
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return [1440, 120]
+    if not isinstance(value, (list, tuple)):
+        return [1440, 120]
+
+    result: list[int] = []
+    for item in value:
+        try:
+            minutes = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 5 <= minutes <= 10080 and minutes not in result:
+            result.append(minutes)
+    result.sort(reverse=True)
+    return result[:6]
+
+
 def _business_admin_out(business: Business) -> BusinessAdminDetailOut:
     data = {column.name: getattr(business, column.name) for column in Business.__table__.columns}
     data["booking_labels"] = _parse_booking_labels(getattr(business, "booking_labels", None))
+    data["owner_reminder_minutes"] = _normalize_reminder_minutes(
+        getattr(business, "owner_reminder_minutes", None)
+    )
+    data["master_reminder_minutes"] = _normalize_reminder_minutes(
+        getattr(business, "master_reminder_minutes", None)
+    )
     order = getattr(business, "booking_flow_order", "service_first") or "service_first"
     data["booking_flow_order"] = order if order in ("service_first", "resource_first") else "service_first"
     return BusinessAdminDetailOut(**data)
@@ -1415,6 +1445,15 @@ async def update_business(
         if order not in ("service_first", "resource_first"):
             raise HTTPException(status_code=422, detail="Invalid booking_flow_order")
         updates["booking_flow_order"] = order
+    for reminder_field in ("owner_reminder_minutes", "master_reminder_minutes"):
+        if reminder_field in updates:
+            normalized = _normalize_reminder_minutes(updates[reminder_field])
+            if not normalized:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{reminder_field} must contain at least one interval between 5 and 10080 minutes",
+                )
+            updates[reminder_field] = json.dumps(normalized)
     # Convert time strings to time objects. Accept both "HH:MM" and "HH:MM:SS"
     # (the API serializes Time columns as "HH:MM:SS", and an unedited <input type="time">
     # round-trips that exact string back to us).
