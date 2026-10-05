@@ -1,0 +1,21 @@
+{
+  "name": "ServGo",
+  "short_name": "ServGo",
+  "description": "Онлайн-запись на услуги и напоминания о визитах",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#0f6fff",
+  "lang": "ru",
+  "categories": ["business", "lifestyle", "productivity"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+name: ServGo PWA CI
+
+on:
+  pull_request:
+    paths:
+      - 'web/frontend/**'
+      - 'web/api/**'
+      - 'bot/services/notifications.py'
+      - 'bot/services/webpush.py'
+      - 'database/models.py'
+      - 'requirements.txt'
+      - 'migrations/add_push_subscriptions.sql'
+      - '.github/workflows/pwa-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Frontend build
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: web/frontend
+        run: npm ci --legacy-peer-deps
+
+      - name: Build frontend
+        working-directory: web/frontend
+        run: npm run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Compile changed Python modules
+        run: |
+          python -m py_compile             bot/services/notifications.py             bot/services/webpush.py             database/models.py             web/api/main.py             web/api/database.py             web/api/routes/notifications.py             web/api/routes/client.py             web/api/schemas.py

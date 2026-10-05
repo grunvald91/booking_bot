@@ -5,7 +5,7 @@ Works with the same PostgreSQL database as the Telegram bot.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import client, admin, auth, ai, subscriptions
+from .routes import client, admin, auth, ai, subscriptions, notifications
 from . import rental
 
 app = FastAPI(
@@ -29,6 +29,7 @@ app.include_router(rental.router, tags=["rental"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(ai.router, tags=["ai"])
 app.include_router(subscriptions.router, tags=["subscriptions"])
+app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 
 
 @app.get("/health")

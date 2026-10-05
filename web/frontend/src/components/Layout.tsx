@@ -16,6 +16,7 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { Logo } from './Logo'
+import { PwaInstallPrompt } from './PwaInstallPrompt'
 
 const clientNav = [
   { to: '/', label: 'Главная', icon: Home },
@@ -202,6 +203,8 @@ export function Layout() {
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-24 md:pb-6 animate-fade-in">
         <Outlet />
       </main>
+
+      {!isAdmin && <PwaInstallPrompt />}
 
       {/* Mobile bottom tab bar (client + admin) */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-50">

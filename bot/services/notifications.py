@@ -2,7 +2,9 @@
 Модуль для отправки уведомлений клиентам, мастерам и владельцам
 """
 import logging
+import os
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional
 from urllib.parse import quote
 
@@ -16,6 +18,7 @@ from database.models import Booking, User, Business, Employee
 from database.crud import get_business_owners
 from bot.utils.validators import format_date_with_weekday, format_phone
 from bot.utils.business_types import get_terminology, is_venue_rental_type
+from bot.services.webpush import send_booking_webpush
 
 
 def get_employee_label(business_type: str) -> str:
@@ -165,19 +168,44 @@ async def send_grouped_24h_reminder(bot: Bot, bookings: list, session: AsyncSess
 
         message += "\n\n✨ До встречи! Ждём вас! 😊"
 
-        await bot.send_message(
-            chat_id=client.telegram_id,
-            text=message,
-            parse_mode="HTML"
-        )
+        telegram_sent = False
+        if client and client.telegram_id and client.telegram_id > 0:
+            try:
+                await bot.send_message(
+                    chat_id=client.telegram_id,
+                    text=message,
+                    parse_mode="HTML"
+                )
+                telegram_sent = True
+            except Exception as telegram_error:
+                logger.warning(
+                    "Telegram 24h reminder failed for user %s: %s",
+                    client.telegram_id,
+                    telegram_error,
+                )
 
-        # Отмечаем что уведомление отправлено для ВСЕХ записей группы
-        for b in bookings:
-            b.reminder_24h_sent = True
-        await session.commit()
+        push_sent = False
+        try:
+            push_sent = await send_booking_webpush(bookings, session, "24h") > 0
+        except Exception as push_error:
+            logger.warning("Web Push 24h reminder failed: %s", push_error)
+
+        # Флаг означает: хотя бы один клиентский канал доставил напоминание.
+        # Полная поканальная история будет вынесена в notification_deliveries.
+        if telegram_sent or push_sent:
+            for b in bookings:
+                b.reminder_24h_sent = True
+            await session.commit()
+        else:
+            await session.rollback()
 
         booking_ids = [b.id for b in bookings]
-        logger.info(f"Sent grouped 24h reminder for bookings {booking_ids} to user {client.telegram_id}")
+        logger.info(
+            "24h reminder bookings=%s telegram=%s webpush=%s",
+            booking_ids,
+            telegram_sent,
+            push_sent,
+        )
 
     except Exception as e:
         booking_ids = [b.id for b in bookings]
@@ -297,19 +325,42 @@ async def send_grouped_2h_reminder(bot: Bot, bookings: list, session: AsyncSessi
 
             message += "\n\n✨ Ждём вас! 😊"
 
-        await bot.send_message(
-            chat_id=client.telegram_id,
-            text=message,
-            parse_mode="HTML"
-        )
+        telegram_sent = False
+        if client and client.telegram_id and client.telegram_id > 0:
+            try:
+                await bot.send_message(
+                    chat_id=client.telegram_id,
+                    text=message,
+                    parse_mode="HTML"
+                )
+                telegram_sent = True
+            except Exception as telegram_error:
+                logger.warning(
+                    "Telegram 2h reminder failed for user %s: %s",
+                    client.telegram_id,
+                    telegram_error,
+                )
 
-        # Отмечаем для ВСЕХ записей группы
-        for b in bookings:
-            b.reminder_2h_sent = True
-        await session.commit()
+        push_sent = False
+        try:
+            push_sent = await send_booking_webpush(bookings, session, "2h") > 0
+        except Exception as push_error:
+            logger.warning("Web Push 2h reminder failed: %s", push_error)
+
+        if telegram_sent or push_sent:
+            for b in bookings:
+                b.reminder_2h_sent = True
+            await session.commit()
+        else:
+            await session.rollback()
 
         booking_ids = [b.id for b in bookings]
-        logger.info(f"Sent grouped 2h reminder for bookings {booking_ids} to user {client.telegram_id}")
+        logger.info(
+            "2h reminder bookings=%s telegram=%s webpush=%s",
+            booking_ids,
+            telegram_sent,
+            push_sent,
+        )
 
     except Exception as e:
         booking_ids = [b.id for b in bookings]
@@ -764,15 +815,20 @@ def _group_bookings_by_visit(bookings: list) -> dict:
 
 
 async def check_and_send_reminders(bot: Bot):
-    """Проверка и отправка напоминаний о предстоящих записях (с группировкой по визитам)"""
+    """Send due reminders without relying on a narrow +/-5 minute window.
+
+    A restart can no longer permanently skip a reminder merely because the
+    process was down at the exact target minute. Business times are currently
+    interpreted in SERVGO_TIMEZONE (Europe/Moscow by default).
+    """
     try:
         async with async_session_maker() as session:
-            now = datetime.now()  # Используем локальное время
-
-            # === Напоминания за 24 часа ===
-            time_24h_from_now = now + timedelta(hours=24)
-            time_24h_window_start = time_24h_from_now - timedelta(minutes=5)
-            time_24h_window_end = time_24h_from_now + timedelta(minutes=5)
+            timezone_name = os.getenv("SERVGO_TIMEZONE", "Europe/Moscow")
+            try:
+                now = datetime.now(ZoneInfo(timezone_name)).replace(tzinfo=None)
+            except Exception:
+                logger.warning("Invalid SERVGO_TIMEZONE=%s; falling back to Europe/Moscow", timezone_name)
+                now = datetime.now(ZoneInfo("Europe/Moscow")).replace(tzinfo=None)
 
             result = await session.execute(
                 select(Booking)
@@ -780,56 +836,47 @@ async def check_and_send_reminders(bot: Bot):
                     selectinload(Booking.client),
                     selectinload(Booking.business),
                     selectinload(Booking.service),
-                    selectinload(Booking.employee)
+                    selectinload(Booking.employee),
                 )
                 .where(Booking.status.in_(["pending", "confirmed"]))
-                .where(Booking.reminder_24h_sent == False)
             )
-            bookings_24h = list(result.scalars().all())
+            active_bookings = list(result.scalars().all())
 
-            # Фильтруем по времени
-            bookings_24h_filtered = []
-            for booking in bookings_24h:
+            due_24h = []
+            due_2h = []
+            two_hours = now + timedelta(hours=2)
+            twenty_four_hours = now + timedelta(hours=24)
+
+            for booking in active_bookings:
                 booking_datetime = datetime.combine(booking.booking_date, booking.booking_time)
-                if time_24h_window_start <= booking_datetime <= time_24h_window_end:
-                    bookings_24h_filtered.append(booking)
+                if booking_datetime <= now:
+                    continue
 
-            # Группируем по визитам и отправляем
-            groups_24h = _group_bookings_by_visit(bookings_24h_filtered)
-            for group_key, group_bookings in groups_24h.items():
+                if (
+                    not booking.reminder_24h_sent
+                    and two_hours < booking_datetime <= twenty_four_hours
+                ):
+                    due_24h.append(booking)
+
+                if (
+                    not booking.reminder_2h_sent
+                    and now < booking_datetime <= two_hours
+                ):
+                    due_2h.append(booking)
+
+            groups_24h = _group_bookings_by_visit(due_24h)
+            for group_bookings in groups_24h.values():
                 await send_grouped_24h_reminder(bot, group_bookings, session)
 
-            # === Напоминания за 2 часа ===
-            time_2h_from_now = now + timedelta(hours=2)
-            time_2h_window_start = time_2h_from_now - timedelta(minutes=5)
-            time_2h_window_end = time_2h_from_now + timedelta(minutes=5)
-
-            result = await session.execute(
-                select(Booking)
-                .options(
-                    selectinload(Booking.client),
-                    selectinload(Booking.business),
-                    selectinload(Booking.service),
-                    selectinload(Booking.employee)
-                )
-                .where(Booking.status.in_(["pending", "confirmed"]))
-                .where(Booking.reminder_2h_sent == False)
-            )
-            bookings_2h = list(result.scalars().all())
-
-            # Фильтруем по времени
-            bookings_2h_filtered = []
-            for booking in bookings_2h:
-                booking_datetime = datetime.combine(booking.booking_date, booking.booking_time)
-                if time_2h_window_start <= booking_datetime <= time_2h_window_end:
-                    bookings_2h_filtered.append(booking)
-
-            # Группируем по визитам и отправляем
-            groups_2h = _group_bookings_by_visit(bookings_2h_filtered)
-            for group_key, group_bookings in groups_2h.items():
+            groups_2h = _group_bookings_by_visit(due_2h)
+            for group_bookings in groups_2h.values():
                 await send_grouped_2h_reminder(bot, group_bookings, session)
 
-            logger.info(f"Checked reminders: {len(groups_24h)} visits for 24h, {len(groups_2h)} visits for 2h")
+            logger.info(
+                "Checked reminders: %s visits due <=24h, %s visits due <=2h",
+                len(groups_24h),
+                len(groups_2h),
+            )
 
     except Exception as e:
         logger.error(f"Error checking reminders: {e}")
