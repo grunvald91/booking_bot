@@ -618,41 +618,22 @@ async def admin_confirm_booking(callback: CallbackQuery, state: FSMContext):
 
         repeat_line = f"🔁 Повторится ещё {repeat_weeks - 1} раз(а) — каждую неделю\n" if repeat_weeks > 1 else ""
 
-        # Формируем текст уведомления
-        notification_text = (
-            f"📋 <b>Новая запись!</b>\n\n"
-            f"👤 Клиент: {data.get('client_name')}\n"
-            f"📱 Телефон: {data.get('client_phone')}\n"
-            f"💼 Услуги:\n{services_text}\n"
-            f"⏱ Длительность: {total_duration} мин\n"
-            f"{price_text}"
-            f"📅 Дата: {data.get('booking_date')}\n"
-            f"🕐 Время: {data.get('booking_time')}\n"
-            f"{repeat_line}"
-            f"🏢 Бизнес: {business.name if business else ''}"
-        )
-
-        # Отправляем уведомление мастеру
-        if employee and employee.telegram_id:
-            try:
-                await callback.bot.send_message(
-                    chat_id=employee.telegram_id,
-                    text=notification_text,
-                    parse_mode="HTML"
+        try:
+            async with async_session_maker() as notify_session:
+                from bot.services.booking_events import notify_booking_event
+                await notify_booking_event(
+                    notify_session,
+                    [b.id for b in first_visit_bookings],
+                    "created",
                 )
-            except Exception:
-                pass  # Мастер не запустил бота
-
-        # Отправляем уведомление владельцу бизнеса
-        if business and business.owner and business.owner.telegram_id:
-            try:
-                await callback.bot.send_message(
-                    chat_id=business.owner.telegram_id,
-                    text=notification_text,
-                    parse_mode="HTML"
-                )
-            except Exception:
-                pass  # Владелец не запустил бота
+        except Exception as notify_error:
+            import logging
+            logging.getLogger(__name__).error(
+                "Administrator-created booking notification failed booking=%s: %s",
+                first_visit_bookings[0].id if first_visit_bookings else None,
+                notify_error,
+                exc_info=True,
+            )
 
         await callback.message.edit_text(
             f"✅ <b>Запись создана!</b>\n\n"
