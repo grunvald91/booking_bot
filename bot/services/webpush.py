@@ -9,7 +9,7 @@ from pywebpush import WebPushException, webpush_async
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import Booking, BusinessOwner, PushSubscription, User
+from database.models import Booking, BusinessOwner, Employee, PushSubscription, User
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +169,108 @@ async def send_booking_status_webpush(
     }
     return await send_webpush_to_subscriptions(subscriptions, payload, session)
 
+async def resolve_staff_notification_targets(
+    bookings: list[Booking],
+    session: AsyncSession,
+    *,
+    respect_business_preferences: bool = True,
+    owners_only: bool = False,
+) -> tuple[set[int], set[int]]:
+    """Resolve ServGo user IDs (PWA) and Telegram IDs for staff recipients.
+
+    For scheduled reminders the per-business recipient toggles are respected.
+    Immediate booking events deliberately bypass those toggles because a new
+    confirmed booking must always reach everybody involved.
+    """
+    if not bookings:
+        return set(), set()
+
+    first = bookings[0]
+    business = first.business
+    if business is None:
+        return set(), set()
+
+    include_owners = True
+    include_masters = not owners_only
+    include_admins = not owners_only
+    if respect_business_preferences:
+        include_owners = bool(getattr(business, "staff_notify_owners", True))
+        include_masters = bool(getattr(business, "staff_notify_masters", True)) and not owners_only
+        include_admins = bool(getattr(business, "staff_notify_admins", True)) and not owners_only
+
+    user_ids: set[int] = set()
+    telegram_ids: set[int] = set()
+
+    if include_owners:
+        if getattr(business, "owner_id", None):
+            user_ids.add(int(business.owner_id))
+        owner_rows = await session.execute(
+            select(BusinessOwner.user_id).where(BusinessOwner.business_id == first.business_id)
+        )
+        user_ids.update(int(row[0]) for row in owner_rows.all())
+
+    if include_masters:
+        telegram_ids.update(
+            int(b.employee.telegram_id)
+            for b in bookings
+            if getattr(b, "employee", None) is not None
+            and getattr(b.employee, "telegram_id", None)
+            and int(b.employee.telegram_id) > 0
+        )
+
+    if include_admins:
+        admin_result = await session.execute(
+            select(Employee).where(
+                Employee.business_id == first.business_id,
+                Employee.is_active == True,
+                Employee.role.in_(["administrator", "master_and_admin"]),
+                Employee.telegram_id.is_not(None),
+            )
+        )
+        admins = list(admin_result.scalars().all())
+        duty_admins: list[Employee] = []
+        booking_date = first.booking_date
+        booking_date_iso = booking_date.isoformat()
+        for admin in admins:
+            on_duty = getattr(admin, "on_duty_date", None) == booking_date
+            schedule_raw = getattr(admin, "duty_schedule", None)
+            if schedule_raw:
+                try:
+                    schedule = json.loads(schedule_raw) if isinstance(schedule_raw, str) else schedule_raw
+                except (json.JSONDecodeError, TypeError):
+                    schedule = []
+                if isinstance(schedule, list) and booking_date_iso in schedule:
+                    on_duty = True
+            if on_duty:
+                duty_admins.append(admin)
+
+        selected_admins = duty_admins or admins
+        telegram_ids.update(
+            int(admin.telegram_id)
+            for admin in selected_admins
+            if admin.telegram_id and int(admin.telegram_id) > 0
+        )
+
+    # Owners are stored by user_id, so collect their Telegram IDs as well.
+    if user_ids:
+        owners_users = await session.execute(
+            select(User.id, User.telegram_id).where(User.id.in_(user_ids))
+        )
+        for user_id, telegram_id in owners_users.all():
+            if telegram_id and int(telegram_id) > 0:
+                telegram_ids.add(int(telegram_id))
+
+    # Masters/admins are stored by Telegram ID; resolve matching ServGo users
+    # so PWA pushes go to their authenticated devices too.
+    if telegram_ids:
+        staff_users = await session.execute(
+            select(User.id).where(User.telegram_id.in_(telegram_ids))
+        )
+        user_ids.update(int(row[0]) for row in staff_users.all())
+
+    return user_ids, telegram_ids
+
+
 async def send_staff_booking_webpush(
     bookings: list[Booking],
     session: AsyncSession,
@@ -188,31 +290,11 @@ async def send_staff_booking_webpush(
     if business is None:
         return 0, 0
 
-    user_ids: set[int] = set()
-
-    # Legacy primary owner + co-owners.
-    if getattr(business, "owner_id", None):
-        user_ids.add(int(business.owner_id))
-    owner_rows = await session.execute(
-        select(BusinessOwner.user_id).where(BusinessOwner.business_id == first.business_id)
+    user_ids, _ = await resolve_staff_notification_targets(
+        bookings,
+        session,
+        respect_business_preferences=True,
     )
-    user_ids.update(int(row[0]) for row in owner_rows.all())
-
-    # Employee rows store telegram_id rather than user_id. Resolve them to
-    # ServGo users if those staff members have ever authenticated in the PWA.
-    employee_tg_ids = {
-        int(b.employee.telegram_id)
-        for b in bookings
-        if getattr(b, "employee", None) is not None
-        and getattr(b.employee, "telegram_id", None)
-        and int(b.employee.telegram_id) > 0
-    }
-    if employee_tg_ids:
-        employee_users = await session.execute(
-            select(User.id).where(User.telegram_id.in_(employee_tg_ids))
-        )
-        user_ids.update(int(row[0]) for row in employee_users.all())
-
     if not user_ids:
         return 0, 0
 
