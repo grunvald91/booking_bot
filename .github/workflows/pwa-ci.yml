@@ -8,8 +8,11 @@ on:
       - 'bot/services/notifications.py'
       - 'bot/services/webpush.py'
       - 'database/models.py'
+      - 'database/booking_safety.py'
+      - 'tests/test_booking_safety.py'
       - 'requirements.txt'
       - 'migrations/add_push_subscriptions.sql'
+      - 'migrations/add_booking_overlap_constraint.sql'
       - '.github/workflows/pwa-ci.yml'
   workflow_dispatch:
 
@@ -50,4 +53,21 @@ jobs:
 
       - name: Compile changed Python modules
         run: |
-          python -m py_compile             bot/services/notifications.py             bot/services/webpush.py             database/models.py             web/api/main.py             web/api/database.py             web/api/routes/notifications.py             web/api/routes/client.py             web/api/schemas.py
+          python -m py_compile \
+            bot/services/notifications.py \
+            bot/services/webpush.py \
+            database/models.py \
+            database/booking_safety.py \
+            database/crud.py \
+            web/api/main.py \
+            web/api/database.py \
+            web/api/rental.py \
+            web/api/routes/admin.py \
+            web/api/routes/notifications.py \
+            web/api/routes/client.py \
+            web/api/schemas.py
+
+      - name: Run booking safety regression tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python tests/test_booking_safety.py
