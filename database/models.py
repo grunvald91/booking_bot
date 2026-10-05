@@ -79,6 +79,8 @@ class Business(Base):
     photos: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON массив file_id фотографий
     video: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Telegram file_id видеообзора
     directions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Как добраться
+    booking_labels: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON: кастомные названия шагов записи
+    booking_flow_order: Mapped[str] = mapped_column(String(32), default="service_first")  # service_first | resource_first
 
     # Настройки предоплаты
     prepayment_enabled: Mapped[bool] = mapped_column(Boolean, default=False)  # Включена ли предоплата
@@ -197,6 +199,7 @@ class Employee(Base):
     min_booking_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Минимальное время бронирования
     solo_price_per_hour: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Спецтариф соло (₽/час)
     photos: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON список file_id фото
+    primary_photo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # выбранный file_id главного фото
     video: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # file_id видео
     on_duty_date: Mapped[Optional[datetime.date]] = mapped_column(Date, nullable=True)  # Дата дежурства
     duty_schedule: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON: ["2026-03-25","2026-03-26",...] — график дежурств

@@ -50,8 +50,9 @@ function App() {
 
   useEffect(() => {
     const initData = window.Telegram?.WebApp?.initData
+    const explicitLogout = sessionStorage.getItem('servgoExplicitLogout') === '1'
 
-    if (initData) {
+    if (initData && !explicitLogout) {
       // Always refresh role from server — owner status may have changed,
       // and stale userRole='client' in localStorage hides admin UI.
       api.telegramAuth(initData)
