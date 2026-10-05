@@ -810,258 +810,27 @@ async def create_booking(
         can_c, can_r = _can_modify_booking(loaded)
         result_bookings.append(_booking_to_out(loaded, can_cancel=can_c, can_reschedule=can_r))
 
-    # Fire-and-forget notifications — SAME format as bot (notifications.py)
-    async def _send_booking_notifications():
+    # Mandatory immediate event after a real booking is created.
+    # If prepayment is enabled, this event is intentionally delayed until the
+    # owner confirms receipt of payment.
+    if not getattr(business, "prepayment_enabled", False):
         try:
-            bot_token = os.getenv("BOT_TOKEN", "").strip()
-            client_name = body.client_name or (booking_user.full_name if booking_user else "Клиент") or "Клиент"
-            client_phone = body.client_phone or (booking_user.phone if booking_user else None)
-            client_tg_id = booking_user.telegram_id if booking_user else None
+            from bot.services.notification_events import dispatch_booking_event
 
-            # Build client link (same as bot: tg://user?id=...)
-            if client_tg_id and client_tg_id > 0:
-                client_link = f'<a href="tg://user?id={client_tg_id}">{client_name}</a>'
-            else:
-                client_link = client_name
-
-            # Format phone link (same as bot: format_phone + tel: link)
-            phone_line = ""
-            if client_phone:
-                clean_phone = ''.join(c for c in client_phone if c.isdigit() or c == '+')
-                if clean_phone.startswith('+'):
-                    clean_digits = clean_phone[1:]
-                else:
-                    clean_digits = clean_phone
-                if len(clean_digits) == 10:
-                    formatted_phone = f"+7{clean_digits}"
-                elif len(clean_digits) == 11 and clean_digits.startswith('7'):
-                    formatted_phone = f"+7{clean_digits[1:]}"
-                elif len(clean_digits) == 11 and clean_digits.startswith('8'):
-                    formatted_phone = f"8{clean_digits[1:]}"
-                else:
-                    formatted_phone = client_phone
-                tel_link = formatted_phone if formatted_phone.startswith('+') else '+7' + formatted_phone[1:]
-                phone_line = f'📱 Телефон: <a href="tel:{tel_link}">{formatted_phone}</a>\n'
-
-            # Date formatting (same as bot: DD.MM.YYYY (Пн))
-            weekdays_ru = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
-            weekday = weekdays_ru[body.date.weekday()]
-            booking_date_str = f"{body.date.strftime('%d.%m.%Y')} ({weekday})"
-
-            # Collect services info — только по ПЕРВОМУ визиту серии: при повторе
-            # result_bookings содержит len(occurrence_dates) * len(svc_ids) строк
-            # (по одной на каждую услугу каждой недели), иначе уведомление показало бы
-            # услуги/сумму/длительность, умноженные на количество повторов.
-            first_visit_bookings = result_bookings[:len(svc_ids)] if svc_ids else result_bookings
-            main_services = []
-            for rb in first_visit_bookings:
-                if rb.service_name:
-                    main_services.append({
-                        "name": rb.service_name,
-                        "price": rb.service_price or 0,
-                        "duration": rb.service_duration or 0,
-                    })
-
-            addon_services = []
-            addon_total = 0
-            if body.additional_service_ids:
-                for addon_id in body.additional_service_ids:
-                    addon_result = await db.execute(select(Service).where(Service.id == addon_id))
-                    addon_svc = addon_result.scalar_one_or_none()
-                    if addon_svc:
-                        hours = (body.additional_service_hours or {}).get(str(addon_id), 1)
-                        price = (addon_svc.price or 0) * hours
-                        addon_total += price
-                        addon_services.append({"name": addon_svc.name, "price": price, "duration": addon_svc.duration_minutes or 0})
-
-            main_total = sum(s["price"] for s in main_services)
-            grand_total = main_total + addon_total
-            total_duration = sum(s["duration"] for s in main_services)
-            first_time = result_bookings[0].time if result_bookings else body.time
-            first_booking_id = created_bookings[0].id if created_bookings else None
-
-            # Employee info
-            emp = None
-            emp_name = ""
-            if body.employee_id:
-                emp_result = await db.execute(select(Employee).where(Employee.id == body.employee_id))
-                emp = emp_result.scalar_one_or_none()
-                emp_name = emp.name if emp else ""
-
-            # Employee label based on business type (same as bot)
-            biz_type = business.business_type or "default"
-            from bot.utils.business_types import get_terminology, is_venue_rental_type
-            term = get_terminology(biz_type)
-            emp_label = term.get("employee", "Мастер")
-            is_venue = is_venue_rental_type(biz_type)
-
-            # --- Build services text block (same format as bot) ---
-            svc_lines = ""
-            for s in main_services:
-                price_part = f" - {s['price']}₽" if s['price'] else ""
-                svc_lines += f"  • {s['name']}{price_part}\n"
-            if addon_services:
-                svc_lines += "\n  📎 Доп. услуги:\n"
-                for a in addon_services:
-                    price_part = f" - {a['price']}₽" if a['price'] else ""
-                    svc_lines += f"  • {a['name']}{price_part}\n"
-
-            # ── 1. OWNER notification (same as bot: notify_owner_new_booking) ──
-            owner_msg = (
-                f"\n🆕 <b>Новая запись в {business.name}</b>\n\n"
-                f"📅 {booking_date_str} в {first_time}\n\n"
-                f"👤 Клиент: {client_link}\n"
-                f"{phone_line}"
-                f"\n💼 Услуги:\n{svc_lines}"
+            await dispatch_booking_event(
+                created_bookings,
+                db,
+                "booking_created",
+                include_client=True,
+                staff_audience="all",
             )
-            if grand_total > 0:
-                owner_msg += f"\n💰 Общая сумма: {grand_total}₽"
-            if len(occurrence_dates) > 1:
-                owner_msg += f"\n🔁 Повторится ещё {len(occurrence_dates) - 1} раз(а) — каждую неделю"
-            if emp_name:
-                if is_venue:
-                    owner_msg += f"\n\n🏠 Помещение: {emp_name}"
-                else:
-                    owner_msg += f"\n\n👔 {emp_label}: {emp_name}"
-            if body.notes:
-                owner_msg += f"\n\n💬 Комментарий: {body.notes}"
-
-            # Keyboard (same callback_data as bot: admin_kb.get_booking_admin_actions_keyboard)
-            confirm_kb = None
-            if first_booking_id:
-                confirm_kb = {
-                    "inline_keyboard": [
-                        [{"text": "✅ Подтвердить", "callback_data": f"admin_confirm:{first_booking_id}"}],
-                        [{"text": "✔️ Завершить", "callback_data": f"admin_complete:{first_booking_id}"}],
-                        [{"text": "❌ Отменить", "callback_data": f"admin_cancel:{first_booking_id}"}]
-                    ]
-                }
-
-            async with httpx.AsyncClient() as http:
-                # Owner
-                if business and business.owner_id:
-                    owner_result = await db.execute(select(User).where(User.id == business.owner_id))
-                    owner = owner_result.scalar_one_or_none()
-                    if owner and owner.telegram_id:
-                        payload = {"chat_id": owner.telegram_id, "text": owner_msg, "parse_mode": "HTML"}
-                        if confirm_kb:
-                            payload["reply_markup"] = confirm_kb
-                        await http.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json=payload)
-
-                # ── 2. MASTER notification (same as bot: notify_master_new_booking) ──
-                if emp and getattr(emp, 'telegram_id', None):
-                    master_msg = (
-                        f"\n🆕 <b>Новая запись!</b>\n\n"
-                        f"📅 Дата: {booking_date_str}\n"
-                        f"🕐 Время: {first_time}\n\n"
-                        f"👤 Клиент: {client_link}\n"
-                        f"{phone_line}"
-                        f"\n💼 Ваши услуги:\n{svc_lines}"
-                        f"\n⏱ Длительность: {total_duration} мин"
-                    )
-                    if grand_total > 0:
-                        master_msg += f"\n💰 Сумма: {grand_total}₽"
-                    if body.notes:
-                        master_msg += f"\n\n💬 Комментарий: {body.notes}"
-                    await http.post(
-                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                        json={"chat_id": emp.telegram_id, "text": master_msg, "parse_mode": "HTML"},
-                    )
-
-                # ── 3. ADMINISTRATORS notification (same as bot: notify_administrator_new_booking) ──
-                from datetime import date as date_cls
-                if body.date == date_cls.today():
-                    admins_result = await db.execute(
-                        select(Employee).where(
-                            Employee.business_id == body.business_id,
-                            Employee.role.in_(["administrator", "master_and_admin"]),
-                            Employee.telegram_id.isnot(None),
-                            Employee.is_active == True,
-                        )
-                    )
-                    admins = admins_result.scalars().all()
-                    duty_admins = [a for a in admins if a.on_duty_date == date_cls.today()]
-                    notify_admins = duty_admins if duty_admins else admins
-
-                    admin_msg = (
-                        f"\n🆕 <b>Новая запись в {business.name}</b>\n\n"
-                        f"📅 {booking_date_str} в {first_time}\n\n"
-                        f"👤 Клиент: {client_link}\n"
-                        f"{phone_line}"
-                        f"\n💼 Услуги:\n{svc_lines}"
-                    )
-                    if total_duration > 0:
-                        admin_msg += f"\n⏱ Общая длительность: {total_duration} мин"
-                    if grand_total > 0:
-                        admin_msg += f"\n💰 Общая сумма: {grand_total}₽"
-                    if emp_name:
-                        if is_venue:
-                            admin_msg += f"\n\n🏠 Помещение: {emp_name}"
-                        else:
-                            admin_msg += f"\n\n👔 {emp_label}: {emp_name}"
-                    if body.notes:
-                        admin_msg += f"\n\n💬 Комментарий: {body.notes}"
-
-                    for adm in notify_admins:
-                        if emp and adm.telegram_id == emp.telegram_id:
-                            continue
-                        try:
-                            await http.post(
-                                f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                                json={"chat_id": adm.telegram_id, "text": admin_msg, "parse_mode": "HTML"},
-                            )
-                        except Exception:
-                            pass
-
-                # ── 4. CLIENT notification ──
-                if booking_user and getattr(booking_user, 'telegram_id', None) and booking_user.telegram_id > 0:
-                    from urllib.parse import quote
-                    address_line = ""
-                    if business.address:
-                        encoded_addr = quote(business.address)
-                        address_line = (
-                            f'\n📍 <b>Адрес:</b> <a href="https://yandex.ru/maps/?text={encoded_addr}">{business.address}</a>'
-                            f'\n🗺 <a href="https://yandex.ru/maps/?text={encoded_addr}">Яндекс.Карты</a>'
-                            f' | <a href="https://2gis.ru/search/{encoded_addr}">2ГИС</a>'
-                        )
-                    biz_phone_line = ""
-                    if business.phone:
-                        biz_phone_line = f"\n📞 Телефон для связи: {business.phone}"
-
-                    client_msg = (
-                        f"✅ <b>Запись успешно создана!</b>\n\n"
-                        f"🏢 {business.name}\n\n"
-                        f"💼 Услуги:\n{svc_lines}"
-                    )
-                    if emp_name:
-                        if is_venue:
-                            client_msg += f"\n🏠 Помещение: {emp_name}"
-                        else:
-                            client_msg += f"\n👤 {emp_label}: {emp_name}"
-                    client_msg += (
-                        f"\n📅 Дата: {booking_date_str}\n"
-                        f"🕐 Время: {first_time}"
-                    )
-                    if grand_total > 0:
-                        client_msg += f"\n💰 Сумма: {grand_total}₽"
-                    client_msg += f"{address_line}{biz_phone_line}"
-                    client_msg += "\n\nЖдём вас! 🎉"
-                    try:
-                        await http.post(
-                            f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                            json={"chat_id": booking_user.telegram_id, "text": client_msg, "parse_mode": "HTML"},
-                        )
-                    except Exception:
-                        pass
-
-        except Exception as e:
-            logger.error(f"Booking notification error: {e}", exc_info=True)
-
-    # Only send "Новая запись!" notification if NO prepayment required.
-    # When prepayment is enabled, the bot's confirm_prepayment handler
-    # (admin.py) sends all notifications after owner confirms payment.
-    if not getattr(business, 'prepayment_enabled', False):
-        asyncio.create_task(_send_booking_notifications())
+        except Exception as notification_error:
+            logger.error(
+                "Booking-created notification failed for bookings %s: %s",
+                [b.id for b in created_bookings],
+                notification_error,
+                exc_info=True,
+            )
 
     return result_bookings
 
