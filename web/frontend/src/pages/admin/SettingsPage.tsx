@@ -44,6 +44,7 @@ async function fetchQrBlob(url: string): Promise<string> {
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
 import { BusinessSelector } from '../../components/BusinessSelector'
 import { AdminShell } from '../../components/AdminShell'
+import { NotificationSetup } from '../../components/NotificationSetup'
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -436,6 +437,16 @@ export function SettingsPage() {
       )}
 
       <div className="ds-form-narrow" style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 4 }}>
+        <section className="ds-card" style={{ padding: 14 }}>
+          <h2 className="ds-h3" style={{ marginBottom: 6 }}>
+            Уведомления о записях
+          </h2>
+          <p className="ds-sub" style={{ marginBottom: 8, lineHeight: 1.5 }}>
+            Включите системные уведомления на этом устройстве. ServGo будет напоминать владельцу о предстоящих записях за 24 часа и за 2 часа.
+          </p>
+          <NotificationSetup />
+        </section>
+
         {/* === 1. Business Profile === */}
         <section className="ds-card" style={{ padding: 14 }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
