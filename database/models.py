@@ -260,8 +260,10 @@ class Booking(Base):
     prepayment_confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # Когда подтверждена
 
     reminder_sent: Mapped[bool] = mapped_column(Boolean, default=False)  # Deprecated, используем reminder_24h/2h
-    reminder_24h_sent: Mapped[bool] = mapped_column(Boolean, default=False)  # Отправлено напоминание за 24ч
-    reminder_2h_sent: Mapped[bool] = mapped_column(Boolean, default=False)  # Отправлено напоминание за 2ч
+    reminder_24h_sent: Mapped[bool] = mapped_column(Boolean, default=False)  # Клиенту за 24ч
+    reminder_2h_sent: Mapped[bool] = mapped_column(Boolean, default=False)  # Клиенту за 2ч
+    staff_reminder_24h_sent: Mapped[bool] = mapped_column(Boolean, default=False)  # Владельцу/мастеру за 24ч
+    staff_reminder_2h_sent: Mapped[bool] = mapped_column(Boolean, default=False)  # Владельцу/мастеру за 2ч
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     version: Mapped[int] = mapped_column(Integer, default=1)  # Для оптимистичной блокировки

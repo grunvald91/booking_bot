@@ -15,6 +15,7 @@ on:
       - 'requirements.txt'
       - 'migrations/add_push_subscriptions.sql'
       - 'migrations/add_booking_overlap_constraint.sql'
+      - 'migrations/add_staff_reminder_fields.sql'
       - '.github/workflows/pwa-ci.yml'
   workflow_dispatch:
 

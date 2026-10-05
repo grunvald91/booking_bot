@@ -18,7 +18,7 @@ from database.models import Booking, User, Business, Employee
 from database.crud import get_business_owners
 from bot.utils.validators import format_date_with_weekday, format_phone
 from bot.utils.business_types import get_terminology, is_venue_rental_type
-from bot.services.webpush import send_booking_webpush
+from bot.services.webpush import send_booking_webpush, send_staff_booking_webpush
 
 
 def get_employee_label(business_type: str) -> str:
@@ -365,6 +365,129 @@ async def send_grouped_2h_reminder(bot: Bot, bookings: list, session: AsyncSessi
     except Exception as e:
         booking_ids = [b.id for b in bookings]
         logger.error(f"Error sending grouped 2h reminder for bookings {booking_ids}: {e}")
+
+
+async def send_grouped_staff_reminder(
+    bot: Bot,
+    bookings: list[Booking],
+    session: AsyncSession,
+    reminder_kind: str,
+):
+    """Notify owners and assigned masters about an upcoming client visit."""
+    if not bookings:
+        return
+
+    first = bookings[0]
+    business = first.business
+    client = first.client
+    if business is None:
+        return
+
+    service_names = list(
+        dict.fromkeys(
+            b.service.name for b in bookings if getattr(b, "service", None)
+        )
+    )
+    employee_names = list(
+        dict.fromkeys(
+            b.employee.name for b in bookings if getattr(b, "employee", None)
+        )
+    )
+
+    if reminder_kind == "2h":
+        header = "⏰ <b>Через 2 часа запись!</b>"
+    else:
+        header = "📅 <b>Предстоящая запись</b>"
+
+    message = (
+        f"{header}\n\n"
+        f"🏢 {business.name}\n"
+        f"📅 {format_date_with_weekday(first.booking_date)}\n"
+        f"🕐 {first.booking_time.strftime('%H:%M')}\n"
+    )
+    if client:
+        message += f"\n👤 Клиент: {client.full_name}"
+        if client.phone:
+            formatted_phone = format_phone(client.phone)
+            tel_link = formatted_phone if formatted_phone.startswith('+') else '+7' + formatted_phone[1:]
+            message += f'\n📱 <a href="tel:{tel_link}">{formatted_phone}</a>'
+
+    if service_names:
+        message += "\n\n💼 " + ", ".join(service_names)
+    if employee_names:
+        message += "\n👔 " + ", ".join(employee_names)
+
+    message += await _format_payment_summary_block(first)
+    message += "\n\nОткройте расписание ServGo, если нужно проверить детали."
+
+    # Telegram recipients: all owners + all assigned masters. Deduplicate when
+    # owner and master are the same Telegram account.
+    telegram_targets: set[int] = set()
+
+    owners = await get_business_owners(session, first.business_id)
+    for owner in owners:
+        if owner.telegram_id and owner.telegram_id > 0:
+            telegram_targets.add(int(owner.telegram_id))
+
+    for booking in bookings:
+        employee = getattr(booking, "employee", None)
+        if employee and employee.telegram_id and employee.telegram_id > 0:
+            telegram_targets.add(int(employee.telegram_id))
+
+    telegram_sent = 0
+    for telegram_id in telegram_targets:
+        try:
+            await bot.send_message(
+                chat_id=telegram_id,
+                text=message,
+                parse_mode="HTML",
+            )
+            telegram_sent += 1
+        except Exception as exc:
+            logger.warning(
+                "Staff Telegram %s reminder failed for %s: %s",
+                reminder_kind,
+                telegram_id,
+                exc,
+            )
+
+    push_sent = 0
+    push_targets = 0
+    try:
+        push_sent, push_targets = await send_staff_booking_webpush(
+            bookings,
+            session,
+            reminder_kind,
+        )
+    except Exception as exc:
+        logger.warning("Staff Web Push %s reminder failed: %s", reminder_kind, exc)
+
+    had_targets = bool(telegram_targets) or push_targets > 0
+    delivered = telegram_sent > 0 or push_sent > 0
+
+    # If there is nobody configured to receive staff reminders, mark this
+    # reminder as handled to avoid retrying every five minutes forever.
+    # If configured targets exist but every delivery failed, leave the flag
+    # false so the scheduler retries on the next pass.
+    if delivered or not had_targets:
+        for booking in bookings:
+            if reminder_kind == "2h":
+                booking.staff_reminder_2h_sent = True
+            else:
+                booking.staff_reminder_24h_sent = True
+        await session.commit()
+    else:
+        await session.rollback()
+
+    logger.info(
+        "Staff %s reminder bookings=%s telegram=%s/%s webpush=%s/%s",
+        reminder_kind,
+        [b.id for b in bookings],
+        telegram_sent,
+        len(telegram_targets),
+        push_sent,
+        push_targets,
+    )
 
 
 async def notify_master_new_booking(bot: Bot, booking: Booking, services_list: Optional[list] = None, is_subscription: bool = False, subscription_name: str = None):
@@ -815,11 +938,10 @@ def _group_bookings_by_visit(bookings: list) -> dict:
 
 
 async def check_and_send_reminders(bot: Bot):
-    """Send due reminders without relying on a narrow +/-5 minute window.
+    """Send client and staff reminders for upcoming visits.
 
-    A restart can no longer permanently skip a reminder merely because the
-    process was down at the exact target minute. Business times are currently
-    interpreted in SERVGO_TIMEZONE (Europe/Moscow by default).
+    Client and staff delivery flags are independent so one audience cannot
+    suppress retries for the other. The scheduler runs every five minutes.
     """
     try:
         async with async_session_maker() as session:
@@ -827,7 +949,10 @@ async def check_and_send_reminders(bot: Bot):
             try:
                 now = datetime.now(ZoneInfo(timezone_name)).replace(tzinfo=None)
             except Exception:
-                logger.warning("Invalid SERVGO_TIMEZONE=%s; falling back to Europe/Moscow", timezone_name)
+                logger.warning(
+                    "Invalid SERVGO_TIMEZONE=%s; falling back to Europe/Moscow",
+                    timezone_name,
+                )
                 now = datetime.now(ZoneInfo("Europe/Moscow")).replace(tzinfo=None)
 
             result = await session.execute(
@@ -838,44 +963,77 @@ async def check_and_send_reminders(bot: Bot):
                     selectinload(Booking.service),
                     selectinload(Booking.employee),
                 )
-                .where(Booking.status.in_(["pending", "confirmed"]))
+                .where(
+                    Booking.status.in_(
+                        ["pending", "confirmed", "prepayment_sent", "prepayment_confirmed"]
+                    )
+                )
             )
             active_bookings = list(result.scalars().all())
 
-            due_24h = []
-            due_2h = []
+            client_24h: list[Booking] = []
+            client_2h: list[Booking] = []
+            staff_24h: list[Booking] = []
+            staff_2h: list[Booking] = []
+
             two_hours = now + timedelta(hours=2)
             twenty_four_hours = now + timedelta(hours=24)
 
             for booking in active_bookings:
-                booking_datetime = datetime.combine(booking.booking_date, booking.booking_time)
+                booking_datetime = datetime.combine(
+                    booking.booking_date,
+                    booking.booking_time,
+                )
                 if booking_datetime <= now:
                     continue
 
-                if (
-                    not booking.reminder_24h_sent
-                    and two_hours < booking_datetime <= twenty_four_hours
-                ):
-                    due_24h.append(booking)
+                in_24h_window = two_hours < booking_datetime <= twenty_four_hours
+                in_2h_window = now < booking_datetime <= two_hours
 
-                if (
-                    not booking.reminder_2h_sent
-                    and now < booking_datetime <= two_hours
-                ):
-                    due_2h.append(booking)
+                if in_24h_window:
+                    if not booking.reminder_24h_sent:
+                        client_24h.append(booking)
+                    if not booking.staff_reminder_24h_sent:
+                        staff_24h.append(booking)
 
-            groups_24h = _group_bookings_by_visit(due_24h)
-            for group_bookings in groups_24h.values():
+                if in_2h_window:
+                    if not booking.reminder_2h_sent:
+                        client_2h.append(booking)
+                    if not booking.staff_reminder_2h_sent:
+                        staff_2h.append(booking)
+
+            client_groups_24h = _group_bookings_by_visit(client_24h)
+            for group_bookings in client_groups_24h.values():
                 await send_grouped_24h_reminder(bot, group_bookings, session)
 
-            groups_2h = _group_bookings_by_visit(due_2h)
-            for group_bookings in groups_2h.values():
+            client_groups_2h = _group_bookings_by_visit(client_2h)
+            for group_bookings in client_groups_2h.values():
                 await send_grouped_2h_reminder(bot, group_bookings, session)
 
+            staff_groups_24h = _group_bookings_by_visit(staff_24h)
+            for group_bookings in staff_groups_24h.values():
+                await send_grouped_staff_reminder(
+                    bot,
+                    group_bookings,
+                    session,
+                    "24h",
+                )
+
+            staff_groups_2h = _group_bookings_by_visit(staff_2h)
+            for group_bookings in staff_groups_2h.values():
+                await send_grouped_staff_reminder(
+                    bot,
+                    group_bookings,
+                    session,
+                    "2h",
+                )
+
             logger.info(
-                "Checked reminders: %s visits due <=24h, %s visits due <=2h",
-                len(groups_24h),
-                len(groups_2h),
+                "Checked reminders: client=%s/%s staff=%s/%s (24h/2h visits)",
+                len(client_groups_24h),
+                len(client_groups_2h),
+                len(staff_groups_24h),
+                len(staff_groups_2h),
             )
 
     except Exception as e:

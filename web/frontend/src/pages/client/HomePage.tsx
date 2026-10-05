@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { MapPin, Clock, ChevronRight, Briefcase } from 'lucide-react'
 import { api, type Business } from '../../api/client'
 import { ClientShell } from '../../components/ClientShell'
+import { NotificationSetup } from '../../components/NotificationSetup'
 
 const gradients = [
   'linear-gradient(135deg, #3b82f6, #4f46e5)',
@@ -39,6 +40,7 @@ export function HomePage() {
   const [businesses, setBusinesses] = useState<Business[]>([])
   const [loading, setLoading] = useState(true)
   const [failedPhotos, setFailedPhotos] = useState<Set<number>>(new Set())
+  const isAuthenticated = Boolean(localStorage.getItem('token'))
 
   useEffect(() => {
     api
@@ -61,6 +63,18 @@ export function HomePage() {
           Выберите салон и запишитесь на удобное время
         </p>
       </div>
+
+      {isAuthenticated && (
+        <details className="ds-card" style={{ marginBottom: 14, padding: 14 }}>
+          <summary className="ds-text" style={{ cursor: 'pointer', fontWeight: 700 }}>
+            Системные уведомления ServGo
+          </summary>
+          <p className="ds-sub" style={{ marginTop: 8, lineHeight: 1.5 }}>
+            Включите их на этом устройстве, чтобы получать напоминания о записях. Это подходит и клиентам, и сотрудникам.
+          </p>
+          <NotificationSetup />
+        </details>
+      )}
 
       {/* Business cards */}
       {loading ? (
