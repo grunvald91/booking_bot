@@ -263,6 +263,19 @@ async def list_bookings(
         .limit(200)
     )
     bookings = result.scalars().all()
+
+    if created_ids:
+        try:
+            from bot.services.booking_events import notify_booking_event
+            await notify_booking_event(db, [created_ids[0]], "created")
+        except Exception as notify_error:
+            logger.error(
+                "Manual booking notification failed booking=%s: %s",
+                created_ids[0],
+                notify_error,
+                exc_info=True,
+            )
+
     return [_admin_booking_out(b) for b in bookings]
 
 
