@@ -632,16 +632,34 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
     occurrence_dates = compute_recurring_dates(booking_date, repeat_weeks)
 
     async with async_session_maker() as session:
-        # Получаем пользователя
+        # Получаем пользователя и бизнес
         user = await get_or_create_user(
             session,
             telegram_id=callback.from_user.id,
             username=callback.from_user.username,
             full_name=callback.from_user.full_name
         )
+        from database.crud import get_business_by_id
+        business = await get_business_by_id(session, data['business_id'])
+        if not business:
+            await callback.answer("Бизнес не найден", show_alert=True)
+            return
 
         employee_id = data.get('employee_id')
         service_id = data['service_id']
+        client_subscription_id = data.get('client_subscription_id')
+        prepayment_enabled = bool(
+            getattr(business, 'prepayment_enabled', False)
+            and not client_subscription_id
+        )
+        prepayment_percent = int(getattr(business, 'prepayment_percent', None) or 100)
+        service_price = int(data.get('service_price') or 0)
+        prepayment_amount = (
+            int(service_price * prepayment_percent / 100)
+            if prepayment_enabled
+            else None
+        )
+        initial_status = "pending_prepayment" if prepayment_enabled else "confirmed"
 
         conflicts = await check_series_conflicts(
             session, employee_id, occurrence_dates, [(service_id, booking_time)]
@@ -666,7 +684,9 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
                     service_id=service_id,
                     booking_date=occurrence_date,
                     booking_time=booking_time,
-                    employee_id=employee_id
+                    employee_id=employee_id,
+                    status=initial_status,
+                    prepayment_amount=prepayment_amount,
                 )
                 created_bookings.append(booking)
         except ValueError as e:
@@ -694,7 +714,6 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
         booking = created_bookings[0]
 
         subscription_line = ""
-        client_subscription_id = data.get('client_subscription_id')
         if client_subscription_id:
             usage = await use_subscription_service(
                 session, client_subscription_id, service_id, booking_id=booking.id
@@ -723,14 +742,29 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
             if left is not None:
                 subscription_line = f"\n🎫 Списано с абонемента «{data.get('subscription_name', '')}», осталось: {left}\n"
 
-        # Отправляем уведомления (один раз, по первой записи серии)
-        from bot.services.notifications import notify_master_new_booking, notify_owner_new_booking
-        await notify_master_new_booking(callback.bot, booking)
-        await notify_owner_new_booking(callback.bot, booking)
-
-        # Получаем информацию о бизнесе для ссылок
-        from database.crud import get_business_by_id
-        business = await get_business_by_id(session, data['business_id'])
+        # Mandatory created-event is sent immediately only when no
+        # prepayment is required. The Telegram chat itself shows the client
+        # confirmation below, so the dispatcher sends client Web Push but does
+        # not duplicate the same Telegram message.
+        if not prepayment_enabled:
+            try:
+                from bot.services.notification_events import dispatch_booking_event
+                await dispatch_booking_event(
+                    created_bookings,
+                    session,
+                    "booking_created",
+                    include_client=True,
+                    staff_audience="all",
+                    send_client_telegram=False,
+                    send_client_webpush=True,
+                )
+            except Exception as notification_error:
+                logger.error(
+                    "Telegram booking-created event failed for bookings %s: %s",
+                    [item.id for item in created_bookings],
+                    notification_error,
+                    exc_info=True,
+                )
 
     # Формируем кликабельные ссылки
     phone_text = ""
