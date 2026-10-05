@@ -77,23 +77,25 @@ jobs:
           if rel < 0:
               raise SystemExit('ServGo SPA location not found')
           insert_at=start+rel
-          addition='''    # PWA control files: always revalidate service worker and manifest.
-    location = /sw.js {
-        root /opt/booking_bot/web/frontend/dist;
-        default_type application/javascript;
-        add_header Cache-Control "no-cache, no-store, must-revalidate";
-        add_header Pragma "no-cache";
-        try_files $uri =404;
-    }
-
-    location = /manifest.webmanifest {
-        root /opt/booking_bot/web/frontend/dist;
-        default_type application/manifest+json;
-        add_header Cache-Control "no-cache";
-        try_files $uri =404;
-    }
-
-'''
+          addition="\\n".join([
+              "    # PWA control files: always revalidate service worker and manifest.",
+              "    location = /sw.js {",
+              "        root /opt/booking_bot/web/frontend/dist;",
+              "        default_type application/javascript;",
+              "        add_header Cache-Control \\"no-cache, no-store, must-revalidate\\";",
+              "        add_header Pragma \\"no-cache\\";",
+              "        try_files $uri =404;",
+              "    }",
+              "",
+              "    location = /manifest.webmanifest {",
+              "        root /opt/booking_bot/web/frontend/dist;",
+              "        default_type application/manifest+json;",
+              "        add_header Cache-Control \\"no-cache\\";",
+              "        try_files $uri =404;",
+              "    }",
+              "",
+              "",
+          ])
           p.write_text(text[:insert_at]+addition+text[insert_at:])
           print('pwa_locations=inserted')
           PATCH_PY
