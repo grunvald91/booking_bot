@@ -274,7 +274,8 @@ async def resolve_staff_notification_targets(
 async def send_staff_booking_webpush(
     bookings: list[Booking],
     session: AsyncSession,
-    reminder_kind: str,
+    reminder_slot: str,
+    hours_before: int,
 ) -> tuple[int, int]:
     """Send upcoming-visit push to business owners and assigned masters.
 
@@ -320,11 +321,11 @@ async def send_staff_booking_webpush(
     )
     time_text = first.booking_time.strftime("%H:%M")
 
-    if reminder_kind == "2h":
-        title = "⏰ Через 2 часа клиент"
+    if hours_before <= 3:
+        title = f"⏰ Через {hours_before} ч клиент"
         body = f"{client_name} · {time_text} · {service_names}"
     else:
-        title = "📅 Предстоящая запись"
+        title = f"📅 Запись через {hours_before} ч"
         body = (
             f"{client_name} · {first.booking_date.strftime('%d.%m.%Y')} "
             f"в {time_text} · {service_names}"
@@ -335,7 +336,7 @@ async def send_staff_booking_webpush(
         "body": body,
         "url": "/",
         "booking_id": first.id,
-        "tag": f"servgo-staff-booking-{first.id}-{reminder_kind}",
+        "tag": f"servgo-staff-booking-{first.id}-{reminder_slot}",
     }
     sent = await send_webpush_to_subscriptions(subscriptions, payload, session)
     return sent, len(subscriptions)
