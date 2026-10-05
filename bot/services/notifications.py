@@ -18,7 +18,7 @@ from database.models import Booking, User, Business, Employee
 from database.crud import get_business_owners
 from bot.utils.validators import format_date_with_weekday, format_phone
 from bot.utils.business_types import get_terminology, is_venue_rental_type
-from bot.services.webpush import send_booking_webpush, send_staff_booking_webpush
+from bot.services.webpush import send_booking_webpush, send_staff_booking_webpush, resolve_staff_notification_targets
 
 
 def get_employee_label(business_type: str) -> str:
@@ -371,9 +371,10 @@ async def send_grouped_staff_reminder(
     bot: Bot,
     bookings: list[Booking],
     session: AsyncSession,
-    reminder_kind: str,
+    reminder_slot: str,
+    hours_before: int,
 ):
-    """Notify owners and assigned masters about an upcoming client visit."""
+    """Notify configured owners/masters/admins about an upcoming client visit."""
     if not bookings:
         return
 
@@ -394,10 +395,10 @@ async def send_grouped_staff_reminder(
         )
     )
 
-    if reminder_kind == "2h":
-        header = "⏰ <b>Через 2 часа запись!</b>"
+    if hours_before <= 3:
+        header = f"⏰ <b>Через {hours_before} ч запись!</b>"
     else:
-        header = "📅 <b>Предстоящая запись</b>"
+        header = f"📅 <b>Запись через {hours_before} ч</b>"
 
     message = (
         f"{header}\n\n"
@@ -420,19 +421,11 @@ async def send_grouped_staff_reminder(
     message += await _format_payment_summary_block(first)
     message += "\n\nОткройте расписание ServGo, если нужно проверить детали."
 
-    # Telegram recipients: all owners + all assigned masters. Deduplicate when
-    # owner and master are the same Telegram account.
-    telegram_targets: set[int] = set()
-
-    owners = await get_business_owners(session, first.business_id)
-    for owner in owners:
-        if owner.telegram_id and owner.telegram_id > 0:
-            telegram_targets.add(int(owner.telegram_id))
-
-    for booking in bookings:
-        employee = getattr(booking, "employee", None)
-        if employee and employee.telegram_id and employee.telegram_id > 0:
-            telegram_targets.add(int(employee.telegram_id))
+    _, telegram_targets = await resolve_staff_notification_targets(
+        bookings,
+        session,
+        respect_business_preferences=True,
+    )
 
     telegram_sent = 0
     for telegram_id in telegram_targets:
@@ -446,7 +439,7 @@ async def send_grouped_staff_reminder(
         except Exception as exc:
             logger.warning(
                 "Staff Telegram %s reminder failed for %s: %s",
-                reminder_kind,
+                reminder_slot,
                 telegram_id,
                 exc,
             )
@@ -457,21 +450,18 @@ async def send_grouped_staff_reminder(
         push_sent, push_targets = await send_staff_booking_webpush(
             bookings,
             session,
-            reminder_kind,
+            reminder_slot,
+            hours_before,
         )
     except Exception as exc:
-        logger.warning("Staff Web Push %s reminder failed: %s", reminder_kind, exc)
+        logger.warning("Staff Web Push %s reminder failed: %s", reminder_slot, exc)
 
     had_targets = bool(telegram_targets) or push_targets > 0
     delivered = telegram_sent > 0 or push_sent > 0
 
-    # If there is nobody configured to receive staff reminders, mark this
-    # reminder as handled to avoid retrying every five minutes forever.
-    # If configured targets exist but every delivery failed, leave the flag
-    # false so the scheduler retries on the next pass.
     if delivered or not had_targets:
         for booking in bookings:
-            if reminder_kind == "2h":
+            if reminder_slot == "second":
                 booking.staff_reminder_2h_sent = True
             else:
                 booking.staff_reminder_24h_sent = True
@@ -480,8 +470,9 @@ async def send_grouped_staff_reminder(
         await session.rollback()
 
     logger.info(
-        "Staff %s reminder bookings=%s telegram=%s/%s webpush=%s/%s",
-        reminder_kind,
+        "Staff %s reminder hours=%s bookings=%s telegram=%s/%s webpush=%s/%s",
+        reminder_slot,
+        hours_before,
         [b.id for b in bookings],
         telegram_sent,
         len(telegram_targets),
