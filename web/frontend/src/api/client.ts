@@ -102,6 +102,12 @@ export interface BusinessDetail extends Business {
   cancellation_policy_photo?: string;
   cancellation_policy_text?: string;
   require_receipt_for_prepayment?: boolean;
+  staff_reminders_enabled?: boolean;
+  staff_reminder_first_hours?: number;
+  staff_reminder_second_hours?: number | null;
+  staff_notify_owners?: boolean;
+  staff_notify_masters?: boolean;
+  staff_notify_admins?: boolean;
   booking_labels?: Record<string, string>;
   booking_flow_order?: 'service_first' | 'resource_first';
 }
@@ -307,6 +313,12 @@ export interface BusinessAdminDetail {
   cancellation_policy_photo?: string;
   cancellation_policy_text?: string;
   require_receipt_for_prepayment: boolean;
+  staff_reminders_enabled?: boolean;
+  staff_reminder_first_hours?: number;
+  staff_reminder_second_hours?: number | null;
+  staff_notify_owners?: boolean;
+  staff_notify_masters?: boolean;
+  staff_notify_admins?: boolean;
   booking_labels?: Record<string, string>;
   booking_flow_order?: 'service_first' | 'resource_first';
 }
@@ -328,6 +340,12 @@ export interface BusinessUpdateData {
   payment_details?: string;
   cancellation_policy_text?: string;
   require_receipt_for_prepayment?: boolean;
+  staff_reminders_enabled?: boolean;
+  staff_reminder_first_hours?: number;
+  staff_reminder_second_hours?: number | null;
+  staff_notify_owners?: boolean;
+  staff_notify_masters?: boolean;
+  staff_notify_admins?: boolean;
   booking_labels?: Record<string, string>;
   booking_flow_order?: 'service_first' | 'resource_first';
 }
