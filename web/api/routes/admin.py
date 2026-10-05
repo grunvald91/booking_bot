@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 import json
 import httpx
 from sqlalchemy import select, func, and_, case, delete as sa_delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -24,6 +25,14 @@ from ..database import (
     VenueTimePricing, Subscription, SubscriptionService, EmployeeService,
 )
 from database.crud import get_or_create_guest_user
+from database.booking_safety import (
+    ACTIVE_BOOKING_STATUSES,
+    BookingConflictError,
+    booking_resource_duration,
+    ensure_resource_available,
+    lock_resource_days,
+    service_occupies_resource,
+)
 from ..deps import get_current_admin
 from ..booking_utils import compute_recurring_dates
 from ..schemas import (
