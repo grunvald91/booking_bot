@@ -191,20 +191,24 @@ async def busy_resource_intervals(
     *,
     employee_id: int,
     dates: Iterable[date],
+    exclude_booking_ids: Sequence[int] | None = None,
 ) -> list[tuple[datetime, datetime]]:
     """Return active occupied intervals for slot rendering/read-only checks."""
     days = sorted(set(dates))
     if not days:
         return []
     expanded = _expanded_lock_dates(days)
+    filters = [
+        Booking.employee_id == employee_id,
+        Booking.booking_date.in_(expanded),
+        Booking.status.in_(ACTIVE_BOOKING_STATUSES),
+        Booking.occupies_resource.is_(True),
+    ]
+    if exclude_booking_ids:
+        filters.append(Booking.id.notin_(list(exclude_booking_ids)))
     result = await session.execute(
         select(Booking)
-        .where(
-            Booking.employee_id == employee_id,
-            Booking.booking_date.in_(expanded),
-            Booking.status.in_(ACTIVE_BOOKING_STATUSES),
-            Booking.occupies_resource.is_(True),
-        )
+        .where(*filters)
         .options(selectinload(Booking.service))
     )
     intervals: list[tuple[datetime, datetime]] = []
