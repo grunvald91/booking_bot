@@ -5,6 +5,7 @@ import { Layout } from './components/Layout'
 import { HomePage } from './pages/client/HomePage'
 import { BusinessPage } from './pages/client/BusinessPage'
 import { BookingPage } from './pages/client/BookingPage'
+import { BookingStatusPage } from './pages/client/BookingStatusPage'
 import { MyBookingsPage } from './pages/client/MyBookingsPage'
 import { SubscriptionsPage } from './pages/client/SubscriptionsPage'
 import { LoginPage } from './pages/client/LoginPage'
@@ -82,6 +83,7 @@ function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/business/:id" element={<BusinessPage />} />
         <Route path="/book/:businessId" element={<BookingPage />} />
+        <Route path="/b/:token" element={<BookingStatusPage />} />
         <Route
           path="/my"
           element={
