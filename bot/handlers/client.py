@@ -656,6 +656,23 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
             await callback.answer()
             return
 
+        business = await get_business_by_id(session, data['business_id'])
+        if not business:
+            await callback.answer("Бизнес не найден", show_alert=True)
+            return
+
+        client_subscription_id = data.get('client_subscription_id')
+        requires_prepayment = bool(
+            business.prepayment_enabled
+            and not client_subscription_id
+        )
+        prepayment_amount = None
+        if requires_prepayment:
+            service = await get_service_by_id(session, service_id)
+            full_price = int(service.price or 0) if service else 0
+            percent = int(business.prepayment_percent or 100)
+            prepayment_amount = int(full_price * percent / 100)
+
         created_bookings = []
         try:
             for occurrence_date in occurrence_dates:
@@ -666,7 +683,9 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
                     service_id=service_id,
                     booking_date=occurrence_date,
                     booking_time=booking_time,
-                    employee_id=employee_id
+                    employee_id=employee_id,
+                    status="pending_prepayment" if requires_prepayment else "confirmed",
+                    prepayment_amount=prepayment_amount,
                 )
                 created_bookings.append(booking)
         except ValueError as e:
@@ -694,7 +713,6 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
         booking = created_bookings[0]
 
         subscription_line = ""
-        client_subscription_id = data.get('client_subscription_id')
         if client_subscription_id:
             usage = await use_subscription_service(
                 session, client_subscription_id, service_id, booking_id=booking.id
@@ -723,14 +741,26 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
             if left is not None:
                 subscription_line = f"\n🎫 Списано с абонемента «{data.get('subscription_name', '')}», осталось: {left}\n"
 
-        # Отправляем уведомления (один раз, по первой записи серии)
-        from bot.services.notifications import notify_master_new_booking, notify_owner_new_booking
-        await notify_master_new_booking(callback.bot, booking)
-        await notify_owner_new_booking(callback.bot, booking)
-
-        # Получаем информацию о бизнесе для ссылок
-        from database.crud import get_business_by_id
-        business = await get_business_by_id(session, data['business_id'])
+        # A booking without prepayment is immediately confirmed. Telegram
+        # already shows the client the confirmation below, so the common event
+        # sends client PWA only and staff Telegram + PWA to avoid duplicates.
+        if not requires_prepayment:
+            try:
+                from bot.services.booking_events import notify_booking_event
+                await notify_booking_event(
+                    session,
+                    [booking.id],
+                    "created",
+                    telegram_client=False,
+                    push_client=True,
+                )
+            except Exception as notify_error:
+                logger.error(
+                    "Telegram booking event failed booking=%s: %s",
+                    booking.id,
+                    notify_error,
+                    exc_info=True,
+                )
 
     # Формируем кликабельные ссылки
     phone_text = ""
@@ -746,6 +776,36 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
         encoded_address = quote(business.address)
         yandex_maps_url = f"https://yandex.ru/maps/?text={encoded_address}"
         address_text = f'\n📍 Адрес: <a href="{yandex_maps_url}">{business.address}</a>'
+
+    if requires_prepayment:
+        payment_text = (
+            f"\n💳 <b>Для подтверждения записи внесите предоплату: {prepayment_amount or 0}₽</b>\n"
+        )
+        if business.payment_phone:
+            payment_text += f"📱 Перевод: <code>{business.payment_phone}</code>\n"
+        if business.payment_details:
+            payment_text += f"📝 {business.payment_details}\n"
+        payment_text += (
+            "\nПосле перевода нажмите кнопку ниже. "
+            "Владелец подтвердит получение — после этого запись будет подтверждена."
+        )
+        await callback.message.edit_text(
+            (
+                f"⏳ <b>Время зарезервировано, ожидается предоплата</b>\n\n"
+                f"📅 {data['booking_date']} в {data['booking_time']}\n"
+                f"🏢 {data['business_name']}\n"
+                f"💼 {data['service_name']}\n"
+                f"{payment_text}"
+            ),
+            parse_mode="HTML",
+            reply_markup=client_kb.get_prepayment_confirmation_keyboard(
+                booking.id,
+                require_receipt=getattr(business, "require_receipt_for_prepayment", False),
+            ),
+        )
+        await state.set_state(BookingStates.waiting_prepayment)
+        await callback.answer("Ожидается предоплата")
+        return
 
     # Определяем текст о напоминании в зависимости от времени до записи
     booking_datetime = datetime.combine(booking_date, booking_time)
