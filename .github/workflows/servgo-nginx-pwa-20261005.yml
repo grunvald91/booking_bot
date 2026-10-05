@@ -1,4 +1,4 @@
-name: ServGo nginx PWA config inspect
+name: ServGo nginx PWA cache patch
 
 on:
   push:
@@ -9,15 +9,15 @@ permissions:
   contents: read
 
 jobs:
-  inspect:
+  patch:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     env:
       SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
     steps:
       - name: Install Paramiko
         run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
-      - name: Inspect ServGo nginx blocks
+      - name: Patch PWA control-file locations safely
         shell: bash
         run: |
           python - <<'PY'
@@ -40,15 +40,97 @@ jobs:
                   c.close()
                   if n==2: raise
                   time.sleep(3)
-          cmd=r'''for f in /etc/nginx/sites-enabled/webapp /etc/nginx/sites-enabled/webapp.bak_auth3_; do
-            echo "===== $f ====="
-            if [ -f "$f" ]; then nl -ba "$f" | sed -n '1,260p'; else echo missing; fi
-          done
+          cmd=r'''set -Eeuo pipefail
+          FILE=/etc/nginx/sites-enabled/webapp
+          BACKUP="/etc/nginx/sites-available/webapp.pwa-backup-$(date +%Y%m%d-%H%M%S)"
+          cp -a "$FILE" "$BACKUP"
+          echo "backup=$BACKUP"
+
+          python3 - <<'PATCH_PY'
+          from pathlib import Path
+          p=Path('/etc/nginx/sites-enabled/webapp')
+          text=p.read_text()
+          marker='server_name servgo.ru www.servgo.ru 155.212.162.47;'
+          m=text.find(marker)
+          if m < 0:
+              raise SystemExit('ServGo server_name not found')
+          start=text.rfind('server {',0,m)
+          if start < 0:
+              raise SystemExit('ServGo server block start not found')
+          depth=0; end=None
+          for i in range(start,len(text)):
+              if text[i]=='{': depth+=1
+              elif text[i]=='}':
+                  depth-=1
+                  if depth==0:
+                      end=i+1; break
+          if end is None:
+              raise SystemExit('ServGo server block end not found')
+          block=text[start:end]
+          if 'listen 443 ssl;' not in block:
+              raise SystemExit('First ServGo block is not HTTPS')
+          if 'location = /sw.js' in block or 'location = /manifest.webmanifest' in block:
+              print('pwa_locations=already_present')
+              raise SystemExit(0)
+          needle='    location / {'
+          rel=block.find(needle)
+          if rel < 0:
+              raise SystemExit('ServGo SPA location not found')
+          insert_at=start+rel
+          addition='''    # PWA control files: always revalidate service worker and manifest.
+    location = /sw.js {
+        root /opt/booking_bot/web/frontend/dist;
+        default_type application/javascript;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+        try_files $uri =404;
+    }
+
+    location = /manifest.webmanifest {
+        root /opt/booking_bot/web/frontend/dist;
+        default_type application/manifest+json;
+        add_header Cache-Control "no-cache";
+        try_files $uri =404;
+    }
+
+'''
+          p.write_text(text[:insert_at]+addition+text[insert_at:])
+          print('pwa_locations=inserted')
+          PATCH_PY
+
+          if ! nginx -t; then
+            cp -a "$BACKUP" "$FILE"
+            nginx -t
+            echo 'nginx_patch=rolled_back'
+            exit 1
+          fi
+          systemctl reload nginx
+          sleep 1
+          test "$(systemctl is-active nginx.service)" = active
+
+          echo '--- public headers ---'
+          SW_HEADERS=$(curl -fsSI --max-time 10 https://servgo.ru/sw.js | tr -d '\r')
+          MAN_HEADERS=$(curl -fsSI --max-time 10 https://servgo.ru/manifest.webmanifest | tr -d '\r')
+          printf '%s\n' "$SW_HEADERS" | grep -i '^HTTP/'
+          printf '%s\n' "$SW_HEADERS" | grep -i '^Content-Type:'
+          printf '%s\n' "$SW_HEADERS" | grep -i '^Cache-Control:'
+          printf '%s\n' "$MAN_HEADERS" | grep -i '^HTTP/'
+          printf '%s\n' "$MAN_HEADERS" | grep -i '^Content-Type:'
+          printf '%s\n' "$MAN_HEADERS" | grep -i '^Cache-Control:'
+
+          printf '%s\n' "$SW_HEADERS" | grep -qi 'Cache-Control:.*no-cache'
+          printf '%s\n' "$MAN_HEADERS" | grep -qi 'Content-Type:.*application/manifest+json'
+          printf '%s\n' "$MAN_HEADERS" | grep -qi 'Cache-Control:.*no-cache'
+          curl -fsS --max-time 8 https://servgo.ru/api/health >/dev/null
+          echo 'nginx_patch=success'
           '''
-          _,out,err=ssh.exec_command(cmd,timeout=20)
-          print(out.read().decode('utf-8','replace'))
-          if out.channel.recv_exit_status()!=0:
-              print(err.read().decode('utf-8','replace')[-800:])
-              raise SystemExit(1)
+          _,out,err=ssh.exec_command(cmd,timeout=45)
+          stdout=out.read().decode('utf-8','replace')
+          stderr=err.read().decode('utf-8','replace')
+          print(stdout)
+          status=out.channel.recv_exit_status()
+          if status:
+              print('stderr_suffix='+stderr[-1600:])
+              raise SystemExit(status)
           ssh.close()
           PY
