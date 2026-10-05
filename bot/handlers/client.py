@@ -661,6 +661,14 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
         )
         initial_status = "pending_prepayment" if prepayment_enabled else "confirmed"
 
+        if prepayment_enabled and repeat_weeks > 1:
+            await callback.message.edit_text(
+                "💳 Для бизнеса с предоплатой повторные записи пока оформляются по одной.\n\n"
+                "Так каждая предоплата однозначно относится к конкретному визиту."
+            )
+            await callback.answer()
+            return
+
         conflicts = await check_series_conflicts(
             session, employee_id, occurrence_dates, [(service_id, booking_time)]
         )
@@ -765,6 +773,37 @@ async def booking_confirmed(callback: CallbackQuery, state: FSMContext):
                     notification_error,
                     exc_info=True,
                 )
+
+    if prepayment_enabled:
+        details = []
+        if prepayment_amount is not None:
+            details.append(f"💰 Предоплата: <b>{prepayment_amount}₽</b>")
+        if business.payment_phone:
+            details.append(f"📱 Перевод по номеру: <code>{business.payment_phone}</code>")
+        if business.payment_details:
+            details.append(f"🏦 Реквизиты: {business.payment_details}")
+
+        prepayment_text = (
+            "⏳ <b>Время временно зарезервировано</b>\n\n"
+            f"🏢 {business.name}\n"
+            f"📅 {data['booking_date']} в {data['booking_time']}\n"
+            f"💼 {data['service_name']}\n\n"
+            + "\n".join(details)
+            + "\n\nПосле перевода подтвердите оплату кнопкой ниже. "
+              "Запись станет подтверждённой после проверки владельцем."
+        )
+        await callback.message.edit_text(
+            prepayment_text,
+            parse_mode="HTML",
+            reply_markup=client_kb.get_prepayment_confirmation_keyboard(
+                booking.id,
+                require_receipt=bool(getattr(business, 'require_receipt_for_prepayment', False)),
+            ),
+        )
+        await state.update_data(prepayment_booking_id=booking.id)
+        await state.set_state(BookingStates.waiting_prepayment)
+        await callback.answer("Ожидаем предоплату")
+        return
 
     # Формируем кликабельные ссылки
     phone_text = ""
