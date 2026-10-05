@@ -1,4 +1,4 @@
-name: ServGo production release
+name: ServGo rental prerequisite check
 
 on:
   push:
@@ -9,51 +9,30 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
+  check:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 8
     env:
       SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Build PWA frontend
-        working-directory: web/frontend
-        run: |
-          npm ci --legacy-peer-deps
-          npm run build
-
-      - name: Pack release payload
-        run: |
-          tar -czf /tmp/servgo-release.tgz             bot/services/notifications.py             bot/services/webpush.py             database/models.py             requirements.txt             web/api/database.py             web/api/main.py             web/api/routes/admin.py             web/api/routes/auth.py             web/api/routes/client.py             web/api/routes/notifications.py             web/api/schemas.py             migrations/add_booking_flow_customization.sql             migrations/add_push_subscriptions.sql             web/frontend/dist
-
       - name: Install SSH client library
         run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
-
-      - name: Deploy with backup, migrations and rollback
+      - name: Check production rental prerequisites
         shell: bash
         run: |
           python - <<'PY'
-          import base64, hashlib, os, pathlib, time
+          import base64, hashlib, os, time
           import paramiko
-
           HOST='155.212.162.47'
-          ROOT='/opt/booking_bot'
-          RELEASE='servgo-20261005-7d7e541'
           FP='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
-
           class Pinned(paramiko.MissingHostKeyPolicy):
               def missing_host_key(self,c,h,k):
-                  actual=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
-                  if actual!=FP: raise paramiko.SSHException('host key mismatch')
+                  a=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if a!=FP: raise paramiko.SSHException('host key mismatch')
                   c.get_host_keys().add(h,k.get_name(),k)
-
           ssh=None
-          for attempt in range(3):
+          for n in range(3):
               c=paramiko.SSHClient(); c.set_missing_host_key_policy(Pinned())
               try:
                   c.connect(HOST,port=22,username='root',password=os.environ['SERVER_PASSWORD'],
@@ -61,285 +40,65 @@ jobs:
                   ssh=c; break
               except (paramiko.SSHException,OSError,EOFError):
                   c.close()
-                  if attempt==2: raise
+                  if n==2: raise
                   time.sleep(3)
-
-          stage=f'{ROOT}/.release_staging/{RELEASE}'
-          _,out,err=ssh.exec_command(f"mkdir -p '{stage}' && chmod 700 '{stage}'",timeout=15)
-          if out.channel.recv_exit_status()!=0:
-              raise SystemExit(err.read().decode('utf-8','replace')[-500:])
-
-          sftp=ssh.open_sftp()
-          try:
-              sftp.put('/tmp/servgo-release.tgz',stage+'/release.tgz')
-          finally:
-              sftp.close()
-
-          command=r'''set -Eeuo pipefail
-          ROOT=/opt/booking_bot
-          RELEASE=servgo-20261005-7d7e541
-          STAGE="$ROOT/.release_staging/$RELEASE"
-          PAYLOAD="$STAGE/payload"
-          BACKUP="$ROOT/.release_backups/$RELEASE-$(date +%Y%m%d-%H%M%S)"
-          TARGETS=(
-            bot/services/notifications.py
-            bot/services/webpush.py
-            database/models.py
-            requirements.txt
-            web/api/database.py
-            web/api/main.py
-            web/api/routes/admin.py
-            web/api/routes/auth.py
-            web/api/routes/client.py
-            web/api/routes/notifications.py
-            web/api/schemas.py
-          )
-
-          rm -rf "$PAYLOAD"
-          mkdir -p "$PAYLOAD" "$BACKUP"
-          chmod 700 "$BACKUP"
-          tar -xzf "$STAGE/release.tgz" -C "$PAYLOAD"
-
-          echo "release=$RELEASE"
-          echo "backup_dir=$BACKUP"
-
-          : > "$BACKUP/absent.txt"
-          for f in "${TARGETS[@]}"; do
-            if [ -f "$ROOT/$f" ]; then
-              mkdir -p "$BACKUP/files/$(dirname "$f")"
-              cp -a "$ROOT/$f" "$BACKUP/files/$f"
-            else
-              echo "$f" >> "$BACKUP/absent.txt"
-            fi
-          done
-          if [ -d "$ROOT/web/frontend/dist" ]; then
-            mkdir -p "$BACKUP/files/web/frontend"
-            cp -a "$ROOT/web/frontend/dist" "$BACKUP/files/web/frontend/dist"
-          fi
-          if [ -f "$ROOT/.env" ]; then
-            cp -a "$ROOT/.env" "$BACKUP/env"
-            chmod 600 "$BACKUP/env"
-          fi
-
-          rollback() {
-            code=$?
-            trap - ERR
-            echo "release_failed=yes exit=$code; rolling back application files"
-            for f in "${TARGETS[@]}"; do
-              if [ -f "$BACKUP/files/$f" ]; then
-                mkdir -p "$ROOT/$(dirname "$f")"
-                cp -a "$BACKUP/files/$f" "$ROOT/$f"
-              fi
-            done
-            if [ -f "$BACKUP/absent.txt" ]; then
-              while IFS= read -r f; do [ -n "$f" ] && rm -f "$ROOT/$f"; done < "$BACKUP/absent.txt"
-            fi
-            if [ -d "$BACKUP/files/web/frontend/dist" ]; then
-              rm -rf "$ROOT/web/frontend/dist"
-              cp -a "$BACKUP/files/web/frontend/dist" "$ROOT/web/frontend/dist"
-            fi
-            if [ -f "$BACKUP/env" ]; then
-              cp -a "$BACKUP/env" "$ROOT/.env"
-            fi
-            systemctl restart booking-web-api.service || true
-            systemctl restart booking-bot.service || true
-            sleep 3
-            printf 'rollback_api='; curl -sS --max-time 5 -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/health || true
-            printf 'rollback_bot='; systemctl is-active booking-bot.service || true
-            exit "$code"
-          }
-          trap rollback ERR
-
-          echo '--- install only new runtime dependency ---'
-          "$ROOT/venv/bin/pip" install --disable-pip-version-check 'pywebpush>=2.5.0'
-
-          echo '--- configure VAPID without exposing keys ---'
-          cd "$ROOT"
-          ./venv/bin/python - <<'ENV_PY'
-          from pathlib import Path
-          import base64, os
-          from cryptography.hazmat.primitives import serialization
-          from cryptography.hazmat.primitives.asymmetric import ec
-
-          path=Path('.env')
-          raw=path.read_text() if path.exists() else ''
-          lines=raw.splitlines()
-          values={}
-          for line in lines:
-              if '=' in line and not line.lstrip().startswith('#'):
-                  k,v=line.split('=',1); values[k.strip()]=v.strip()
-
-          generated=False
-          if not values.get('VAPID_PUBLIC_KEY') or not values.get('VAPID_PRIVATE_KEY'):
-              key=ec.generate_private_key(ec.SECP256R1())
-              private_der=key.private_bytes(
-                  encoding=serialization.Encoding.DER,
-                  format=serialization.PrivateFormat.PKCS8,
-                  encryption_algorithm=serialization.NoEncryption(),
-              )
-              public_point=key.public_key().public_bytes(
-                  encoding=serialization.Encoding.X962,
-                  format=serialization.PublicFormat.UncompressedPoint,
-              )
-              enc=lambda b: base64.urlsafe_b64encode(b).decode('ascii').rstrip('=')
-              values['VAPID_PUBLIC_KEY']=enc(public_point)
-              values['VAPID_PRIVATE_KEY']=enc(private_der)
-              generated=True
-          values.setdefault('VAPID_SUBJECT','mailto:admin@servgo.ru')
-          values.setdefault('SERVGO_TIMEZONE','Europe/Moscow')
-
-          replace={'VAPID_PUBLIC_KEY','VAPID_PRIVATE_KEY','VAPID_SUBJECT','SERVGO_TIMEZONE'}
-          out=[]; seen=set()
-          for line in lines:
-              if '=' in line and not line.lstrip().startswith('#'):
-                  k=line.split('=',1)[0].strip()
-                  if k in replace:
-                      if k not in seen:
-                          out.append(k+'='+values[k]); seen.add(k)
-                      continue
-              out.append(line)
-          for k in ('VAPID_PUBLIC_KEY','VAPID_PRIVATE_KEY','VAPID_SUBJECT','SERVGO_TIMEZONE'):
-              if k not in seen: out.append(k+'='+values[k])
-          tmp=path.with_suffix('.tmp-release')
-          tmp.write_text('\n'.join(out).rstrip()+'\n')
-          os.chmod(tmp,0o600)
-          tmp.replace(path)
-          print('vapid_keys=' + ('generated' if generated else 'preserved'))
-          print('vapid_subject=configured')
-          print('servgo_timezone=configured')
-          ENV_PY
-
-          echo '--- backup existing schema for touched tables ---'
-          ./venv/bin/python - <<'SCHEMA_PY'
-          import os, subprocess
-          from dotenv import load_dotenv
-          load_dotenv('/opt/booking_bot/.env')
-          env=os.environ.copy()
-          env['PGPASSWORD']=os.getenv('DB_PASSWORD','')
-          cmd=['pg_dump','-h',os.getenv('DB_HOST','localhost'),'-p',os.getenv('DB_PORT','5432'),
-               '-U',os.getenv('DB_USER','postgres'),'-d',os.getenv('DB_NAME','booking_bot'),
-               '--schema-only','--no-owner','--no-privileges','-t','businesses','-t','employees']
-          try:
-              p=subprocess.run(cmd,env=env,capture_output=True,text=True,timeout=30)
-              if p.returncode==0:
-                  open(os.environ.get('BACKUP_SCHEMA','/tmp/servgo-pre-migration-schema.sql'),'w').write(p.stdout)
-                  print('schema_backup=ok')
-              else:
-                  print('schema_backup=skipped')
-          except Exception:
-              print('schema_backup=skipped')
-          SCHEMA_PY
-          if [ -f /tmp/servgo-pre-migration-schema.sql ]; then
-            mv /tmp/servgo-pre-migration-schema.sql "$BACKUP/pre-migration-schema.sql"
-            chmod 600 "$BACKUP/pre-migration-schema.sql"
-          fi
-
-          echo '--- apply additive database migrations ---'
-          STAGE_PAYLOAD="$PAYLOAD" ./venv/bin/python - <<'MIG_PY'
-          import asyncio, os
-          from pathlib import Path
-          import asyncpg
-          from dotenv import load_dotenv
-          load_dotenv('/opt/booking_bot/.env')
-          async def run():
-              conn=await asyncpg.connect(
-                  host=os.getenv('DB_HOST','localhost'),
-                  port=int(os.getenv('DB_PORT','5432')),
-                  user=os.getenv('DB_USER','postgres'),
-                  password=os.getenv('DB_PASSWORD',''),
-                  database=os.getenv('DB_NAME','booking_bot'),
-              )
+          command=r'''set -e
+          cd /opt/booking_bot
+          echo '--- runtime modules ---'
+          ./venv/bin/python - <<'MOD_PY'
+          for name in ('httpx','pywebpush'):
               try:
-                  root=Path(os.environ['STAGE_PAYLOAD'])
-                  for name in ('add_push_subscriptions.sql','add_booking_flow_customization.sql'):
-                      sql=(root/'migrations'/name).read_text()
-                      await conn.execute(sql)
-                      print('migration_'+name+'=ok')
-              finally:
-                  await conn.close()
-          asyncio.run(run())
-          MIG_PY
-
-          echo '--- activate backend and bot source ---'
-          for f in "${TARGETS[@]}"; do
-            mkdir -p "$ROOT/$(dirname "$f")"
-            install -m 0644 "$PAYLOAD/$f" "$ROOT/$f"
+                  mod=__import__(name)
+                  print(name+'=present version='+str(getattr(mod,'__version__','unknown')))
+              except Exception as e:
+                  print(name+'=missing type='+type(e).__name__)
+          MOD_PY
+          echo '--- rental files ---'
+          for f in web/api/rental.py web/api/rental_logic.py; do
+            if [ -f "$f" ]; then echo "$f=present"; else echo "$f=missing"; fi
           done
-
-          echo '--- atomically activate frontend dist ---'
-          rm -rf "$ROOT/web/frontend/dist.new-$RELEASE"
-          cp -a "$PAYLOAD/web/frontend/dist" "$ROOT/web/frontend/dist.new-$RELEASE"
-          rm -rf "$ROOT/web/frontend/dist"
-          mv "$ROOT/web/frontend/dist.new-$RELEASE" "$ROOT/web/frontend/dist"
-
-          echo '--- syntax/import validation ---'
-          cd "$ROOT"
-          ./venv/bin/python -m py_compile             database/models.py             bot/services/notifications.py bot/services/webpush.py             web/api/database.py web/api/main.py web/api/routes/admin.py             web/api/routes/auth.py web/api/routes/client.py web/api/routes/notifications.py web/api/schemas.py
-          ./venv/bin/python - <<'IMPORT_PY'
-          from web.api.main import app
-          from bot.services.webpush import webpush_configured
-          print('api_import=ok')
-          print('webpush_configured='+str(webpush_configured()).lower())
-          IMPORT_PY
-
-          echo '--- restart services ---'
-          systemctl restart booking-web-api.service
-          sleep 2
-          test "$(systemctl is-active booking-web-api.service)" = active
-          curl -fsS --max-time 8 http://127.0.0.1:8000/health >/dev/null
-
-          systemctl restart booking-bot.service
-          sleep 3
-          test "$(systemctl is-active booking-bot.service)" = active
-
-          echo '--- verify database shape ---'
-          ./venv/bin/python - <<'VERIFY_DB_PY'
+          echo '--- env state ---'
+          python3 - <<'ENV_PY'
+          from pathlib import Path
+          p=Path('.env')
+          keys={'VAPID_PUBLIC_KEY','VAPID_PRIVATE_KEY','VAPID_SUBJECT','SERVGO_TIMEZONE'}
+          found={}
+          if p.exists():
+              for line in p.read_text(errors='replace').splitlines():
+                  if '=' in line and not line.lstrip().startswith('#'):
+                      k,v=line.split('=',1)
+                      if k.strip() in keys: found[k.strip()]='set' if v.strip() else 'empty'
+          for k in sorted(keys): print(k+'='+found.get(k,'absent'))
+          ENV_PY
+          echo '--- db fields ---'
+          ./venv/bin/python - <<'DB_PY'
           import asyncio
           from sqlalchemy import text
-          from database.database import async_session
+          from database.database import async_session_maker
           async def run():
-              async with async_session() as s:
-                  checks=[('businesses','booking_labels'),('businesses','booking_flow_order'),('employees','primary_photo')]
-                  for t,c in checks:
-                      q=text("select exists(select 1 from information_schema.columns where table_name=:t and column_name=:c)")
-                      ok=bool((await s.execute(q,{'t':t,'c':c})).scalar())
-                      print(f'column_{t}_{c}='+str(ok).lower())
-                      if not ok: raise SystemExit(2)
+              checks={
+                'businesses':['working_hours_start','working_hours_end','booking_labels','booking_flow_order'],
+                'employees':['solo_price_per_hour','primary_photo'],
+                'bookings':['duration_minutes','estimated_price','price_requires_confirmation','prepayment_amount','notify_token'],
+              }
+              async with async_session_maker() as s:
+                  for table,cols in checks.items():
+                      rows=set((await s.execute(text("select column_name from information_schema.columns where table_name=:t"),{'t':table})).scalars().all())
+                      for col in cols: print(f'{table}.{col}='+str(col in rows).lower())
                   q=text("select exists(select 1 from information_schema.tables where table_name='push_subscriptions')")
-                  ok=bool((await s.execute(q)).scalar())
-                  print('table_push_subscriptions='+str(ok).lower())
-                  if not ok: raise SystemExit(2)
+                  print('push_subscriptions='+str(bool((await s.execute(q)).scalar())).lower())
           asyncio.run(run())
-          VERIFY_DB_PY
-
-          echo '--- public smoke tests ---'
-          curl -fsS --max-time 10 https://servgo.ru/api/health >/dev/null
-          printf 'public_api=200\n'
-          curl -fsS --max-time 10 https://servgo.ru/manifest.webmanifest >/dev/null
-          printf 'manifest=200\n'
-          curl -fsS --max-time 10 https://servgo.ru/sw.js >/dev/null
-          printf 'service_worker=200\n'
-          curl -fsS --max-time 10 https://servgo.ru/ >/dev/null
-          printf 'frontend=200\n'
-          curl -fsS --max-time 10 https://servgo.ru/api/notifications/vapid-public-key | ./venv/bin/python -c "import json,sys; d=json.load(sys.stdin); n=len(d.get('public_key','')); print('vapid_endpoint=ok key_length='+str(n)); raise SystemExit(0 if n>20 else 2)"
-
-          printf '%s\n' '7d7e541bbcf1da61be82c2dd3e079bb3df174513' > "$ROOT/.release_version"
-          chmod 644 "$ROOT/.release_version"
-
-          trap - ERR
-          echo 'release_status=success'
-          printf 'api_service='; systemctl is-active booking-web-api.service
-          printf 'bot_service='; systemctl is-active booking-bot.service
-          echo "backup_retained=$BACKUP"
+          DB_PY
+          printf 'api_health='; curl -sS --max-time 5 -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/health
+          printf 'bot='; systemctl is-active booking-bot.service
           '''
-          _,out,err=ssh.exec_command(command,timeout=600,environment={'BACKUP_SCHEMA':''})
+          _,out,err=ssh.exec_command(command,timeout=45)
           stdout=out.read().decode('utf-8','replace')
           stderr=err.read().decode('utf-8','replace')
           print(stdout)
           status=out.channel.recv_exit_status()
           if status:
-              print('deploy_exit='+str(status))
-              print('stderr_suffix='+stderr[-2000:])
+              print(stderr[-1000:])
               raise SystemExit(status)
           ssh.close()
           PY
