@@ -406,10 +406,17 @@ export const api = {
   // Client
   getBusinesses: () => request<Business[]>('/businesses'),
   getBusiness: (id: number) => request<BusinessDetail>(`/businesses/${id}`),
-  getSlots: async (bizId: number, serviceId: number, date: string, employeeId?: number) => {
+  getSlots: async (
+    bizId: number,
+    serviceId: number,
+    date: string,
+    employeeId?: number,
+    durationMinutes?: number
+  ) => {
     const employeeQuery = employeeId ? `&employee_id=${employeeId}` : '';
+    const durationQuery = durationMinutes ? `&duration_minutes=${durationMinutes}` : '';
     const data = await request<Array<{ time: string } | string>>(
-      `/businesses/${bizId}/slots?service_id=${serviceId}&date=${date}${employeeQuery}`
+      `/businesses/${bizId}/slots?service_id=${serviceId}&date=${date}${employeeQuery}${durationQuery}`
     );
     // Normalize: API returns [{time:"09:00"},...] but we need ["09:00",...]
     return data.map((s) => (typeof s === 'string' ? s : s.time));

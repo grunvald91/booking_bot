@@ -247,6 +247,11 @@ class Booking(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Rental bookings have a per-booking duration/quote; ordinary services use service duration/price.
     duration_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Immutable snapshot used for resource occupancy. Unlike duration_minutes,
+    # this is populated for ordinary services too and must not be used to
+    # detect rental bookings.
+    resource_duration_minutes: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
+    occupies_resource: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     estimated_price: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     price_requires_confirmation: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 

@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, func, and_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -22,6 +23,16 @@ from ..photo_transport import create_photo_client
 from ..database import get_db, Business, Service, Employee, EmployeeService, Booking, User, VenueTimePricing
 from ..deps import get_current_user, get_current_user_optional
 from database.crud import get_or_create_guest_user
+from database.booking_safety import (
+    ACTIVE_BOOKING_STATUSES,
+    BookingConflictError,
+    booking_resource_duration,
+    busy_resource_intervals,
+    ensure_resource_available,
+    lock_resource_days,
+    service_occupies_resource,
+    service_resource_duration,
+)
 from ..booking_utils import compute_recurring_dates
 from ..schemas import (
     BusinessOut,
@@ -385,75 +396,103 @@ async def get_slots(
     date: date = Query(..., description="Date in YYYY-MM-DD format"),
     service_id: Optional[int] = Query(None),
     employee_id: Optional[int] = Query(None),
+    duration_minutes: Optional[int] = Query(None, ge=1, le=24 * 60),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Available time slots for a given date.
-    Algorithm matches the Telegram bot logic (client.py).
-    """
+    """Available starts where the whole requested interval is free."""
     result = await db.execute(select(Business).where(Business.id == business_id))
     business = result.scalar_one_or_none()
     if not business:
         raise HTTPException(status_code=404, detail="Business not found")
 
-    # Determine interval
     interval = business.booking_interval_minutes or 30
     if employee_id:
-        emp_result = await db.execute(select(Employee).where(Employee.id == employee_id))
+        emp_result = await db.execute(
+            select(Employee).where(
+                Employee.id == employee_id,
+                Employee.business_id == business_id,
+                Employee.is_active.is_(True),
+            )
+        )
         emp = emp_result.scalar_one_or_none()
-        if emp and emp.booking_interval_minutes:
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee/resource not found")
+        if emp.booking_interval_minutes:
             interval = emp.booking_interval_minutes
 
-    # Working hours
+    requested_duration = duration_minutes
+    if requested_duration is None and service_id:
+        service = (
+            await db.execute(
+                select(Service).where(
+                    Service.id == service_id,
+                    Service.business_id == business_id,
+                    Service.is_active.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if not service:
+            raise HTTPException(status_code=404, detail="Service not found")
+        requested_duration = service_resource_duration(service)
+    requested_duration = requested_duration or interval
+
     start_time = business.working_hours_start or time(9, 0)
     end_time = business.working_hours_end or time(18, 0)
-
-    # Fetch existing bookings for this date (all active statuses)
-    booking_filter = [
-        Booking.business_id == business_id,
-        Booking.booking_date == date,
-        Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"]),
-    ]
-    if employee_id:
-        booking_filter.append(Booking.employee_id == employee_id)
-
-    existing = await db.execute(
-        select(Booking.booking_time).where(and_(*booking_filter))
-    )
-    booked_times = {row[0] for row in existing.all()}
-
-    # Generate slots
     current = datetime.combine(date, start_time)
     end_dt = datetime.combine(date, end_time)
-
-    # Handle overnight hours (e.g. 09:00 — 02:00 means until 2 AM next day)
     if end_time <= start_time:
         end_dt += timedelta(days=1)
 
-    # If today, start from now + 1 hour
     if date == datetime.now().date():
         now_plus = datetime.now() + timedelta(hours=1)
         if current < now_plus:
             current = now_plus
-            # Round up to next interval
             minutes = (current.minute // interval + 1) * interval
             if minutes >= 60:
                 current = current.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
             else:
                 current = current.replace(minute=minutes, second=0, microsecond=0)
 
-    slots: List[SlotOut] = []
-    while current <= end_dt:
-        t = current.time()
+    busy_intervals: list[tuple[datetime, datetime]] = []
+    booked_times: set[time] = set()
+    if employee_id:
+        busy_intervals = await busy_resource_intervals(
+            db,
+            employee_id=employee_id,
+            dates=[date, end_dt.date()],
+        )
+    else:
+        existing = await db.execute(
+            select(Booking.booking_time).where(
+                Booking.business_id == business_id,
+                Booking.booking_date == date,
+                Booking.status.in_(ACTIVE_BOOKING_STATUSES),
+            )
+        )
+        booked_times = {row[0] for row in existing.all()}
 
-        # Skip break
+    slots: List[SlotOut] = []
+    while current + timedelta(minutes=requested_duration) <= end_dt:
+        t = current.time()
+        candidate_end = current + timedelta(minutes=requested_duration)
+
         is_break = False
         if business.break_start and business.break_end:
-            if business.break_start <= t < business.break_end:
-                is_break = True
+            break_start = datetime.combine(current.date(), business.break_start)
+            break_end = datetime.combine(current.date(), business.break_end)
+            if break_end <= break_start:
+                break_end += timedelta(days=1)
+            is_break = current < break_end and break_start < candidate_end
 
-        # Skip already booked
-        if not is_break and t not in booked_times:
+        if employee_id:
+            overlaps = any(
+                current < busy_end and busy_start < candidate_end
+                for busy_start, busy_end in busy_intervals
+            )
+        else:
+            overlaps = t in booked_times
+
+        if not is_break and not overlaps:
             slots.append(SlotOut(time=t.strftime("%H:%M")))
 
         current += timedelta(minutes=interval)
@@ -560,36 +599,51 @@ async def create_booking(
     db: AsyncSession = Depends(get_db),
     user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """Create new booking(s). Supports multiple services with sequential times."""
-    # Validate business
+    """Create a complete visit atomically under one resource lock."""
     biz_result = await db.execute(select(Business).where(Business.id == body.business_id))
     business = biz_result.scalar_one_or_none()
     if not business:
         raise HTTPException(status_code=404, detail="Business not found")
 
-    # Resolve user: authenticated or find/create by phone
     booking_user = user
     if not booking_user:
         if not body.client_phone:
             raise HTTPException(status_code=401, detail="Authentication required or provide client_phone")
-        # Find or create guest client by phone (гостевой профиль, привязан к телефону)
-        booking_user = await get_or_create_guest_user(db, body.client_name or "Web Client", body.client_phone)
+        booking_user = await get_or_create_guest_user(
+            db,
+            body.client_name or "Web Client",
+            body.client_phone,
+        )
 
-    # Determine service IDs list
     svc_ids = list(body.service_ids) if body.service_ids else []
     if not svc_ids and body.service_id:
         svc_ids = [body.service_id]
     if not svc_ids:
         raise HTTPException(status_code=400, detail="No service specified")
+    if len(svc_ids) != len(set(svc_ids)):
+        raise HTTPException(status_code=400, detail="Duplicate services are not allowed")
 
-    # Validate the selected resource and its explicit service links. An employee/resource
-    # with no links keeps the legacy "works with all services" behaviour.
+    services_result = await db.execute(
+        select(Service).where(
+            Service.id.in_(svc_ids),
+            Service.business_id == body.business_id,
+            Service.is_active.is_(True),
+        )
+    )
+    service_map = {service.id: service for service in services_result.scalars().all()}
+    missing_services = [service_id for service_id in svc_ids if service_id not in service_map]
+    if missing_services:
+        raise HTTPException(status_code=404, detail=f"Service {missing_services[0]} not found")
+    main_services = [service_map[service_id] for service_id in svc_ids]
+    if any(service.is_additional for service in main_services):
+        raise HTTPException(status_code=400, detail="Additional service cannot be a main booking service")
+
     if body.employee_id:
         emp_result = await db.execute(
             select(Employee).where(
                 Employee.id == body.employee_id,
                 Employee.business_id == body.business_id,
-                Employee.is_active == True,
+                Employee.is_active.is_(True),
             )
         )
         selected_employee = emp_result.scalar_one_or_none()
@@ -599,147 +653,127 @@ async def create_booking(
             select(EmployeeService.service_id).where(EmployeeService.employee_id == body.employee_id)
         )
         linked_service_ids = {row[0] for row in links_result.all()}
-        incompatible = [service_id for service_id in svc_ids if linked_service_ids and service_id not in linked_service_ids]
+        incompatible = [
+            service_id
+            for service_id in svc_ids
+            if linked_service_ids and service_id not in linked_service_ids
+        ]
         if incompatible:
-            raise HTTPException(status_code=422, detail="Selected resource does not provide one or more selected services")
+            raise HTTPException(
+                status_code=422,
+                detail="Selected resource does not provide one or more selected services",
+            )
 
-    # Parse start time
     try:
         booking_time = datetime.strptime(body.time, "%H:%M").time()
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid time format, expected HH:MM")
 
-    # Повтор: тот же день недели/время, 2-8 повторов включая первый (без repeat_weeks — 1 дата, как раньше).
     occurrence_dates = compute_recurring_dates(body.date, body.repeat_weeks or 1)
-    created_bookings = []
+    created_bookings: list[Booking] = []
 
-    # Pre-compute additional services info for notes
-    addon_notes_parts = []
+    addon_notes_parts: list[str] = []
     addon_total_price = 0
-    if body.additional_service_ids:
-        for addon_id in body.additional_service_ids:
-            addon_res = await db.execute(
-                select(Service).where(Service.id == addon_id, Service.business_id == body.business_id)
+    addon_ids = list(body.additional_service_ids or [])
+    if len(addon_ids) != len(set(addon_ids)):
+        raise HTTPException(status_code=400, detail="Duplicate additional services are not allowed")
+    if addon_ids:
+        addon_result = await db.execute(
+            select(Service).where(
+                Service.id.in_(addon_ids),
+                Service.business_id == body.business_id,
+                Service.is_active.is_(True),
+                Service.is_additional.is_(True),
             )
-            addon_svc = addon_res.scalar_one_or_none()
-            if addon_svc:
-                hours = (body.additional_service_hours or {}).get(str(addon_id), 1)
-                price = (addon_svc.price or 0) * hours
-                addon_total_price += price
-                addon_notes_parts.append(f"+ {addon_svc.name} ({price}₽)")
+        )
+        addon_map = {service.id: service for service in addon_result.scalars().all()}
+        if len(addon_map) != len(addon_ids):
+            raise HTTPException(status_code=400, detail="Additional service not found")
+        for addon_id in addon_ids:
+            addon_svc = addon_map[addon_id]
+            hours = (body.additional_service_hours or {}).get(str(addon_id), 1)
+            price = (addon_svc.price or 0) * hours
+            addon_total_price += price
+            addon_notes_parts.append(f"+ {addon_svc.name} ({price}₽)")
 
-    # Build notes with addon info
     booking_notes = body.notes or ""
     if addon_notes_parts:
         if booking_notes:
             booking_notes += "\n"
         booking_notes += "Доп. услуги: " + ", ".join(addon_notes_parts)
 
-    # Precompute prepayment amount for the visit (same services repeat on
-    # every occurrence date if repeat_weeks is set — one amount applies to
-    # every booking row created below, matching the pattern already used
-    # in webapp/server.py::api_client_create_booking).
     visit_prepayment_amount = None
-    if getattr(business, 'prepayment_enabled', False):
-        main_services_result = await db.execute(
-            select(Service).where(Service.id.in_(svc_ids), Service.business_id == body.business_id)
-        )
-        main_services_price_total = sum((s.price or 0) for s in main_services_result.scalars().all())
-        visit_total_price = main_services_price_total + addon_total_price
+    if getattr(business, "prepayment_enabled", False):
+        visit_total_price = sum((service.price or 0) for service in main_services) + addon_total_price
         prepayment_percent = business.prepayment_percent or 100
         visit_prepayment_amount = int(visit_total_price * prepayment_percent / 100)
 
-    # Phase 1: проверка конфликтов по ВСЕМ датам повтора, без записи в БД.
-    # Атомарность: если конфликтует хоть одна дата — не создаём ничего.
-    if len(occurrence_dates) > 1:
-        conflicts = []
-        for occ_date in occurrence_dates:
-            check_time = datetime.combine(occ_date, booking_time)
-            for svc_id in svc_ids:
-                svc_result = await db.execute(
-                    select(Service).where(
-                        Service.id == svc_id,
-                        Service.business_id == body.business_id,
-                        Service.is_active == True,
-                    )
-                )
-                service = svc_result.scalar_one_or_none()
-                if not service:
-                    raise HTTPException(status_code=404, detail=f"Service {svc_id} not found")
-                bt = check_time.time()
-                conflict_filter = [
-                    Booking.business_id == body.business_id,
-                    Booking.booking_date == occ_date,
-                    Booking.booking_time == bt,
-                    Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"]),
-                ]
-                if body.employee_id:
-                    conflict_filter.append(Booking.employee_id == body.employee_id)
-                conflict_result = await db.execute(select(Booking).where(and_(*conflict_filter)))
-                if conflict_result.scalar_one_or_none():
-                    conflicts.append(f"{occ_date.strftime('%d.%m')} {bt.strftime('%H:%M')}")
-                check_time += timedelta(minutes=service.duration_minutes or 30)
-        if conflicts:
-            raise HTTPException(status_code=409, detail="Занято: " + ", ".join(conflicts))
+    # One lock per resource/day window for the whole recurring series. The
+    # second concurrent request waits here, then re-checks availability after
+    # the first request commits.
+    await lock_resource_days(db, body.employee_id, occurrence_dates)
 
-    # Phase 2: создание записей по каждой дате повтора.
+    visit_duration = sum((service.duration_minutes or 30) for service in main_services)
+    for occ_date in occurrence_dates:
+        try:
+            await ensure_resource_available(
+                db,
+                employee_id=body.employee_id,
+                booking_date=occ_date,
+                booking_time=booking_time,
+                duration_minutes=visit_duration,
+                acquire_lock=False,
+            )
+        except BookingConflictError as exc:
+            await db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail=f"Занято: {occ_date.strftime('%d.%m')} {booking_time.strftime('%H:%M')}",
+            ) from exc
+
+    initial_status = (
+        "pending_prepayment"
+        if getattr(business, "prepayment_enabled", False)
+        else "pending"
+    )
+
     for occ_date in occurrence_dates:
         current_time = datetime.combine(occ_date, booking_time)
-        for svc_id in svc_ids:
-            # Validate service
-            svc_result = await db.execute(
-                select(Service).where(
-                    Service.id == svc_id,
-                    Service.business_id == body.business_id,
-                    Service.is_active == True,
-                )
-            )
-            service = svc_result.scalar_one_or_none()
-            if not service:
-                raise HTTPException(status_code=404, detail=f"Service {svc_id} not found")
-
-            bt = current_time.time()
-
-            # Check for conflicts with row locking to prevent race conditions
-            conflict_filter = [
-                Booking.business_id == body.business_id,
-                Booking.booking_date == occ_date,
-                Booking.booking_time == bt,
-                Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"]),
-            ]
-            if body.employee_id:
-                conflict_filter.append(Booking.employee_id == body.employee_id)
-
-            conflict_result = await db.execute(
-                select(Booking).where(and_(*conflict_filter)).with_for_update(skip_locked=True)
-            )
-            if conflict_result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Time slot {bt.strftime('%H:%M')} is already taken",
-                )
-
-            # Use pending_prepayment status when prepayment is enabled (matches bot flow)
-            initial_status = "pending_prepayment" if getattr(business, 'prepayment_enabled', False) else "pending"
+        for service in main_services:
+            resource_duration = service.duration_minutes or 30
             booking = Booking(
                 business_id=body.business_id,
                 client_id=booking_user.id,
-                service_id=svc_id,
+                service_id=service.id,
                 employee_id=body.employee_id,
                 booking_date=occ_date,
-                booking_time=bt,
+                booking_time=current_time.time(),
                 status=initial_status,
                 notes=booking_notes or None,
                 notify_token=str(uuid.uuid4()),
-                prepayment_amount=visit_prepayment_amount if initial_status == "pending_prepayment" else None,
+                prepayment_amount=(
+                    visit_prepayment_amount
+                    if initial_status == "pending_prepayment"
+                    else None
+                ),
+                resource_duration_minutes=resource_duration,
+                occupies_resource=service_occupies_resource(service),
             )
             db.add(booking)
             created_bookings.append(booking)
+            current_time += timedelta(minutes=resource_duration)
 
-            # Advance time by service duration for sequential bookings
-            current_time += timedelta(minutes=service.duration_minutes or 30)
-
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        message = str(exc).lower()
+        if "bookings_no_active_resource_overlap" in message or "exclusion" in message:
+            raise HTTPException(
+                status_code=409,
+                detail="Выбранное время только что занял другой клиент. Выберите другой слот.",
+            ) from exc
+        raise
 
     # Reload with relationships
     result_bookings = []
@@ -1082,8 +1116,7 @@ async def reschedule_booking(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Reschedule a booking (and its group) to a new date/time."""
-    # Load the target booking
+    """Reschedule a visit atomically under the same resource lock as creation."""
     result = await db.execute(
         select(Booking)
         .where(Booking.id == booking_id)
@@ -1092,6 +1125,7 @@ async def reschedule_booking(
             selectinload(Booking.service),
             selectinload(Booking.employee),
         )
+        .with_for_update()
     )
     booking = result.scalar_one_or_none()
     if not booking:
@@ -1103,14 +1137,13 @@ async def reschedule_booking(
     if not can_r:
         raise HTTPException(status_code=400, detail="Cannot reschedule this booking")
 
-    # Find booking group: same client, date, employee, consecutive times
     group_result = await db.execute(
         select(Booking)
         .where(
             Booking.client_id == user.id,
             Booking.booking_date == booking.booking_date,
             Booking.employee_id == booking.employee_id,
-            Booking.status.in_(["pending", "confirmed"]),
+            Booking.status.in_(ACTIVE_BOOKING_STATUSES),
         )
         .options(
             selectinload(Booking.business),
@@ -1118,101 +1151,105 @@ async def reschedule_booking(
             selectinload(Booking.employee),
         )
         .order_by(Booking.booking_time.asc())
+        .with_for_update()
     )
     group_bookings = list(group_result.scalars().all())
 
-    # Filter to consecutive bookings that include our target
-    # Sort by time and find consecutive chain containing our booking
     sorted_bookings = sorted(group_bookings, key=lambda b: b.booking_time)
-    chain = []
+    chain: list[Booking] = []
     found = False
-    for i, b in enumerate(sorted_bookings):
-        if b.id == booking_id:
-            found = True
-            # Walk back to find start of chain
-            chain = [b]
-            j = i - 1
-            while j >= 0:
-                prev = sorted_bookings[j]
-                prev_svc = prev.service
-                expected_end = datetime.combine(prev.booking_date, prev.booking_time) + timedelta(
-                    minutes=prev_svc.duration_minutes if prev_svc else 30
-                )
-                if expected_end.time() == chain[0].booking_time:
-                    chain.insert(0, prev)
-                    j -= 1
-                else:
-                    break
-            # Walk forward
-            j = i + 1
-            while j < len(sorted_bookings):
-                nxt = sorted_bookings[j]
-                last = chain[-1]
-                last_svc = last.service
-                expected_end = datetime.combine(last.booking_date, last.booking_time) + timedelta(
-                    minutes=last_svc.duration_minutes if last_svc else 30
-                )
-                if expected_end.time() == nxt.booking_time:
-                    chain.append(nxt)
-                    j += 1
-                else:
-                    break
-            break
+    for i, item in enumerate(sorted_bookings):
+        if item.id != booking_id:
+            continue
+        found = True
+        chain = [item]
+
+        j = i - 1
+        while j >= 0:
+            prev = sorted_bookings[j]
+            expected_end = datetime.combine(prev.booking_date, prev.booking_time) + timedelta(
+                minutes=booking_resource_duration(prev)
+            )
+            if expected_end == datetime.combine(chain[0].booking_date, chain[0].booking_time):
+                chain.insert(0, prev)
+                j -= 1
+            else:
+                break
+
+        j = i + 1
+        while j < len(sorted_bookings):
+            nxt = sorted_bookings[j]
+            last = chain[-1]
+            expected_end = datetime.combine(last.booking_date, last.booking_time) + timedelta(
+                minutes=booking_resource_duration(last)
+            )
+            if expected_end == datetime.combine(nxt.booking_date, nxt.booking_time):
+                chain.append(nxt)
+                j += 1
+            else:
+                break
+        break
 
     if not found:
         chain = [booking]
 
-    # Parse new time
     try:
         new_time = datetime.strptime(body.time, "%H:%M").time()
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid time format, expected HH:MM")
 
-    # Check new slots are available
-    current_dt = datetime.combine(body.date, new_time)
-    for b in chain:
-        bt = current_dt.time()
-        conflict_filter = [
-            Booking.business_id == b.business_id,
-            Booking.booking_date == body.date,
-            Booking.booking_time == bt,
-            Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"]),
-            Booking.id.notin_([x.id for x in chain]),
-        ]
-        if b.employee_id:
-            conflict_filter.append(Booking.employee_id == b.employee_id)
+    target_employee_id = booking.employee_id
+    old_date = booking.booking_date
+    await lock_resource_days(db, target_employee_id, [old_date, body.date])
 
-        conflict_result = await db.execute(
-            select(Booking).where(and_(*conflict_filter)).with_for_update(skip_locked=True)
+    visit_duration = sum(
+        booking_resource_duration(item)
+        for item in chain
+        if getattr(item, "occupies_resource", True)
+    )
+    try:
+        await ensure_resource_available(
+            db,
+            employee_id=target_employee_id,
+            booking_date=body.date,
+            booking_time=new_time,
+            duration_minutes=visit_duration,
+            exclude_booking_ids=[item.id for item in chain],
+            acquire_lock=False,
         )
-        if conflict_result.scalar_one_or_none():
+    except BookingConflictError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="На выбранное время уже есть другая запись",
+        ) from exc
+
+    current_dt = datetime.combine(body.date, new_time)
+    for item in chain:
+        item.booking_date = body.date
+        item.booking_time = current_dt.time()
+        item.reminder_24h_sent = False
+        item.reminder_2h_sent = False
+        current_dt += timedelta(minutes=booking_resource_duration(item))
+
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        message = str(exc).lower()
+        if "bookings_no_active_resource_overlap" in message or "exclusion" in message:
             raise HTTPException(
                 status_code=409,
-                detail=f"Time slot {bt.strftime('%H:%M')} on {body.date} is already taken",
-            )
-        svc_dur = b.service.duration_minutes if b.service else 30
-        current_dt += timedelta(minutes=svc_dur)
+                detail="На выбранное время уже есть другая запись",
+            ) from exc
+        raise
 
-    # Update all bookings in chain
-    current_dt = datetime.combine(body.date, new_time)
-    for b in chain:
-        b.booking_date = body.date
-        b.booking_time = current_dt.time()
-        # A moved visit needs fresh reminders for the new date/time.
-        b.reminder_24h_sent = False
-        b.reminder_2h_sent = False
-        svc_dur = b.service.duration_minutes if b.service else 30
-        current_dt += timedelta(minutes=svc_dur)
-
-    await db.commit()
-
-    # Reload and return
     result_bookings = []
-    for b in chain:
-        await db.refresh(b)
+    for item in chain:
+        await db.refresh(item)
         full = await db.execute(
             select(Booking)
-            .where(Booking.id == b.id)
+            .where(Booking.id == item.id)
             .options(
                 selectinload(Booking.business),
                 selectinload(Booking.service),
