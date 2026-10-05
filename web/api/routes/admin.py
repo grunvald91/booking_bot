@@ -916,7 +916,7 @@ async def admin_reschedule_booking(
     user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Move a booking under serialized source/target resource locks."""
+    """Move a whole visit atomically and notify every affected party."""
     biz_ids = await _get_owner_business_ids(db, user)
 
     result = await db.execute(
@@ -924,6 +924,7 @@ async def admin_reschedule_booking(
         .where(Booking.id == booking_id)
         .options(
             selectinload(Booking.client),
+            selectinload(Booking.business),
             selectinload(Booking.service),
             selectinload(Booking.employee),
         )
@@ -937,13 +938,25 @@ async def admin_reschedule_booking(
     if booking.status not in ACTIVE_BOOKING_STATUSES:
         raise HTTPException(status_code=400, detail="Эту запись нельзя перенести")
 
+    visit = await contiguous_visit_bookings(
+        db,
+        booking,
+        statuses=ACTIVE_BOOKING_STATUSES,
+    )
+    visit_ids = [item.id for item in visit]
+    visit = sorted(visit, key=lambda item: (item.booking_time, item.id))
+    old_date = visit[0].booking_date
+    old_time = visit[0].booking_time
+
     try:
         h, m = map(int, data.time.split(":"))
         new_time = dt_time(h, m)
     except (ValueError, AttributeError):
         raise HTTPException(status_code=400, detail="Invalid time")
 
-    target_employee_id = data.employee_id if data.employee_id is not None else booking.employee_id
+    target_employee_id = (
+        data.employee_id if data.employee_id is not None else booking.employee_id
+    )
     if target_employee_id:
         target_employee = (
             await db.execute(
@@ -957,8 +970,16 @@ async def admin_reschedule_booking(
         if not target_employee:
             raise HTTPException(status_code=404, detail="Employee/resource not found")
 
-    duration = booking_resource_duration(booking)
-    if booking.duration_minutes is not None:
+    visit_duration = sum(
+        booking_resource_duration(item)
+        for item in visit
+        if getattr(item, "occupies_resource", True)
+    )
+    if visit_duration <= 0:
+        visit_duration = booking_resource_duration(booking)
+
+    is_rental = any(item.duration_minutes is not None for item in visit)
+    if is_rental:
         if target_employee_id != booking.employee_id:
             raise HTTPException(status_code=400, detail="Для смены судна создайте новую заявку")
         business = await db.get(Business, booking.business_id)
@@ -970,7 +991,7 @@ async def admin_reschedule_booking(
                 data.date,
                 business.working_hours_start,
                 business.working_hours_end,
-                duration,
+                visit_duration,
                 [],
                 now=datetime.now(ZoneInfo("Europe/Moscow")).replace(tzinfo=None),
             )
@@ -979,8 +1000,6 @@ async def admin_reschedule_booking(
         if data.time not in allowed:
             raise HTTPException(status_code=409, detail="Время вне рабочих часов или уже прошло")
 
-    # Lock both source and target resources in deterministic order so two
-    # simultaneous drag&drop operations cannot swap into each other.
     resource_ids = sorted(
         {
             resource_id
@@ -989,7 +1008,7 @@ async def admin_reschedule_booking(
         }
     )
     for resource_id in resource_ids:
-        await lock_resource_days(db, resource_id, [booking.booking_date, data.date])
+        await lock_resource_days(db, resource_id, [old_date, data.date])
 
     try:
         await ensure_resource_available(
@@ -997,22 +1016,24 @@ async def admin_reschedule_booking(
             employee_id=target_employee_id,
             booking_date=data.date,
             booking_time=new_time,
-            duration_minutes=duration,
-            exclude_booking_ids=[booking.id],
+            duration_minutes=visit_duration,
+            exclude_booking_ids=visit_ids,
             acquire_lock=False,
         )
     except BookingConflictError as exc:
         await db.rollback()
         raise HTTPException(status_code=409, detail="На это время уже есть запись") from exc
 
-    booking.booking_date = data.date
-    booking.booking_time = new_time
-    booking.reminder_24h_sent = False
-    booking.reminder_2h_sent = False
-    booking.staff_reminder_24h_sent = False
-    booking.staff_reminder_2h_sent = False
-    if data.employee_id is not None:
-        booking.employee_id = target_employee_id
+    current_dt = datetime.combine(data.date, new_time)
+    for item in visit:
+        item.booking_date = data.date
+        item.booking_time = current_dt.time()
+        if data.employee_id is not None:
+            item.employee_id = target_employee_id
+        current_dt += timedelta(minutes=booking_resource_duration(item))
+
+    from bot.services.notification_events import clear_upcoming_reminder_deliveries
+    await clear_upcoming_reminder_deliveries(visit, db)
 
     try:
         await db.commit()
@@ -1023,17 +1044,38 @@ async def admin_reschedule_booking(
             raise HTTPException(status_code=409, detail="На это время уже есть запись") from exc
         raise
 
-    result = await db.execute(
-        select(Booking)
-        .where(Booking.id == booking.id)
-        .options(
-            selectinload(Booking.client),
-            selectinload(Booking.service),
-            selectinload(Booking.employee),
+    try:
+        from bot.services.notification_events import dispatch_booking_event
+        await dispatch_booking_event(
+            visit,
+            db,
+            "booking_rescheduled",
+            include_client=True,
+            staff_audience="all",
+            old_date=old_date,
+            old_time=old_time,
         )
-    )
-    booking = result.scalar_one()
-    return _admin_booking_out(booking)
+    except Exception as notification_error:
+        logger.error(
+            "Admin reschedule notification failed booking=%s: %s",
+            booking_id,
+            notification_error,
+            exc_info=True,
+        )
+
+    refreshed = (
+        await db.execute(
+            select(Booking)
+            .where(Booking.id == booking_id)
+            .options(
+                selectinload(Booking.client),
+                selectinload(Booking.business),
+                selectinload(Booking.service),
+                selectinload(Booking.employee),
+            )
+        )
+    ).scalar_one()
+    return _admin_booking_out(refreshed)
 
 
 # ---------- GET /admin/businesses ----------
