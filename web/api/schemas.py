@@ -136,6 +136,7 @@ class BusinessDetailOut(BusinessOut):
 
 class SlotOut(BaseModel):
     time: str
+    available: bool = True
 
 
 # ---------- Bookings ----------
@@ -189,6 +190,7 @@ class BookingOut(BaseModel):
     time: str
     status: str
     employee_name: Optional[str] = None
+    employee_id: Optional[int] = None
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
     can_cancel: bool = False
@@ -213,12 +215,15 @@ class PublicBookingOut(BaseModel):
     business_directions: Optional[str] = None
     date: date
     time: str
+    duration_minutes: int = 60
     employee_name: Optional[str] = None
     employee_label: str
     services: List[PublicServiceItem]
     total_price: int
     prepayment_enabled: bool = False
     prepayment_amount: int = 0
+    paid_amount: int = 0
+    prepayment_confirmed: bool = False
     payment_phone: Optional[str] = None
     payment_details: Optional[str] = None
     require_receipt_for_prepayment: bool = False
