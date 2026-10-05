@@ -937,14 +937,14 @@ function BookingPageInner() {
           <div className="ds-card bk-success-card">
             <div>
               <div className="bk-success-row">
-                <span className="lbl">{isVenue ? 'Зал' : 'Услуга'}</span>
+                <span className="lbl">{isVenue ? labels.resource : labels.service}</span>
                 <span className="val">
                   {isVenue ? selectedRoom?.name : selectedService?.name}
                 </span>
               </div>
               {isVenue && selectedServices.length > 0 && (
                 <div className="bk-success-row">
-                  <span className="lbl">Услуги</span>
+                  <span className="lbl">{labels.service}</span>
                   <span className="val">
                     {selectedServices.map((s) => s.name).join(', ')}
                   </span>
@@ -952,12 +952,12 @@ function BookingPageInner() {
               )}
               {!isVenue && selectedEmployee && (
                 <div className="bk-success-row">
-                  <span className="lbl">Специалист</span>
+                  <span className="lbl">{labels.resource}</span>
                   <span className="val">{selectedEmployee.name}</span>
                 </div>
               )}
               <div className="bk-success-row">
-                <span className="lbl">Дата и время</span>
+                <span className="lbl">{labels.date} / {labels.time}</span>
                 <span className="val">
                   {selectedDate && formatDateRu(selectedDate)}, {selectedTime}
                 </span>
@@ -1312,6 +1312,8 @@ function BookingPageInner() {
           {`✓ выбрано — `}{skipToast}
         </div>
       )}
+
+      {infoModal && <InfoModal data={infoModal} onClose={() => setInfoModal(null)} />}
 
       {/* ═══════════════════════════════════════ */}
       {/* VENUE RENTAL FLOW */}
@@ -1723,7 +1725,7 @@ function BookingPageInner() {
         <div ref={refAddons} className="bk-section bk-fade-in">
           <SectionHeader
             icon={<Package size={20} />}
-            title="Дополнительные услуги"
+            title={labels.additional}
             subtitle="необязательно"
           />
           <div className="bk-option-list">
@@ -1732,31 +1734,46 @@ function BookingPageInner() {
               const hours = addonHours[svc.id] ?? 1
               return (
                 <div key={svc.id}>
-                  <button
-                    onClick={() => toggleAddon(svc.id)}
-                    className={`bk-option ${isSelected ? 'is-selected' : ''}`}
-                  >
-                    <div style={{ flex: 1, textAlign: 'left' }}>
-                      <span className="bk-option-title">
-                        {svc.name}
-                      </span>
-                      <div className="bk-option-meta" style={{ marginTop: 2 }}>
-                        {(svc.price != null && svc.price > 0) && (
-                          <span className="bk-option-meta-item" style={{ color: 'var(--s-accent)', fontWeight: 600 }}>
-                            {formatPrice(svc.price)}{svc.is_hourly_price ? '/ч' : ''}
-                          </span>
+                  <div style={{ position: 'relative' }}>
+                    <button
+                      type="button"
+                      onClick={() => toggleAddon(svc.id)}
+                      className={`bk-option ${isSelected ? 'is-selected' : ''}`}
+                      style={{ width: '100%', paddingRight: 44 }}
+                    >
+                      <div style={{ flex: 1, textAlign: 'left' }}>
+                        <span className="bk-option-title">{svc.name}</span>
+                        {svc.description && (
+                          <p className="bk-option-desc" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                            {svc.description}
+                          </p>
                         )}
-                        {(svc.duration_minutes != null && svc.duration_minutes > 0) && (
-                          <span className="bk-option-meta-item">
-                            {formatDuration(svc.duration_minutes)}
-                          </span>
-                        )}
+                        <div className="bk-option-meta" style={{ marginTop: 2 }}>
+                          {(svc.price != null && svc.price > 0) && (
+                            <span className="bk-option-meta-item" style={{ color: 'var(--s-accent)', fontWeight: 600 }}>
+                              {formatPrice(svc.price)}{svc.is_hourly_price ? '/ч' : ''}
+                            </span>
+                          )}
+                          {(svc.duration_minutes != null && svc.duration_minutes > 0) && (
+                            <span className="bk-option-meta-item">{formatDuration(svc.duration_minutes)}</span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    <div className={`bk-check ${isSelected ? 'is-on' : ''}`}>
-                      {isSelected && <Check size={14} strokeWidth={3} />}
-                    </div>
-                  </button>
+                      <div className={`bk-check ${isSelected ? 'is-on' : ''}`}>
+                        {isSelected && <Check size={14} strokeWidth={3} />}
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); showServiceInfo(svc) }}
+                      className="ds-icon-btn bordered"
+                      aria-label={`Подробнее: ${svc.name}`}
+                      title="Подробнее"
+                      style={{ position: 'absolute', top: 8, right: 8, width: 30, height: 30, zIndex: 2 }}
+                    >
+                      <Info size={15} />
+                    </button>
+                  </div>
 
                   {/* Hourly controls */}
                   {isSelected && svc.is_hourly_price && (
@@ -1805,19 +1822,19 @@ function BookingPageInner() {
             <div className="bk-summary-list">
               {isVenue && selectedRoom && (
                 <div className="bk-summary-line">
-                  <span className="lbl">Зал</span>
+                  <span className="lbl">{labels.resource}</span>
                   <span className="val">{selectedRoom.name}</span>
                 </div>
               )}
               {mainServiceLabel && (
                 <div className="bk-summary-line">
-                  <span className="lbl">{isVenue ? 'Услуги' : 'Услуга'}</span>
+                  <span className="lbl">{labels.service}</span>
                   <span className="val" style={{ maxWidth: '60%' }}>{mainServiceLabel}</span>
                 </div>
               )}
               {!isVenue && selectedEmployee && (
                 <div className="bk-summary-line">
-                  <span className="lbl">Специалист</span>
+                  <span className="lbl">{labels.resource}</span>
                   <span className="val">{selectedEmployee.name}</span>
                 </div>
               )}
@@ -1828,13 +1845,13 @@ function BookingPageInner() {
                 </div>
               )}
               <div className="bk-summary-line">
-                <span className="lbl">Дата</span>
+                <span className="lbl">{labels.date}</span>
                 <span className="val">
                   {selectedDate && formatDateRu(selectedDate)}
                 </span>
               </div>
               <div className="bk-summary-line">
-                <span className="lbl">Время</span>
+                <span className="lbl">{labels.time}</span>
                 <span className="val">{selectedTime}</span>
               </div>
               {totalDuration > 0 && (
