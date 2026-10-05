@@ -77,6 +77,7 @@ jobs:
             web/api/main.py \
             web/api/database.py \
             web/api/rental.py \
+            web/api/routes/ai.py \
             web/api/routes/admin.py \
             web/api/routes/notifications.py \
             web/api/routes/client.py \
