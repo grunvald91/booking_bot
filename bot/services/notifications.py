@@ -964,8 +964,8 @@ async def check_and_send_reminders(bot: Bot):
 
             client_24h: list[Booking] = []
             client_2h: list[Booking] = []
-            staff_24h: list[Booking] = []
-            staff_2h: list[Booking] = []
+            staff_first: list[Booking] = []
+            staff_second: list[Booking] = []
 
             two_hours = now + timedelta(hours=2)
             twenty_four_hours = now + timedelta(hours=24)
@@ -981,17 +981,39 @@ async def check_and_send_reminders(bot: Bot):
                 in_24h_window = two_hours < booking_datetime <= twenty_four_hours
                 in_2h_window = now < booking_datetime <= two_hours
 
-                if in_24h_window:
-                    if not booking.reminder_24h_sent:
-                        client_24h.append(booking)
-                    if not booking.staff_reminder_24h_sent:
-                        staff_24h.append(booking)
+                if in_24h_window and not booking.reminder_24h_sent:
+                    client_24h.append(booking)
 
-                if in_2h_window:
-                    if not booking.reminder_2h_sent:
-                        client_2h.append(booking)
-                    if not booking.staff_reminder_2h_sent:
-                        staff_2h.append(booking)
+                if in_2h_window and not booking.reminder_2h_sent:
+                    client_2h.append(booking)
+
+                business = booking.business
+                if business is None or not getattr(business, "staff_reminders_enabled", True):
+                    continue
+
+                first_hours = int(getattr(business, "staff_reminder_first_hours", 24) or 24)
+                second_raw = getattr(business, "staff_reminder_second_hours", 2)
+                second_hours = int(second_raw) if second_raw is not None else None
+                if first_hours < 1:
+                    first_hours = 24
+                if second_hours is not None and (second_hours < 1 or second_hours >= first_hours):
+                    second_hours = None
+
+                hours_until = (booking_datetime - now).total_seconds() / 3600
+                first_lower_bound = second_hours or 0
+
+                if (
+                    first_lower_bound < hours_until <= first_hours
+                    and not booking.staff_reminder_24h_sent
+                ):
+                    staff_first.append(booking)
+
+                if (
+                    second_hours is not None
+                    and 0 < hours_until <= second_hours
+                    and not booking.staff_reminder_2h_sent
+                ):
+                    staff_second.append(booking)
 
             client_groups_24h = _group_bookings_by_visit(client_24h)
             for group_bookings in client_groups_24h.values():
@@ -1001,30 +1023,36 @@ async def check_and_send_reminders(bot: Bot):
             for group_bookings in client_groups_2h.values():
                 await send_grouped_2h_reminder(bot, group_bookings, session)
 
-            staff_groups_24h = _group_bookings_by_visit(staff_24h)
-            for group_bookings in staff_groups_24h.values():
+            staff_groups_first = _group_bookings_by_visit(staff_first)
+            for group_bookings in staff_groups_first.values():
+                business = group_bookings[0].business
+                first_hours = int(getattr(business, "staff_reminder_first_hours", 24) or 24)
                 await send_grouped_staff_reminder(
                     bot,
                     group_bookings,
                     session,
-                    "24h",
+                    "first",
+                    first_hours,
                 )
 
-            staff_groups_2h = _group_bookings_by_visit(staff_2h)
-            for group_bookings in staff_groups_2h.values():
+            staff_groups_second = _group_bookings_by_visit(staff_second)
+            for group_bookings in staff_groups_second.values():
+                business = group_bookings[0].business
+                second_hours = int(getattr(business, "staff_reminder_second_hours", 2) or 2)
                 await send_grouped_staff_reminder(
                     bot,
                     group_bookings,
                     session,
-                    "2h",
+                    "second",
+                    second_hours,
                 )
 
             logger.info(
-                "Checked reminders: client=%s/%s staff=%s/%s (24h/2h visits)",
+                "Checked reminders: client=%s/%s staff=%s/%s (client 24h/2h; staff first/second)",
                 len(client_groups_24h),
                 len(client_groups_2h),
-                len(staff_groups_24h),
-                len(staff_groups_2h),
+                len(staff_groups_first),
+                len(staff_groups_second),
             )
 
     except Exception as e:
