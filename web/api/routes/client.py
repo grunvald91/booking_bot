@@ -226,6 +226,7 @@ def _booking_to_out(b: Booking, can_cancel: bool = False, can_reschedule: bool =
         time=b.booking_time.strftime("%H:%M"),
         status=b.status,
         employee_name=b.employee.name if b.employee else None,
+        employee_id=b.employee_id,
         notes=b.notes,
         created_at=b.created_at,
         can_cancel=can_cancel,
@@ -397,9 +398,11 @@ async def get_slots(
     service_id: Optional[int] = Query(None),
     employee_id: Optional[int] = Query(None),
     duration_minutes: Optional[int] = Query(None, ge=1, le=24 * 60),
+    include_unavailable: bool = Query(False),
+    exclude_booking_id: Optional[int] = Query(None, ge=1),
     db: AsyncSession = Depends(get_db),
 ):
-    """Available starts where the whole requested interval is free."""
+    """Return candidate starts; optionally include busy starts as unavailable."""
     result = await db.execute(select(Business).where(Business.id == business_id))
     business = result.scalar_one_or_none()
     if not business:
@@ -455,11 +458,25 @@ async def get_slots(
 
     busy_intervals: list[tuple[datetime, datetime]] = []
     booked_times: set[time] = set()
+    exclude_ids: list[int] = []
+    if exclude_booking_id is not None:
+        excluded = (
+            await db.execute(
+                select(Booking).where(
+                    Booking.id == exclude_booking_id,
+                    Booking.business_id == business_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if excluded and (employee_id is None or excluded.employee_id == employee_id):
+            exclude_ids = [excluded.id]
+
     if employee_id:
         busy_intervals = await busy_resource_intervals(
             db,
             employee_id=employee_id,
             dates=[date, end_dt.date()],
+            exclude_booking_ids=exclude_ids,
         )
     else:
         existing = await db.execute(
@@ -492,8 +509,9 @@ async def get_slots(
         else:
             overlaps = t in booked_times
 
-        if not is_break and not overlaps:
-            slots.append(SlotOut(time=t.strftime("%H:%M")))
+        available = not is_break and not overlaps
+        if available or include_unavailable:
+            slots.append(SlotOut(time=t.strftime("%H:%M"), available=available))
 
         current += timedelta(minutes=interval)
 
@@ -1577,7 +1595,13 @@ async def get_booking_by_token(token: str, db: AsyncSession = Depends(get_db)):
 
     prepay_pct = business.prepayment_percent or 100
     computed_prepayment = booking.prepayment_amount or int(total_price * prepay_pct / 100)
-    is_prepay_pending = booking.status in ("pending_prepayment", "prepayment_sent")
+    prepayment_confirmed = booking.prepayment_confirmed_at is not None
+    paid_amount = computed_prepayment if prepayment_confirmed else 0
+    duration_minutes = sum(
+        booking_resource_duration(item)
+        for item in group
+        if getattr(item, "occupies_resource", True)
+    ) or booking_resource_duration(booking)
 
     return PublicBookingOut(
         notify_token=booking.notify_token,
@@ -1588,12 +1612,15 @@ async def get_booking_by_token(token: str, db: AsyncSession = Depends(get_db)):
         business_directions=business.directions,
         date=booking.booking_date,
         time=booking.booking_time.strftime("%H:%M"),
+        duration_minutes=duration_minutes,
         employee_name=booking.employee.name if booking.employee else None,
         employee_label="Помещение" if is_venue else term.get("employee", "Мастер"),
         services=services,
         total_price=total_price,
         prepayment_enabled=getattr(business, "prepayment_enabled", False) or False,
-        prepayment_amount=computed_prepayment if is_prepay_pending else 0,
+        prepayment_amount=computed_prepayment if getattr(business, "prepayment_enabled", False) else 0,
+        paid_amount=paid_amount,
+        prepayment_confirmed=prepayment_confirmed,
         payment_phone=business.payment_phone,
         payment_details=business.payment_details,
         require_receipt_for_prepayment=getattr(business, "require_receipt_for_prepayment", False) or False,

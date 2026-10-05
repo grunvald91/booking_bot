@@ -125,3 +125,47 @@ async def send_booking_webpush(
     }
 
     return await send_webpush_to_subscriptions(subscriptions, payload, session)
+
+async def send_booking_status_webpush(
+    bookings: list[Booking],
+    session: AsyncSession,
+    status_kind: str,
+) -> int:
+    """Send an immediate client push when payment/booking status changes."""
+    if not bookings:
+        return 0
+
+    first = bookings[0]
+    result = await session.execute(
+        select(PushSubscription).where(
+            PushSubscription.user_id == first.client_id,
+            PushSubscription.is_active == True,
+        )
+    )
+    subscriptions = list(result.scalars().all())
+    if not subscriptions:
+        return 0
+
+    business_name = first.business.name if first.business else "ServGo"
+    time_text = first.booking_time.strftime("%H:%M")
+
+    if status_kind == "prepayment_confirmed":
+        title = "✅ Предоплата подтверждена"
+        body = f"{business_name} · запись подтверждена на {first.booking_date.strftime('%d.%m.%Y')} в {time_text}"
+    elif status_kind == "prepayment_rejected":
+        title = "❌ Предоплата не подтверждена"
+        body = f"{business_name} · проверьте оплату и реквизиты"
+    else:
+        title = "ServGo · статус записи обновлён"
+        body = f"{business_name} · {first.booking_date.strftime('%d.%m.%Y')} в {time_text}"
+
+    target = f"/b/{first.notify_token}" if first.notify_token else "/my"
+    payload = {
+        "title": title,
+        "body": body,
+        "url": target,
+        "booking_id": first.id,
+        "tag": f"servgo-booking-{first.id}-{status_kind}",
+    }
+    return await send_webpush_to_subscriptions(subscriptions, payload, session)
+

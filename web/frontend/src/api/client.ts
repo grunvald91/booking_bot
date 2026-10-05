@@ -114,6 +114,7 @@ export interface Booking {
   service_name: string;
   service_price?: number;
   employee_name?: string;
+  employee_id?: number;
   date: string;
   time: string;
   duration?: number;
@@ -126,6 +127,43 @@ export interface Booking {
   notify_token?: string;
   business_address?: string;
   duration_minutes?: number;
+}
+
+
+export interface SlotAvailability {
+  time: string;
+  available: boolean;
+}
+
+export interface PublicBookingService {
+  name: string;
+  price?: number | null;
+  is_additional: boolean;
+}
+
+export interface PublicBooking {
+  notify_token: string;
+  status: string;
+  business_name: string;
+  business_address?: string | null;
+  business_phone?: string | null;
+  business_directions?: string | null;
+  date: string;
+  time: string;
+  duration_minutes: number;
+  employee_name?: string | null;
+  employee_label: string;
+  services: PublicBookingService[];
+  total_price: number;
+  prepayment_enabled: boolean;
+  prepayment_amount: number;
+  paid_amount: number;
+  prepayment_confirmed: boolean;
+  payment_phone?: string | null;
+  payment_details?: string | null;
+  require_receipt_for_prepayment: boolean;
+  cancellation_policy_text?: string | null;
+  cancellation_policy_photo?: string | null;
 }
 
 export interface SubscriptionServiceItem {
@@ -421,6 +459,24 @@ export const api = {
     // Normalize: API returns [{time:"09:00"},...] but we need ["09:00",...]
     return data.map((s) => (typeof s === 'string' ? s : s.time));
   },
+  getSlotAvailability: async (
+    bizId: number,
+    serviceId: number,
+    date: string,
+    employeeId?: number,
+    durationMinutes?: number,
+    excludeBookingId?: number
+  ) => {
+    const params = new URLSearchParams({
+      service_id: String(serviceId),
+      date,
+      include_unavailable: 'true',
+    });
+    if (employeeId) params.set('employee_id', String(employeeId));
+    if (durationMinutes) params.set('duration_minutes', String(durationMinutes));
+    if (excludeBookingId) params.set('exclude_booking_id', String(excludeBookingId));
+    return request<SlotAvailability[]>(`/businesses/${bizId}/slots?${params.toString()}`);
+  },
   calculatePrice: (
     bizId: number,
     employeeId: number,
@@ -466,6 +522,8 @@ export const api = {
     return res.json();
   },
   // QR/guest flow (no auth): identify the booking by its notify-token.
+  getBookingByToken: (notifyToken: string) =>
+    request<PublicBooking>(`/bookings/by-token/${notifyToken}`),
   prepaymentSentByToken: (notifyToken: string) =>
     request<{ message: string }>(`/bookings/by-token/${notifyToken}/prepayment-sent`, { method: 'POST' }),
   uploadReceiptByToken: async (notifyToken: string, file: File): Promise<{ message: string }> => {

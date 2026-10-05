@@ -5671,6 +5671,15 @@ async def confirm_prepayment_by_owner(callback: CallbackQuery, state: FSMContext
             booking.prepayment_confirmed_at = datetime.utcnow()
         await session.commit()
 
+        # PWA/Web Push: browser/PWA clients must see the confirmation even
+        # when they booked without a Telegram account.
+        try:
+            from bot.services.webpush import send_booking_status_webpush
+            await send_booking_status_webpush([booking], session, "prepayment_confirmed")
+            await session.commit()
+        except Exception as push_err:
+            logger.warning("Web Push confirmation failed for booking %s: %s", booking.id, push_err)
+
         # Отправляем уведомление клиенту
         from bot.utils.validators import format_phone as fmt_phone
         from bot.utils.business_types import is_venue_rental_type
@@ -5831,6 +5840,13 @@ async def reject_prepayment_by_owner(callback: CallbackQuery, state: FSMContext)
         # Возвращаем статус на ожидание предоплаты
         booking.status = "pending_prepayment"
         await session.commit()
+
+        try:
+            from bot.services.webpush import send_booking_status_webpush
+            await send_booking_status_webpush([booking], session, "prepayment_rejected")
+            await session.commit()
+        except Exception as push_err:
+            logger.warning("Web Push rejection failed for booking %s: %s", booking.id, push_err)
 
         # Уведомляем клиента
         client_text = (

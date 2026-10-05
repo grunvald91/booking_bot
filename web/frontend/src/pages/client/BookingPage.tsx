@@ -900,7 +900,7 @@ function BookingPageInner() {
           navigate(`/b/${createdNotifyToken}`)
         }
       } catch {
-        setPaymentSent(true)
+        alert('Не удалось сообщить владельцу об оплате. Проверьте соединение и попробуйте ещё раз.')
       }
     }
 
@@ -995,43 +995,46 @@ function BookingPageInner() {
             </div>
           </div>
 
-          <NotificationSetup notifyToken={createdNotifyToken} />
+          {(!prepaymentEnabled || totalPrice <= 0) && (
+            <>
+              <NotificationSetup notifyToken={createdNotifyToken} />
 
-          {selectedDate && selectedTime && business && (
-            <button
-              type="button"
-              onClick={() => downloadBookingIcs({
-                businessName: business.name,
-                serviceName: mainServiceLabel || 'Запись',
-                date: selectedDate,
-                time: selectedTime,
-                durationMinutes: totalDuration || selectedService?.duration_minutes || 60,
-                address: business.address,
-                description: selectedRoomOrEmployee
-                  ? `${mainServiceLabel} · ${selectedRoomOrEmployee.name}`
-                  : mainServiceLabel,
-              })}
-              className="ds-btn ds-btn--ghost ds-btn--block"
-              style={{ marginTop: 12 }}
-            >
-              <Calendar size={17} />
-              Добавить в календарь
-            </button>
-          )}
+              {selectedDate && selectedTime && business && (
+                <button
+                  type="button"
+                  onClick={() => downloadBookingIcs({
+                    businessName: business.name,
+                    serviceName: mainServiceLabel || 'Запись',
+                    date: selectedDate,
+                    time: selectedTime,
+                    durationMinutes: totalDuration || selectedService?.duration_minutes || 60,
+                    address: business.address,
+                    description: selectedRoomOrEmployee
+                      ? `${mainServiceLabel} · ${selectedRoomOrEmployee.name}`
+                      : mainServiceLabel,
+                  })}
+                  className="ds-btn ds-btn--ghost ds-btn--block"
+                  style={{ marginTop: 12 }}
+                >
+                  <Calendar size={17} />
+                  Добавить в календарь
+                </button>
+              )}
 
-          {/* Bot subscribe — дополнительный канал, не единственная доставка */}
-          {createdNotifyToken && (
-            <a
-              href={`https://t.me/Sochiservice_bot?start=notify_${createdNotifyToken}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="bk-bot-link"
-            >
-              <span className="t1">📲 Получать уведомления в Telegram</span>
-              <span className="t2">
-                Открыть бота, чтобы узнавать о подтверждении{prepaymentEnabled ? ' предоплаты' : ' записи'} и напоминаниях
-              </span>
-            </a>
+              {createdNotifyToken && (
+                <a
+                  href={`https://t.me/Sochiservice_bot?start=notify_${createdNotifyToken}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bk-bot-link"
+                >
+                  <span className="t1">📲 Получать уведомления в Telegram</span>
+                  <span className="t2">
+                    Открыть бота, чтобы получать подтверждения и напоминания
+                  </span>
+                </a>
+              )}
+            </>
           )}
 
           {/* Directions on success screen */}
