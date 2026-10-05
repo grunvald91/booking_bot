@@ -7,7 +7,11 @@ on:
       - 'web/api/**'
       - 'bot/services/notifications.py'
       - 'bot/services/webpush.py'
+      - 'bot/services/booking_events.py'
       - 'bot/handlers/admin.py'
+      - 'bot/handlers/client.py'
+      - 'bot/handlers/master.py'
+      - 'bot/handlers/administrator.py'
       - 'database/models.py'
       - 'database/booking_safety.py'
       - 'booking_intervals.py'
@@ -16,6 +20,8 @@ on:
       - 'migrations/add_push_subscriptions.sql'
       - 'migrations/add_booking_overlap_constraint.sql'
       - 'migrations/add_staff_reminder_fields.sql'
+      - 'migrations/add_notification_preferences.sql'
+      - 'scripts/check_no_embedded_bot_tokens.py'
       - '.github/workflows/pwa-ci.yml'
   workflow_dispatch:
 
@@ -59,7 +65,11 @@ jobs:
           python -m py_compile \
             bot/services/notifications.py \
             bot/services/webpush.py \
+            bot/services/booking_events.py \
             bot/handlers/admin.py \
+            bot/handlers/client.py \
+            bot/handlers/master.py \
+            bot/handlers/administrator.py \
             database/models.py \
             booking_intervals.py \
             database/booking_safety.py \
@@ -71,6 +81,9 @@ jobs:
             web/api/routes/notifications.py \
             web/api/routes/client.py \
             web/api/schemas.py
+
+      - name: Reject embedded Telegram bot tokens
+        run: python scripts/check_no_embedded_bot_tokens.py
 
       - name: Run booking safety regression tests
         env:
