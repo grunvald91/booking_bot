@@ -186,6 +186,12 @@ export function SettingsPage() {
           payment_details: biz.payment_details || '',
           cancellation_policy_text: biz.cancellation_policy_text || '',
           require_receipt_for_prepayment: biz.require_receipt_for_prepayment ?? false,
+          staff_reminders_enabled: biz.staff_reminders_enabled ?? true,
+          staff_reminder_first_hours: biz.staff_reminder_first_hours ?? 24,
+          staff_reminder_second_hours: biz.staff_reminder_second_hours ?? 2,
+          staff_notify_owners: biz.staff_notify_owners ?? true,
+          staff_notify_masters: biz.staff_notify_masters ?? true,
+          staff_notify_admins: biz.staff_notify_admins ?? true,
           booking_labels: biz.booking_labels || {},
           booking_flow_order: biz.booking_flow_order || 'service_first',
         })
@@ -279,6 +285,55 @@ export function SettingsPage() {
       showToast('Настройки предоплаты сохранены')
     } catch (e) {
       alert('Ошибка при сохранении: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleSaveNotifications = async () => {
+    if (!businessId) return
+    const first = Number(form.staff_reminder_first_hours ?? 24)
+    const second = form.staff_reminder_second_hours == null ? null : Number(form.staff_reminder_second_hours)
+    if (!Number.isInteger(first) || first < 1 || first > 168) {
+      alert('Первое напоминание: укажите от 1 до 168 часов')
+      return
+    }
+    if (second != null && (!Number.isInteger(second) || second < 1 || second >= first)) {
+      alert('Второе напоминание должно быть от 1 часа и ближе к визиту, чем первое')
+      return
+    }
+    if (
+      form.staff_reminders_enabled &&
+      !form.staff_notify_owners &&
+      !form.staff_notify_masters &&
+      !form.staff_notify_admins
+    ) {
+      alert('Выберите хотя бы одного получателя напоминаний')
+      return
+    }
+
+    setSaving(true)
+    try {
+      const updated = await api.updateBusiness(businessId, {
+        staff_reminders_enabled: form.staff_reminders_enabled ?? true,
+        staff_reminder_first_hours: first,
+        staff_reminder_second_hours: second,
+        staff_notify_owners: form.staff_notify_owners ?? true,
+        staff_notify_masters: form.staff_notify_masters ?? true,
+        staff_notify_admins: form.staff_notify_admins ?? true,
+      })
+      setForm((prev) => ({
+        ...prev,
+        staff_reminders_enabled: updated.staff_reminders_enabled,
+        staff_reminder_first_hours: updated.staff_reminder_first_hours,
+        staff_reminder_second_hours: updated.staff_reminder_second_hours,
+        staff_notify_owners: updated.staff_notify_owners,
+        staff_notify_masters: updated.staff_notify_masters,
+        staff_notify_admins: updated.staff_notify_admins,
+      }))
+      showToast('Настройки уведомлений сохранены')
+    } catch (e) {
+      alert('Ошибка сохранения уведомлений: ' + (e instanceof Error ? e.message : String(e)))
     } finally {
       setSaving(false)
     }
@@ -441,10 +496,110 @@ export function SettingsPage() {
           <h2 className="ds-h3" style={{ marginBottom: 6 }}>
             Уведомления о записях
           </h2>
-          <p className="ds-sub" style={{ marginBottom: 8, lineHeight: 1.5 }}>
-            Включите системные уведомления на этом устройстве. ServGo будет напоминать владельцу о предстоящих записях за 24 часа и за 2 часа.
+          <p className="ds-sub" style={{ marginBottom: 10, lineHeight: 1.5 }}>
+            Системные PWA-уведомления приходят на это устройство, если вы разрешили их в браузере.
+            Telegram и PWA используют одни и те же настройки напоминаний.
           </p>
           <NotificationSetup />
+
+          <div style={{ height: 1, background: 'var(--s-border)', margin: '14px 0' }} />
+
+          <div className="ds-field">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <div className="ds-label" style={{ marginBottom: 2 }}>Напоминать команде перед визитом</div>
+                <div className="ds-sub">Можно отключить только предварительные напоминания.</div>
+              </div>
+              <Toggle
+                checked={form.staff_reminders_enabled ?? true}
+                onChange={(v) => updateField('staff_reminders_enabled', v)}
+              />
+            </div>
+          </div>
+
+          {(form.staff_reminders_enabled ?? true) && (
+            <>
+              <div className="ds-field">
+                <label className="ds-label">Первое напоминание</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="number"
+                    min={1}
+                    max={168}
+                    value={form.staff_reminder_first_hours ?? 24}
+                    onChange={(e) => updateField('staff_reminder_first_hours', Number(e.target.value))}
+                    className="ds-input"
+                    style={{ width: 96 }}
+                  />
+                  <span className="ds-sub">часов до визита</span>
+                </div>
+              </div>
+
+              <div className="ds-field">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                  <div>
+                    <div className="ds-label" style={{ marginBottom: 2 }}>Второе напоминание</div>
+                    <div className="ds-sub">Можно отключить.</div>
+                  </div>
+                  <Toggle
+                    checked={form.staff_reminder_second_hours != null}
+                    onChange={(v) => updateField('staff_reminder_second_hours', v ? 2 : null)}
+                  />
+                </div>
+                {form.staff_reminder_second_hours != null && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="number"
+                      min={1}
+                      max={167}
+                      value={form.staff_reminder_second_hours}
+                      onChange={(e) => updateField('staff_reminder_second_hours', Number(e.target.value))}
+                      className="ds-input"
+                      style={{ width: 96 }}
+                    />
+                    <span className="ds-sub">часов до визита</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="ds-field" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div className="ds-label">Кому отправлять напоминания</div>
+                {[
+                  ['staff_notify_owners', 'Владельцам и совладельцам'],
+                  ['staff_notify_masters', 'Назначенному мастеру / ответственному'],
+                  ['staff_notify_admins', 'Администраторам'],
+                ].map(([key, label]) => (
+                  <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                    <span className="ds-sub" style={{ color: 'var(--s-text)' }}>{label}</span>
+                    <Toggle
+                      checked={Boolean(form[key as keyof BusinessUpdateData] ?? true)}
+                      onChange={(v) => updateField(key as keyof BusinessUpdateData, v as never)}
+                    />
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          <div
+            style={{
+              background: 'var(--s-surface-2)',
+              borderRadius: 12,
+              padding: '10px 12px',
+              marginBottom: 12,
+              fontSize: 13,
+              lineHeight: 1.45,
+              color: 'var(--s-muted)',
+            }}
+          >
+            🆕 Уведомление о новой подтверждённой записи не отключается: оно всегда отправляется
+            клиенту и всем причастным сотрудникам. При предоплате — сразу после подтверждения оплаты владельцем.
+          </div>
+
+          <button onClick={handleSaveNotifications} disabled={saving} className="ds-btn ds-btn--primary">
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+            Сохранить уведомления
+          </button>
         </section>
 
         {/* === 1. Business Profile === */}
