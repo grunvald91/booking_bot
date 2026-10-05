@@ -23,11 +23,18 @@ from ..database import get_db, Business, Service, Employee, Booking, User, Venue
 from ..deps import get_current_user, get_current_user_optional
 from ..schemas import AIChatIn, AIChatOut, AIConfirmIn
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM50")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 
 # Import EmployeeService directly from models (not re-exported by web database)
 from database.models import EmployeeService
-from database.crud import create_booking
+from database.crud import create_booking, get_booking_visit_chain
+from database.booking_safety import (
+    ACTIVE_BOOKING_STATUSES,
+    BookingConflictError,
+    booking_resource_duration,
+    ensure_resource_available,
+    lock_resource_days,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -35,6 +42,9 @@ logger = logging.getLogger(__name__)
 
 def _validate_init_data(init_data: str) -> Optional[dict]:
     """Validate Telegram WebApp initData and return user dict if valid."""
+    if not BOT_TOKEN:
+        logger.warning("BOT_TOKEN is not configured; Telegram initData validation is unavailable")
+        return None
     try:
         parsed = parse_qs(init_data)
         data_check = {}
@@ -633,8 +643,21 @@ async def _exec_create_booking(db: AsyncSession, args: dict, client_id: int) -> 
     biz_name = args.get("business_name") or business.name
     svc_name = args.get("service_name") or service.name
 
-    # Notify owner via Telegram Bot API (fire-and-forget)
-    _schedule_owner_notification(business, booking, service)
+    if not need_prepayment:
+        try:
+            from bot.services.booking_events import notify_booking_event
+            await notify_booking_event(
+                db,
+                [item.id for item in created_bookings],
+                "created",
+            )
+        except Exception as notify_error:
+            logger.error(
+                "AI booking notification failed booking=%s: %s",
+                booking.id,
+                notify_error,
+                exc_info=True,
+            )
 
     if need_prepayment:
         response = (
@@ -665,20 +688,53 @@ async def _exec_confirm_payment(db: AsyncSession, args: dict, client_id: int) ->
     booking_id = int(args["booking_id"])
     res = await db.execute(
         select(Booking)
-        .options(selectinload(Booking.business), selectinload(Booking.service))
+        .options(
+            selectinload(Booking.business),
+            selectinload(Booking.service),
+            selectinload(Booking.employee),
+            selectinload(Booking.client),
+        )
         .where(and_(Booking.id == booking_id, Booking.client_id == client_id))
     )
     bk = res.scalar_one_or_none()
     if not bk:
         return "Запись не найдена"
-    if bk.status not in ("pending_prepayment",):
+    if bk.status not in ("pending_prepayment", "prepayment_sent"):
         return f"Статус записи: {bk.status}. Подтверждение уже было отправлено."
-    bk.status = "prepayment_sent"
+
+    visit = await get_booking_visit_chain(
+        db,
+        bk,
+        statuses=["pending_prepayment", "prepayment_sent"],
+        lock=True,
+    )
+    for item in visit:
+        item.status = "prepayment_sent"
     await db.commit()
 
-    # Notify owner via Telegram Bot API
-    if bk.business:
-        _schedule_owner_payment_notification(bk)
+    try:
+        from bot.services.booking_events import notify_booking_event
+        payment_keyboard = {
+            "inline_keyboard": [
+                [{"text": "✅ Подтвердить оплату", "callback_data": f"confirm_prepayment:{booking_id}"}],
+                [{"text": "❌ Оплаты нет", "callback_data": f"reject_prepayment:{booking_id}"}],
+            ]
+        }
+        await notify_booking_event(
+            db,
+            [item.id for item in visit],
+            "prepayment_sent",
+            notify_client=False,
+            staff_owners_only=True,
+            staff_reply_markup=payment_keyboard,
+        )
+    except Exception as notify_error:
+        logger.error(
+            "AI prepayment notification failed booking=%s: %s",
+            booking_id,
+            notify_error,
+            exc_info=True,
+        )
 
     return f"Отлично! Уведомили заведение о вашей оплате по записи #{booking_id}."
 
@@ -686,134 +742,132 @@ async def _exec_confirm_payment(db: AsyncSession, args: dict, client_id: int) ->
 async def _exec_cancel_booking(db: AsyncSession, args: dict, client_id: int) -> str:
     booking_id = int(args["booking_id"])
     res = await db.execute(
-        select(Booking).where(and_(Booking.id == booking_id, Booking.client_id == client_id))
+        select(Booking)
+        .options(
+            selectinload(Booking.business),
+            selectinload(Booking.service),
+            selectinload(Booking.employee),
+            selectinload(Booking.client),
+        )
+        .where(and_(Booking.id == booking_id, Booking.client_id == client_id))
     )
     bk = res.scalar_one_or_none()
     if not bk:
         return "Запись не найдена или не принадлежит вам"
     if bk.status == "cancelled":
         return "Запись уже отменена"
-    bk.status = "cancelled"
+
+    visit = await get_booking_visit_chain(
+        db,
+        bk,
+        statuses=list(ACTIVE_BOOKING_STATUSES),
+        lock=True,
+    )
     reason = args.get("reason")
-    if reason:
-        bk.notes = (bk.notes or "") + f"\nОтменено клиентом: {reason}"
+    for item in visit:
+        item.status = "cancelled"
+        if reason:
+            item.notes = (item.notes or "") + f"\nОтменено клиентом: {reason}"
     await db.commit()
+
+    try:
+        from bot.services.booking_events import notify_booking_event
+        await notify_booking_event(
+            db,
+            [item.id for item in visit],
+            "cancelled",
+        )
+    except Exception as notify_error:
+        logger.error(
+            "AI cancellation notification failed booking=%s: %s",
+            booking_id,
+            notify_error,
+            exc_info=True,
+        )
     return f"Запись #{booking_id} отменена"
 
 
 async def _exec_reschedule_booking(db: AsyncSession, args: dict, client_id: int) -> str:
-    from datetime import timedelta
     booking_id = int(args["booking_id"])
     res = await db.execute(
-        select(Booking).options(selectinload(Booking.service))
+        select(Booking)
+        .options(
+            selectinload(Booking.business),
+            selectinload(Booking.service),
+            selectinload(Booking.employee),
+            selectinload(Booking.client),
+        )
         .where(and_(Booking.id == booking_id, Booking.client_id == client_id))
+        .with_for_update()
     )
     bk = res.scalar_one_or_none()
     if not bk:
         return "Запись не найдена или не принадлежит вам"
+    if bk.status not in ACTIVE_BOOKING_STATUSES:
+        return "Эту запись уже нельзя перенести"
+
     new_date_str = args["new_date"]
     new_time_str = args["new_time"]
     new_date = datetime.date.fromisoformat(new_date_str)
     new_time = datetime.datetime.strptime(new_time_str, "%H:%M").time()
 
-    # Check for conflicts
-    duration = bk.service.duration_minutes if bk.service else 30
-    new_start = datetime.datetime.combine(new_date, new_time)
-    new_end = new_start + timedelta(minutes=duration)
-
-    conflict_res = await db.execute(
-        select(Booking).options(selectinload(Booking.service)).where(and_(
-            Booking.business_id == bk.business_id,
-            Booking.booking_date == new_date,
-            Booking.employee_id == bk.employee_id,
-            Booking.id != booking_id,
-            Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"]),
-        ))
+    visit = await get_booking_visit_chain(
+        db,
+        bk,
+        statuses=list(ACTIVE_BOOKING_STATUSES),
+        lock=True,
     )
-    for existing in conflict_res.scalars().all():
-        ex_start = datetime.datetime.combine(new_date, existing.booking_time)
-        ex_dur = existing.service.duration_minutes if existing.service else 30
-        ex_end = ex_start + timedelta(minutes=ex_dur)
-        if not (new_end <= ex_start or new_start >= ex_end):
-            return f"Время {new_time_str} на {new_date_str} уже занято. Выберите другое время."
+    old_date = visit[0].booking_date
+    old_time = visit[0].booking_time
 
-    bk.booking_date = new_date
-    bk.booking_time = new_time
+    await lock_resource_days(db, bk.employee_id, [old_date, new_date])
+    visit_duration = sum(
+        booking_resource_duration(item)
+        for item in visit
+        if getattr(item, "occupies_resource", True)
+    )
+    try:
+        await ensure_resource_available(
+            db,
+            employee_id=bk.employee_id,
+            booking_date=new_date,
+            booking_time=new_time,
+            duration_minutes=visit_duration,
+            exclude_booking_ids=[item.id for item in visit],
+            acquire_lock=False,
+        )
+    except BookingConflictError:
+        await db.rollback()
+        return f"Время {new_time_str} на {new_date_str} уже занято. Выберите другое время."
+
+    current = datetime.datetime.combine(new_date, new_time)
+    for item in visit:
+        item.booking_date = new_date
+        item.booking_time = current.time()
+        item.reminder_24h_sent = False
+        item.reminder_2h_sent = False
+        item.staff_reminder_24h_sent = False
+        item.staff_reminder_2h_sent = False
+        current += datetime.timedelta(minutes=booking_resource_duration(item))
     await db.commit()
+
+    try:
+        from bot.services.booking_events import notify_booking_event
+        await notify_booking_event(
+            db,
+            [item.id for item in visit],
+            "rescheduled",
+            old_date=old_date,
+            old_time=old_time,
+        )
+    except Exception as notify_error:
+        logger.error(
+            "AI reschedule notification failed booking=%s: %s",
+            booking_id,
+            notify_error,
+            exc_info=True,
+        )
     return f"Запись #{booking_id} перенесена на {new_date_str} в {new_time_str}"
-
-
-def _schedule_owner_notification(business: Business, booking: Booking, service: Service):
-    """Fire-and-forget notification to owner via Telegram Bot API."""
-    import asyncio
-
-    bot_token = os.getenv("BOT_TOKEN", "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM50")
-
-    async def _send():
-        try:
-            async with httpx.AsyncClient() as client:
-                # Get owner telegram_id
-                from ..database import async_session
-                async with async_session() as s:
-                    res = await s.execute(select(User).where(User.id == business.owner_id))
-                    owner = res.scalar_one_or_none()
-                    if not owner or not owner.telegram_id:
-                        return
-                    text = (
-                        f"Новая запись (web)!\n"
-                        f"{service.name}\n"
-                        f"{booking.booking_date} в {booking.booking_time.strftime('%H:%M')}\n"
-                        f"#{booking.id}"
-                    )
-                    await client.post(
-                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                        json={"chat_id": owner.telegram_id, "text": text},
-                        timeout=10,
-                    )
-        except Exception as e:
-            logger.warning("Failed to notify owner: %s", e)
-
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_send())
-    except RuntimeError:
-        pass
-
-
-def _schedule_owner_payment_notification(booking: Booking):
-    """Fire-and-forget payment notification to owner."""
-    import asyncio
-
-    bot_token = os.getenv("BOT_TOKEN", "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM50")
-
-    async def _send():
-        try:
-            async with httpx.AsyncClient() as client:
-                from ..database import async_session
-                async with async_session() as s:
-                    res = await s.execute(select(User).where(User.id == booking.business.owner_id))
-                    owner = res.scalar_one_or_none()
-                    if not owner or not owner.telegram_id:
-                        return
-                    text = (
-                        f"Клиент отправил предоплату!\n"
-                        f"Запись #{booking.id}\n"
-                        f"{booking.booking_date} в {booking.booking_time.strftime('%H:%M')}\n"
-                        f"Пожалуйста, проверьте оплату."
-                    )
-                    await client.post(
-                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                        json={"chat_id": owner.telegram_id, "text": text},
-                        timeout=10,
-                    )
-        except Exception as e:
-            logger.warning("Failed to notify owner about payment: %s", e)
-
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_send())
-    except RuntimeError:
-        pass
 
 
 # ─── OpenRouter API call ─────────────────────────────────────────────────────
