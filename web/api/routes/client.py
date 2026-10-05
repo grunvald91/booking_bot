@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..photo_transport import create_photo_client
-from ..database import get_db, Business, Service, Employee, Booking, User, VenueTimePricing
+from ..database import get_db, Business, Service, Employee, EmployeeService, Booking, User, VenueTimePricing
 from ..deps import get_current_user, get_current_user_optional
 from database.crud import get_or_create_guest_user
 from ..booking_utils import compute_recurring_dates
@@ -579,6 +579,27 @@ async def create_booking(
         svc_ids = [body.service_id]
     if not svc_ids:
         raise HTTPException(status_code=400, detail="No service specified")
+
+    # Validate the selected resource and its explicit service links. An employee/resource
+    # with no links keeps the legacy "works with all services" behaviour.
+    if body.employee_id:
+        emp_result = await db.execute(
+            select(Employee).where(
+                Employee.id == body.employee_id,
+                Employee.business_id == body.business_id,
+                Employee.is_active == True,
+            )
+        )
+        selected_employee = emp_result.scalar_one_or_none()
+        if not selected_employee:
+            raise HTTPException(status_code=404, detail="Employee/resource not found")
+        links_result = await db.execute(
+            select(EmployeeService.service_id).where(EmployeeService.employee_id == body.employee_id)
+        )
+        linked_service_ids = {row[0] for row in links_result.all()}
+        incompatible = [service_id for service_id in svc_ids if linked_service_ids and service_id not in linked_service_ids]
+        if incompatible:
+            raise HTTPException(status_code=422, detail="Selected resource does not provide one or more selected services")
 
     # Parse start time
     try:
