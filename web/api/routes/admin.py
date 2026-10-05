@@ -611,47 +611,67 @@ async def create_manual_booking(
     user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a booking on behalf of a client (manual booking by owner).
-
-    Поддерживает data.repeat_weeks (2-8) — еженедельный повтор. Атомарно:
-    если конфликтует хоть одна из дат повтора, не создаётся ничего. Без
-    repeat_weeks поведение не меняется (одна запись, без проверки конфликта —
-    админ уже свёрился с расписанием визуально при клике по календарю)."""
+    """Create one or recurring manual bookings with the same safety as clients."""
     biz_ids = await _get_owner_business_ids(db, user)
     if data.business_id not in biz_ids:
         raise HTTPException(status_code=403, detail="Not your business")
 
-    # Parse time
-    from datetime import time as dt_time
-    h, m = map(int, data.time.split(":"))
-    booking_time = dt_time(h, m)
+    try:
+        h, m = map(int, data.time.split(":"))
+        booking_time = dt_time(h, m)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="Invalid time")
+
+    service = (
+        await db.execute(
+            select(Service).where(
+                Service.id == data.service_id,
+                Service.business_id == data.business_id,
+                Service.is_active.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+    if service.is_additional:
+        raise HTTPException(status_code=400, detail="Additional service cannot be booked separately")
+
+    if data.employee_id:
+        employee = (
+            await db.execute(
+                select(Employee).where(
+                    Employee.id == data.employee_id,
+                    Employee.business_id == data.business_id,
+                    Employee.is_active.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee/resource not found")
 
     occurrence_dates = compute_recurring_dates(data.date, data.repeat_weeks or 1)
-
-    # Проверка конфликтов по всем датам ТОЛЬКО при повторе — за 8 недель вперёд
-    # визуально свериться с расписанием нереально, в отличие от одиночного клика.
-    if len(occurrence_dates) > 1:
-        conflicts = []
-        for occ_date in occurrence_dates:
-            conflict_filter = [
-                Booking.business_id == data.business_id,
-                Booking.booking_date == occ_date,
-                Booking.booking_time == booking_time,
-                Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"]),
-            ]
-            if data.employee_id:
-                conflict_filter.append(Booking.employee_id == data.employee_id)
-            conflict_result = await db.execute(select(Booking).where(and_(*conflict_filter)))
-            if conflict_result.scalar_one_or_none():
-                conflicts.append(f"{occ_date.strftime('%d.%m')} {data.time}")
-        if conflicts:
-            raise HTTPException(status_code=409, detail="Занято: " + ", ".join(conflicts))
-
-    # Get or create a guest user for the client (один клиент на всю серию,
-    # переиспользуется по телефону между визитами)
     guest_user = await get_or_create_guest_user(db, data.client_name, data.client_phone)
 
-    created_ids = []
+    resource_duration = service.duration_minutes or 30
+    await lock_resource_days(db, data.employee_id, occurrence_dates)
+    for occ_date in occurrence_dates:
+        try:
+            await ensure_resource_available(
+                db,
+                employee_id=data.employee_id,
+                booking_date=occ_date,
+                booking_time=booking_time,
+                duration_minutes=resource_duration,
+                acquire_lock=False,
+            )
+        except BookingConflictError as exc:
+            await db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail=f"Занято: {occ_date.strftime('%d.%m')} {data.time}",
+            ) from exc
+
+    created_ids: list[int] = []
     for occ_date in occurrence_dates:
         booking = Booking(
             business_id=data.business_id,
@@ -663,14 +683,25 @@ async def create_manual_booking(
             status="confirmed",
             notes=data.notes,
             notify_token=str(uuid.uuid4()),
+            resource_duration_minutes=resource_duration,
+            occupies_resource=service_occupies_resource(service),
         )
         db.add(booking)
         await db.flush()
         created_ids.append(booking.id)
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        message = str(exc).lower()
+        if "bookings_no_active_resource_overlap" in message or "exclusion" in message:
+            raise HTTPException(
+                status_code=409,
+                detail="На выбранное время уже есть другая запись",
+            ) from exc
+        raise
 
-    # Reload with relationships
     result = await db.execute(
         select(Booking)
         .where(Booking.id.in_(created_ids))
