@@ -32,7 +32,6 @@ from bot.keyboards import master_kb
 from bot.keyboards.client_kb import get_main_menu_keyboard
 from bot.utils.validators import validate_phone, format_date_with_weekday, format_phone
 from bot.config import ADMIN_IDS
-from bot.services.notifications import notify_administrator_new_booking
 from bot.services.mlm_sync import can_be_business_owner
 
 router = Router()
@@ -533,36 +532,23 @@ async def confirm_manual_booking(callback: CallbackQuery, state: FSMContext):
         first_visit_bookings = created_bookings[:len(visit_slots)]
         first_booking_id = first_visit_bookings[0].id
 
-    # Отправляем уведомление администратору (по первому визиту серии)
+    # Mandatory booking event: client (where reachable), owners/co-owners,
+    # assigned master and administrators receive Telegram/PWA as available.
     try:
-        from sqlalchemy.orm import selectinload
-        from database.models import Booking
-
         async with async_session_maker() as session:
-            # Загружаем запись с полными данными
-            result = await session.execute(
-                select(Booking)
-                .options(
-                    selectinload(Booking.business),
-                    selectinload(Booking.client),
-                    selectinload(Booking.service),
-                    selectinload(Booking.employee)
-                )
-                .where(Booking.id == first_booking_id)
+            from bot.services.booking_events import notify_booking_event
+            await notify_booking_event(
+                session,
+                [b.id for b in first_visit_bookings],
+                "created",
             )
-            booking_with_data = result.scalar_one_or_none()
-
-            if booking_with_data:
-                master_name = booking_with_data.employee.name if booking_with_data.employee else None
-                await notify_administrator_new_booking(
-                    callback.bot,
-                    booking_with_data,
-                    services_list=services_info if services_info else None,
-                    created_by_master=master_name
-                )
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"Error sending admin notification: {e}")
+    except Exception as notify_error:
+        logger.error(
+            "Master-created booking notification failed booking=%s: %s",
+            first_booking_id,
+            notify_error,
+            exc_info=True,
+        )
 
     # Получаем роли для клавиатуры
     async with async_session_maker() as session:
