@@ -395,75 +395,103 @@ async def get_slots(
     date: date = Query(..., description="Date in YYYY-MM-DD format"),
     service_id: Optional[int] = Query(None),
     employee_id: Optional[int] = Query(None),
+    duration_minutes: Optional[int] = Query(None, ge=1, le=24 * 60),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Available time slots for a given date.
-    Algorithm matches the Telegram bot logic (client.py).
-    """
+    """Available starts where the whole requested interval is free."""
     result = await db.execute(select(Business).where(Business.id == business_id))
     business = result.scalar_one_or_none()
     if not business:
         raise HTTPException(status_code=404, detail="Business not found")
 
-    # Determine interval
     interval = business.booking_interval_minutes or 30
     if employee_id:
-        emp_result = await db.execute(select(Employee).where(Employee.id == employee_id))
+        emp_result = await db.execute(
+            select(Employee).where(
+                Employee.id == employee_id,
+                Employee.business_id == business_id,
+                Employee.is_active.is_(True),
+            )
+        )
         emp = emp_result.scalar_one_or_none()
-        if emp and emp.booking_interval_minutes:
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee/resource not found")
+        if emp.booking_interval_minutes:
             interval = emp.booking_interval_minutes
 
-    # Working hours
+    requested_duration = duration_minutes
+    if requested_duration is None and service_id:
+        service = (
+            await db.execute(
+                select(Service).where(
+                    Service.id == service_id,
+                    Service.business_id == business_id,
+                    Service.is_active.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if not service:
+            raise HTTPException(status_code=404, detail="Service not found")
+        requested_duration = service_resource_duration(service)
+    requested_duration = requested_duration or interval
+
     start_time = business.working_hours_start or time(9, 0)
     end_time = business.working_hours_end or time(18, 0)
-
-    # Fetch existing bookings for this date (all active statuses)
-    booking_filter = [
-        Booking.business_id == business_id,
-        Booking.booking_date == date,
-        Booking.status.in_(["pending", "confirmed", "pending_prepayment", "prepayment_sent"]),
-    ]
-    if employee_id:
-        booking_filter.append(Booking.employee_id == employee_id)
-
-    existing = await db.execute(
-        select(Booking.booking_time).where(and_(*booking_filter))
-    )
-    booked_times = {row[0] for row in existing.all()}
-
-    # Generate slots
     current = datetime.combine(date, start_time)
     end_dt = datetime.combine(date, end_time)
-
-    # Handle overnight hours (e.g. 09:00 — 02:00 means until 2 AM next day)
     if end_time <= start_time:
         end_dt += timedelta(days=1)
 
-    # If today, start from now + 1 hour
     if date == datetime.now().date():
         now_plus = datetime.now() + timedelta(hours=1)
         if current < now_plus:
             current = now_plus
-            # Round up to next interval
             minutes = (current.minute // interval + 1) * interval
             if minutes >= 60:
                 current = current.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
             else:
                 current = current.replace(minute=minutes, second=0, microsecond=0)
 
-    slots: List[SlotOut] = []
-    while current <= end_dt:
-        t = current.time()
+    busy_intervals: list[tuple[datetime, datetime]] = []
+    booked_times: set[time] = set()
+    if employee_id:
+        busy_intervals = await busy_resource_intervals(
+            db,
+            employee_id=employee_id,
+            dates=[date, end_dt.date()],
+        )
+    else:
+        existing = await db.execute(
+            select(Booking.booking_time).where(
+                Booking.business_id == business_id,
+                Booking.booking_date == date,
+                Booking.status.in_(ACTIVE_BOOKING_STATUSES),
+            )
+        )
+        booked_times = {row[0] for row in existing.all()}
 
-        # Skip break
+    slots: List[SlotOut] = []
+    while current + timedelta(minutes=requested_duration) <= end_dt:
+        t = current.time()
+        candidate_end = current + timedelta(minutes=requested_duration)
+
         is_break = False
         if business.break_start and business.break_end:
-            if business.break_start <= t < business.break_end:
-                is_break = True
+            break_start = datetime.combine(current.date(), business.break_start)
+            break_end = datetime.combine(current.date(), business.break_end)
+            if break_end <= break_start:
+                break_end += timedelta(days=1)
+            is_break = current < break_end and break_start < candidate_end
 
-        # Skip already booked
-        if not is_break and t not in booked_times:
+        if employee_id:
+            overlaps = any(
+                current < busy_end and busy_start < candidate_end
+                for busy_start, busy_end in busy_intervals
+            )
+        else:
+            overlaps = t in booked_times
+
+        if not is_break and not overlaps:
             slots.append(SlotOut(time=t.strftime("%H:%M")))
 
         current += timedelta(minutes=interval)
