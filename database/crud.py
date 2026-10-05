@@ -2,7 +2,7 @@
 CRUD операции для работы с базой данных
 Create, Read, Update, Delete
 """
-from datetime import date, time, datetime
+from datetime import date, time, datetime, timedelta
 from typing import List, Optional
 from sqlalchemy import select, and_, or_, delete, func
 from sqlalchemy.exc import IntegrityError
@@ -16,6 +16,7 @@ from database.models import (
 from database.booking_safety import (
     ACTIVE_BOOKING_STATUSES,
     BookingConflictError,
+    booking_resource_duration,
     ensure_resource_available,
     resource_overlap_exists,
     service_occupies_resource,
