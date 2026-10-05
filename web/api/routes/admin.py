@@ -967,6 +967,9 @@ async def admin_reschedule_booking(
         await db.rollback()
         raise HTTPException(status_code=409, detail="На это время уже есть запись") from exc
 
+    old_date = booking.booking_date
+    old_time = booking.booking_time
+
     booking.booking_date = data.date
     booking.booking_time = new_time
     booking.reminder_24h_sent = False
@@ -984,6 +987,23 @@ async def admin_reschedule_booking(
         if "bookings_no_active_resource_overlap" in message or "exclusion" in message:
             raise HTTPException(status_code=409, detail="На это время уже есть запись") from exc
         raise
+
+    try:
+        from bot.services.booking_events import notify_booking_event
+        await notify_booking_event(
+            db,
+            [booking.id],
+            "rescheduled",
+            old_date=old_date,
+            old_time=old_time,
+        )
+    except Exception as notify_error:
+        logger.error(
+            "Admin reschedule notification failed booking=%s: %s",
+            booking.id,
+            notify_error,
+            exc_info=True,
+        )
 
     result = await db.execute(
         select(Booking)
