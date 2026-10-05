@@ -1,4 +1,4 @@
-name: ServGo post-rollback health check
+name: ServGo finalize staged production release
 
 on:
   push:
@@ -9,69 +9,204 @@ permissions:
   contents: read
 
 jobs:
-  health:
+  finalize:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     env:
-      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Install SSH client library
-        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
-      - name: Check production services
+      - name: Install SSH client
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Verify pinned host and finalize release
         shell: bash
         run: |
-          python - <<'PY'
-          import base64, hashlib, os, time
-          import paramiko
-          HOST='155.212.162.47'; FP='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
-          class Pinned(paramiko.MissingHostKeyPolicy):
-              def missing_host_key(self,c,h,k):
-                  a=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
-                  if a!=FP: raise paramiko.SSHException('host key mismatch')
-                  c.get_host_keys().add(h,k.get_name(),k)
-          ssh=None
-          for n in range(3):
-              c=paramiko.SSHClient(); c.set_missing_host_key_policy(Pinned())
-              try:
-                  c.connect(HOST,port=22,username='root',password=os.environ['SERVER_PASSWORD'],
-                            look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
-                  ssh=c; break
-              except (paramiko.SSHException,OSError,EOFError):
-                  c.close()
-                  if n==2: raise
-                  time.sleep(3)
-          cmd=r'''set +e
-          echo '--- status ---'
-          systemctl is-active booking-web-api.service
-          systemctl is-active booking-bot.service
-          systemctl is-active nginx.service
-          printf 'local_api='; curl -sS --max-time 5 -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/health
-          printf 'public_api='; curl -sS --max-time 8 -o /dev/null -w '%{http_code}\n' https://servgo.ru/api/health
-          echo '--- release env presence ---'
-          cd /opt/booking_bot
-          python3 - <<'ENV_PY'
+          set -euo pipefail
+          HOST=155.212.162.47
+          EXPECTED='SHA256:uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          ssh-keyscan -T 10 -p 22 "$HOST" > /tmp/servgo_known_hosts 2>/dev/null
+          ssh-keygen -lf /tmp/servgo_known_hosts -E sha256 | grep -F "$EXPECTED" >/dev/null
+          OPTS="-o UserKnownHostsFile=/tmp/servgo_known_hosts -o StrictHostKeyChecking=yes"
+
+          sshpass -e ssh $OPTS root@"$HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          ROOT=/opt/booking_bot
+          PAYLOAD="$ROOT/.release_staging/servgo-20261005-7d7e541-v2/payload"
+          RELEASE=servgo-20261005-7d7e541-final
+          BACKUP="$ROOT/.release_backups/$RELEASE-$(date +%Y%m%d-%H%M%S)"
+          TARGETS=(
+            bot/services/notifications.py
+            bot/services/webpush.py
+            database/models.py
+            requirements.txt
+            web/api/database.py
+            web/api/main.py
+            web/api/rental.py
+            web/api/rental_logic.py
+            web/api/routes/admin.py
+            web/api/routes/auth.py
+            web/api/routes/client.py
+            web/api/routes/notifications.py
+            web/api/schemas.py
+          )
+
+          test -f "$PAYLOAD/web/api/rental.py"
+          test -f "$PAYLOAD/web/api/routes/notifications.py"
+          test -f "$PAYLOAD/web/frontend/dist/index.html"
+
+          mkdir -p "$BACKUP"
+          chmod 700 "$BACKUP"
+          : > "$BACKUP/absent.txt"
+          for f in "${TARGETS[@]}"; do
+            if [ -f "$ROOT/$f" ]; then
+              mkdir -p "$BACKUP/files/$(dirname "$f")"
+              cp -a "$ROOT/$f" "$BACKUP/files/$f"
+            else
+              echo "$f" >> "$BACKUP/absent.txt"
+            fi
+          done
+          if [ -d "$ROOT/web/frontend/dist" ]; then
+            mkdir -p "$BACKUP/files/web/frontend"
+            cp -a "$ROOT/web/frontend/dist" "$BACKUP/files/web/frontend/dist"
+          fi
+          cp -a "$ROOT/.env" "$BACKUP/env"
+          chmod 600 "$BACKUP/env"
+
+          rollback() {
+            code=$?
+            trap - ERR
+            echo "release_failed=yes exit=$code"
+            for f in "${TARGETS[@]}"; do
+              if [ -f "$BACKUP/files/$f" ]; then
+                mkdir -p "$ROOT/$(dirname "$f")"
+                cp -a "$BACKUP/files/$f" "$ROOT/$f"
+              fi
+            done
+            while IFS= read -r f; do [ -n "$f" ] && rm -f "$ROOT/$f"; done < "$BACKUP/absent.txt"
+            if [ -d "$BACKUP/files/web/frontend/dist" ]; then
+              rm -rf "$ROOT/web/frontend/dist"
+              cp -a "$BACKUP/files/web/frontend/dist" "$ROOT/web/frontend/dist"
+            fi
+            cp -a "$BACKUP/env" "$ROOT/.env"
+            systemctl restart booking-web-api.service || true
+            systemctl restart booking-bot.service || true
+            for i in $(seq 1 12); do
+              if curl -fsS --max-time 2 http://127.0.0.1:8000/health >/dev/null 2>&1; then break; fi
+              sleep 1
+            done
+            printf 'rollback_api='; curl -sS --max-time 3 -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/health || true
+            printf 'rollback_bot='; systemctl is-active booking-bot.service || true
+            exit "$code"
+          }
+          trap rollback ERR
+
+          cd "$ROOT"
+          ./venv/bin/python - <<'ENV_PY'
           from pathlib import Path
+          import base64, os
+          from cryptography.hazmat.primitives import serialization
+          from cryptography.hazmat.primitives.asymmetric import ec
           p=Path('.env')
+          lines=p.read_text().splitlines()
           vals={}
-          if p.exists():
-              for line in p.read_text(errors='replace').splitlines():
-                  if '=' in line and not line.lstrip().startswith('#'):
-                      k,v=line.split('=',1)
-                      if k.strip() in {'VAPID_PUBLIC_KEY','VAPID_PRIVATE_KEY','VAPID_SUBJECT','SERVGO_TIMEZONE'}:
-                          vals[k.strip()]='set' if v.strip() else 'empty'
-          for k in ('VAPID_PUBLIC_KEY','VAPID_PRIVATE_KEY','VAPID_SUBJECT','SERVGO_TIMEZONE'):
-              print(k+'='+vals.get(k,'absent'))
+          for line in lines:
+              if '=' in line and not line.lstrip().startswith('#'):
+                  k,v=line.split('=',1); vals[k.strip()]=v.strip()
+          if not vals.get('VAPID_PUBLIC_KEY') or not vals.get('VAPID_PRIVATE_KEY'):
+              key=ec.generate_private_key(ec.SECP256R1())
+              enc=lambda b: base64.urlsafe_b64encode(b).decode('ascii').rstrip('=')
+              vals['VAPID_PRIVATE_KEY']=enc(key.private_bytes(
+                  serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
+                  serialization.NoEncryption()))
+              vals['VAPID_PUBLIC_KEY']=enc(key.public_key().public_bytes(
+                  serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint))
+          vals.setdefault('VAPID_SUBJECT','mailto:admin@servgo.ru')
+          vals.setdefault('SERVGO_TIMEZONE','Europe/Moscow')
+          wanted=('VAPID_PUBLIC_KEY','VAPID_PRIVATE_KEY','VAPID_SUBJECT','SERVGO_TIMEZONE')
+          out=[]; seen=set()
+          for line in lines:
+              if '=' in line and not line.lstrip().startswith('#'):
+                  k=line.split('=',1)[0].strip()
+                  if k in wanted:
+                      if k not in seen: out.append(k+'='+vals[k]); seen.add(k)
+                      continue
+              out.append(line)
+          for k in wanted:
+              if k not in seen: out.append(k+'='+vals[k])
+          tmp=p.with_suffix('.tmp-final')
+          tmp.write_text('\n'.join(out).rstrip()+'\n')
+          os.chmod(tmp,0o600)
+          tmp.replace(p)
+          print('vapid=configured')
           ENV_PY
-          echo '--- current code marker ---'
-          test -f web/api/rental.py && echo rental_file=present || echo rental_file=missing
-          test -f web/api/routes/notifications.py && echo notifications_file=present || echo notifications_file=missing
-          echo '--- api logs ---'
-          journalctl -u booking-web-api.service -n 35 --no-pager | sed -E 's/(password|token|secret|key)=([^ ]+)/\1=[REDACTED]/Ig'
-          '''
-          _,out,err=ssh.exec_command(cmd,timeout=45)
-          print(out.read().decode('utf-8','replace'))
-          e=err.read().decode('utf-8','replace')
-          if e: print('stderr_suffix='+e[-800:])
-          ssh.close()
-          PY
+
+          for f in "${TARGETS[@]}"; do
+            mkdir -p "$ROOT/$(dirname "$f")"
+            install -m 0644 "$PAYLOAD/$f" "$ROOT/$f"
+          done
+          rm -rf "$ROOT/web/frontend/dist.new-$RELEASE"
+          cp -a "$PAYLOAD/web/frontend/dist" "$ROOT/web/frontend/dist.new-$RELEASE"
+          rm -rf "$ROOT/web/frontend/dist"
+          mv "$ROOT/web/frontend/dist.new-$RELEASE" "$ROOT/web/frontend/dist"
+
+          ./venv/bin/python -m py_compile             database/models.py bot/services/notifications.py bot/services/webpush.py             web/api/database.py web/api/main.py web/api/rental.py web/api/rental_logic.py             web/api/routes/admin.py web/api/routes/auth.py web/api/routes/client.py             web/api/routes/notifications.py web/api/schemas.py
+          ./venv/bin/python - <<'IMPORT_PY'
+          from web.api.main import app
+          from web.api import rental
+          from bot.services.webpush import webpush_configured
+          assert webpush_configured()
+          print('imports=ok')
+          IMPORT_PY
+
+          systemctl restart booking-web-api.service
+          for i in $(seq 1 15); do
+            if curl -fsS --max-time 2 http://127.0.0.1:8000/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          curl -fsS --max-time 5 http://127.0.0.1:8000/health >/dev/null
+
+          systemctl restart booking-bot.service
+          sleep 3
+          test "$(systemctl is-active booking-bot.service)" = active
+
+          ./venv/bin/python - <<'DB_PY'
+          import asyncio
+          from sqlalchemy import text
+          from database.database import async_session_maker
+          async def run():
+              checks={
+                  'businesses':['booking_labels','booking_flow_order'],
+                  'employees':['primary_photo'],
+                  'bookings':['duration_minutes','estimated_price','price_requires_confirmation','prepayment_amount','notify_token'],
+              }
+              async with async_session_maker() as s:
+                  for table,cols in checks.items():
+                      existing=set((await s.execute(text(
+                          "select column_name from information_schema.columns where table_name=:t"
+                      ),{'t':table})).scalars().all())
+                      for col in cols:
+                          if col not in existing: raise RuntimeError(f'missing {table}.{col}')
+                  q=text("select exists(select 1 from information_schema.tables where table_name='push_subscriptions')")
+                  if not bool((await s.execute(q)).scalar()): raise RuntimeError('missing push_subscriptions')
+          asyncio.run(run())
+          print('database_shape=ok')
+          DB_PY
+
+          curl -fsS --max-time 10 https://servgo.ru/api/health >/dev/null
+          echo 'public_api=200'
+          curl -fsS --max-time 10 https://servgo.ru/manifest.webmanifest >/dev/null
+          echo 'manifest=200'
+          curl -fsS --max-time 10 https://servgo.ru/sw.js >/dev/null
+          echo 'service_worker=200'
+          curl -fsS --max-time 10 https://servgo.ru/ >/dev/null
+          echo 'frontend=200'
+          curl -fsS --max-time 10 https://servgo.ru/api/notifications/vapid-public-key | ./venv/bin/python -c "import json,sys; d=json.load(sys.stdin); assert len(d.get('public_key',''))>20; print('vapid_endpoint=ok')"
+
+          printf '%s\n' '7d7e541bbcf1da61be82c2dd3e079bb3df174513' > "$ROOT/.release_version"
+          chmod 644 "$ROOT/.release_version"
+          trap - ERR
+          echo 'release_status=success'
+          printf 'api_service='; systemctl is-active booking-web-api.service
+          printf 'bot_service='; systemctl is-active booking-bot.service
+          echo "backup_retained=$BACKUP"
+          REMOTE
