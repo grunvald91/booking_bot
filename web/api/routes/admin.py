@@ -725,8 +725,8 @@ async def update_booking_status(
     user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update booking status without allowing a reactivated overlap."""
-    if data.status not in ("confirmed", "completed", "cancelled", "pending"):
+    """Update a booking/visit status and emit mandatory lifecycle notifications."""
+    if data.status not in ("confirmed", "completed", "cancelled", "pending", "pending_prepayment"):
         raise HTTPException(status_code=400, detail="Invalid status")
 
     biz_ids = await _get_owner_business_ids(db, user)
@@ -736,6 +736,7 @@ async def update_booking_status(
         .where(Booking.id == booking_id)
         .options(
             selectinload(Booking.client),
+            selectinload(Booking.business),
             selectinload(Booking.service),
             selectinload(Booking.employee),
         )
@@ -746,6 +747,9 @@ async def update_booking_status(
         raise HTTPException(status_code=404, detail="Booking not found")
     if booking.business_id not in biz_ids:
         raise HTTPException(status_code=403, detail="Not your business")
+
+    old_status = booking.status
+
     if data.status == "confirmed" and booking.duration_minutes is not None and (
         booking.price_requires_confirmation or booking.prepayment_amount is None
     ):
@@ -775,7 +779,28 @@ async def update_booking_status(
                 detail="Нельзя вернуть запись: это время уже занято",
             ) from exc
 
-    booking.status = data.status
+    visit = [booking]
+    if old_status in ("pending_prepayment", "prepayment_sent"):
+        visit = await get_booking_visit_chain(
+            db,
+            booking,
+            statuses=["pending_prepayment", "prepayment_sent"],
+            lock=True,
+        )
+    elif data.status in ("cancelled", "completed"):
+        visit = await get_booking_visit_chain(
+            db,
+            booking,
+            statuses=list(ACTIVE_BOOKING_STATUSES),
+            lock=True,
+        )
+
+    now_utc = datetime.utcnow()
+    for item in visit:
+        item.status = data.status
+        if data.status == "confirmed" and old_status in ("pending_prepayment", "prepayment_sent"):
+            item.prepayment_confirmed_at = now_utc
+
     try:
         await db.commit()
     except IntegrityError as exc:
@@ -788,7 +813,46 @@ async def update_booking_status(
             ) from exc
         raise
 
-    await db.refresh(booking)
+    event_kind = None
+    event_kwargs = {}
+    if data.status == "confirmed" and old_status in ("pending_prepayment", "prepayment_sent"):
+        event_kind = "prepayment_confirmed"
+    elif data.status == "confirmed" and old_status == "pending":
+        event_kind = "created"
+    elif data.status == "cancelled" and old_status != "cancelled":
+        event_kind = "cancelled"
+    elif data.status == "pending_prepayment" and old_status == "prepayment_sent":
+        event_kind = "prepayment_rejected"
+        event_kwargs = {"notify_staff": False}
+
+    if event_kind:
+        try:
+            from bot.services.booking_events import notify_booking_event
+            await notify_booking_event(
+                db,
+                [item.id for item in visit],
+                event_kind,
+                **event_kwargs,
+            )
+        except Exception as notify_error:
+            logger.error(
+                "Admin lifecycle notification failed booking=%s event=%s: %s",
+                booking_id,
+                event_kind,
+                notify_error,
+                exc_info=True,
+            )
+
+    result = await db.execute(
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(
+            selectinload(Booking.client),
+            selectinload(Booking.service),
+            selectinload(Booking.employee),
+        )
+    )
+    booking = result.scalar_one()
     return _admin_booking_out(booking)
 
 
