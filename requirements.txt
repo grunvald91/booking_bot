@@ -14,6 +14,9 @@ pywebpush>=2.5.0
 pytz>=2024.1
 qrcode[pil]>=7.4.2
 
+# HTTP client (rental owner notifications)
+httpx>=0.28.0
+
 # Async tools
 APScheduler>=3.10.4
 
