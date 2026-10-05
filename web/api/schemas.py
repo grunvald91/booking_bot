@@ -89,6 +89,7 @@ class EmployeeOut(BaseModel):
     min_booking_minutes: Optional[int] = None
     solo_price_per_hour: Optional[int] = None
     photos: Optional[str] = None
+    primary_photo: Optional[str] = None
     on_duty_date: Optional[date] = None
     is_active: bool = True
     venue_time_pricing: List[TimePricingOut] = []
@@ -127,6 +128,8 @@ class BusinessDetailOut(BusinessOut):
     cancellation_policy_photo: Optional[str] = None
     cancellation_policy_text: Optional[str] = None
     require_receipt_for_prepayment: bool = False
+    booking_labels: dict[str, str] = {}
+    booking_flow_order: str = "service_first"
 
 
 # ---------- Slots ----------
@@ -439,6 +442,8 @@ class BusinessUpdateIn(BaseModel):
     payment_details: Optional[str] = None
     cancellation_policy_text: Optional[str] = None
     require_receipt_for_prepayment: Optional[bool] = None
+    booking_labels: Optional[dict[str, str]] = None
+    booking_flow_order: Optional[str] = None
 
 
 class BusinessAdminDetailOut(BaseModel):
@@ -463,6 +468,8 @@ class BusinessAdminDetailOut(BaseModel):
     cancellation_policy_photo: Optional[str] = None
     cancellation_policy_text: Optional[str] = None
     require_receipt_for_prepayment: bool = False
+    booking_labels: dict[str, str] = {}
+    booking_flow_order: str = "service_first"
 
     class Config:
         from_attributes = True
