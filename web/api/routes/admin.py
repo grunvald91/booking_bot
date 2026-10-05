@@ -24,7 +24,7 @@ from ..database import (
     get_db, Business, Service, Employee, Booking, User, BusinessOwner,
     VenueTimePricing, Subscription, SubscriptionService, EmployeeService,
 )
-from database.crud import get_or_create_guest_user
+from database.crud import get_or_create_guest_user, get_booking_visit_chain
 from database.booking_safety import (
     ACTIVE_BOOKING_STATUSES,
     BookingConflictError,
