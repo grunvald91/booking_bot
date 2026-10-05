@@ -13,12 +13,12 @@ from datetime import date, time
 from typing import Iterable, Optional
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from database.crud import get_business_owners
-from database.models import Booking, Employee
+from database.models import Booking, Employee, NotificationDelivery
 from bot.services.webpush import send_client_event_webpush, send_staff_event_webpush
 
 logger = logging.getLogger(__name__)
@@ -246,6 +246,27 @@ def _client_message(
         f"📅 {when}"
         f"{address_line}{phone_line}{tail}"
     )
+
+
+async def clear_upcoming_reminder_deliveries(
+    bookings: list[Booking],
+    session: AsyncSession,
+) -> None:
+    """Allow reminders to be scheduled again after a visit is moved."""
+    ids = [int(item.id) for item in bookings if getattr(item, "id", None)]
+    if not ids:
+        return
+    await session.execute(
+        delete(NotificationDelivery).where(
+            NotificationDelivery.booking_id.in_(ids),
+            NotificationDelivery.event_kind == "upcoming_reminder",
+        )
+    )
+    for item in bookings:
+        item.reminder_24h_sent = False
+        item.reminder_2h_sent = False
+        item.staff_reminder_24h_sent = False
+        item.staff_reminder_2h_sent = False
 
 
 async def dispatch_booking_event(
