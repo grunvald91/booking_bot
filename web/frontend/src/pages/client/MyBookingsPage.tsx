@@ -7,7 +7,7 @@ import {
   ChevronRight,
   User,
 } from 'lucide-react'
-import { api, type Booking } from '../../api/client'
+import { api, type Booking, type SlotAvailability } from '../../api/client'
 import { hapticSelection, hapticSuccess, hapticError } from '../../utils/telegram'
 import { ClientShell } from '../../components/ClientShell'
 import { NotificationSetup } from '../../components/NotificationSetup'
@@ -204,7 +204,7 @@ function TimeSlotPicker({
   onSelect,
   loading,
 }: {
-  slots: string[]
+  slots: SlotAvailability[]
   selected: string | null
   onSelect: (time: string) => void
   loading: boolean
@@ -220,24 +220,38 @@ function TimeSlotPicker({
   }
   if (slots.length === 0) {
     return (
-      <p className="ds-sub" style={{ marginTop: 12 }}>Нет доступных слотов на эту дату</p>
+      <p className="ds-sub" style={{ marginTop: 12 }}>Нет времени в рабочем расписании на эту дату</p>
     )
   }
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-      {slots.map((time) => (
-        <button
-          key={time}
-          onClick={() => {
-            hapticSelection()
-            onSelect(time)
-          }}
-          className={`ds-btn ds-btn--sm${selected === time ? ' ds-btn--primary' : ' ds-btn--ghost'}`}
-        >
-          {time}
-        </button>
-      ))}
-    </div>
+    <>
+      <div className="ds-sub" style={{ display: 'flex', gap: 14, marginTop: 10, fontSize: 12 }}>
+        <span>● свободно</span>
+        <span style={{ opacity: 0.55 }}>● занято</span>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+        {slots.map((slot) => (
+          <button
+            key={slot.time}
+            disabled={!slot.available}
+            title={slot.available ? 'Свободно' : 'Занято'}
+            onClick={() => {
+              if (!slot.available) return
+              hapticSelection()
+              onSelect(slot.time)
+            }}
+            className={`ds-btn ds-btn--sm${selected === slot.time ? ' ds-btn--primary' : ' ds-btn--ghost'}`}
+            style={!slot.available ? {
+              opacity: 0.45,
+              cursor: 'not-allowed',
+              textDecoration: 'line-through',
+            } : undefined}
+          >
+            {slot.time}
+          </button>
+        ))}
+      </div>
+    </>
   )
 }
 
@@ -289,7 +303,7 @@ function ReschedulePanel({
 }) {
   const [newDate, setNewDate] = useState<string | null>(null)
   const [newTime, setNewTime] = useState<string | null>(null)
-  const [slots, setSlots] = useState<string[]>([])
+  const [slots, setSlots] = useState<SlotAvailability[]>([])
   const [slotsLoading, setSlotsLoading] = useState(false)
 
   useEffect(() => {
@@ -301,7 +315,14 @@ function ReschedulePanel({
     setSlotsLoading(true)
     setNewTime(null)
     api
-      .getSlots(booking.business_id, booking.service_id, newDate)
+      .getSlotAvailability(
+        booking.business_id,
+        booking.service_id,
+        newDate,
+        booking.employee_id,
+        booking.duration_minutes || 60,
+        booking.id
+      )
       .then((result) => {
         setSlots(result)
       })
@@ -311,7 +332,7 @@ function ReschedulePanel({
       .finally(() => {
         setSlotsLoading(false)
       })
-  }, [newDate, booking.business_id, booking.service_id])
+  }, [newDate, booking.business_id, booking.service_id, booking.employee_id, booking.duration_minutes, booking.id])
 
   return (
     <div style={{ marginTop: 14, borderTop: '1px solid var(--s-line)', paddingTop: 14 }}>
