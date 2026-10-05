@@ -9,7 +9,7 @@ from pywebpush import WebPushException, webpush_async
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import Booking, PushSubscription
+from database.models import Booking, BusinessOwner, PushSubscription, User
 
 logger = logging.getLogger(__name__)
 
@@ -168,4 +168,93 @@ async def send_booking_status_webpush(
         "tag": f"servgo-booking-{first.id}-{status_kind}",
     }
     return await send_webpush_to_subscriptions(subscriptions, payload, session)
+
+async def send_staff_booking_webpush(
+    bookings: list[Booking],
+    session: AsyncSession,
+    reminder_kind: str,
+) -> tuple[int, int]:
+    """Send upcoming-visit push to business owners and assigned masters.
+
+    Returns (sent_count, target_subscription_count). Masters become eligible
+    once they have authenticated in ServGo with the same Telegram account and
+    enabled Web Push; owners are ordinary ServGo users already.
+    """
+    if not bookings:
+        return 0, 0
+
+    first = bookings[0]
+    business = first.business
+    if business is None:
+        return 0, 0
+
+    user_ids: set[int] = set()
+
+    # Legacy primary owner + co-owners.
+    if getattr(business, "owner_id", None):
+        user_ids.add(int(business.owner_id))
+    owner_rows = await session.execute(
+        select(BusinessOwner.user_id).where(BusinessOwner.business_id == first.business_id)
+    )
+    user_ids.update(int(row[0]) for row in owner_rows.all())
+
+    # Employee rows store telegram_id rather than user_id. Resolve them to
+    # ServGo users if those staff members have ever authenticated in the PWA.
+    employee_tg_ids = {
+        int(b.employee.telegram_id)
+        for b in bookings
+        if getattr(b, "employee", None) is not None
+        and getattr(b.employee, "telegram_id", None)
+        and int(b.employee.telegram_id) > 0
+    }
+    if employee_tg_ids:
+        employee_users = await session.execute(
+            select(User.id).where(User.telegram_id.in_(employee_tg_ids))
+        )
+        user_ids.update(int(row[0]) for row in employee_users.all())
+
+    if not user_ids:
+        return 0, 0
+
+    result = await session.execute(
+        select(PushSubscription).where(
+            PushSubscription.user_id.in_(user_ids),
+            PushSubscription.is_active == True,
+        )
+    )
+    subscriptions = list(result.scalars().all())
+    if not subscriptions:
+        return 0, 0
+
+    service_names = ", ".join(
+        dict.fromkeys(
+            b.service.name for b in bookings if getattr(b, "service", None)
+        )
+    ) or "Запись"
+    client_name = (
+        first.client.full_name
+        if getattr(first, "client", None) is not None
+        else "Клиент"
+    )
+    time_text = first.booking_time.strftime("%H:%M")
+
+    if reminder_kind == "2h":
+        title = "⏰ Через 2 часа клиент"
+        body = f"{client_name} · {time_text} · {service_names}"
+    else:
+        title = "📅 Предстоящая запись"
+        body = (
+            f"{client_name} · {first.booking_date.strftime('%d.%m.%Y')} "
+            f"в {time_text} · {service_names}"
+        )
+
+    payload = {
+        "title": title,
+        "body": body,
+        "url": "/admin/schedule",
+        "booking_id": first.id,
+        "tag": f"servgo-staff-booking-{first.id}-{reminder_kind}",
+    }
+    sent = await send_webpush_to_subscriptions(subscriptions, payload, session)
+    return sent, len(subscriptions)
 
