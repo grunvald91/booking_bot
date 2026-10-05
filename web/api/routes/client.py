@@ -813,7 +813,7 @@ async def create_booking(
     # Fire-and-forget notifications — SAME format as bot (notifications.py)
     async def _send_booking_notifications():
         try:
-            bot_token = "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM50"
+            bot_token = os.getenv("BOT_TOKEN", "").strip()
             client_name = body.client_name or (booking_user.full_name if booking_user else "Клиент") or "Клиент"
             client_phone = body.client_phone or (booking_user.phone if booking_user else None)
             client_tg_id = booking_user.telegram_id if booking_user else None
@@ -1347,7 +1347,7 @@ async def _mark_prepayment_sent(booking: Booking, db: AsyncSession) -> dict:
                         [{"text": "❌ Отменить бронь / нет оплаты", "callback_data": f"reject_prepayment:{booking.id}"}]
                     ]
                 }
-                bot_token = "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM50"
+                bot_token = os.getenv("BOT_TOKEN", "").strip()
                 async with httpx.AsyncClient(timeout=30) as http:
                     resp = await http.post(
                         f"https://api.telegram.org/bot{bot_token}/sendMessage",
@@ -1381,7 +1381,7 @@ async def _send_receipt_and_notify(booking: Booking, db: AsyncSession, file: Upl
             owner_result = await db.execute(select(User).where(User.id == business.owner_id))
             owner = owner_result.scalar_one_or_none()
             if owner and owner.telegram_id:
-                bot_token = "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM50"
+                bot_token = os.getenv("BOT_TOKEN", "").strip()
 
                 file_content = await file.read()
                 content_type = file.content_type or "image/jpeg"
