@@ -132,6 +132,8 @@ def _client_message(
         header = "❌ <b>Запись отменена</b>"
     elif event_kind == "rescheduled":
         header = "🔄 <b>Запись перенесена</b>"
+    elif event_kind == "prepayment_rejected":
+        header = "❌ <b>Предоплата не подтверждена</b>"
     else:
         header = "🔔 <b>Статус записи обновлён</b>"
 
@@ -236,6 +238,7 @@ def _event_push_payload(
         "prepayment_confirmed": "✅ Запись подтверждена",
         "cancelled": "❌ Запись отменена",
         "rescheduled": "🔄 Запись перенесена",
+        "prepayment_rejected": "❌ Предоплата не подтверждена",
     }
 
     if staff:
