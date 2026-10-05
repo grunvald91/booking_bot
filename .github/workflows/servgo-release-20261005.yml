@@ -1,0 +1,183 @@
+name: ServGo production release preflight
+
+on:
+  push:
+    branches:
+      - ops/servgo-release-20261005
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build production frontend
+        working-directory: web/frontend
+        run: |
+          npm ci --legacy-peer-deps
+          npm run build
+
+      - name: Install SSH client library
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+
+      - name: Read-only production preflight
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64
+          import hashlib
+          import os
+          import pathlib
+          import subprocess
+          import time
+          import paramiko
+
+          HOST='155.212.162.47'
+          ROOT='/opt/booking_bot'
+          BASE_SHA='439b5e9dddfe76dc73e355404ee78b9f06a4318c'
+          EXPECTED_FP='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          TARGETS=[
+              'bot/services/notifications.py',
+              'bot/services/webpush.py',
+              'database/models.py',
+              'requirements.txt',
+              'web/api/database.py',
+              'web/api/main.py',
+              'web/api/routes/admin.py',
+              'web/api/routes/auth.py',
+              'web/api/routes/client.py',
+              'web/api/routes/notifications.py',
+              'web/api/schemas.py',
+          ]
+
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self, client, hostname, key):
+                  actual=base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  if actual != EXPECTED_FP:
+                      raise paramiko.SSHException('Host key fingerprint mismatch')
+                  client.get_host_keys().add(hostname,key.get_name(),key)
+
+          ssh=None
+          for attempt in range(1,4):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(Pinned())
+              try:
+                  c.connect(HOST,port=22,username='root',password=os.environ['SERVER_PASSWORD'],
+                            look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  ssh=c; break
+              except (paramiko.SSHException,OSError,EOFError) as exc:
+                  c.close()
+                  if attempt==3: raise
+                  time.sleep(3)
+          key=ssh.get_transport().get_remote_server_key()
+          fp=base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+          print('ssh_authenticated=yes host_key_sha256='+fp)
+
+          command=r'''set -u
+          echo '--- services ---'
+          printf 'booking-bot='; systemctl is-active booking-bot.service || true
+          printf 'booking-web-api='; systemctl is-active booking-web-api.service || true
+          printf 'nginx='; systemctl is-active nginx.service || true
+          echo '--- service metadata ---'
+          systemctl show booking-bot.service booking-web-api.service -p Id -p FragmentPath -p WorkingDirectory -p ExecStart -p EnvironmentFiles --no-pager || true
+          echo '--- health ---'
+          printf 'api_health='; curl -sS --max-time 5 -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/health || true
+          printf 'legacy_schedule='; curl -sS --max-time 5 -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/schedule || true
+          echo '--- disk ---'
+          df -h /opt | tail -1
+          echo '--- env keys only ---'
+          cd /opt/booking_bot || exit 2
+          python3 - <<'ENV_PY'
+          from pathlib import Path
+          wanted={'BOT_TOKEN','DB_TYPE','DB_HOST','DB_PORT','DB_NAME','DB_USER','DB_PASSWORD','VAPID_PUBLIC_KEY','VAPID_PRIVATE_KEY','VAPID_SUBJECT','SERVGO_TIMEZONE'}
+          p=Path('.env')
+          print('env_file='+('present' if p.exists() else 'missing'))
+          seen={}
+          if p.exists():
+              for line in p.read_text(errors='replace').splitlines():
+                  if '=' not in line or line.lstrip().startswith('#'): continue
+                  k,v=line.split('=',1)
+                  k=k.strip()
+                  if k in wanted: seen[k]='set' if v.strip() else 'empty'
+          for k in sorted(wanted):
+              print('env_'+k+'='+seen.get(k,'absent'))
+          ENV_PY
+          echo '--- database shape ---'
+          ./venv/bin/python - <<'DB_PY'
+          import asyncio
+          from sqlalchemy import text
+          from database.database import async_session_maker
+          async def main():
+              async with async_session_maker() as s:
+                  checks=[
+                      ('businesses','booking_labels'),
+                      ('businesses','booking_flow_order'),
+                      ('employees','primary_photo'),
+                  ]
+                  for table,col in checks:
+                      q=text("select exists(select 1 from information_schema.columns where table_name=:t and column_name=:c)")
+                      print(f'column_{table}_{col}='+str(bool((await s.execute(q,{'t':table,'c':col})).scalar())).lower())
+                  q=text("select exists(select 1 from information_schema.tables where table_name='push_subscriptions')")
+                  print('table_push_subscriptions='+str(bool((await s.execute(q)).scalar())).lower())
+          asyncio.run(main())
+          DB_PY
+          echo '--- runtime dependencies ---'
+          ./venv/bin/python - <<'DEP_PY'
+          try:
+              import pywebpush
+              print('pywebpush=present')
+          except Exception as e:
+              print('pywebpush=missing:'+type(e).__name__)
+          DEP_PY
+          echo '--- frontend ---'
+          printf 'frontend_dist='; test -d web/frontend/dist && echo present || echo missing
+          test -f web/frontend/dist/index.html && sed -n '1,5p' web/frontend/dist/index.html || true
+          echo '--- nginx routing (filtered) ---'
+          nginx -T 2>/dev/null | grep -E '^[[:space:]]*(server_name|root|location[[:space:]]+/api|location[[:space:]]+=?[[:space:]]+/(sw\.js|manifest)|proxy_pass)' | head -80 || true
+          '''
+          _,out,err=ssh.exec_command(command,timeout=45)
+          stdout=out.read().decode('utf-8','replace')
+          stderr=err.read().decode('utf-8','replace')
+          print(stdout)
+          status=out.channel.recv_exit_status()
+          if status:
+              print('remote_preflight_exit='+str(status))
+              print('remote_stderr_suffix='+stderr[-1000:])
+              raise SystemExit(status)
+
+          print('--- source drift for release targets ---')
+          sftp=ssh.open_sftp()
+          try:
+              for path in TARGETS:
+                  current=pathlib.Path(path).read_bytes()
+                  try:
+                      with sftp.open(ROOT+'/'+path,'rb') as f: remote=f.read()
+                  except FileNotFoundError:
+                      remote=None
+                  try:
+                      old=subprocess.check_output(['git','show',BASE_SHA+':'+path],stderr=subprocess.DEVNULL)
+                  except subprocess.CalledProcessError:
+                      old=None
+                  if remote is None:
+                      state='expected_missing' if old is None else 'MISSING_EXISTING_FILE'
+                  elif remote==current:
+                      state='already_current'
+                  elif old is not None and remote==old:
+                      state='expected_old'
+                  else:
+                      state='DRIFT_REVIEW_REQUIRED'
+                  print(path+'='+state)
+          finally:
+              sftp.close(); ssh.close()
+          PY
