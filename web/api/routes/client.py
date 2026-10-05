@@ -45,6 +45,25 @@ router = APIRouter()
 # ---------- helpers ----------
 
 
+BOOKING_LABEL_KEYS = {"service", "resource", "additional_services", "date", "time"}
+
+
+def _parse_booking_labels(raw) -> dict[str, str]:
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, str] = {}
+    for key, label in value.items():
+        if key in BOOKING_LABEL_KEYS and isinstance(label, str) and label.strip():
+            result[key] = label.strip()[:80]
+    return result
+
+
 async def _build_prepayment_owner_msg(booking: Booking, db: AsyncSession, receipt_note: str = None) -> str:
     """Build prepayment owner notification — SAME format as bot's _build_prepayment_owner_text."""
     from bot.utils.business_types import is_venue_rental_type, get_terminology
@@ -250,6 +269,8 @@ def _employee_to_out(e: Employee, pricing_rules: list = None) -> EmployeeOut:
         area_sqm=getattr(e, 'area_sqm', None),
         solo_price_per_hour=getattr(e, 'solo_price_per_hour', None),
         photos=getattr(e, 'photos', None),
+        primary_photo=getattr(e, 'primary_photo', None),
+        service_ids=[link.service_id for link in getattr(e, 'employee_services', [])],
         venue_time_pricing=tp_list,
     )
 
@@ -298,7 +319,7 @@ async def get_business(business_id: int, db: AsyncSession = Depends(get_db)):
         .where(Business.id == business_id)
         .options(
             selectinload(Business.services),
-            selectinload(Business.employees),
+            selectinload(Business.employees).selectinload(Employee.employee_services),
         )
     )
     biz = result.scalar_one_or_none()
@@ -343,7 +364,14 @@ async def get_business(business_id: int, db: AsyncSession = Depends(get_db)):
         payment_phone=getattr(biz, 'payment_phone', None),
         payment_details=getattr(biz, 'payment_details', None),
         cancellation_policy_photo=getattr(biz, 'cancellation_policy_photo', None),
+        cancellation_policy_text=getattr(biz, 'cancellation_policy_text', None),
         require_receipt_for_prepayment=getattr(biz, 'require_receipt_for_prepayment', False) or False,
+        booking_labels=_parse_booking_labels(getattr(biz, 'booking_labels', None)),
+        booking_flow_order=(
+            getattr(biz, 'booking_flow_order', 'service_first')
+            if getattr(biz, 'booking_flow_order', 'service_first') in ("service_first", "resource_first")
+            else "service_first"
+        ),
     )
 
 
