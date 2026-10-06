@@ -90,6 +90,16 @@ class Business(Base):
     cancellation_policy_photo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Telegram file_id фото условий отмены
     cancellation_policy_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Текст условий отмены
     require_receipt_for_prepayment: Mapped[bool] = mapped_column(Boolean, default=False)  # Требовать чек для подтверждения оплаты
+
+    # Юридические данные оператора персональных данных / исполнителя услуг.
+    # Не заполняем их автоматически: владелец бизнеса обязан указать реальные реквизиты.
+    legal_name: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    legal_inn: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    legal_ogrn: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    legal_address: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    legal_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    legal_documents_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
     ai_instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # AI-инструкция для бизнеса
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -258,6 +268,13 @@ class Booking(Base):
     # Предоплата
     prepayment_amount: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Сумма предоплаты
     prepayment_confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # Когда подтверждена
+
+    # Доказательство принятия юридических документов в момент записи.
+    # Согласие на ПД и условия записи хранятся раздельно.
+    personal_data_consent_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    personal_data_consent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    booking_terms_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    booking_terms_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     reminder_sent: Mapped[bool] = mapped_column(Boolean, default=False)  # Deprecated, используем reminder_24h/2h
     reminder_24h_sent: Mapped[bool] = mapped_column(Boolean, default=False)  # Клиенту за 24ч

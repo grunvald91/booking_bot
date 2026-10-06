@@ -1415,6 +1415,16 @@ async def update_business(
         if order not in ("service_first", "resource_first"):
             raise HTTPException(status_code=422, detail="Invalid booking_flow_order")
         updates["booking_flow_order"] = order
+
+    if updates.get("legal_documents_enabled") is True:
+        legal_name = (updates.get("legal_name") if "legal_name" in updates else business.legal_name) or ""
+        legal_email = (updates.get("legal_email") if "legal_email" in updates else business.legal_email) or ""
+        legal_address = (updates.get("legal_address") if "legal_address" in updates else business.legal_address) or ""
+        if not legal_name.strip() or not legal_email.strip() or not legal_address.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="Перед включением юридических документов заполните наименование/ФИО, адрес и email оператора.",
+            )
     # Convert time strings to time objects. Accept both "HH:MM" and "HH:MM:SS"
     # (the API serializes Time columns as "HH:MM:SS", and an unedited <input type="time">
     # round-trips that exact string back to us).
