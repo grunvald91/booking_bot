@@ -24,6 +24,7 @@ from ..database import get_db, Business, Service, Employee, EmployeeService, Boo
 from ..deps import get_current_user, get_current_user_optional
 from database.crud import get_or_create_guest_user
 from email_utils import normalize_optional_email
+from bot.services.email_notifications import send_booking_email_by_ids
 from database.booking_safety import (
     ACTIVE_BOOKING_STATUSES,
     BookingConflictError,
@@ -1110,6 +1111,17 @@ async def create_booking(
     # (admin.py) sends all notifications after owner confirms payment.
     if not getattr(business, 'prepayment_enabled', False):
         asyncio.create_task(_send_booking_notifications())
+
+    # Email is an optional independent channel. It is sent for both ordinary
+    # and prepayment bookings so the client immediately has a durable link to
+    # the booking status page.
+    if client_email:
+        asyncio.create_task(
+            send_booking_email_by_ids(
+                [booking.id for booking in created_bookings],
+                "created",
+            )
+        )
 
     return result_bookings
 
