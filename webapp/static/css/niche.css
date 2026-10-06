@@ -42,3 +42,37 @@
     opacity: 0.5;
     font-size: 1.1em;
 }
+
+
+/* First-screen explanation of the digital marketing team. */
+.hero-team-card {
+    margin-top: 20px;
+    padding: 18px;
+    border: 1px solid rgba(47, 91, 235, 0.16);
+    border-radius: 18px;
+    background: rgba(47, 91, 235, 0.06);
+}
+.hero-team-card > strong {
+    display: block;
+    font-size: 16px;
+    line-height: 1.35;
+}
+.hero-team-card > p {
+    margin: 7px 0 0;
+    opacity: .78;
+}
+.hero-team-roles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+.hero-team-roles span {
+    padding: 7px 10px;
+    border-radius: 999px;
+    background: #fff;
+    border: 1px solid rgba(13, 27, 42, 0.08);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.25;
+}
