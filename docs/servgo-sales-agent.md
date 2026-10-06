@@ -227,3 +227,53 @@ ordinary-booking, rental and legacy webapp pricing implementations in ServGo.
 Unsupported scenarios must remain on their existing form/operator path until their
 booking adapters are covered by contract tests. No production migration or rollout
 is performed by this change.
+
+## Shared ten-minute prepayment window (services, rooms and vessels)
+
+The payment window depends on required prepayment, never on business/resource
+kind or the channel that created the booking. Ordinary prepayment bookings keep
+the existing ten-minute window from creation. In the rental quote path, requesting
+a positive deposit moves the booking from `pending` to `pending_prepayment` and
+sets `prepayment_requested_at`; the client gets ten minutes from that request,
+even if the original request was created much earlier. Repeating the same quote
+does not extend its window. Zero-deposit rental quotes remain `pending` with no
+payment timer. Existing rental price calculation and operator deposit limits are
+preserved. An unquoted request cannot start a payment clock without a bill.
+
+`database/prepayment.py` is the shared deadline/expiry implementation. The existing
+bot scheduler still runs expiry every two minutes: unpaid bookings become
+`cancelled` and release their resource. The API also rejects payment submission
+after the deadline and cannot revive a cancelled booking. Row locks serialize
+expiry with payment/receipt submission. `prepayment_sent` is protected from expiry;
+only the owner can confirm receipt of money. Explicit zero amounts are excluded.
+
+Both `/b/:token` and the existing `/rental/b/:token` render the same payment/status
+page, with the actual rental quote, duration, payment deadline, business payment
+details, and optional/required receipt upload. The twenty-minute chat confirmation
+card lifetime is separate: that card has not reserved a slot yet.
+
+### Scoped rollout and rollback
+
+No production rollout is performed by this PR. Reconcile the touched production
+sources first, as required by CLAUDE.md. Deploy only the changed API/sales modules,
+`web/api/schemas.py`, `database/models.py`, `database/prepayment.py`,
+`bot/services/notifications.py`, and rebuilt frontend assets, with their matching
+versions; the exact full file list is in the commit diff.
+
+1. Apply `migrations/add_prepayment_requested_at.sql` before restarting the new API
+   and `booking-bot`. It only adds a nullable column and starts no payment timers.
+2. Deploy the matched API, worker and frontend; restart their existing services.
+   Check API health, the scheduler's expiry job and both booking status URLs.
+3. Only after all components are healthy, apply
+   `migrations/activate_rental_prepayment_windows.sql`. Existing finalized rental
+   quotes with positive deposits get a new ten-minute window. Zero-deposit,
+   unquoted, submitted-payment and confirmed reservations are untouched. Repeating
+   this activation does not restart already-running windows.
+4. Verify a synthetic positive-deposit booking expires and releases its slot;
+   a zero-deposit booking does not; submitted payment remains awaiting the owner.
+
+Retain the nullable column on rollback. API/frontend changes can be rolled back
+without deleting bookings. Keep the new expiry worker/deadline helper until active
+rental windows have drained: reverting that worker to creation-time expiry while
+newly quoted old requests still exist would cancel them early. Do not mass-reset
+booking states or resurrect cancelled reservations during rollback.

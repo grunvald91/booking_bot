@@ -250,6 +250,7 @@ class ServGoTools:
             description += ". Доп. услуги: " + ", ".join(addon_names)
         if quote["prepayment_percent"]:
             description += f". Предоплата: {quote['prepayment_percent']}%"
+            description += ". Сообщите об отправке предоплаты в течение 10 минут после создания брони"
         if quote.get("deposit_policy"):
             description += ". " + quote["deposit_policy"]
         if quote["receipt_required"]:

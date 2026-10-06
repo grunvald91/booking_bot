@@ -315,6 +315,7 @@ class Booking(Base):
 
     # Предоплата
     prepayment_amount: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Сумма предоплаты
+    prepayment_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     prepayment_confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # Когда подтверждена
 
     # Доказательство принятия юридических документов в момент записи.
