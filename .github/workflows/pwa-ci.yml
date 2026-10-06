@@ -7,18 +7,23 @@ on:
       - 'web/api/**'
       - 'bot/services/notifications.py'
       - 'bot/services/webpush.py'
+      - 'bot/services/notification_events.py'
       - 'bot/services/email_notifications.py'
       - 'email_utils.py'
       - 'tests/test_email_utils.py'
       - 'bot/handlers/admin.py'
+      - 'bot/handlers/client.py'
       - 'database/models.py'
       - 'database/booking_safety.py'
       - 'booking_intervals.py'
+      - 'notification_rules.py'
       - 'tests/test_booking_safety.py'
+      - 'tests/test_notification_rules.py'
       - 'requirements.txt'
       - 'migrations/add_push_subscriptions.sql'
       - 'migrations/add_booking_overlap_constraint.sql'
       - 'migrations/add_staff_reminder_fields.sql'
+      - 'migrations/add_configurable_staff_notifications.sql'
       - 'migrations/add_user_email.sql'
       - '.github/workflows/pwa-ci.yml'
   workflow_dispatch:
@@ -63,11 +68,14 @@ jobs:
           python -m py_compile \
             bot/services/notifications.py \
             bot/services/webpush.py \
+            bot/services/notification_events.py \
             bot/services/email_notifications.py \
             email_utils.py \
             bot/handlers/admin.py \
+            bot/handlers/client.py \
             database/models.py \
             booking_intervals.py \
+            notification_rules.py \
             database/booking_safety.py \
             database/crud.py \
             web/api/main.py \
@@ -83,4 +91,5 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python tests/test_booking_safety.py
+          python tests/test_notification_rules.py
           python tests/test_email_utils.py
