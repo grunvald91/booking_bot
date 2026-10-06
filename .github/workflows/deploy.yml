@@ -55,8 +55,14 @@ jobs:
             exit 1
           fi
 
-      - name: Install sshpass
-        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Ensure sshpass
+        run: |
+          if command -v sshpass >/dev/null 2>&1; then
+            sshpass -V
+          else
+            sudo apt-get update
+            sudo apt-get install -y sshpass
+          fi
 
       - name: Determine files to deploy
         id: pick
@@ -94,7 +100,7 @@ jobs:
             if [ ! -f "$f" ]; then echo "пропуск (нет файла): $f"; continue; fi
             ANY=1
             dir=$(dirname "$f")
-            sshpass -e ssh $SSH_OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "mkdir -p '$REMOTE_PATH/$dir'"
+            sshpass -e ssh -n $SSH_OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "mkdir -p '$REMOTE_PATH/$dir'"
             sshpass -e scp $SSH_OPTS -P "$SERVER_PORT" "$f" "$SERVER_USER@$SERVER_HOST:$REMOTE_PATH/$f"
             echo "залит: $f"
           done <<< '${{ steps.pick.outputs.files }}'
@@ -106,10 +112,20 @@ jobs:
         run: |
           set -euo pipefail
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-          sshpass -e ssh $SSH_OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" '
+          sshpass -e ssh -n $SSH_OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" '
             set -e
             systemctl restart '"$SERVICE_NAME"'
-            sleep 4
             echo -n "is-active: "; systemctl is-active '"$SERVICE_NAME"'
-            curl -s -o /dev/null -w "schedule HTTP %{http_code}\n" --max-time 6 http://127.0.0.1:8080/schedule
+            for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+              code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:8080/ || true)
+              if [ "$code" != "000" ] && [ "$code" -lt 500 ]; then
+                echo "webapp HTTP $code (attempt $attempt)"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "Webapp did not become ready on 127.0.0.1:8080"
+            systemctl status '"$SERVICE_NAME"' --no-pager || true
+            journalctl -u '"$SERVICE_NAME"' -n 60 --no-pager || true
+            exit 1
           '
