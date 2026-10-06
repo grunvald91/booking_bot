@@ -32,6 +32,7 @@ class UserOut(BaseModel):
     id: int
     full_name: str
     phone: Optional[str] = None
+    email: Optional[str] = None
     username: Optional[str] = None
 
     class Config:
@@ -179,6 +180,7 @@ class CreateBookingIn(BaseModel):
     notes: Optional[str] = None
     client_name: Optional[str] = None
     client_phone: Optional[str] = None
+    client_email: Optional[str] = Field(default=None, max_length=255)
     # Юридические подтверждения перед записью. Это два самостоятельных действия:
     # согласие на обработку ПД не объединяется с принятием условий записи.
     personal_data_consent: bool = False
@@ -254,6 +256,7 @@ class AdminBookingOut(BaseModel):
     id: int
     client_name: str
     client_phone: Optional[str] = None
+    client_email: Optional[str] = None
     service_name: str
     service_duration: Optional[int] = None
     price: Optional[int] = None
