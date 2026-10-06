@@ -459,10 +459,6 @@ function BookingPageInner() {
           setClientEmail((current) => current || user.email || '')
           localStorage.setItem('clientEmail', user.email)
         }
-        if (user?.email) {
-          setClientEmail(user.email)
-          localStorage.setItem('clientEmail', user.email)
-        }
       }).catch(() => setPrefillFallback())
     } else {
       setPrefillFallback()
@@ -799,7 +795,6 @@ function BookingPageInner() {
       })
 
       if (clientPhone) localStorage.setItem('clientPhone', clientPhone)
-      if (clientEmail.trim()) localStorage.setItem('clientEmail', clientEmail.trim().toLowerCase())
       if (clientEmail.trim()) localStorage.setItem('clientEmail', clientEmail.trim().toLowerCase())
 
       const result = await api.createBooking({
@@ -2064,34 +2059,6 @@ function BookingPageInner() {
                 <p className="ds-error" style={{ marginTop: 4, marginBottom: 0 }}>Укажите ваше имя</p>
               )}
             </div>
-            <div className="ds-field">
-              <label className="ds-label">
-                Email <span style={{ fontWeight: 400 }}>(необязательно)</span>
-              </label>
-              <input
-                ref={emailInputRef}
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                value={clientEmail}
-                onChange={(e) => {
-                  setClientEmail(e.target.value)
-                  if (fieldErrors.email) setFieldErrors((p) => ({ ...p, email: false }))
-                }}
-                placeholder="name@example.com"
-                className={`ds-input ${fieldErrors.email ? 'bk-input-error' : ''}`}
-              />
-              {fieldErrors.email ? (
-                <p className="ds-error" style={{ marginTop: 4, marginBottom: 0 }}>
-                  Проверьте адрес электронной почты
-                </p>
-              ) : (
-                <p className="ds-hint" style={{ marginTop: 5 }}>
-                  Если укажете email, ServGo сможет присылать подтверждения и напоминания ещё и по почте.
-                </p>
-              )}
-            </div>
-
             <div className="ds-field">
               <label className="ds-label">
                 Телефон <span style={{ color: 'var(--s-danger)' }}>*</span>
