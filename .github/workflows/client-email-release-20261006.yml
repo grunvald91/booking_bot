@@ -145,9 +145,14 @@ jobs:
 
           systemctl restart booking-web-api.service
           systemctl restart booking-bot.service
-          sleep 4
           test "$(systemctl is-active booking-web-api.service)" = active
           test "$(systemctl is-active booking-bot.service)" = active
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 2 http://127.0.0.1:8000/health >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
           curl -fsS --max-time 8 http://127.0.0.1:8000/health >/dev/null
           curl -fsS --max-time 10 https://servgo.ru/api/health >/dev/null
 
