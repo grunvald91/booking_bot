@@ -1,0 +1,92 @@
+name: ServGo mail daemon fix
+
+on:
+  push:
+    branches: [ops/servgo-mail-fix-20261006]
+
+permissions:
+  contents: read
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Install SSH helper
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Fix OpenDKIM and lock SMTP to localhost
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64,hashlib,os,time,paramiko
+          H='155.212.162.47'; F='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class P(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  a=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if a!=F: raise paramiko.SSHException('host key mismatch')
+                  c.get_host_keys().add(h,k.get_name(),k)
+          s=None
+          for n in range(3):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(P())
+              try:
+                  c.connect(H,username='root',password=os.environ['SERVER_PASSWORD'],look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  s=c; break
+              except Exception:
+                  c.close()
+                  if n==2: raise
+                  time.sleep(3)
+          cmd=r'''set -Eeuo pipefail
+          grep -q '^PidFile ' /etc/opendkim.conf || sed -i '/^UserID/a PidFile                 /run/opendkim/opendkim.pid' /etc/opendkim.conf
+          install -d -m 0755 -o opendkim -g opendkim /run/opendkim
+
+          postconf -e 'inet_interfaces = loopback-only'
+          postconf -e 'inet_protocols = ipv4'
+          postconf -e 'mydestination = localhost'
+          postconf -e 'mynetworks = 127.0.0.0/8'
+          postconf -e 'smtp_helo_name = artur.grunvald1991.fvds.ru'
+          postconf -e 'milter_default_action = accept'
+          postconf -e 'milter_protocol = 6'
+          postconf -e 'smtpd_milters = inet:127.0.0.1:8891'
+          postconf -e 'non_smtpd_milters = inet:127.0.0.1:8891'
+
+          systemctl reset-failed opendkim || true
+          systemctl restart opendkim
+          systemctl restart postfix
+
+          test "$(systemctl is-active opendkim)" = active
+          test "$(systemctl is-active postfix)" = active
+
+          echo '--- sockets ---'
+          ss -ltnp | grep -E ':(25|8891)\b' || true
+          if ss -ltn | awk '$4 ~ /:25$/ {print $4}' | grep -Ev '^127\.0\.0\.1:25$' >/dev/null; then
+            echo 'ERROR public SMTP listener detected'
+            exit 1
+          fi
+
+          python3 - <<'SMTP'
+          import smtplib
+          with smtplib.SMTP('127.0.0.1',25,timeout=5) as smtp:
+              code,_=smtp.ehlo()
+              assert code==250
+          print('local_smtp=ok')
+          SMTP
+
+          echo '--- config ---'
+          postconf -n | grep -E '^(myhostname|mydomain|myorigin|inet_interfaces|inet_protocols|smtp_helo_name|.*milters)'
+          echo '--- dkim record ---'
+          cat /etc/opendkim/keys/servgo.ru/s202610.txt
+          echo '--- env ---'
+          grep -E '^SMTP_(HOST|PORT|FROM|FROM_NAME|USE_TLS)=' /opt/booking_bot/.env
+          '''
+          _,o,e=s.exec_command(cmd,timeout=90)
+          stdout=o.read().decode('utf-8','replace')
+          stderr=e.read().decode('utf-8','replace')
+          print(stdout)
+          status=o.channel.recv_exit_status()
+          if status:
+              print(stderr[-1800:])
+              raise SystemExit(status)
+          s.close()
+          PY
