@@ -13,6 +13,7 @@ on:
       - 'tests/test_email_utils.py'
       - 'tests/test_sales_agent.py'
       - 'migrations/add_sales_conversations.sql'
+      - 'migrations/add_sales_agent_settings.sql'
       - 'bot/handlers/admin.py'
       - 'bot/handlers/client.py'
       - 'database/models.py'

@@ -18,6 +18,7 @@ import { SettingsPage } from './pages/admin/SettingsPage'
 import { SubscriptionsAdminPage } from './pages/admin/SubscriptionsAdminPage'
 import { ChatPage } from './pages/client/ChatPage'
 import { SalesInboxPage } from './pages/admin/SalesInboxPage'
+import { SalesSettingsPage } from './pages/admin/SalesSettingsPage'
 import { RentalBookingStatusPage } from './pages/client/RentalBookingStatusPage'
 import { LegalPage } from './pages/client/LegalPage'
 
@@ -109,6 +110,7 @@ function App() {
 
         {/* Admin routes */}
         <Route path="/admin/sales" element={<AdminRoute><SalesInboxPage /></AdminRoute>} />
+        <Route path="/admin/sales/settings" element={<AdminRoute><SalesSettingsPage /></AdminRoute>} />
         <Route
           path="/admin"
           element={

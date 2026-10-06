@@ -15,6 +15,8 @@ from .. import rental
 from ..routes import client
 from ..rental_logic import price_quote
 from ..schemas import CreateBookingIn
+from .policy import policy_for, SalesPolicy
+from .schedule import resource_works
 
 
 class ToolArgs(BaseModel):
@@ -77,6 +79,13 @@ TOOL_SCHEMAS = [{"type": "function", "function": {
 class ServGoTools:
     def __init__(self, db, business: Business, user=None):
         self.db, self.business, self.user = db, business, user
+        self.policy = policy_for(business)
+
+    async def require_tool(self, name):
+        saved = (await self.db.execute(select(Business.sales_agent_settings)
+            .where(Business.id == self.business.id))).scalar_one()
+        self.policy = SalesPolicy.model_validate((saved or {}).get("policy", {}))
+        self.policy.require(name)
 
     async def service(self, service_id: int) -> Service:
         service = (await self.db.execute(select(Service).where(
@@ -159,7 +168,7 @@ class ServGoTools:
               or service.price is None or service.is_hourly_price or service.duration_minutes <= 0):
             result.update(amount=None, price_requires_confirmation=True, booking_supported=False)
         elif addons:
-            if any(s.price is None or s.is_hourly_price for s in addons):
+            if any(s.price is None or s.is_hourly_price or s.pricing_type not in (None, "fixed") or s.tariff_description for s in addons):
                 result.update(amount=None, price_requires_confirmation=True, booking_supported=False)
             else:
                 result["amount"] = service.price + sum(s.price for s in addons)
@@ -168,12 +177,27 @@ class ServGoTools:
                 .where(VenueTimePricing.employee_id == employee.id).limit(1))).first()
             if rules:
                 result.update(price_requires_confirmation=True, booking_supported=False)
+        if (self.business.working_hours_start and self.business.working_hours_end
+            and self.business.working_hours_end <= self.business.working_hours_start):
+            # Existing SlotOut carries only HH:MM, so next-day starts cannot be
+            # safely confirmed against the requested calendar date by this adapter.
+            result["booking_supported"] = False
         result["prepayment_percent"] = (
             None if self.business.business_type == "venue_rental"
             else (self.business.prepayment_percent or 100) if self.business.prepayment_enabled else 0)
+        result["receipt_required"] = bool(self.business.require_receipt_for_prepayment)
+        result["payment_confirmation"] = "operator"
+        result["prepayment_amount"] = (
+            int(result["amount"] * result["prepayment_percent"] / 100)
+            if result["amount"] is not None and result["prepayment_percent"] is not None else None)
+        if self.business.business_type == "venue_rental":
+            result["deposit_policy"] = "Депозит назначает оператор аренды после согласования цены, максимум 20%"
         return result
 
     async def availability(self, args: AvailabilityArgs) -> dict:
+        if (self.business.working_hours_start and self.business.working_hours_end
+            and self.business.working_hours_end <= self.business.working_hours_start):
+            raise HTTPException(422, "Для ночного графика используйте обычную форму записи или оператора")
         service = await self.service(args.service_id)
         today = datetime.now(ZoneInfo("Europe/Moscow")).date()
         if args.date < today or args.date > today + timedelta(days=366):
@@ -182,11 +206,10 @@ class ServGoTools:
             raise HTTPException(422, "Сначала выберите основную услугу")
         employees = ([await self.employee(args.employee_id, service)] if args.employee_id
                      else await self.specialists(service))
-        days_off = set((await self.db.execute(select(EmployeeDayOff.employee_id).where(
-            EmployeeDayOff.date == args.date, EmployeeDayOff.employee_id.in_([e.id for e in employees])))).scalars())
         slots = []
         for employee in employees:
-            if employee.id in days_off or (employee.on_duty_date and employee.on_duty_date != args.date):
+            duration = args.duration_hours * 60 if args.duration_hours and self.business.business_type == "venue_rental" else service.duration_minutes
+            if not await resource_works(self.db, employee, args.date, duration):
                 continue
             if self.business.business_type == "venue_rental":
                 if not employee.solo_price_per_hour or not args.duration_hours:
@@ -203,6 +226,7 @@ class ServGoTools:
                 "duration_hours_required": self.business.business_type == "venue_rental" and not args.duration_hours}
 
     async def prepare_booking(self, args: BookingArgs) -> dict:
+        await self.require_tool("create_booking")
         service = await self.service(args.service_id)
         employee = await self.employee(args.employee_id, service)
         quote = await self.quote(PriceArgs.model_validate(args.model_dump()))
@@ -226,12 +250,17 @@ class ServGoTools:
             description += ". Доп. услуги: " + ", ".join(addon_names)
         if quote["prepayment_percent"]:
             description += f". Предоплата: {quote['prepayment_percent']}%"
+        if quote.get("deposit_policy"):
+            description += ". " + quote["deposit_policy"]
+        if quote["receipt_required"]:
+            description += ". Для проверки предоплаты требуется чек на странице записи"
         return {"description": description, "args": args.model_dump(mode="json"), "quote": quote,
                 "requires_contact": not self.user or (self.business.business_type == "venue_rental" and not self.user.phone),
                 "requires_legal_consent": bool(self.business.legal_documents_enabled),
                 "business_id": self.business.id, "cancellation_policy": self.business.cancellation_policy_text}
 
     async def execute_read(self, name: str, args: ToolArgs) -> dict:
+        await self.require_tool(name)
         if name == "get_services":
             query = select(Service).where(Service.business_id == self.business.id, Service.is_active.is_(True))
             if args.query:
@@ -239,11 +268,15 @@ class ServGoTools:
                 escaped = args.query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
                 query = query.where(Service.name.ilike(f"%{escaped}%", escape="\\"))
             services = (await self.db.execute(query.order_by(Service.sort_order, Service.id).limit(50))).scalars().all()
-            return {"services": [{"id": s.id, "name": s.name, "price": s.price,
+            return {"services": [{"id": s.id, "name": s.name, "price": s.price if self.policy.show_prices else None,
                 "duration_minutes": s.duration_minutes, "is_additional": s.is_additional,
                 "description": (s.description or "")[:300]} for s in services]}
         if name == "get_service_details":
-            return self.service_data(await self.service(args.service_id))
+            data = self.service_data(await self.service(args.service_id))
+            if not self.policy.show_prices:
+                for key in ("price", "tariff_description"):
+                    data.pop(key, None)
+            return data
         if name == "get_prices":
             return await self.quote(args)
         if name == "get_specialists":

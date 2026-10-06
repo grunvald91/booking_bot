@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api, type SalesInboxThread } from '../../api/client'
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
 import { AdminShell } from '../../components/AdminShell'
@@ -35,7 +36,11 @@ function BusinessInbox({ businessId }: { businessId: number }) {
     {error && <p role="alert" className="ds-sub">{error}</p>}
     {!threads.length && <p className="ds-text">Диалогов в очереди нет.</p>}
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-      {threads.map((t, i) => <button className="ds-chip" disabled={busy} key={t.id} aria-pressed={thread?.id === t.id} onClick={() => { setSelected(t.id); setInput('') }}>Диалог {i + 1}</button>)}
+      {threads.map(t => <button className="ds-chip" disabled={busy} key={t.id} aria-pressed={thread?.id === t.id} onClick={() => { setSelected(t.id); setInput('') }} style={{ textAlign: 'left', maxWidth: 320 }}>
+        <strong>Диалог {t.id.slice(0, 8)}</strong><br />
+        <small>{new Date(t.updated_at + 'Z').toLocaleString('ru-RU')}</small><br />
+        {(t.messages.filter(m => m.role === 'user').at(-1)?.text || t.reason || '').slice(0, 90)}
+      </button>)}
     </div>
     {thread && <div className="ds-card" style={{ padding: 14 }}>
       <p className="ds-sub">Причина: {thread.reason || 'Клиент попросил оператора'}</p>
@@ -54,6 +59,7 @@ function BusinessInbox({ businessId }: { businessId: number }) {
 export function SalesInboxPage() {
   const { businesses, selectedId, selectBusiness } = useAdminBusiness()
   return <AdminShell title="Диалоги ИИ" headerExtra={<BusinessSelector businesses={businesses} selectedId={selectedId} onSelect={selectBusiness} />}>
+    <Link to="/admin/sales/settings">Настройки ИИ-продавца</Link>
     {selectedId && <BusinessInbox key={selectedId} businessId={selectedId} />}
   </AdminShell>
 }

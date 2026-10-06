@@ -148,6 +148,7 @@ class Business(Base):
     legal_documents_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
     ai_instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # AI-инструкция для бизнеса
+    sales_agent_settings: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
