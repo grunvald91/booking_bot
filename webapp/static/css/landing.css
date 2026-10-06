@@ -896,6 +896,7 @@ button { font: inherit; cursor: pointer; }
 .form-actions .secondary-action { margin-left: 0; flex: 1; justify-content: center; }
 
 
+/* Production footer is deployed automatically with scoped webapp changes. */
 /* ──── Footer: niche presentations + contacts ──── */
 .site-footer {
     background: var(--navy);
