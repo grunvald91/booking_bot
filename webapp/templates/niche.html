@@ -50,41 +50,29 @@
 
 <main id="top">
 <section class="hero" aria-labelledby="hero-title">
-    <div class="hero-stage" aria-hidden="true">
-        <div class="color-panel panel-schedule">
-            <div class="panel-label">{{ niche.hero.stage_label | default('Цифровая команда') }}</div>
-            {% set stage_colors = ['mint','peach','sky','lemon'] %}
-            {% for item in niche.hero.stage_services %}
-            <div class="schedule-line {{ stage_colors[loop.index0 % 4] }}"><span>{{ item.time }}</span><b>{{ item.label }}</b></div>
-            {% endfor %}
-        </div>
-        <div class="phone-card">
-            <div class="phone-speaker"></div>
-            <div class="phone-caption">ServGo</div>
-            <div class="phone-title">{{ niche.hero.phone_title | default('Дальше — клиент') }}</div>
-            <div class="slot-grid">
-                {% for item in niche.hero.slots %}<span{% if loop.index == 3 %} class="selected"{% endif %}>{{ item }}</span>{% endfor %}
-            </div>
-            <div class="phone-submit">Одна система</div>
-        </div>
-    </div>
     <div class="hero-content">
         <p class="eyebrow">{{ niche.hero.eyebrow }}</p>
         <h1 id="hero-title">{{ niche.hero.h1 }}</h1>
         <p class="hero-copy">{{ niche.hero['copy'] }}</p>
-        {% if niche.hero.team_title %}
-        <div class="hero-team-card">
-            <strong>{{ niche.hero.team_title }}</strong>
-            <p>{{ niche.hero.team_copy }}</p>
-            <div class="hero-team-roles">
-                {% for role in niche.hero.team_roles %}<span>{{ role }}</span>{% endfor %}
-            </div>
-        </div>
-        {% endif %}
         <div class="hero-actions hero-main-actions">
             <button class="primary-action" type="button" data-open-connect-form>Показать для моего бизнеса</button>
             <a class="secondary-action" href="{{ niche.demo_site_url }}">Посмотреть запись</a>
         </div>
+    </div>
+
+    <div class="hero-core-systems" aria-label="Две основные системы ServGo">
+        {% for system in niche.core_systems %}
+        <article class="hero-system-card">
+            <span class="hero-system-num">{{ system.icon }}</span>
+            <h2>{{ system.title }}</h2>
+            <p>{{ system.text }}</p>
+            {% if system.bullets %}
+            <ul>
+                {% for bullet in system.bullets %}<li>{{ bullet }}</li>{% endfor %}
+            </ul>
+            {% endif %}
+        </article>
+        {% endfor %}
     </div>
 </section>
 
