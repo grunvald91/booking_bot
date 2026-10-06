@@ -222,6 +222,7 @@ export interface AdminBooking {
   id: number;
   client_name: string;
   client_phone?: string;
+  client_email?: string;
   service_name: string;
   service_duration?: number;
   price?: number;
