@@ -14,6 +14,7 @@ import {
   DoorOpen,
   User as UserIcon,
   ImagePlus,
+  ShieldCheck,
 } from 'lucide-react'
 import { api, type BusinessUpdateData, type OwnerInfo, type Employee } from '../../api/client'
 
@@ -186,6 +187,12 @@ export function SettingsPage() {
           payment_details: biz.payment_details || '',
           cancellation_policy_text: biz.cancellation_policy_text || '',
           require_receipt_for_prepayment: biz.require_receipt_for_prepayment ?? false,
+          legal_name: biz.legal_name || '',
+          legal_inn: biz.legal_inn || '',
+          legal_ogrn: biz.legal_ogrn || '',
+          legal_address: biz.legal_address || '',
+          legal_email: biz.legal_email || '',
+          legal_documents_enabled: biz.legal_documents_enabled ?? false,
           booking_labels: biz.booking_labels || {},
           booking_flow_order: biz.booking_flow_order || 'service_first',
         })
@@ -258,6 +265,36 @@ export function SettingsPage() {
       showToast('Сценарий записи сохранён')
     } catch (e) {
       alert('Ошибка при сохранении сценария: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Save legal operator details and document switch
+  const handleSaveLegal = async () => {
+    if (!businessId) return
+    setSaving(true)
+    try {
+      const updated = await api.updateBusiness(businessId, {
+        legal_name: form.legal_name,
+        legal_inn: form.legal_inn,
+        legal_ogrn: form.legal_ogrn,
+        legal_address: form.legal_address,
+        legal_email: form.legal_email,
+        legal_documents_enabled: form.legal_documents_enabled,
+      })
+      setForm((prev) => ({
+        ...prev,
+        legal_name: updated.legal_name || '',
+        legal_inn: updated.legal_inn || '',
+        legal_ogrn: updated.legal_ogrn || '',
+        legal_address: updated.legal_address || '',
+        legal_email: updated.legal_email || '',
+        legal_documents_enabled: updated.legal_documents_enabled ?? false,
+      }))
+      showToast('Юридические данные сохранены')
+    } catch (e) {
+      alert('Ошибка при сохранении юридических данных: ' + (e instanceof Error ? e.message : String(e)))
     } finally {
       setSaving(false)
     }
@@ -939,6 +976,60 @@ export function SettingsPage() {
               })}
             </div>
           )}
+        </section>
+
+        {/* === Legal documents === */}
+        <section className="ds-card" style={{ padding: 14 }}>
+          <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <ShieldCheck size={18} style={{ color: 'var(--s-accent)' }} />
+            Юридические документы и персональные данные
+          </h2>
+          <p className="ds-sub" style={{ marginBottom: 14, lineHeight: 1.5 }}>
+            Эти реквизиты подставляются в Политику обработки персональных данных, отдельное согласие на обработку ПД и условия записи. Не включайте документы, пока не указаны реальные данные оператора.
+          </p>
+
+          <div className="ds-field">
+            <label className="ds-label">Официальное наименование / ФИО ИП или самозанятого</label>
+            <input className="ds-input" value={form.legal_name || ''} onChange={(e) => updateField('legal_name', e.target.value)} placeholder="ИП Иванов Иван Иванович / ООО «…»" />
+          </div>
+          <div className="ds-field-row">
+            <div className="ds-field">
+              <label className="ds-label">ИНН</label>
+              <input className="ds-input" value={form.legal_inn || ''} onChange={(e) => updateField('legal_inn', e.target.value)} />
+            </div>
+            <div className="ds-field">
+              <label className="ds-label">ОГРН / ОГРНИП</label>
+              <input className="ds-input" value={form.legal_ogrn || ''} onChange={(e) => updateField('legal_ogrn', e.target.value)} />
+            </div>
+          </div>
+          <div className="ds-field">
+            <label className="ds-label">Адрес оператора</label>
+            <input className="ds-input" value={form.legal_address || ''} onChange={(e) => updateField('legal_address', e.target.value)} />
+          </div>
+          <div className="ds-field">
+            <label className="ds-label">Email для обращений по персональным данным</label>
+            <input type="email" className="ds-input" value={form.legal_email || ''} onChange={(e) => updateField('legal_email', e.target.value)} placeholder="privacy@example.ru" />
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 6 }}>
+            <div>
+              <div className="ds-text" style={{ fontWeight: 600 }}>Показывать документы и требовать отдельные согласия</div>
+              <p className="ds-caption" style={{ marginTop: 3 }}>После включения клиент не сможет завершить запись без двух самостоятельных подтверждений.</p>
+            </div>
+            <Toggle checked={form.legal_documents_enabled ?? false} onChange={(v) => updateField('legal_documents_enabled', v)} />
+          </div>
+
+          {businessId && (
+            <div className="ds-sub" style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 12 }}>
+              <a href={`/legal/privacy/${businessId}`} target="_blank" rel="noreferrer" className="ds-accent">Политика ПД</a>
+              <a href={`/legal/consent/${businessId}`} target="_blank" rel="noreferrer" className="ds-accent">Согласие на ПД</a>
+              <a href={`/legal/terms/${businessId}`} target="_blank" rel="noreferrer" className="ds-accent">Условия записи</a>
+            </div>
+          )}
+
+          <button onClick={handleSaveLegal} disabled={saving} className="ds-btn ds-btn--primary ds-btn--block" style={{ marginTop: 14 }}>
+            {saving ? 'Сохранение...' : 'Сохранить юридические данные'}
+          </button>
         </section>
 
         {/* === 3. Prepayment Settings === */}
