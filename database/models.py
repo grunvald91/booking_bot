@@ -61,6 +61,26 @@ class PushSubscription(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class NotificationDelivery(Base):
+    """Dedupe/audit record for configurable staff reminders and system events."""
+    __tablename__ = "notification_deliveries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dedupe_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    booking_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("bookings.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    business_id: Mapped[int] = mapped_column(
+        ForeignKey("businesses.id", ondelete="CASCADE"), index=True
+    )
+    audience: Mapped[str] = mapped_column(String(32))  # client | owner | master | admin | staff
+    event_kind: Mapped[str] = mapped_column(String(64))
+    offset_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    telegram_sent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    webpush_sent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Business(Base):
     """Бизнесы (салон красоты, автосервис и т.д.)"""
     __tablename__ = "businesses"
@@ -82,6 +102,13 @@ class Business(Base):
     directions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Как добраться
     booking_labels: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON: кастомные названия шагов записи
     booking_flow_order: Mapped[str] = mapped_column(String(32), default="service_first")  # service_first | resource_first
+
+    # Staff reminder settings. Immediate booking events are mandatory and are
+    # intentionally NOT controlled by these switches.
+    owner_reminders_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    owner_reminder_minutes: Mapped[str] = mapped_column(Text, default="[1440, 120]", nullable=False)
+    master_reminders_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    master_reminder_minutes: Mapped[str] = mapped_column(Text, default="[1440, 120]", nullable=False)
 
     # Настройки предоплаты
     prepayment_enabled: Mapped[bool] = mapped_column(Boolean, default=False)  # Включена ли предоплата
