@@ -15,6 +15,7 @@ from .database import get_db, Business, Service, Employee, Booking, User, Busine
 from .deps import get_current_admin
 from .rental_logic import available_starts, price_quote
 from .sales.schedule import resource_works
+from database.prepayment import payment_deadline, request_prepayment
 from database.booking_safety import (
     ACTIVE_BOOKING_STATUSES,
     BookingConflictError,
@@ -50,7 +51,8 @@ def _public_status(booking: Booking) -> dict:
             'time': booking.booking_time.strftime('%H:%M'), 'duration_minutes': booking.duration_minutes,
             'estimated_price': booking.estimated_price,
             'price_requires_confirmation': booking.price_requires_confirmation,
-            'prepayment_amount': booking.prepayment_amount}
+            'prepayment_amount': booking.prepayment_amount,
+            'prepayment_expires_at': payment_deadline(booking)}
 
 
 async def _booked_intervals(db: AsyncSession, business_id: int, employee_id: int, day: date):
@@ -290,10 +292,20 @@ async def update_rental_quote(booking_id: int, body: RentalQuoteUpdate,
         raise HTTPException(403, 'Not your business')
     if booking.status in ('cancelled', 'completed'):
         raise HTTPException(409, 'Booking cannot be quoted')
+    if booking.status not in ('pending', 'pending_prepayment'):
+        if (booking.estimated_price != body.estimated_price or booking.prepayment_amount != body.prepayment_amount):
+            raise HTTPException(409, 'Cannot change a quote after payment submission or confirmation')
+        from .routes.admin import _admin_booking_out
+        return _admin_booking_out(booking)
+    deadline = payment_deadline(booking)
+    if deadline is not None and deadline <= datetime.utcnow():
+        booking.status = 'cancelled'
+        await db.commit()
+        raise HTTPException(409, 'Payment window expired; create a new booking')
     if body.prepayment_amount > body.estimated_price * 0.2:
         raise HTTPException(400, 'Prepayment cannot exceed 20%')
     booking.estimated_price = body.estimated_price
-    booking.prepayment_amount = body.prepayment_amount
+    request_prepayment(booking, body.prepayment_amount)
     booking.price_requires_confirmation = False
     await db.commit()
     from .routes.admin import _admin_booking_out

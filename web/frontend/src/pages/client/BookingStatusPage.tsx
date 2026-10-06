@@ -85,6 +85,9 @@ export function BookingStatusPage() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [paymentBusy, setPaymentBusy] = useState(false)
+  const [receipt, setReceipt] = useState<File | null>(null)
+  const bookingStatus = booking?.status
 
   const load = useCallback(async (silent = false) => {
     if (!token) {
@@ -110,14 +113,14 @@ export function BookingStatusPage() {
   }, [load])
 
   useEffect(() => {
-    if (!booking || !['prepayment_sent', 'pending_prepayment', 'pending'].includes(booking.status)) {
+    if (!bookingStatus || !['prepayment_sent', 'pending_prepayment', 'pending'].includes(bookingStatus)) {
       return
     }
     const id = window.setInterval(() => {
       void load(true)
     }, 3000)
     return () => window.clearInterval(id)
-  }, [booking?.status, load])
+  }, [bookingStatus, load])
 
   useEffect(() => {
     const onVisible = () => {
@@ -212,6 +215,7 @@ export function BookingStatusPage() {
           )}
         </div>
 
+        {error && <p role="alert" className="ds-sub" style={{ marginTop: 10, color: 'var(--s-danger)' }}>{error}</p>}
         <div className="ds-card" style={{ marginTop: 12, padding: 16 }}>
           <h2 className="ds-h2">{booking.business_name}</h2>
           <div style={{ display: 'grid', gap: 9, marginTop: 12 }}>
@@ -239,6 +243,7 @@ export function BookingStatusPage() {
                 <span className="ds-text" style={{ fontWeight: 700 }}>{formatPrice(booking.total_price)}</span>
               </div>
             )}
+            {booking.price_requires_confirmation && <p className="ds-sub">Стоимость согласует компания. Запрос предоплаты появится после согласования.</p>}
             {booking.prepayment_enabled && booking.prepayment_amount > 0 && (
               <div className="ds-row" style={{ cursor: 'default', padding: 0 }}>
                 <span className="ds-sub">Предоплата</span>
@@ -287,6 +292,10 @@ export function BookingStatusPage() {
         {booking.status === 'pending_prepayment' && booking.prepayment_enabled && (
           <div className="ds-card" style={{ marginTop: 12, padding: 16 }}>
             <h3 className="ds-h3">Реквизиты для предоплаты</h3>
+            {booking.prepayment_expires_at && <p className="ds-sub" style={{ marginTop: 10 }}>
+              Отправьте предоплату и сообщите о переводе до {new Date(booking.prepayment_expires_at + (booking.prepayment_expires_at.endsWith('Z') ? '' : 'Z')).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}.
+              После истечения срока неоплаченная бронь будет отменена.
+            </p>}
             {booking.payment_phone && (
               <p className="ds-text" style={{ marginTop: 10 }}>
                 Телефон: <strong>{booking.payment_phone}</strong>
@@ -295,23 +304,31 @@ export function BookingStatusPage() {
             {booking.payment_details && (
               <p className="ds-sub" style={{ marginTop: 8, whiteSpace: 'pre-line' }}>{booking.payment_details}</p>
             )}
+            <label className="ds-sub" style={{ display: 'block', marginTop: 12 }}>
+              {booking.require_receipt_for_prepayment ? 'Приложите чек (обязательно)' : 'Чек об оплате (по желанию)'}
+              <input type="file" accept="image/*,application/pdf" disabled={paymentBusy} onChange={event => setReceipt(event.target.files?.[0] || null)} />
+            </label>
             <button
               type="button"
               className="ds-btn ds-btn--primary ds-btn--block"
               style={{ marginTop: 14 }}
+              disabled={paymentBusy || (booking.require_receipt_for_prepayment && !receipt)}
               onClick={async () => {
-                if (!token) return
+                if (!token || paymentBusy) return
+                setPaymentBusy(true); setError(null)
                 try {
-                  await api.prepaymentSentByToken(token)
+                  if (receipt) await api.uploadReceiptByToken(token, receipt)
+                  else await api.prepaymentSentByToken(token)
                   await load(true)
                 } catch {
-                  setError('Не удалось сообщить владельцу об оплате. Попробуйте ещё раз.')
+                  await load(true)
+                  setError('Не удалось сообщить об оплате. Проверьте статус: срок брони мог истечь. Если деньги уже отправлены, свяжитесь с компанией.')
                 }
+                finally { setPaymentBusy(false) }
               }}
             >
-              Оплата отправлена ✓
+              {paymentBusy ? 'Отправляем…' : receipt ? 'Отправить чек и сообщить об оплате' : 'Оплата отправлена ✓'}
             </button>
-            {error && <p className="ds-sub" style={{ marginTop: 8, color: 'var(--s-danger)' }}>{error}</p>}
           </div>
         )}
 

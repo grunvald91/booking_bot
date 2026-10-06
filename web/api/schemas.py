@@ -238,6 +238,8 @@ class PublicBookingOut(BaseModel):
     total_price: int
     prepayment_enabled: bool = False
     prepayment_amount: int = 0
+    prepayment_expires_at: Optional[datetime] = None
+    price_requires_confirmation: bool = False
     paid_amount: int = 0
     prepayment_confirmed: bool = False
     payment_phone: Optional[str] = None

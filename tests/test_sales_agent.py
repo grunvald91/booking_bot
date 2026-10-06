@@ -88,6 +88,9 @@ class SalesApiTests(unittest.IsolatedAsyncioTestCase):
             self.service, self.other_service = service.id, other_service.id
             self.employee, self.other_employee = employee.id, other_employee.id
         self.app = FastAPI(); self.app.include_router(ai.router)
+        from web.api.routes import client
+        from web.api import rental
+        self.app.include_router(client.router); self.app.include_router(rental.router)
         async def get_session():
             async with self.sessions() as db:
                 yield db
@@ -608,6 +611,200 @@ class SalesApiTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {"SERVGO_PLATFORM_API_TOKEN": token, "SERVGO_PLATFORM_BUSINESS_IDS": ""}):
             rows = await self.client.get("/platform/sales/businesses", headers=headers)
             self.assertEqual(rows.json(), [])
+
+    async def create_quoted_rental(self, amount=1000, *, old=True, receipt=False):
+        from web.api import rental
+        async with self.sessions() as db:
+            business = await db.get(Business, self.business)
+            business.business_type = "venue_rental"
+            business.require_receipt_for_prepayment = receipt
+            business.payment_phone = "+79990000009"
+            business.payment_details = "Демо реквизиты"
+            business.booking_labels = json.dumps({"resource": "Ресурс"})
+            (await db.get(Employee, self.employee)).solo_price_per_hour = 1000
+            await db.commit()
+        action = await self.propose(time="11:00", duration_hours=5)
+        result = await self.client.post("/ai/confirm", headers=self.auth, json={"action_id": action["action_id"]})
+        self.assertEqual(result.status_code, 200, result.text)
+        bid = result.json()["booking_ids"][0]
+        async with self.sessions() as db:
+            booking = await db.get(Booking, bid)
+            if old: booking.created_at = datetime.utcnow() - timedelta(hours=1)
+            await db.commit()
+            owner = await db.get(User, self.owner)
+            await rental.update_rental_quote(bid, rental.RentalQuoteUpdate(estimated_price=5000, prepayment_amount=amount), owner, db)
+            return bid, booking.notify_token
+
+    async def test_rental_positive_deposit_starts_new_window_then_expires_and_frees_resource(self):
+        from database.prepayment import expire_due_prepayments, payment_deadline
+        from web.api import rental
+        bid, token = await self.create_quoted_rental()
+        async with self.sessions() as db:
+            booking = await db.get(Booking, bid)
+            self.assertEqual(booking.status, "pending_prepayment")
+            self.assertGreater(booking.prepayment_requested_at, booking.created_at + timedelta(minutes=30))
+            deadline = payment_deadline(booking)
+            self.assertEqual(await expire_due_prepayments(db, now=deadline - timedelta(seconds=1)), [])
+            await db.commit()
+            owner = await db.get(User, self.owner)
+            await rental.update_rental_quote(bid, rental.RentalQuoteUpdate(estimated_price=5000, prepayment_amount=1000), owner, db)
+            self.assertEqual(payment_deadline(booking), deadline)  # repeat quote does not prolong hold
+            expired = await expire_due_prepayments(db, now=deadline)
+            self.assertEqual([b.id for b in expired], [bid])
+            await db.commit()
+            slots = await rental.rental_slots(self.business, self.day, self.employee, 5, db)
+            self.assertIn("11:00", slots["slots"])
+
+    async def test_rental_zero_deposit_has_no_payment_timer(self):
+        from database.prepayment import expire_due_prepayments, payment_deadline
+        bid, token = await self.create_quoted_rental(amount=0)
+        async with self.sessions() as db:
+            booking = await db.get(Booking, bid)
+            self.assertEqual(booking.status, "pending")
+            self.assertIsNone(payment_deadline(booking))
+            self.assertEqual(await expire_due_prepayments(db, now=datetime.utcnow() + timedelta(days=2)), [])
+        status = await self.client.get(f"/bookings/by-token/{token}")
+        self.assertEqual(status.status_code, 200, status.text)
+        self.assertFalse(status.json()["prepayment_enabled"])
+        self.assertEqual(status.json()["prepayment_amount"], 0)
+        self.assertIsNone(status.json()["prepayment_expires_at"])
+        self.assertEqual(status.json()["total_price"], 5000)
+
+    async def test_rental_uses_common_payment_page_and_required_receipt_protects_from_expiry(self):
+        from database.prepayment import expire_due_prepayments
+        bid, token = await self.create_quoted_rental(receipt=True)
+        status = await self.client.get(f"/bookings/by-token/{token}")
+        self.assertEqual(status.status_code, 200, status.text)
+        data = status.json()
+        self.assertEqual((data["total_price"], data["prepayment_amount"], data["duration_minutes"]), (5000, 1000, 300))
+        self.assertTrue(data["prepayment_enabled"])
+        self.assertTrue(data["require_receipt_for_prepayment"])
+        self.assertTrue(data["prepayment_expires_at"])
+        self.assertEqual(data["payment_details"], "Демо реквизиты")
+        self.assertEqual(data["employee_label"], "Ресурс")
+        denied = await self.client.post(f"/bookings/by-token/{token}/prepayment-sent")
+        self.assertEqual(denied.status_code, 422)
+        invalid = await self.client.post(f"/bookings/by-token/{token}/receipt", files={"file": ("empty.png", b"", "image/png")})
+        self.assertEqual(invalid.status_code, 422)
+        with patch("bot.services.notification_events.dispatch_booking_event", new=AsyncMock()) as event:
+            uploaded = await self.client.post(f"/bookings/by-token/{token}/receipt", files={"file": ("demo.png", b"synthetic-receipt", "image/png")})
+            self.assertEqual(uploaded.status_code, 200, uploaded.text)
+            replay = await self.client.post(f"/bookings/by-token/{token}/receipt", files={"file": ("demo.png", b"synthetic-receipt", "image/png")})
+            self.assertEqual(replay.status_code, 200)
+            self.assertEqual(event.await_count, 1)
+        async with self.sessions() as db:
+            booking = await db.get(Booking, bid)
+            self.assertEqual(booking.status, "prepayment_sent")
+            self.assertIsNone(booking.prepayment_confirmed_at)
+            self.assertEqual(await expire_due_prepayments(db, now=datetime.utcnow() + timedelta(hours=1)), [])
+
+    async def test_expiry_and_late_payment_submission_cannot_revive_cancelled_rental(self):
+        from database.prepayment import expire_due_prepayments
+        bid, token = await self.create_quoted_rental()
+        async with self.sessions() as db:
+            booking = await db.get(Booking, bid)
+            booking.prepayment_requested_at = datetime.utcnow() - timedelta(minutes=11)
+            await db.commit()
+        async def expire():
+            async with self.sessions() as db:
+                await expire_due_prepayments(db); await db.commit()
+        if self.pg_schema:
+            _, submitted = await asyncio.gather(expire(), self.client.post(f"/bookings/by-token/{token}/prepayment-sent"))
+        else:
+            await expire()
+            submitted = await self.client.post(f"/bookings/by-token/{token}/prepayment-sent")
+        self.assertEqual(submitted.status_code, 409, submitted.text)
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(Booking, bid)).status, "cancelled")
+
+    async def test_common_expiry_includes_services_rooms_and_yachts_only_when_payment_required(self):
+        from database.prepayment import expire_due_prepayments
+        old = datetime.utcnow() - timedelta(minutes=11)
+        async with self.sessions() as db:
+            for index, (label, duration, status, amount) in enumerate([
+                ("Услуга", None, "pending_prepayment", 1000),
+                ("Помещение", 300, "pending_prepayment", 1000),
+                ("Яхта", 300, "pending_prepayment", 1000),
+                ("Без предоплаты", 300, "pending", 0),
+                ("Без предоплаты — старый статус", 300, "pending_prepayment", 0),
+                ("Оплата отправлена", 300, "prepayment_sent", 1000),
+            ]):
+                db.add(Booking(business_id=self.business, service_id=self.service, employee_id=self.employee,
+                    client_id=self.customer, booking_date=self.day + timedelta(days=index), booking_time=time(11),
+                    status=status, duration_minutes=duration, prepayment_amount=amount, created_at=old, notes=label))
+            await db.commit()
+            expired = await expire_due_prepayments(db)
+            self.assertEqual({b.notes for b in expired}, {"Услуга", "Помещение", "Яхта"})
+            await db.commit()
+
+    async def test_payment_claim_row_lock_prevents_worker_cancelling_submitted_payment(self):
+        if not self.pg_schema: self.skipTest("Real PostgreSQL row locks")
+        from database.prepayment import expire_due_prepayments, payment_deadline, require_payment_window
+        bid, token = await self.create_quoted_rental()
+        started = asyncio.Event()
+        async with self.sessions() as payer:
+            booking = (await payer.execute(select(Booking).where(Booking.id == bid).with_for_update())).scalar_one()
+            await payer.refresh(booking, ["business"])
+            self.assertTrue(await require_payment_window(payer, booking))
+            later = payment_deadline(booking) + timedelta(seconds=1)
+            booking.status = "prepayment_sent"
+            await payer.flush()
+            async def expiry():
+                async with self.sessions() as worker:
+                    started.set()
+                    expired = await expire_due_prepayments(worker, now=later)
+                    await worker.commit()
+                    return expired
+            task = asyncio.create_task(expiry())
+            await started.wait()
+            await payer.commit()
+            self.assertEqual(await asyncio.wait_for(task, timeout=5), [])
+
+    async def test_scheduler_calls_common_expiry_for_rental(self):
+        from bot.services.notifications import expire_unpaid_bookings
+        bid, token = await self.create_quoted_rental()
+        async with self.sessions() as db:
+            (await db.get(Booking, bid)).prepayment_requested_at = datetime.utcnow() - timedelta(minutes=11)
+            await db.commit()
+        bot = AsyncMock()
+        with patch("bot.services.notifications.async_session_maker", self.sessions):
+            await expire_unpaid_bookings(bot)
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(Booking, bid)).status, "cancelled")
+        self.assertEqual(bot.send_message.await_count, 1)
+
+    async def test_prepayment_migrations_are_additive_scoped_and_do_not_restart_windows(self):
+        if not self.pg_schema: self.skipTest("Native PostgreSQL migration check")
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1] / "migrations"
+        schema = "prepayment_migration_" + uuid.uuid4().hex
+        async with self.admin_engine.begin() as connection:
+            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+            await connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+            await connection.execute(text("""CREATE TABLE bookings (
+                id INTEGER PRIMARY KEY, duration_minutes INTEGER, status VARCHAR(40),
+                prepayment_amount INTEGER, price_requires_confirmation BOOLEAN)"""))
+            await connection.execute(text("""INSERT INTO bookings VALUES
+                (1, NULL, 'pending_prepayment', 500, FALSE),
+                (2, 300, 'pending', 500, FALSE),
+                (3, 300, 'pending', 0, FALSE),
+                (4, 300, 'pending', 500, TRUE),
+                (5, 300, 'prepayment_sent', 500, FALSE),
+                (6, 300, 'confirmed', 500, FALSE)"""))
+            for _ in range(2):
+                await connection.execute(text((root / "add_prepayment_requested_at.sql").read_text()))
+            rows = (await connection.execute(text("SELECT status, prepayment_requested_at FROM bookings WHERE id=2"))).one()
+            self.assertEqual(rows, ("pending", None))  # DDL alone activates no timer
+            activation = text((root / "activate_rental_prepayment_windows.sql").read_text())
+            await connection.execute(activation)
+            timestamp = (await connection.execute(text("SELECT prepayment_requested_at FROM bookings WHERE id=2"))).scalar_one()
+            self.assertIsNotNone(timestamp)
+            await connection.execute(activation)
+            rows = (await connection.execute(text("SELECT id, status, prepayment_requested_at FROM bookings ORDER BY id"))).all()
+            self.assertEqual([r.status for r in rows], ["pending_prepayment", "pending_prepayment", "pending", "pending", "prepayment_sent", "confirmed"])
+            self.assertEqual(rows[1].prepayment_requested_at, timestamp)
+            self.assertTrue(all(r.prepayment_requested_at is None for r in rows if r.id != 2))
+            await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
 
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):

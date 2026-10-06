@@ -225,6 +225,8 @@ export interface PublicBooking {
   prepayment_amount: number;
   paid_amount: number;
   prepayment_confirmed: boolean;
+  prepayment_expires_at?: string | null;
+  price_requires_confirmation?: boolean;
   payment_phone?: string | null;
   payment_details?: string | null;
   require_receipt_for_prepayment: boolean;
