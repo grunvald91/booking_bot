@@ -1,0 +1,40 @@
+name: Mail final diagnostic
+on:
+  push:
+    branches: [ops/mail-final-diagnostic-20261006]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - shell: bash
+        run: |
+          python - <<'PY'
+          import base64,hashlib,os,paramiko
+          class P(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  a=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if a!='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU': raise Exception('host key')
+                  c.get_host_keys().add(h,k.get_name(),k)
+          c=paramiko.SSHClient(); c.set_missing_host_key_policy(P())
+          c.connect('155.212.162.47',username='root',password=os.environ['SERVER_PASSWORD'],look_for_keys=False,allow_agent=False)
+          cmd="postconf inet_interfaces inet_protocols myhostname smtp_helo_name; echo PORTS; ss -lntp | egrep ':(25|587|993)\\b' || true; echo SERVICES; for s in postfix dovecot opendkim fail2ban; do echo -n $s=; systemctl is-active $s || true; done; echo MAILCOUNT; find /var/mail/vhosts/servgo.ru/support/Maildir/new -type f | wc -l; echo QUEUE; mailq 2>&1 | tail -20"
+          _,o,e=c.exec_command(cmd,timeout=30)
+          print(o.read().decode()); print(e.read().decode()); c.close()
+          PY
+      - shell: bash
+        run: |
+          python - <<'PY'
+          import socket
+          for port in (25,587,993):
+              try:
+                  s=socket.create_connection(('mail.servgo.ru',port),timeout=5); s.close()
+                  print(f'PUBLIC {port}=ok')
+              except Exception as e:
+                  print(f'PUBLIC {port}=fail:{type(e).__name__}')
+          PY
