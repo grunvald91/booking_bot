@@ -14,6 +14,15 @@ const gradients = [
   'linear-gradient(135deg, #ec4899, #e11d48)',
 ]
 
+const nichePresentations = [
+  { label: 'Бани и сауны', href: 'https://promo.servgo.ru/banya' },
+  { label: 'Барбершопы', href: 'https://promo.servgo.ru/barbershop' },
+  { label: 'Салоны красоты', href: 'https://promo.servgo.ru/beauty' },
+  { label: 'Аренда залов и фотостудий', href: 'https://promo.servgo.ru/hall-rental' },
+  { label: 'Психологи и коучи', href: 'https://promo.servgo.ru/psy' },
+  { label: 'Шиномонтаж', href: 'https://promo.servgo.ru/shinomontazh' },
+]
+
 function formatWorkingHours(biz: Business) {
   if (biz.working_hours) return biz.working_hours
   if (biz.working_hours_start && biz.working_hours_end) {
@@ -196,6 +205,69 @@ export function HomePage() {
           })}
         </div>
       )}
+      <footer
+        style={{
+          marginTop: 36,
+          padding: '24px 18px',
+          borderRadius: 22,
+          background: 'var(--color-servgo-navy)',
+          color: '#fff',
+        }}
+      >
+        <p style={{ margin: 0, fontSize: 12, fontWeight: 700, opacity: 0.62, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          ServGo для бизнеса
+        </p>
+        <h2 style={{ margin: '8px 0 14px', fontSize: 20, lineHeight: 1.2, fontWeight: 800 }}>
+          Презентации для конкретных ниш
+        </h2>
+
+        <nav
+          aria-label="Презентации ServGo по нишам"
+          style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}
+        >
+          {nichePresentations.map((item) => (
+            <a
+              key={item.href}
+              href={item.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                color: '#fff',
+                textDecoration: 'none',
+                fontSize: 12,
+                fontWeight: 650,
+                lineHeight: 1.3,
+                padding: '8px 10px',
+                borderRadius: 10,
+                border: '1px solid rgba(255,255,255,0.18)',
+                background: 'rgba(255,255,255,0.07)',
+              }}
+            >
+              {item.label}
+            </a>
+          ))}
+        </nav>
+
+        <div
+          style={{
+            marginTop: 20,
+            paddingTop: 18,
+            borderTop: '1px solid rgba(255,255,255,0.14)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          <span style={{ fontSize: 12, fontWeight: 700, opacity: 0.62 }}>Связаться</span>
+          <a href="mailto:grunvaldlab@gmail.com" style={{ color: '#fff', fontSize: 14, fontWeight: 700, textDecoration: 'none' }}>
+            grunvaldlab@gmail.com
+          </a>
+          <a href="tel:+79023911399" style={{ color: '#fff', fontSize: 14, fontWeight: 700, textDecoration: 'none' }}>
+            8 902 391-13-99
+          </a>
+        </div>
+      </footer>
+
     </ClientShell>
   )
 }
