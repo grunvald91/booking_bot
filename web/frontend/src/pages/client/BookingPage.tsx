@@ -281,6 +281,12 @@ type InfoModalData = {
   title: string
   description?: string
   details?: string[]
+  photos?: string[]
+}
+
+function infoPhotoSrc(photo: string): string {
+  if (/^https?:\/\//i.test(photo) || photo.startsWith('/')) return photo
+  return `/api/telegram-photo/${encodeURIComponent(photo)}`
 }
 
 function InfoModal({ data, onClose }: { data: InfoModalData; onClose: () => void }) {
@@ -315,6 +321,29 @@ function InfoModal({ data, onClose }: { data: InfoModalData; onClose: () => void
             <X size={18} />
           </button>
         </div>
+        {data.photos && data.photos.length > 0 && (
+          <div className="bk-info-gallery" aria-label={`Фотографии: ${data.title}`}>
+            {data.photos.map((photo, i) => {
+              const src = infoPhotoSrc(photo)
+              return (
+                <a
+                  key={`${photo}-${i}`}
+                  href={src}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bk-info-gallery-item"
+                  aria-label={`Открыть фото ${i + 1} из ${data.photos!.length}`}
+                >
+                  <img
+                    src={src}
+                    alt={`${data.title} — фото ${i + 1}`}
+                    loading={i === 0 ? 'eager' : 'lazy'}
+                  />
+                </a>
+              )
+            })}
+          </div>
+        )}
         <p className="ds-text" style={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
           {data.description?.trim() || 'Подробное описание пока не добавлено.'}
         </p>
@@ -718,7 +747,13 @@ function BookingPageInner() {
       resource.area_sqm ? `Площадь: ${resource.area_sqm} м²` : '',
       getRoomPriceRange(resource) ? `Стоимость: ${getRoomPriceRange(resource)}` : '',
     ].filter(Boolean)
-    setInfoModal({ title: resource.name, description: resource.description, details })
+    const photos = Array.from(
+      new Set(
+        [resource.primary_photo, ...parsePhotos(resource.photos), resource.photo_url]
+          .filter((photo): photo is string => typeof photo === 'string' && photo.trim().length > 0)
+      )
+    )
+    setInfoModal({ title: resource.name, description: resource.description, details, photos })
   }
 
   // Список незаполненного для подсказки над кнопкой
