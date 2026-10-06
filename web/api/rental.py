@@ -95,6 +95,11 @@ async def rental_slots(business_id: int, date: date, employee_id: int,
 @router.post('/businesses/{business_id}/rental/bookings', status_code=201)
 async def create_rental_booking(business_id: int, body: RentalRequest,
                                 db: AsyncSession = Depends(get_db)):
+    return await create_rental_request(business_id, body, db)
+
+
+async def create_rental_request(business_id: int, body: RentalRequest, db: AsyncSession,
+                                *, user: User | None = None, commit: bool = True):
     business, employee = await _rental_context(db, business_id, body.employee_id)
     try:
         requested_time = time.fromisoformat(body.time)
@@ -175,12 +180,14 @@ async def create_rental_booking(business_id: int, body: RentalRequest,
     if len(client_name) < 2 or not (10 <= len(digits) <= 15):
         raise HTTPException(400, 'Valid name and phone are required')
 
-    client = User(
-        telegram_id=-secrets.randbelow(2**60)-1,
-        full_name=client_name,
-        phone=('+' if client_phone.startswith('+') else '') + digits,
-    )
-    db.add(client)
+    client = user
+    if client is None:
+        client = User(
+            telegram_id=-secrets.randbelow(2**60)-1,
+            full_name=client_name,
+            phone=('+' if client_phone.startswith('+') else '') + digits,
+        )
+        db.add(client)
     await db.flush()
 
     notes = [
@@ -211,7 +218,10 @@ async def create_rental_booking(business_id: int, body: RentalRequest,
     db.add(booking)
 
     try:
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
     except IntegrityError as exc:
         await db.rollback()
         message = str(exc).lower()
@@ -220,6 +230,13 @@ async def create_rental_booking(business_id: int, body: RentalRequest,
         raise
 
     await db.refresh(booking)
+    if commit:
+        await notify_rental_request(booking, db)
+    return {**_public_status(booking), 'tracking_token': booking.notify_token}
+
+
+async def notify_rental_request(booking, db):
+    """Shared post-commit event for web and AI rental requests."""
     try:
         from bot.services.notification_events import dispatch_booking_event
         await dispatch_booking_event(
@@ -236,7 +253,6 @@ async def create_rental_booking(business_id: int, body: RentalRequest,
             notification_error,
             exc_info=True,
         )
-    return {**_public_status(booking), 'tracking_token': booking.notify_token}
 
 
 @router.get('/rental/bookings/{tracking_token}')

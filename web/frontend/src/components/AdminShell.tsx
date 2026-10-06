@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Clock, Scissors, Users, Settings, Moon, Sun, LogOut } from 'lucide-react'
+import { LayoutDashboard, Clock, Scissors, Users, Settings, Moon, Sun, LogOut, MessageCircle } from 'lucide-react'
 import { useTheme } from '../hooks/useTheme'
 
 const NAV = [
@@ -9,6 +9,7 @@ const NAV = [
   { to: '/admin/schedule', label: 'Расписание', Icon: Clock },
   { to: '/admin/services', label: 'Услуги', Icon: Scissors },
   { to: '/admin/employees', label: 'Мастера', Icon: Users },
+  { to: '/admin/sales', label: 'Диалоги', Icon: MessageCircle },
   { to: '/admin/settings', label: 'Настройки', Icon: Settings },
 ]
 

@@ -628,6 +628,12 @@ async def create_booking(
     db: AsyncSession = Depends(get_db),
     user: Optional[User] = Depends(get_current_user_optional),
 ):
+    return await create_booking_visit(body, db, user)
+
+
+async def create_booking_visit(
+    body: CreateBookingIn, db: AsyncSession, user: Optional[User], *, commit: bool = True,
+):
     """Create a complete visit atomically under one resource lock."""
     biz_result = await db.execute(select(Business).where(Business.id == body.business_id))
     business = biz_result.scalar_one_or_none()
@@ -828,7 +834,10 @@ async def create_booking(
             current_time += timedelta(minutes=resource_duration)
 
     try:
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
     except IntegrityError as exc:
         await db.rollback()
         message = str(exc).lower()
@@ -856,6 +865,14 @@ async def create_booking(
         can_c, can_r = _can_modify_booking(loaded)
         result_bookings.append(_booking_to_out(loaded, can_cancel=can_c, can_reschedule=can_r))
 
+    if commit:
+        await notify_created_visit(created_bookings, db, business, client_email)
+
+    return result_bookings
+
+
+async def notify_created_visit(created_bookings, db, business, client_email=None):
+    """Shared post-commit events for ordinary and AI-created visits."""
     # Mandatory immediate event after a real booking is created.
     # If prepayment is enabled, this event is intentionally delayed until the
     # owner confirms receipt of payment.
@@ -888,8 +905,6 @@ async def create_booking(
                 "created",
             )
         )
-
-    return result_bookings
 
 
 # ---------- GET /my/bookings ----------

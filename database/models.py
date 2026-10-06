@@ -3,13 +3,32 @@
 """
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import BigInteger, String, DateTime, ForeignKey, Boolean, Integer, Text, Time, Date, UniqueConstraint
+from sqlalchemy import BigInteger, String, DateTime, ForeignKey, Boolean, Integer, Text, Time, Date, UniqueConstraint, JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
     """Базовый класс для всех моделей"""
     pass
+
+
+class SalesConversation(Base):
+    """Durable, tenant-scoped sales thread; no model-supplied identity fields."""
+    __tablename__ = "sales_conversations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), index=True)
+    principal: Mapped[str] = mapped_column(String(80))  # user:<id> or guest:<cookie digest>
+    messages: Mapped[list] = mapped_column(JSON, default=list)
+    stage: Mapped[str] = mapped_column(String(32), default="needs_analysis")
+    facts: Mapped[dict] = mapped_column(JSON, default=dict)
+    mode: Mapped[str] = mapped_column(String(16), default="ai")
+    handoff_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    action_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, unique=True)
+    action: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("business_id", "principal", name="uq_sales_business_principal"),)
 
 
 class User(Base):
