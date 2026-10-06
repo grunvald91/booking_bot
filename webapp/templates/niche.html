@@ -76,12 +76,6 @@
     </div>
 </section>
 
-<section class="signal-strip" aria-label="Что даёт ServGo">
-{% for card in niche.signal_strip %}
-    <div class="signal-card {{ card.color }}"><strong>{{ card.title }}</strong><span>{{ card.sub }}</span></div>
-{% endfor %}
-</section>
-
 <section class="section band-cream pains-section" id="pains">
     <div class="section-heading">
         <p class="eyebrow">{{ niche.pains.intro }}</p>
