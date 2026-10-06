@@ -12,7 +12,7 @@ mkdir -p "$BACKUP"
 
 export DEBIAN_FRONTEND=noninteractive
 
-# The VPS may be running apt-daily/unattended-upgrades. Wait rather than
+# The VPS may be running apt-daily/unattended-upgrades. Wait safely rather than
 # competing for dpkg/debconf locks.
 for lock in /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/debconf/config.dat; do
   for _ in $(seq 1 60); do
