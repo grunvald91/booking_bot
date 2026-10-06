@@ -1,5 +1,44 @@
 // === Type definitions ===
 
+export interface SalesPendingAction {
+  action_id: string;
+  description: string;
+  tool_name: string;
+  requires_contact: boolean;
+  requires_legal_consent: boolean;
+  business_id: number;
+  cancellation_policy?: string;
+  expires_at: string;
+}
+
+export interface SalesChatResult {
+  reply: string;
+  pending_action?: SalesPendingAction | null;
+  mode: 'ai' | 'human';
+  booking_url?: string | null;
+}
+
+export interface SalesHistory {
+  messages: { id: string; role: 'user' | 'ai'; text: string }[];
+  mode: 'ai' | 'human';
+  pending_action?: SalesPendingAction | null;
+  booking_url?: string | null;
+}
+
+export interface SalesConfirmation {
+  client_name?: string;
+  client_phone?: string;
+  personal_data_consent?: boolean;
+  booking_terms_accepted?: boolean;
+}
+
+export interface SalesInboxThread {
+  id: string;
+  reason?: string;
+  messages: SalesHistory['messages'];
+  updated_at: string;
+}
+
 export interface Business {
   id: number;
   name: string;
@@ -781,18 +820,31 @@ export const api = {
 
   // AI Chat
   aiChat: (message: string, businessId?: number) =>
-    request<{ reply: string; pending_action?: { action_id: string; description: string; tool_name: string } }>('/ai/chat', {
+    request<SalesChatResult>('/ai/chat', {
       method: 'POST',
       body: JSON.stringify({ message, business_id: businessId }),
     }),
-  aiConfirm: (actionId: string) =>
-    request<{ reply: string }>('/ai/confirm', {
+  aiHistory: (businessId: number) => request<SalesHistory>(`/ai/history?business_id=${businessId}`),
+  aiHandoff: (businessId: number) => request<SalesChatResult>('/ai/handoff', {
+    method: 'POST', body: JSON.stringify({ business_id: businessId }),
+  }),
+  aiConfirm: (actionId: string, details: SalesConfirmation = {}) =>
+    request<SalesChatResult>('/ai/confirm', {
       method: 'POST',
-      body: JSON.stringify({ action_id: actionId }),
+      body: JSON.stringify({ action_id: actionId, ...details }),
     }),
   aiReject: (actionId: string) =>
     request<{ message: string }>('/ai/reject', {
       method: 'POST',
       body: JSON.stringify({ action_id: actionId }),
     }),
+  salesInbox: (businessId: number) => request<SalesInboxThread[]>(`/admin/ai/businesses/${businessId}/conversations`),
+  salesReply: (conversationId: string, message: string) => request(`/admin/ai/conversations/${conversationId}/reply`, {
+    method: 'POST', body: JSON.stringify({ message }),
+  }),
+  salesResume: (conversationId: string) => request(`/admin/ai/conversations/${conversationId}/resume`, { method: 'POST' }),
+  rentalStatus: (token: string) => request<{
+    id: number; status: string; date: string; time: string; duration_minutes: number;
+    estimated_price: number | null; price_requires_confirmation: boolean; prepayment_amount: number | null;
+  }>(`/rental/bookings/${token}`),
 };

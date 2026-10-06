@@ -32,6 +32,7 @@ const adminNav = [
   { to: '/admin/employees', label: 'Сотрудники', icon: Users },
   { to: '/admin/subscriptions', label: 'Абонементы', icon: Ticket },
   { to: '/admin/analytics', label: 'Аналитика', icon: BarChart3 },
+  { to: '/admin/sales', label: 'Диалоги ИИ', icon: MessageCircle },
   { to: '/admin/settings', label: 'Настройки', icon: Settings },
 ]
 

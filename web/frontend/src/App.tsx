@@ -17,6 +17,8 @@ import { AnalyticsPage } from './pages/admin/AnalyticsPage'
 import { SettingsPage } from './pages/admin/SettingsPage'
 import { SubscriptionsAdminPage } from './pages/admin/SubscriptionsAdminPage'
 import { ChatPage } from './pages/client/ChatPage'
+import { SalesInboxPage } from './pages/admin/SalesInboxPage'
+import { RentalBookingStatusPage } from './pages/client/RentalBookingStatusPage'
 import { LegalPage } from './pages/client/LegalPage'
 
 /** Redirect /book?business_id=X → /book/X, or /book → / */
@@ -85,6 +87,7 @@ function App() {
         <Route path="/business/:id" element={<BusinessPage />} />
         <Route path="/book/:businessId" element={<BookingPage />} />
         <Route path="/b/:token" element={<BookingStatusPage />} />
+        <Route path="/rental/b/:token" element={<RentalBookingStatusPage />} />
         <Route
           path="/my"
           element={
@@ -105,6 +108,7 @@ function App() {
         <Route path="/calendar" element={<LegacyAdminRedirect to="/admin/schedule" />} />
 
         {/* Admin routes */}
+        <Route path="/admin/sales" element={<AdminRoute><SalesInboxPage /></AdminRoute>} />
         <Route
           path="/admin"
           element={
