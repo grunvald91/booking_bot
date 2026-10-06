@@ -82,6 +82,11 @@ jobs:
           echo '--- TLS cert availability ---'
           ls -ld /etc/letsencrypt/live/servgo.ru 2>/dev/null || true
           ls -ld /etc/letsencrypt/live/mail.servgo.ru 2>/dev/null || true
+          if [ -f /etc/letsencrypt/live/servgo.ru/fullchain.pem ]; then
+            openssl x509 -in /etc/letsencrypt/live/servgo.ru/fullchain.pem -noout -subject -ext subjectAltName
+          fi
+          echo '--- firewall ---'
+          ufw status 2>/dev/null || true
           '''
           _,out,err=ssh.exec_command(cmd,timeout=90)
           stdout=out.read().decode('utf-8','replace')
