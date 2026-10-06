@@ -138,9 +138,20 @@ async def send_booking_email(
     elif kind == "24h":
         subject = f"Напоминание о записи — {business_name}"
         lead = "Напоминаем о предстоящей записи."
-    elif kind == "prepayment_confirmed":
-        subject = f"Предоплата подтверждена — {business_name}"
-        lead = "Предоплата получена владельцем. Ваша запись подтверждена."
+    elif kind in {"confirmed", "prepayment_confirmed"}:
+        subject = (
+            f"Предоплата подтверждена — {business_name}"
+            if kind == "prepayment_confirmed"
+            else f"Запись подтверждена — {business_name}"
+        )
+        lead = (
+            "Предоплата получена владельцем. Ваша запись подтверждена."
+            if kind == "prepayment_confirmed"
+            else "Владелец подтвердил вашу запись."
+        )
+    elif kind == "cancelled":
+        subject = f"Запись отменена — {business_name}"
+        lead = "Ваша запись была отменена."
     elif kind == "prepayment_rejected":
         subject = f"Предоплата не подтверждена — {business_name}"
         lead = "Владелец пока не подтвердил получение предоплаты. Проверьте реквизиты и оплату."
