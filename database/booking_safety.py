@@ -219,3 +219,73 @@ async def busy_resource_intervals(
         start = datetime.combine(booking.booking_date, booking.booking_time)
         intervals.append((start, start + timedelta(minutes=duration)))
     return intervals
+
+
+async def contiguous_visit_bookings(
+    session: AsyncSession,
+    anchor: Booking,
+    statuses: Sequence[str] | None = None,
+) -> list[Booking]:
+    """Return the contiguous service rows that form the anchor's visit.
+
+    Modern multi-service visits store services sequentially, so equality on
+    booking_time is not enough. Legacy rows with the same start are also
+    grouped.
+    """
+    filters = [
+        Booking.client_id == anchor.client_id,
+        Booking.business_id == anchor.business_id,
+        Booking.employee_id == anchor.employee_id,
+        Booking.booking_date == anchor.booking_date,
+    ]
+    if statuses:
+        filters.append(Booking.status.in_(list(statuses)))
+
+    result = await session.execute(
+        select(Booking)
+        .where(and_(*filters))
+        .options(
+            selectinload(Booking.client),
+            selectinload(Booking.business),
+            selectinload(Booking.service),
+            selectinload(Booking.employee),
+        )
+        .order_by(Booking.booking_time, Booking.id)
+    )
+    items = list(result.scalars().all())
+    if not items:
+        return [anchor]
+
+    anchor_index = next((i for i, item in enumerate(items) if item.id == anchor.id), None)
+    if anchor_index is None:
+        return [anchor]
+
+    chain = [items[anchor_index]]
+
+    i = anchor_index - 1
+    while i >= 0:
+        prev = items[i]
+        first = chain[0]
+        prev_start = datetime.combine(prev.booking_date, prev.booking_time)
+        prev_end = prev_start + timedelta(minutes=booking_resource_duration(prev))
+        first_start = datetime.combine(first.booking_date, first.booking_time)
+        if prev.booking_time == first.booking_time or prev_end == first_start:
+            chain.insert(0, prev)
+            i -= 1
+        else:
+            break
+
+    i = anchor_index + 1
+    while i < len(items):
+        nxt = items[i]
+        last = chain[-1]
+        last_start = datetime.combine(last.booking_date, last.booking_time)
+        last_end = last_start + timedelta(minutes=booking_resource_duration(last))
+        nxt_start = datetime.combine(nxt.booking_date, nxt.booking_time)
+        if nxt.booking_time == chain[0].booking_time or nxt_start == last_end:
+            chain.append(nxt)
+            i += 1
+        else:
+            break
+
+    return chain

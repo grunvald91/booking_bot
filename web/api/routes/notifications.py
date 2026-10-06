@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..database import Booking, PushSubscription, User, get_db
 from ..deps import get_current_user_optional
@@ -95,6 +96,38 @@ async def subscribe(
         db.add(subscription)
 
     await db.commit()
+
+    # Guest PWA subscriptions are created only after the booking response gives
+    # the browser a notify_token. Deliver the already-created booking event now
+    # so guest clients get the same immediate PWA confirmation as authenticated
+    # clients. Prepayment-gated bookings wait for owner confirmation.
+    if body.notify_token:
+        try:
+            booking_result = await db.execute(
+                select(Booking)
+                .where(Booking.notify_token == body.notify_token)
+                .options(
+                    selectinload(Booking.business),
+                    selectinload(Booking.service),
+                    selectinload(Booking.employee),
+                    selectinload(Booking.client),
+                )
+            )
+            booking = booking_result.scalar_one_or_none()
+            if booking and booking.status in ("pending", "confirmed", "prepayment_confirmed"):
+                from bot.services.webpush import send_client_event_webpush
+                event_kind = (
+                    "rental_request_created"
+                    if getattr(booking, "duration_minutes", None) is not None
+                    else "booking_created"
+                )
+                await send_client_event_webpush([booking], db, event_kind)
+                await db.commit()
+        except Exception:
+            # Subscription itself succeeded; notification bootstrap must never
+            # make the endpoint fail.
+            await db.rollback()
+
     return {"ok": True}
 
 
