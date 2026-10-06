@@ -21,7 +21,7 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
     <link rel="manifest" href="/static/site.webmanifest?v=2">
     <link rel="stylesheet" href="/static/css/landing.css?v=12">
-    <link rel="stylesheet" href="/static/css/niche.css?v=3">
+    <link rel="stylesheet" href="/static/css/niche.css?v=4">
     <script type="application/ld+json">
     {
       "@context":"https://schema.org",
@@ -31,7 +31,7 @@
       "url":{{ ("https://promo.servgo.ru/" + niche.slug) | tojson }},
       "provider":{"@type":"Organization","name":"ServGo","url":"https://servgo.ru"},
       "areaServed":"RU",
-      "serviceType":"Цифровая платформа развития сервисного бизнеса"
+      "serviceType":"Подготовка текстов и онлайн-запись"
     }
     </script>
 </head>
@@ -39,143 +39,124 @@
 <header class="topbar">
     <a class="brand" href="#top" aria-label="ServGo"><span class="brand-mark">SG</span><span class="brand-name">ServGo</span></a>
     <nav class="nav-links" aria-label="Главная навигация">
-        <a href="#pains">Боли</a>
-        <a href="#system">Как решаем</a>
-        <a href="#inside">Что уже есть</a>
+        <a href="#system">Как работает</a>
         <a href="#pricing">Стоимость</a>
-        <a href="#roadmap">Планы</a>
+        <a href="#roadmap">Что дальше</a>
     </nav>
-    <button class="nav-cta" type="button" data-open-connect-form>Обсудить бизнес</button>
+    <button class="nav-cta" type="button" data-open-connect-form>Показать ServGo</button>
 </header>
 
 <main id="top">
-<section class="hero" aria-labelledby="hero-title">
-    <div class="hero-content">
-        <p class="eyebrow">{{ niche.hero.eyebrow }}</p>
-        <h1 id="hero-title">{{ niche.hero.h1 }}</h1>
-        <p class="hero-copy">{{ niche.hero['copy'] }}</p>
-        <div class="hero-actions hero-main-actions">
-            <button class="primary-action" type="button" data-open-connect-form>Показать для моего бизнеса</button>
-            <a class="secondary-action" href="{{ niche.demo_site_url }}">Посмотреть запись</a>
+    <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-content">
+            <p class="eyebrow">{{ niche.hero.eyebrow }}</p>
+            <h1 id="hero-title">{{ niche.hero.h1 }}</h1>
+            <p class="hero-copy">{{ niche.hero['copy'] }}</p>
+            <p class="hero-price"><strong>{{ niche.pricing.monthly }}/мес</strong><span> + {{ niche.pricing.setup }} за подключение</span></p>
+            <div class="hero-actions hero-main-actions">
+                <button class="primary-action" type="button" data-open-connect-form>Показать для моего бизнеса</button>
+                <a class="secondary-action" href="{{ niche.demo_site_url }}">Пример записи</a>
+            </div>
         </div>
-    </div>
-
-    <div class="hero-core-systems" aria-label="Две основные системы ServGo">
-        {% for system in niche.core_systems %}
-        <article class="hero-system-card">
-            <span class="hero-system-num">{{ system.icon }}</span>
-            <h2>{{ system.title }}</h2>
-            <p>{{ system.text }}</p>
-            {% if system.bullets %}
-            <ul>
-                {% for bullet in system.bullets %}<li>{{ bullet }}</li>{% endfor %}
-            </ul>
-            {% endif %}
-        </article>
-        {% endfor %}
-    </div>
-</section>
-
-<section class="section band-cream pains-section" id="pains">
-    <div class="section-heading">
-        <p class="eyebrow">{{ niche.pains.intro }}</p>
-        <h2>{{ niche.pains.h2 }}</h2>
-    </div>
-    <ul class="pains-list">
-    {% for item in niche.pains.entries %}
-        <li class="pain-item">
-            <span class="pain-bullet">{{ '%02d' % loop.index }}</span>
-            <span class="pain-text"><strong>{{ item.title }}</strong><br>{{ item.pain }}<br><b>{{ item.solution }}</b></span>
-        </li>
-    {% endfor %}
-    </ul>
-</section>
-
-<section class="section band-white" id="system">
-    <div class="section-heading">
-        <p class="eyebrow">Одна система вместо нескольких сервисов</p>
-        <h2>{{ niche.system.h2 }}</h2>
-        <p>{{ niche.system['copy'] }}</p>
-    </div>
-    <div class="feature-grid">
-    {% for card in niche.system.cards %}
-        <article class="feature-card card-{{ card.color }}"><span class="feature-icon">{{ card.icon }}</span><h3>{{ card.title }}</h3><p>{{ card.text }}</p></article>
-    {% endfor %}
-    </div>
-</section>
-
-<section class="section band-blue" id="clients">
-    <div class="split-layout">
-        <div><p class="eyebrow">Путь клиента</p><h2>{{ niche.clients.h2 }}</h2><p>{{ niche.clients['copy'] }}</p></div>
-        <div class="client-steps">
-        {% for step in niche.clients.steps %}
-            <div><span>{{ step.num }}</span><div class="step-text"><b>{{ step.title }}</b><small>{{ step.sub }}</small></div></div>
-        {% endfor %}
+        <div class="hero-summary" aria-label="Что даёт ServGo">
+            {% for card in niche.hero_cards %}
+            <article class="summary-card">
+                <span class="summary-number">{{ '%02d' % loop.index }}</span>
+                <h2>{{ card.title }}</h2>
+                <p>{{ card.text }}</p>
+            </article>
+            {% endfor %}
         </div>
-    </div>
-</section>
+    </section>
 
-<section class="section band-white" id="inside">
-    <div class="section-heading"><p class="eyebrow">Работает сейчас</p><h2>Что уже входит в ServGo</h2><p>Это не список обещаний. Эти части уже есть в системе или в рабочем маркетинговом контуре ServGo.</p></div>
-    <div class="capability-grid">{% for cap in niche.capability_grid %}<div><span></span>{{ cap }}</div>{% endfor %}</div>
-</section>
-
-<section class="section band-pricing" id="pricing">
-    <div class="pricing-panel">
-        <div class="pricing-copy"><p class="eyebrow">{{ niche.pricing.eyebrow }}</p><h2>{{ niche.pricing.h2 }}</h2><p>{{ niche.pricing['copy'] }}</p></div>
-        <div class="pricing-card" aria-label="Стоимость ServGo">
-            <span class="pricing-label">{{ niche.pricing.card_label }}</span>
-            <strong class="pricing-amount">{{ niche.pricing.card_amount }}</strong>
-            <span class="pricing-period">{{ niche.pricing.card_period }}</span>
-            <strong style="font-size:22px;margin-top:18px">{{ niche.pricing.setup_amount }}</strong>
-            <span class="pricing-period">{{ niche.pricing.setup_note }}</span>
-            <p>{{ niche.pricing.card_note }}</p>
+    <section class="promo-section pains-section" id="pains" aria-labelledby="pains-title">
+        <h2 id="pains-title">{{ niche.pains.h2 }}</h2>
+        <div class="pain-cards">
+            {% for item in niche.pains.entries %}
+            <article class="pain-card">
+                <h3>{{ item.title }}</h3>
+                <p>{{ item.pain }}</p>
+                <p class="pain-solution">{{ item.solution }}</p>
+            </article>
+            {% endfor %}
         </div>
-    </div>
-</section>
+    </section>
 
-<section class="section band-cream" id="roadmap">
-    <div class="section-heading"><p class="eyebrow">Ближайшее развитие</p><h2>{{ niche.roadmap.h2 }}</h2><p>{{ niche.roadmap['copy'] }}</p></div>
-    <div class="feature-grid">
-    {% for card in niche.roadmap.cards %}
-        <article class="feature-card card-{{ card.color }}"><span class="feature-icon">{{ card.icon }}</span><h3>{{ card.title }}</h3><p>{{ card.text }}</p></article>
-    {% endfor %}
-    </div>
-</section>
+    <section class="promo-section workflow-section" id="system" aria-labelledby="workflow-title">
+        <h2 id="workflow-title">{{ niche.workflow.h2 }}</h2>
+        <ol class="workflow-steps">
+            {% for step in niche.workflow.steps %}
+            <li><span class="summary-number">{{ loop.index }}</span><div><h3>{{ step.title }}</h3><p>{{ step.text }}</p></div></li>
+            {% endfor %}
+        </ol>
+        <p class="content-example"><strong>{{ niche.example.label }}:</strong> {{ niche.example.text }}</p>
+    </section>
 
-<section class="section band-launch" id="launch">
-    <div class="launch-panel">
-        <div><p class="eyebrow">{{ niche.launch.eyebrow }}</p><h2>{{ niche.launch.h2 }}</h2><p>{{ niche.launch['copy'] }}</p>
-            <div class="hero-actions launch-actions"><button class="primary-action" type="button" data-open-connect-form>Обсудить подключение</button></div>
+    <section class="promo-section offer-section" id="pricing" aria-labelledby="pricing-title">
+        <div class="offer-heading">
+            <p class="eyebrow">Стоимость</p>
+            <h2 id="pricing-title">Что вы получаете за {{ niche.pricing.monthly }} в месяц</h2>
         </div>
-        <ol class="launch-list">{% for step in niche.launch.steps %}<li><span>{{ '%02d' % loop.index }}</span><b>{{ step }}</b></li>{% endfor %}</ol>
-    </div>
-</section>
+        <div class="offer-grid">
+            <div class="offer-included">
+                <ul>{% for item in niche.pricing.included %}<li>{{ item }}</li>{% endfor %}</ul>
+                <p class="offer-note">{{ niche.pricing.note }}</p>
+                <h3>Настроим всё за вас</h3>
+                <p>{{ niche.pricing.setup_note }}</p>
+            </div>
+            <div class="offer-price-card">
+                <strong class="offer-amount">{{ niche.pricing.monthly }}</strong>
+                <span>в месяц</span>
+                <p><strong>{{ niche.pricing.setup }}</strong> — подключение один раз</p>
+                <p class="offer-total">Подключение + первый месяц: <strong>{{ niche.pricing.first_month }}</strong></p>
+                <button class="primary-action" type="button" data-open-connect-form>Обсудить подключение</button>
+            </div>
+        </div>
+    </section>
 
-{% if niche.faq and niche.faq.entries %}
-<section class="section band-white faq-section" id="faq">
-    <div class="section-heading"><p class="eyebrow">Частые вопросы</p><h2>{{ niche.faq.h2 }}</h2></div>
-    <div class="faq-list">{% for item in niche.faq.entries %}<details class="faq-item"{% if loop.first %} open{% endif %}><summary>{{ item.q }}</summary><p>{{ item.a }}</p></details>{% endfor %}</div>
-</section>
-{% endif %}
+    <section class="promo-section roadmap-section" id="roadmap" aria-labelledby="roadmap-title">
+        <p class="eyebrow">{{ niche.roadmap.eyebrow }}</p>
+        <h2 id="roadmap-title">{{ niche.roadmap.h2 }}</h2>
+        <p class="roadmap-intro">{{ niche.roadmap['copy'] }}</p>
+        <div class="roadmap-grid">
+            <article class="seller-card">
+                <span class="plan-label">Ближайший этап · в разработке</span>
+                <h3>{{ niche.roadmap.seller_title }}</h3>
+                <p>{{ niche.roadmap.seller_copy }}</p>
+                <ol class="seller-steps">{% for step in niche.roadmap.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+            </article>
+            <article class="social-plan-card">
+                <span class="plan-label">Дальнейший план</span>
+                <h3>{{ niche.roadmap.social_title }}</h3>
+                <p>{{ niche.roadmap.social_copy }}</p>
+            </article>
+        </div>
+    </section>
 
-<section class="section band-final">
-    <div class="final-content"><p class="eyebrow">{{ niche.final.eyebrow }}</p><h2>{{ niche.final.h2 }}</h2><p>{{ niche.final['copy'] }}</p>
-        <div class="hero-actions"><button class="primary-action" type="button" data-open-connect-form>Показать ServGo для моего бизнеса</button><a class="secondary-action" href="{{ niche.demo_site_url }}">Посмотреть запись</a></div>
-    </div>
-</section>
+    <section class="promo-section faq-section" id="faq" aria-labelledby="faq-title">
+        <h2 id="faq-title">Перед подключением</h2>
+        <div class="faq-list">
+            {% for item in niche.faq.entries + niche.niche_faq %}
+            <details class="faq-item"{% if loop.first %} open{% endif %}><summary>{{ item.q }}</summary><p>{{ item.a }}</p></details>
+            {% endfor %}
+        </div>
+    </section>
 
-{% if other_niches %}
-<section class="section band-related" aria-label="Другие ниши ServGo">
-    <div class="section-heading"><p class="eyebrow">ServGo для других ниш</p><h2>Та же платформа — разные боли бизнеса</h2></div>
-    <div class="related-grid">{% for other in other_niches %}<a class="related-card" href="/{{ other.slug }}"><span class="related-label">{{ other.label }}</span><span class="related-arrow">→</span></a>{% endfor %}</div>
-</section>
-{% endif %}
+    <section class="promo-section final-section" aria-labelledby="final-title">
+        <h2 id="final-title">{{ niche.final.h2 }}</h2>
+        <p>{{ niche.final['copy'] }}</p>
+        <button class="primary-action" type="button" data-open-connect-form>Показать для моего бизнеса</button>
+    </section>
 </main>
 
 <footer class="site-footer">
     <div class="site-footer-inner">
-        <div><p class="eyebrow">ServGo</p><h2>Цифровая платформа развития сервисного бизнеса</h2><p class="footer-brand-note">Маркетинг → клиент → запись → возврат → аналитика</p></div>
+        <div>
+            <p class="footer-brand-note">ServGo · подготовка текстов и онлайн-запись</p>
+            {% if other_niches %}
+            <nav class="footer-niche-links" aria-label="ServGo для других ниш">{% for other in other_niches %}<a href="/{{ other.slug }}">{{ other.label }}</a>{% endfor %}</nav>
+            {% endif %}
+        </div>
         <div class="footer-contacts"><strong>Связаться</strong><div class="footer-contact-links"><a href="mailto:grunvaldlab@gmail.com">grunvaldlab@gmail.com</a><a href="tel:+79023911399">8 902 391-13-99</a></div></div>
     </div>
 </footer>
@@ -183,19 +164,19 @@
 <div class="modal-backdrop" data-connect-modal hidden>
     <div class="connect-modal" role="dialog" aria-modal="true" aria-labelledby="connect-form-title">
         <button class="modal-close" type="button" data-close-connect-form aria-label="Закрыть форму">×</button>
-        <p class="eyebrow">ServGo для вашего бизнеса</p>
-        <h2 id="connect-form-title">Расскажите, как с вами связаться</h2>
+        <p class="eyebrow">{{ niche.meta.short_label }}</p>
+        <h2 id="connect-form-title">Покажем ServGo для вашего бизнеса</h2>
         <form class="connect-form" data-connect-form novalidate>
             <input type="hidden" name="niche" value="{{ niche.slug }}">
             <label><span>Имя</span><input type="text" name="name" autocomplete="name" required></label>
             <div class="form-grid"><label><span>Телефон</span><input type="tel" name="phone" autocomplete="tel"></label><label><span>Email</span><input type="email" name="email" autocomplete="email"></label></div>
-            <label><span>Что сейчас больше всего мешает расти?</span><textarea name="comment" rows="4" placeholder="Например: мало новых клиентов, пустые окна, нет времени на контент"></textarea></label>
-            <p class="form-hint">Укажите имя и телефон или email.</p>
+            <label><span>О вашем бизнесе — по желанию</span><textarea name="comment" rows="3" placeholder="Какие услуги предлагаете и с чем нужна помощь?"></textarea></label>
+            <p class="form-hint">Укажите имя и телефон или email. Свяжемся и договоримся о показе.</p>
             <div class="form-status" data-connect-form-status role="status" aria-live="polite"></div>
-            <div class="form-actions"><button class="primary-action" type="submit">Отправить</button><button class="secondary-action" type="button" data-close-connect-form>Отмена</button></div>
+            <div class="form-actions"><button class="primary-action" type="submit">Запросить показ</button><button class="secondary-action" type="button" data-close-connect-form>Отмена</button></div>
         </form>
     </div>
 </div>
-<script src="/static/js/landing.js?v=6"></script>
+<script src="/static/js/landing.js?v=7"></script>
 </body>
 </html>
