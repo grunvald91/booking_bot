@@ -3768,7 +3768,10 @@ async def admin_confirm_booking(callback: CallbackQuery):
         result = await session.execute(
             select(Booking)
             .options(
-                selectinload(Booking.business)
+                selectinload(Booking.client),
+                selectinload(Booking.business),
+                selectinload(Booking.service),
+                selectinload(Booking.employee),
             )
             .where(Booking.id == booking_id)
         )
@@ -3797,6 +3800,12 @@ async def admin_confirm_booking(callback: CallbackQuery):
         # Подтверждаем запись
         booking.status = "confirmed"
         await session.commit()
+
+        try:
+            from bot.services.email_notifications import send_booking_email
+            await send_booking_email([booking], "confirmed")
+        except Exception as email_err:
+            logger.warning("Email confirmation failed for booking %s: %s", booking.id, email_err)
 
     await callback.answer("✅ Запись подтверждена")
     # Перенаправляем обратно на детали записи
@@ -3889,6 +3898,12 @@ async def admin_cancel_booking(callback: CallbackQuery):
         # Отменяем запись
         booking.status = "cancelled"
         await session.commit()
+
+        try:
+            from bot.services.email_notifications import send_booking_email
+            await send_booking_email([booking], "cancelled")
+        except Exception as email_err:
+            logger.warning("Email cancellation failed for booking %s: %s", booking.id, email_err)
 
         # Уведомляем клиента об отмене
         try:
@@ -5680,6 +5695,12 @@ async def confirm_prepayment_by_owner(callback: CallbackQuery, state: FSMContext
         except Exception as push_err:
             logger.warning("Web Push confirmation failed for booking %s: %s", booking.id, push_err)
 
+        try:
+            from bot.services.email_notifications import send_booking_email
+            await send_booking_email([booking], "prepayment_confirmed")
+        except Exception as email_err:
+            logger.warning("Email prepayment confirmation failed for booking %s: %s", booking.id, email_err)
+
         # Отправляем уведомление клиенту
         from bot.utils.validators import format_phone as fmt_phone
         from bot.utils.business_types import is_venue_rental_type
@@ -5847,6 +5868,12 @@ async def reject_prepayment_by_owner(callback: CallbackQuery, state: FSMContext)
             await session.commit()
         except Exception as push_err:
             logger.warning("Web Push rejection failed for booking %s: %s", booking.id, push_err)
+
+        try:
+            from bot.services.email_notifications import send_booking_email
+            await send_booking_email([booking], "prepayment_rejected")
+        except Exception as email_err:
+            logger.warning("Email prepayment rejection failed for booking %s: %s", booking.id, email_err)
 
         # Уведомляем клиента
         client_text = (
