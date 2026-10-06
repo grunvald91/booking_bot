@@ -325,6 +325,10 @@ export interface BusinessAdminDetail {
   legal_documents_enabled?: boolean;
   booking_labels?: Record<string, string>;
   booking_flow_order?: 'service_first' | 'resource_first';
+  owner_reminders_enabled: boolean;
+  owner_reminder_minutes: number[];
+  master_reminders_enabled: boolean;
+  master_reminder_minutes: number[];
 }
 
 export interface BusinessUpdateData {
@@ -352,6 +356,10 @@ export interface BusinessUpdateData {
   legal_documents_enabled?: boolean;
   booking_labels?: Record<string, string>;
   booking_flow_order?: 'service_first' | 'resource_first';
+  owner_reminders_enabled?: boolean;
+  owner_reminder_minutes?: number[];
+  master_reminders_enabled?: boolean;
+  master_reminder_minutes?: number[];
 }
 
 export interface OwnerInfo {

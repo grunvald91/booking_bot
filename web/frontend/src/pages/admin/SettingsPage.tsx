@@ -47,6 +47,14 @@ import { BusinessSelector } from '../../components/BusinessSelector'
 import { AdminShell } from '../../components/AdminShell'
 import { NotificationSetup } from '../../components/NotificationSetup'
 
+const REMINDER_PRESETS = [1440, 720, 360, 180, 120, 60, 30]
+
+function reminderLabel(minutes: number) {
+  if (minutes % 1440 === 0) return `${minutes / 1440} дн.`
+  if (minutes % 60 === 0) return `${minutes / 60} ч.`
+  return `${minutes} мин.`
+}
+
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
@@ -94,6 +102,8 @@ export function SettingsPage() {
 
   // Business profile form
   const [form, setForm] = useState<BusinessUpdateData>({})
+  const [ownerCustomMinutes, setOwnerCustomMinutes] = useState('')
+  const [masterCustomMinutes, setMasterCustomMinutes] = useState('')
   const [photos, setPhotos] = useState<string[]>([])
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
 
@@ -195,6 +205,10 @@ export function SettingsPage() {
           legal_documents_enabled: biz.legal_documents_enabled ?? false,
           booking_labels: biz.booking_labels || {},
           booking_flow_order: biz.booking_flow_order || 'service_first',
+          owner_reminders_enabled: biz.owner_reminders_enabled ?? true,
+          owner_reminder_minutes: biz.owner_reminder_minutes?.length ? biz.owner_reminder_minutes : [1440, 120],
+          master_reminders_enabled: biz.master_reminders_enabled ?? true,
+          master_reminder_minutes: biz.master_reminder_minutes?.length ? biz.master_reminder_minutes : [1440, 120],
         })
         try {
           setPhotos(biz.photos ? JSON.parse(biz.photos) : [])
@@ -295,6 +309,55 @@ export function SettingsPage() {
       showToast('Юридические данные сохранены')
     } catch (e) {
       alert('Ошибка при сохранении юридических данных: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const toggleReminderOffset = (field: 'owner_reminder_minutes' | 'master_reminder_minutes', minutes: number) => {
+    const current = form[field] || []
+    const next = current.includes(minutes)
+      ? current.filter((value) => value !== minutes)
+      : [...current, minutes]
+    if (next.length === 0) return
+    updateField(field, [...new Set(next)].sort((a, b) => b - a).slice(0, 6))
+  }
+
+  const addCustomReminder = (
+    field: 'owner_reminder_minutes' | 'master_reminder_minutes',
+    raw: string,
+    clear: () => void,
+  ) => {
+    const minutes = Number(raw)
+    if (!Number.isInteger(minutes) || minutes < 5 || minutes > 10080) {
+      alert('Укажите от 5 до 10080 минут')
+      return
+    }
+    const next = [...new Set([...(form[field] || []), minutes])].sort((a, b) => b - a).slice(0, 6)
+    updateField(field, next)
+    clear()
+  }
+
+  const handleSaveReminders = async () => {
+    if (!businessId) return
+    setSaving(true)
+    try {
+      const updated = await api.updateBusiness(businessId, {
+        owner_reminders_enabled: form.owner_reminders_enabled ?? true,
+        owner_reminder_minutes: form.owner_reminder_minutes?.length ? form.owner_reminder_minutes : [1440, 120],
+        master_reminders_enabled: form.master_reminders_enabled ?? true,
+        master_reminder_minutes: form.master_reminder_minutes?.length ? form.master_reminder_minutes : [1440, 120],
+      })
+      setForm((prev) => ({
+        ...prev,
+        owner_reminders_enabled: updated.owner_reminders_enabled,
+        owner_reminder_minutes: updated.owner_reminder_minutes,
+        master_reminders_enabled: updated.master_reminders_enabled,
+        master_reminder_minutes: updated.master_reminder_minutes,
+      }))
+      showToast('Настройки уведомлений сохранены')
+    } catch (e) {
+      alert('Ошибка сохранения уведомлений: ' + (e instanceof Error ? e.message : String(e)))
     } finally {
       setSaving(false)
     }
@@ -478,10 +541,101 @@ export function SettingsPage() {
           <h2 className="ds-h3" style={{ marginBottom: 6 }}>
             Уведомления о записях
           </h2>
-          <p className="ds-sub" style={{ marginBottom: 8, lineHeight: 1.5 }}>
-            Включите системные уведомления на этом устройстве. ServGo будет напоминать владельцу о предстоящих записях за 24 часа и за 2 часа.
+          <p className="ds-sub" style={{ marginBottom: 10, lineHeight: 1.5 }}>
+            Новая подтверждённая запись всегда отправляется клиенту и причастным сотрудникам. Ниже настраиваются только дополнительные напоминания перед визитом.
           </p>
           <NotificationSetup />
+
+          {([
+            {
+              title: 'Владельцы и совладельцы',
+              enabledField: 'owner_reminders_enabled' as const,
+              minutesField: 'owner_reminder_minutes' as const,
+              custom: ownerCustomMinutes,
+              setCustom: setOwnerCustomMinutes,
+            },
+            {
+              title: 'Мастера / ответственные',
+              enabledField: 'master_reminders_enabled' as const,
+              minutesField: 'master_reminder_minutes' as const,
+              custom: masterCustomMinutes,
+              setCustom: setMasterCustomMinutes,
+            },
+          ]).map((group) => (
+            <div key={group.title} style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--s-border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <div>
+                  <div className="ds-label">{group.title}</div>
+                  <div className="ds-caption">Telegram и PWA, если уведомления разрешены на устройстве</div>
+                </div>
+                <Toggle
+                  checked={form[group.enabledField] ?? true}
+                  onChange={(value) => updateField(group.enabledField, value)}
+                />
+              </div>
+
+              {(form[group.enabledField] ?? true) && (
+                <>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginTop: 10 }}>
+                    {REMINDER_PRESETS.map((minutes) => {
+                      const selected = (form[group.minutesField] || []).includes(minutes)
+                      return (
+                        <button
+                          key={minutes}
+                          type="button"
+                          className={selected ? 'ds-btn ds-btn--primary' : 'ds-btn'}
+                          onClick={() => toggleReminderOffset(group.minutesField, minutes)}
+                          style={{ minHeight: 34, padding: '6px 10px' }}
+                        >
+                          {reminderLabel(minutes)}
+                        </button>
+                      )
+                    })}
+                    {(form[group.minutesField] || [])
+                      .filter((minutes) => !REMINDER_PRESETS.includes(minutes))
+                      .map((minutes) => (
+                        <button
+                          key={minutes}
+                          type="button"
+                          className="ds-btn ds-btn--primary"
+                          onClick={() => toggleReminderOffset(group.minutesField, minutes)}
+                          style={{ minHeight: 34, padding: '6px 10px' }}
+                        >
+                          {reminderLabel(minutes)} ×
+                        </button>
+                      ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 9 }}>
+                    <input
+                      type="number"
+                      min={5}
+                      max={10080}
+                      value={group.custom}
+                      onChange={(e) => group.setCustom(e.target.value)}
+                      placeholder="Своё время, мин"
+                      className="ds-input"
+                    />
+                    <button
+                      type="button"
+                      className="ds-btn"
+                      onClick={() => addCustomReminder(group.minutesField, group.custom, () => group.setCustom(''))}
+                    >
+                      Добавить
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+
+          <button
+            onClick={handleSaveReminders}
+            disabled={saving}
+            className="ds-btn ds-btn--primary ds-btn--block"
+            style={{ marginTop: 14 }}
+          >
+            {saving ? 'Сохранение...' : 'Сохранить уведомления'}
+          </button>
         </section>
 
         {/* === 1. Business Profile === */}
