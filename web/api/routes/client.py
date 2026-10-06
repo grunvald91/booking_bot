@@ -848,6 +848,9 @@ async def create_booking(
     async def _send_booking_notifications():
         try:
             bot_token = os.getenv("BOT_TOKEN")
+            if not bot_token:
+                logger.error("BOT_TOKEN is not configured; booking Telegram notifications skipped")
+                return
             client_name = body.client_name or (booking_user.full_name if booking_user else "Клиент") or "Клиент"
             client_phone = body.client_phone or (booking_user.phone if booking_user else None)
             client_tg_id = booking_user.telegram_id if booking_user else None
@@ -1384,8 +1387,16 @@ async def _mark_prepayment_sent(booking: Booking, db: AsyncSession) -> dict:
                 bot_token = os.getenv("BOT_TOKEN")
                 if not bot_token:
                     logger.error("BOT_TOKEN is not configured; Telegram notification skipped")
-                    return
-                async with httpx.AsyncClient(timeout=30) as http:
+                else:
+                    async with httpx.AsyncClient(timeout=30) as http:
+                        resp = await http.post(
+                            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                            json={"chat_id": owner.telegram_id, "text": msg, "parse_mode": "HTML", "reply_markup": prepay_kb},
+                        )
+                        if resp.status_code != 200:
+                            logger.error(f"Telegram sendMessage failed for prepayment booking {booking.id}: {resp.status_code} {resp.text}")
+                        else:
+                            logger.info(f"Prepayment notification sent to owner {owner.telegram_id} for booking {booking.id}")
                     resp = await http.post(
                         f"https://api.telegram.org/bot{bot_token}/sendMessage",
                         json={"chat_id": owner.telegram_id, "text": msg, "parse_mode": "HTML", "reply_markup": prepay_kb},
@@ -1419,6 +1430,9 @@ async def _send_receipt_and_notify(booking: Booking, db: AsyncSession, file: Upl
             owner = owner_result.scalar_one_or_none()
             if owner and owner.telegram_id:
                 bot_token = os.getenv("BOT_TOKEN")
+                if not bot_token:
+                    logger.error("BOT_TOKEN is not configured; receipt Telegram notification skipped")
+                    return {"message": "Receipt recorded; Telegram notification unavailable"}
 
                 file_content = await file.read()
                 content_type = file.content_type or "image/jpeg"
