@@ -156,6 +156,9 @@ jobs:
               code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:8080/ || true)
               if [ "$code" != "000" ] && [ "$code" -lt 500 ]; then
                 echo "webapp HTTP $code (attempt $attempt)"
+                niche_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 4 http://127.0.0.1:8080/beauty || true)
+                echo "promo niche HTTP $niche_code"
+                [ "$niche_code" = "200" ] || exit 1
                 exit 0
               fi
               sleep 2
