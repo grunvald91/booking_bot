@@ -1,0 +1,171 @@
+name: Client email production release
+
+on:
+  push:
+    branches: [ops/client-email-release-20261006]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build frontend
+        working-directory: web/frontend
+        run: |
+          npm ci --legacy-peer-deps
+          npm run build
+      - name: Pack release
+        run: |
+          tar -czf /tmp/client-email-release.tgz             email_utils.py             database/models.py             database/crud.py             web/api/schemas.py             web/api/routes/client.py             bot/services/email_notifications.py             bot/services/notifications.py             bot/handlers/admin.py             migrations/add_user_email.sql             web/frontend/dist
+      - name: Install SSH library
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Deploy and audit SMTP presence
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, time, paramiko
+          HOST='155.212.162.47'
+          ROOT='/opt/booking_bot'
+          FP='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  actual=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if actual!=FP:
+                      raise paramiko.SSHException('host key mismatch')
+                  c.get_host_keys().add(h,k.get_name(),k)
+
+          ssh=None
+          for n in range(3):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(Pinned())
+              try:
+                  c.connect(HOST,port=22,username='root',password=os.environ['SERVER_PASSWORD'],
+                            look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  ssh=c; break
+              except (paramiko.SSHException,OSError,EOFError):
+                  c.close()
+                  if n==2: raise
+                  time.sleep(3)
+
+          stage=ROOT+'/.release_staging/client-email-4f6f9a4f'
+          ssh.exec_command("mkdir -p "+stage,timeout=10)[1].channel.recv_exit_status()
+          sftp=ssh.open_sftp()
+          sftp.put('/tmp/client-email-release.tgz',stage+'/release.tgz')
+          sftp.close()
+
+          cmd=r'''set -Eeuo pipefail
+          ROOT=/opt/booking_bot
+          STAGE=$ROOT/.release_staging/client-email-4f6f9a4f
+          PAYLOAD=$STAGE/payload
+          BACKUP=$ROOT/.release_backups/client-email-4f6f9a4f-$(date +%Y%m%d-%H%M%S)
+          TARGETS=(
+            email_utils.py
+            database/models.py
+            database/crud.py
+            web/api/schemas.py
+            web/api/routes/client.py
+            bot/services/email_notifications.py
+            bot/services/notifications.py
+            bot/handlers/admin.py
+          )
+
+          rm -rf "$PAYLOAD"
+          mkdir -p "$PAYLOAD" "$BACKUP/files"
+          tar -xzf "$STAGE/release.tgz" -C "$PAYLOAD"
+
+          for f in "${TARGETS[@]}"; do
+            if [ -f "$ROOT/$f" ]; then
+              mkdir -p "$BACKUP/files/$(dirname "$f")"
+              cp -a "$ROOT/$f" "$BACKUP/files/$f"
+            fi
+          done
+          mkdir -p "$BACKUP/files/web/frontend"
+          cp -a "$ROOT/web/frontend/dist" "$BACKUP/files/web/frontend/dist"
+
+          cd "$ROOT"
+          STAGE_PAYLOAD="$PAYLOAD" ./venv/bin/python - <<'MIG'
+          import asyncio, os, asyncpg
+          from pathlib import Path
+          from dotenv import load_dotenv
+          load_dotenv('/opt/booking_bot/.env')
+          async def main():
+              conn=await asyncpg.connect(
+                  host=os.getenv('DB_HOST','localhost'),
+                  port=int(os.getenv('DB_PORT','5432')),
+                  user=os.getenv('DB_USER','postgres'),
+                  password=os.getenv('DB_PASSWORD',''),
+                  database=os.getenv('DB_NAME','booking_bot'))
+              try:
+                  sql=(Path(os.environ['STAGE_PAYLOAD'])/'migrations'/'add_user_email.sql').read_text()
+                  await conn.execute(sql)
+              finally:
+                  await conn.close()
+          asyncio.run(main())
+          MIG
+
+          for f in "${TARGETS[@]}"; do
+            mkdir -p "$ROOT/$(dirname "$f")"
+            install -m 0644 "$PAYLOAD/$f" "$ROOT/$f"
+          done
+
+          rm -rf "$ROOT/web/frontend/dist"
+          cp -a "$PAYLOAD/web/frontend/dist" "$ROOT/web/frontend/dist"
+
+          ./venv/bin/python -m py_compile             email_utils.py             database/models.py database/crud.py             web/api/schemas.py web/api/routes/client.py             bot/services/email_notifications.py             bot/services/notifications.py bot/handlers/admin.py
+
+          systemctl restart booking-web-api.service
+          systemctl restart booking-bot.service
+          sleep 4
+          test "$(systemctl is-active booking-web-api.service)" = active
+          test "$(systemctl is-active booking-bot.service)" = active
+          curl -fsS --max-time 8 http://127.0.0.1:8000/health >/dev/null
+          curl -fsS --max-time 10 https://servgo.ru/api/health >/dev/null
+
+          ./venv/bin/python - <<'VERIFY'
+          import asyncio, os
+          from sqlalchemy import text
+          from database.database import async_session_maker
+          from dotenv import load_dotenv
+          load_dotenv('/opt/booking_bot/.env')
+
+          async def main():
+              async with async_session_maker() as s:
+                  email_col=bool((await s.execute(text("""
+                    select exists(
+                      select 1 from information_schema.columns
+                      where table_name='users' and column_name='email'
+                    )
+                  """))).scalar())
+                  print('user_email_column='+str(email_col).lower())
+          asyncio.run(main())
+
+          for key in SMTP_HOST SMTP_FROM_EMAIL SMTP_USERNAME SMTP_PASSWORD; do
+            value=$(grep -E "^$key=" .env | tail -n1 | cut -d= -f2- || true)
+            if [ -n "$value" ]; then echo "$key=present"; else echo "$key=missing"; fi
+          done
+          VERIFY
+
+          printf '%s
+' '4f6f9a4f04a6c92afd2638c2e9534b31a8da8639' > "$ROOT/.release_version"
+          echo release_status=success
+          echo backup_dir=$BACKUP
+          '''
+          _,out,err=ssh.exec_command(cmd,timeout=300)
+          stdout=out.read().decode('utf-8','replace')
+          stderr=err.read().decode('utf-8','replace')
+          print(stdout)
+          status=out.channel.recv_exit_status()
+          if status:
+              print(stderr[-2500:])
+              raise SystemExit(status)
+          ssh.close()
+          PY
