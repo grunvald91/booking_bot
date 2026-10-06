@@ -97,7 +97,7 @@ DOVAUTH
 
 cat >/etc/dovecot/conf.d/99-servgo.conf <<'DOV'
 protocols = imap lmtp
-mail_location = maildir:/var/mail/vhosts/%d/%n
+mail_location = maildir:/var/mail/vhosts/%d/%n/Maildir
 first_valid_uid = 5000
 last_valid_uid = 5000
 ssl = required
@@ -304,8 +304,11 @@ chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/servgo-mail-reload.sh
 
 postfix check
 dovecot -n >/tmp/dovecot-servgo.txt
-systemctl enable --now opendkim dovecot postfix fail2ban
-systemctl restart opendkim dovecot postfix fail2ban
+systemctl enable opendkim dovecot postfix fail2ban
+systemctl restart opendkim dovecot fail2ban
+postfix stop || true
+sleep 1
+postfix start
 
 # Local delivery smoke test.
 printf 'Subject: ServGo mail local smoke test\nFrom: noreply@servgo.ru\nTo: support@servgo.ru\n\nMail server is alive.\n' \
