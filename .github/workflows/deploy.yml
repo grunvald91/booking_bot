@@ -1,9 +1,9 @@
 name: Deploy webapp to server
 
-# Ручной деплой файлов webapp/ на сервер. Автодеплой отключён: GitHub может
-# синхронизировать исходники с production без обратной перезаписи сервера.
-# Сервер /opt/booking_bot НЕ git-репозиторий — файлы заливаются по SCP
-# только при явном запуске workflow_dispatch.
+# Экономный деплой production webapp на сервер.
+# Автодеплой запускается только при изменениях production-веба в main.
+# Сервер /opt/booking_bot НЕ git-репозиторий — изменённые файлы заливаются по SCP.
+# Ручной workflow_dispatch сохранён для точечного аварийного деплоя.
 #
 # Деплоятся ТОЛЬКО файлы, изменённые в коммите (под webapp/**), чтобы не затирать
 # серверные файлы, которые могли расходиться с git. Для ручного деплоя конкретных
@@ -13,6 +13,14 @@ name: Deploy webapp to server
 # Опционально (repository variables): SERVER_HOST, SERVER_USER, SERVER_PORT.
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'webapp/server.py'
+      - 'webapp/templates/**'
+      - 'webapp/static/**'
+      - 'webapp/niches/**'
   workflow_dispatch:
     inputs:
       files:
