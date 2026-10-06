@@ -1,0 +1,107 @@
+name: ServGo unified notifications postdeploy audit
+
+on:
+  push:
+    branches:
+      - ops/unified-notifications-release-20261006
+    paths:
+      - '.github/workflows/unified-notifications-postdeploy-audit-20261006.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: eb1608c06ac5ea3f61240fc34276da142cd1d223
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Verify deployed release
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, pathlib, time
+          import paramiko
+          HOST='155.212.162.47'
+          ROOT='/opt/booking_bot'
+          FP='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          targets=[
+            'bot/handlers/admin.py','bot/handlers/client.py',
+            'bot/services/notification_events.py','bot/services/notifications.py',
+            'bot/services/webpush.py','database/booking_safety.py','database/models.py',
+            'notification_rules.py','web/api/rental.py','web/api/routes/admin.py',
+            'web/api/routes/client.py','web/api/routes/notifications.py','web/api/schemas.py',
+          ]
+          expected={p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in targets}
+
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  actual=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if actual!=FP: raise paramiko.SSHException('host key mismatch')
+                  c.get_host_keys().add(h,k.get_name(),k)
+          ssh=None
+          for n in range(3):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(Pinned())
+              try:
+                  c.connect(HOST,port=22,username='root',password=os.environ['SERVER_PASSWORD'],
+                            look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  ssh=c; break
+              except (paramiko.SSHException,OSError,EOFError):
+                  c.close()
+                  if n==2: raise
+                  time.sleep(3)
+          sftp=ssh.open_sftp()
+          with sftp.open(ROOT+'/.release_version','rb') as f:
+              version=f.read().decode().strip()
+          print('release_version='+version)
+          assert version=='eb1608c06ac5ea3f61240fc34276da142cd1d223'
+          mismatches=[]
+          for p,want in expected.items():
+              with sftp.open(ROOT+'/'+p,'rb') as f:
+                  got=hashlib.sha256(f.read()).hexdigest()
+              if got!=want: mismatches.append((p,want,got))
+          sftp.close()
+          if mismatches:
+              for x in mismatches: print('hash_mismatch='+repr(x))
+              raise SystemExit('runtime hash mismatch')
+          print('runtime_hashes=all_match_release')
+
+          cmd=r'''set -e
+          printf 'api='; systemctl is-active booking-web-api.service
+          printf 'bot='; systemctl is-active booking-bot.service
+          printf 'internal_health='; curl -sS --max-time 5 -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/health
+          cd /opt/booking_bot
+          ./venv/bin/python - <<'DB'
+          import asyncio
+          from sqlalchemy import text
+          from database.database import async_session_maker
+          async def run():
+              async with async_session_maker() as s:
+                  n=(await s.execute(text("select count(*) from notification_deliveries"))).scalar() or 0
+                  push=(await s.execute(text("select count(*) from push_subscriptions where is_active=true"))).scalar() or 0
+                  print('notification_deliveries_rows='+str(n))
+                  print('active_push_subscriptions='+str(push))
+          asyncio.run(run())
+          DB
+          echo 'api_recent_errors_begin'
+          journalctl -u booking-web-api.service --since '2026-10-06 11:56:00' --no-pager -p err 2>/dev/null | tail -n 30 || true
+          echo 'api_recent_errors_end'
+          echo 'bot_recent_errors_begin'
+          journalctl -u booking-bot.service --since '2026-10-06 11:56:00' --no-pager -p err 2>/dev/null | tail -n 30 || true
+          echo 'bot_recent_errors_end'
+          '''
+          _,out,err=ssh.exec_command(cmd,timeout=45)
+          stdout=out.read().decode('utf-8','replace')
+          status=out.channel.recv_exit_status()
+          print(stdout)
+          if status:
+              print(err.read().decode('utf-8','replace')[-1200:])
+              raise SystemExit(status)
+          ssh.close()
+          PY
