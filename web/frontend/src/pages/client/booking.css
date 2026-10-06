@@ -295,3 +295,43 @@
 .bk-fallback-sub { max-width: 320px; margin: 0 0 16px; }
 .bk-fallback-mono { font-size: 10px; color: var(--s-muted-2); margin-bottom: 16px; max-width: 320px; word-break: break-word; font-family: monospace; }
 .bk-fallback-actions { display: flex; gap: 8px; }
+
+
+/* Resource info gallery: yachts, rooms, studios, specialists and other bookable resources. */
+.bk-info-gallery {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 16px;
+}
+.bk-info-gallery-item {
+  display: block;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--s-surface-2);
+  aspect-ratio: 4 / 3;
+}
+.bk-info-gallery-item:first-child {
+  grid-column: 1 / -1;
+  aspect-ratio: 16 / 9;
+}
+.bk-info-gallery-item img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  transition: transform .18s ease;
+}
+.bk-info-gallery-item:active img {
+  transform: scale(.985);
+}
+@media (min-width: 640px) {
+  .bk-info-gallery {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .bk-info-gallery-item:first-child {
+    grid-column: span 2;
+    grid-row: span 2;
+    aspect-ratio: auto;
+  }
+}
