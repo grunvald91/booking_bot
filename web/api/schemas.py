@@ -181,7 +181,6 @@ class CreateBookingIn(BaseModel):
     client_name: Optional[str] = None
     client_phone: Optional[str] = None
     client_email: Optional[str] = Field(default=None, max_length=320)
-    client_email: Optional[str] = Field(default=None, max_length=255)
     # Юридические подтверждения перед записью. Это два самостоятельных действия:
     # согласие на обработку ПД не объединяется с принятием условий записи.
     personal_data_consent: bool = False
