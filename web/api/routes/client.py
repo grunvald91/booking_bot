@@ -1397,14 +1397,6 @@ async def _mark_prepayment_sent(booking: Booking, db: AsyncSession) -> dict:
                             logger.error(f"Telegram sendMessage failed for prepayment booking {booking.id}: {resp.status_code} {resp.text}")
                         else:
                             logger.info(f"Prepayment notification sent to owner {owner.telegram_id} for booking {booking.id}")
-                    resp = await http.post(
-                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                        json={"chat_id": owner.telegram_id, "text": msg, "parse_mode": "HTML", "reply_markup": prepay_kb},
-                    )
-                    if resp.status_code != 200:
-                        logger.error(f"Telegram sendMessage failed for prepayment booking {booking.id}: {resp.status_code} {resp.text}")
-                    else:
-                        logger.info(f"Prepayment notification sent to owner {owner.telegram_id} for booking {booking.id}")
             else:
                 logger.warning(f"No owner telegram_id for booking {booking.id}")
         else:
