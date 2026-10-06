@@ -14,8 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from database import async_session_maker
-from database.models import Booking, User, Business, Employee
+from database.models import Booking, User, Business, Employee, NotificationDelivery
 from database.crud import get_business_owners
+from database.booking_safety import booking_resource_duration
+from notification_rules import (
+    due_reminder_offset,
+    format_reminder_offset,
+    normalize_reminder_minutes,
+)
 from bot.utils.validators import format_date_with_weekday, format_phone
 from bot.utils.business_types import get_terminology, is_venue_rental_type
 from bot.services.webpush import send_booking_webpush, send_staff_booking_webpush
@@ -381,20 +387,59 @@ async def send_grouped_2h_reminder(bot: Bot, bookings: list, session: AsyncSessi
         logger.error(f"Error sending grouped 2h reminder for bookings {booking_ids}: {e}")
 
 
+def _staff_reminder_dedupe_key(
+    bookings: list[Booking],
+    audience: str,
+    offset_minutes: int,
+) -> str:
+    ids = "-".join(str(b.id) for b in sorted(bookings, key=lambda item: item.id))
+    return f"staff-reminder:{audience}:{offset_minutes}:{ids}"
+
+
+async def _staff_reminder_already_sent(
+    session: AsyncSession,
+    dedupe_key: str,
+    bookings: list[Booking],
+    offset_minutes: int,
+) -> bool:
+    # Compatibility with the two legacy staff reminder flags. This prevents
+    # already-processed production/demo bookings from being re-notified when
+    # the configurable reminder engine is deployed.
+    if offset_minutes == 1440 and all(
+        getattr(item, "staff_reminder_24h_sent", False) for item in bookings
+    ):
+        return True
+    if offset_minutes == 120 and all(
+        getattr(item, "staff_reminder_2h_sent", False) for item in bookings
+    ):
+        return True
+
+    result = await session.execute(
+        select(NotificationDelivery.id).where(NotificationDelivery.dedupe_key == dedupe_key)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def send_grouped_staff_reminder(
     bot: Bot,
     bookings: list[Booking],
     session: AsyncSession,
-    reminder_kind: str,
+    *,
+    audience: str,
+    offset_minutes: int,
 ):
-    """Notify owners and assigned masters about an upcoming client visit."""
-    if not bookings:
+    """Notify one configurable staff audience through Telegram and PWA."""
+    if not bookings or audience not in ("owner", "master"):
         return
 
     first = bookings[0]
     business = first.business
     client = first.client
     if business is None:
+        return
+
+    dedupe_key = _staff_reminder_dedupe_key(bookings, audience, offset_minutes)
+    if await _staff_reminder_already_sent(session, dedupe_key, bookings, offset_minutes):
         return
 
     service_names = list(
@@ -408,13 +453,9 @@ async def send_grouped_staff_reminder(
         )
     )
 
-    if reminder_kind == "2h":
-        header = "⏰ <b>Через 2 часа запись!</b>"
-    else:
-        header = "📅 <b>Предстоящая запись</b>"
-
+    audience_label = "владельцу" if audience == "owner" else "мастеру"
     message = (
-        f"{header}\n\n"
+        f"⏰ <b>Запись через {format_reminder_offset(offset_minutes)}</b>\n\n"
         f"🏢 {business.name}\n"
         f"📅 {format_date_with_weekday(first.booking_date)}\n"
         f"🕐 {first.booking_time.strftime('%H:%M')}\n"
@@ -430,23 +471,25 @@ async def send_grouped_staff_reminder(
         message += "\n\n💼 " + ", ".join(service_names)
     if employee_names:
         message += "\n👔 " + ", ".join(employee_names)
-
     message += await _format_payment_summary_block(first)
     message += "\n\nОткройте расписание ServGo, если нужно проверить детали."
 
-    # Telegram recipients: all owners + all assigned masters. Deduplicate when
-    # owner and master are the same Telegram account.
     telegram_targets: set[int] = set()
-
-    owners = await get_business_owners(session, first.business_id)
-    for owner in owners:
-        if owner.telegram_id and owner.telegram_id > 0:
-            telegram_targets.add(int(owner.telegram_id))
-
-    for booking in bookings:
-        employee = getattr(booking, "employee", None)
-        if employee and employee.telegram_id and employee.telegram_id > 0:
-            telegram_targets.add(int(employee.telegram_id))
+    if audience == "owner":
+        owners = await get_business_owners(session, first.business_id)
+        telegram_targets.update(
+            int(owner.telegram_id)
+            for owner in owners
+            if owner.telegram_id and int(owner.telegram_id) > 0
+        )
+    else:
+        telegram_targets.update(
+            int(booking.employee.telegram_id)
+            for booking in bookings
+            if booking.employee
+            and booking.employee.telegram_id
+            and int(booking.employee.telegram_id) > 0
+        )
 
     telegram_sent = 0
     for telegram_id in telegram_targets:
@@ -459,8 +502,9 @@ async def send_grouped_staff_reminder(
             telegram_sent += 1
         except Exception as exc:
             logger.warning(
-                "Staff Telegram %s reminder failed for %s: %s",
-                reminder_kind,
+                "Staff Telegram reminder audience=%s offset=%s failed for %s: %s",
+                audience,
+                offset_minutes,
                 telegram_id,
                 exc,
             )
@@ -471,36 +515,53 @@ async def send_grouped_staff_reminder(
         push_sent, push_targets = await send_staff_booking_webpush(
             bookings,
             session,
-            reminder_kind,
+            str(offset_minutes),
+            audience=audience,
         )
     except Exception as exc:
-        logger.warning("Staff Web Push %s reminder failed: %s", reminder_kind, exc)
+        logger.warning(
+            "Staff Web Push reminder audience=%s offset=%s failed: %s",
+            audience,
+            offset_minutes,
+            exc,
+        )
 
     had_targets = bool(telegram_targets) or push_targets > 0
     delivered = telegram_sent > 0 or push_sent > 0
 
-    # If there is nobody configured to receive staff reminders, mark this
-    # reminder as handled to avoid retrying every five minutes forever.
-    # If configured targets exist but every delivery failed, leave the flag
-    # false so the scheduler retries on the next pass.
     if delivered or not had_targets:
-        for booking in bookings:
-            if reminder_kind == "2h":
-                booking.staff_reminder_2h_sent = True
-            else:
-                booking.staff_reminder_24h_sent = True
+        session.add(
+            NotificationDelivery(
+                dedupe_key=dedupe_key,
+                booking_id=first.id,
+                business_id=first.business_id,
+                audience=audience,
+                event_kind="upcoming_reminder",
+                offset_minutes=offset_minutes,
+                telegram_sent=telegram_sent,
+                webpush_sent=push_sent,
+            )
+        )
+        if offset_minutes == 1440:
+            for item in bookings:
+                item.staff_reminder_24h_sent = True
+        elif offset_minutes == 120:
+            for item in bookings:
+                item.staff_reminder_2h_sent = True
         await session.commit()
     else:
         await session.rollback()
 
     logger.info(
-        "Staff %s reminder bookings=%s telegram=%s/%s webpush=%s/%s",
-        reminder_kind,
+        "Staff reminder audience=%s offset=%s bookings=%s telegram=%s/%s webpush=%s/%s target=%s",
+        audience,
+        offset_minutes,
         [b.id for b in bookings],
         telegram_sent,
         len(telegram_targets),
         push_sent,
         push_targets,
+        audience_label,
     )
 
 
@@ -934,29 +995,60 @@ async def notify_administrator_new_booking(bot: Bot, booking: Booking, services_
         logger.error(f"Error notifying administrators about booking {booking.id}: {e}")
 
 
-def _group_bookings_by_visit(bookings: list) -> dict:
-    """Группировка записей по визиту (клиент + бизнес + дата + время)"""
-    groups = {}
+def _group_bookings_by_visit(bookings: list[Booking]) -> dict:
+    """Group same-client contiguous service rows into one real visit."""
+    buckets: dict[tuple, list[Booking]] = {}
     for booking in bookings:
-        # Ключ группы: (client_id, business_id, date, time)
         key = (
             booking.client_id,
             booking.business_id,
+            booking.employee_id,
             booking.booking_date,
-            booking.booking_time
         )
-        if key not in groups:
-            groups[key] = []
-        groups[key].append(booking)
+        buckets.setdefault(key, []).append(booking)
+
+    groups: dict[tuple, list[Booking]] = {}
+    for bucket_key, items in buckets.items():
+        ordered = sorted(items, key=lambda b: (b.booking_time, b.id))
+        chain: list[Booking] = []
+        chain_end = None
+        chain_no = 0
+
+        def flush():
+            nonlocal chain, chain_no
+            if not chain:
+                return
+            first = chain[0]
+            groups[(*bucket_key, first.booking_time, chain_no)] = list(chain)
+            chain_no += 1
+            chain = []
+
+        for booking in ordered:
+            start = datetime.combine(booking.booking_date, booking.booking_time)
+            end = start + timedelta(minutes=booking_resource_duration(booking))
+            if not chain:
+                chain = [booking]
+                chain_end = end
+                continue
+
+            # Same start (legacy rows) or immediately contiguous services are
+            # one visit. A real gap starts a separate visit.
+            first_start = datetime.combine(chain[0].booking_date, chain[0].booking_time)
+            if start == first_start or (chain_end is not None and start == chain_end):
+                chain.append(booking)
+                if chain_end is None or end > chain_end:
+                    chain_end = end
+            else:
+                flush()
+                chain = [booking]
+                chain_end = end
+        flush()
+
     return groups
 
 
 async def check_and_send_reminders(bot: Bot):
-    """Send client and staff reminders for upcoming visits.
-
-    Client and staff delivery flags are independent so one audience cannot
-    suppress retries for the other. The scheduler runs every five minutes.
-    """
+    """Send fixed client reminders and configurable owner/master reminders."""
     try:
         async with async_session_maker() as session:
             timezone_name = os.getenv("SERVGO_TIMEZONE", "Europe/Moscow")
@@ -984,74 +1076,95 @@ async def check_and_send_reminders(bot: Bot):
                 )
             )
             active_bookings = list(result.scalars().all())
+            visit_groups = _group_bookings_by_visit(active_bookings)
 
-            client_24h: list[Booking] = []
-            client_2h: list[Booking] = []
-            staff_24h: list[Booking] = []
-            staff_2h: list[Booking] = []
+            client_24h_count = 0
+            client_2h_count = 0
+            owner_count = 0
+            master_count = 0
 
-            two_hours = now + timedelta(hours=2)
-            twenty_four_hours = now + timedelta(hours=24)
-
-            for booking in active_bookings:
+            for group_bookings in visit_groups.values():
+                first = min(
+                    group_bookings,
+                    key=lambda b: (b.booking_time, b.id),
+                )
                 booking_datetime = datetime.combine(
-                    booking.booking_date,
-                    booking.booking_time,
+                    first.booking_date,
+                    first.booking_time,
                 )
                 if booking_datetime <= now:
                     continue
 
-                in_24h_window = two_hours < booking_datetime <= twenty_four_hours
-                in_2h_window = now < booking_datetime <= two_hours
+                remaining_minutes = (booking_datetime - now).total_seconds() / 60.0
 
-                if in_24h_window:
-                    if not booking.reminder_24h_sent:
-                        client_24h.append(booking)
-                    if not booking.staff_reminder_24h_sent:
-                        staff_24h.append(booking)
+                # Client reminders remain the existing product behaviour:
+                # one reminder within 24h (but above 2h), then one within 2h.
+                if 120 < remaining_minutes <= 1440:
+                    if any(not b.reminder_24h_sent for b in group_bookings):
+                        await send_grouped_24h_reminder(bot, group_bookings, session)
+                        client_24h_count += 1
+                elif 0 < remaining_minutes <= 120:
+                    if any(not b.reminder_2h_sent for b in group_bookings):
+                        await send_grouped_2h_reminder(bot, group_bookings, session)
+                        client_2h_count += 1
 
-                if in_2h_window:
-                    if not booking.reminder_2h_sent:
-                        client_2h.append(booking)
-                    if not booking.staff_reminder_2h_sent:
-                        staff_2h.append(booking)
+                business = first.business
+                if business is None:
+                    continue
 
-            client_groups_24h = _group_bookings_by_visit(client_24h)
-            for group_bookings in client_groups_24h.values():
-                await send_grouped_24h_reminder(bot, group_bookings, session)
+                if getattr(business, "owner_reminders_enabled", True):
+                    owner_offsets = normalize_reminder_minutes(
+                        getattr(business, "owner_reminder_minutes", None)
+                    )
+                    owner_due = due_reminder_offset(remaining_minutes, owner_offsets)
+                    if owner_due is not None:
+                        key = _staff_reminder_dedupe_key(
+                            group_bookings,
+                            "owner",
+                            owner_due,
+                        )
+                        if not await _staff_reminder_already_sent(session, key, group_bookings, owner_due):
+                            await send_grouped_staff_reminder(
+                                bot,
+                                group_bookings,
+                                session,
+                                audience="owner",
+                                offset_minutes=owner_due,
+                            )
+                            owner_count += 1
 
-            client_groups_2h = _group_bookings_by_visit(client_2h)
-            for group_bookings in client_groups_2h.values():
-                await send_grouped_2h_reminder(bot, group_bookings, session)
-
-            staff_groups_24h = _group_bookings_by_visit(staff_24h)
-            for group_bookings in staff_groups_24h.values():
-                await send_grouped_staff_reminder(
-                    bot,
-                    group_bookings,
-                    session,
-                    "24h",
-                )
-
-            staff_groups_2h = _group_bookings_by_visit(staff_2h)
-            for group_bookings in staff_groups_2h.values():
-                await send_grouped_staff_reminder(
-                    bot,
-                    group_bookings,
-                    session,
-                    "2h",
-                )
+                if getattr(business, "master_reminders_enabled", True):
+                    master_offsets = normalize_reminder_minutes(
+                        getattr(business, "master_reminder_minutes", None)
+                    )
+                    master_due = due_reminder_offset(remaining_minutes, master_offsets)
+                    if master_due is not None:
+                        key = _staff_reminder_dedupe_key(
+                            group_bookings,
+                            "master",
+                            master_due,
+                        )
+                        if not await _staff_reminder_already_sent(session, key, group_bookings, master_due):
+                            await send_grouped_staff_reminder(
+                                bot,
+                                group_bookings,
+                                session,
+                                audience="master",
+                                offset_minutes=master_due,
+                            )
+                            master_count += 1
 
             logger.info(
-                "Checked reminders: client=%s/%s staff=%s/%s (24h/2h visits)",
-                len(client_groups_24h),
-                len(client_groups_2h),
-                len(staff_groups_24h),
-                len(staff_groups_2h),
+                "Checked reminders: client=%s/%s owner=%s master=%s visits=%s",
+                client_24h_count,
+                client_2h_count,
+                owner_count,
+                master_count,
+                len(visit_groups),
             )
 
     except Exception as e:
-        logger.error(f"Error checking reminders: {e}")
+        logger.error(f"Error checking reminders: {e}", exc_info=True)
 
 
 async def auto_complete_bookings():
