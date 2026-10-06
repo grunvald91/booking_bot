@@ -25,7 +25,7 @@ dpkg --configure -a || true
 echo "postfix postfix/mailname string $DOMAIN" | debconf-set-selections
 echo "postfix postfix/main_mailer_type select Internet Site" | debconf-set-selections
 apt-get update -qq
-apt-get install -y postfix dovecot-core dovecot-imapd opendkim opendkim-tools fail2ban
+apt-get install -y postfix dovecot-core dovecot-imapd dovecot-lmtpd opendkim opendkim-tools fail2ban
 
 for p in /etc/postfix /etc/dovecot /etc/opendkim.conf /etc/opendkim /etc/fail2ban; do
   [ -e "$p" ] && cp -a "$p" "$BACKUP/" || true
