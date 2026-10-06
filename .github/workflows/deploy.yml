@@ -21,6 +21,7 @@ on:
       - 'webapp/templates/**'
       - 'webapp/static/**'
       - 'webapp/niches/**'
+      - 'web/frontend/**'
   workflow_dispatch:
     inputs:
       files:
@@ -69,26 +70,52 @@ jobs:
         run: |
           set -euo pipefail
           MANUAL='${{ github.event.inputs.files }}'
-          if [ -n "${MANUAL// /}" ]; then
-            FILES=$(printf '%s\n' $MANUAL)
-          else
-            BEFORE='${{ github.event.before }}'
-            AFTER='${{ github.sha }}'
-            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-              BEFORE=$(git rev-parse "${AFTER}~1" 2>/dev/null || echo "")
-            fi
-            if [ -n "$BEFORE" ]; then
-              FILES=$(git diff --name-only --diff-filter=ACMR "$BEFORE" "$AFTER" -- 'webapp/**' || true)
-            else
-              FILES=$(git ls-files 'webapp/**')
-            fi
+          BEFORE='${{ github.event.before }}'
+          AFTER='${{ github.sha }}'
+
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            BEFORE=$(git rev-parse "${AFTER}~1" 2>/dev/null || echo "")
           fi
-          echo "Файлы к заливке:"; printf '%s\n' "$FILES"
+
+          if [ -n "${MANUAL// /}" ]; then
+            CHANGED=$(printf '%s\n' $MANUAL)
+          elif [ -n "$BEFORE" ]; then
+            CHANGED=$(git diff --name-only --diff-filter=ACMR "$BEFORE" "$AFTER" -- 'webapp/**' 'web/frontend/**' || true)
+          else
+            CHANGED=$(git ls-files 'webapp/**' 'web/frontend/**')
+          fi
+
+          WEBAPP_FILES=$(printf '%s\n' "$CHANGED" | grep '^webapp/' || true)
+          if printf '%s\n' "$CHANGED" | grep -q '^web/frontend/'; then
+            FRONTEND_CHANGED=1
+          else
+            FRONTEND_CHANGED=0
+          fi
+
+          echo "Webapp files to upload:"
+          printf '%s\n' "$WEBAPP_FILES"
+          echo "Frontend changed: $FRONTEND_CHANGED"
           {
             echo 'files<<__EOF__'
-            printf '%s\n' "$FILES"
+            printf '%s\n' "$WEBAPP_FILES"
             echo '__EOF__'
+            echo "frontend_changed=$FRONTEND_CHANGED"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node for frontend build
+        if: steps.pick.outputs.frontend_changed == '1'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Build frontend
+        if: steps.pick.outputs.frontend_changed == '1'
+        working-directory: web/frontend
+        run: |
+          npm ci --legacy-peer-deps
+          npm run build
 
       - name: Upload changed files (SCP)
         run: |
@@ -106,6 +133,15 @@ jobs:
           done <<< '${{ steps.pick.outputs.files }}'
           if [ "$ANY" = "0" ]; then echo "Нет файлов для заливки — деплой не требуется."; fi
           echo "ANY=$ANY" >> "$GITHUB_ENV"
+
+      - name: Upload frontend dist
+        if: steps.pick.outputs.frontend_changed == '1'
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh -n $SSH_OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "mkdir -p '$REMOTE_PATH/web/frontend/dist'"
+          sshpass -e scp -r $SSH_OPTS -P "$SERVER_PORT" web/frontend/dist/. "$SERVER_USER@$SERVER_HOST:$REMOTE_PATH/web/frontend/dist/"
+          sshpass -e ssh -n $SSH_OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "grep -R -q 'grunvaldlab@gmail.com' '$REMOTE_PATH/web/frontend/dist/assets' && echo 'frontend footer marker: ok'"
 
       - name: Restart service and verify
         if: env.ANY == '1'
