@@ -23,7 +23,7 @@ jobs:
                   c.get_host_keys().add(h,k.get_name(),k)
           c=paramiko.SSHClient(); c.set_missing_host_key_policy(P())
           c.connect('155.212.162.47',username='root',password=os.environ['SERVER_PASSWORD'],look_for_keys=False,allow_agent=False)
-          cmd="for s in postfix dovecot opendkim fail2ban; do echo ===$s===; systemctl is-active $s || true; systemctl status $s --no-pager -l 2>&1 | tail -12; done; echo ===ports===; ss -lntp | egrep ':(25|587|993)\\b' || true; echo ===mailcert===; ls -l /etc/letsencrypt/live/mail.servgo.ru 2>/dev/null || true"
+          cmd="echo ===postconf===; postconf inet_interfaces inet_protocols myhostname smtp_helo_name virtual_mailbox_domains smtpd_milters; for s in postfix dovecot opendkim fail2ban; do echo ===$s===; systemctl is-active $s || true; systemctl status $s --no-pager -l 2>&1 | tail -12; done; echo ===ports===; ss -lntp | egrep ':(25|587|993)\\b' || true; echo ===mailcert===; ls -l /etc/letsencrypt/live/mail.servgo.ru 2>/dev/null || true"
           _,o,e=c.exec_command(cmd,timeout=30)
           print(o.read().decode()); print(e.read().decode()); c.close()
           PY
