@@ -137,6 +137,10 @@ class BusinessDetailOut(BusinessOut):
     legal_documents_enabled: bool = False
     booking_labels: dict[str, str] = Field(default_factory=dict)
     booking_flow_order: str = "service_first"
+    owner_reminders_enabled: bool = True
+    owner_reminder_minutes: List[int] = Field(default_factory=lambda: [1440, 120])
+    master_reminders_enabled: bool = True
+    master_reminder_minutes: List[int] = Field(default_factory=lambda: [1440, 120])
 
 
 # ---------- Slots ----------
@@ -470,6 +474,10 @@ class BusinessUpdateIn(BaseModel):
     legal_documents_enabled: Optional[bool] = None
     booking_labels: Optional[dict[str, str]] = None
     booking_flow_order: Optional[str] = None
+    owner_reminders_enabled: Optional[bool] = None
+    owner_reminder_minutes: Optional[List[int]] = None
+    master_reminders_enabled: Optional[bool] = None
+    master_reminder_minutes: Optional[List[int]] = None
 
 
 class BusinessAdminDetailOut(BaseModel):
