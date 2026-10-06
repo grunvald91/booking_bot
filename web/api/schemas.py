@@ -128,6 +128,12 @@ class BusinessDetailOut(BusinessOut):
     cancellation_policy_photo: Optional[str] = None
     cancellation_policy_text: Optional[str] = None
     require_receipt_for_prepayment: bool = False
+    legal_name: Optional[str] = None
+    legal_inn: Optional[str] = None
+    legal_ogrn: Optional[str] = None
+    legal_address: Optional[str] = None
+    legal_email: Optional[str] = None
+    legal_documents_enabled: bool = False
     booking_labels: dict[str, str] = Field(default_factory=dict)
     booking_flow_order: str = "service_first"
 
@@ -173,6 +179,10 @@ class CreateBookingIn(BaseModel):
     notes: Optional[str] = None
     client_name: Optional[str] = None
     client_phone: Optional[str] = None
+    # Юридические подтверждения перед записью. Это два самостоятельных действия:
+    # согласие на обработку ПД не объединяется с принятием условий записи.
+    personal_data_consent: bool = False
+    booking_terms_accepted: bool = False
     # Повтор той же брони еженедельно на N недель (включая первую); None = без повтора.
     repeat_weeks: Optional[int] = Field(default=None, ge=2, le=8)
 
@@ -449,6 +459,12 @@ class BusinessUpdateIn(BaseModel):
     payment_details: Optional[str] = None
     cancellation_policy_text: Optional[str] = None
     require_receipt_for_prepayment: Optional[bool] = None
+    legal_name: Optional[str] = None
+    legal_inn: Optional[str] = None
+    legal_ogrn: Optional[str] = None
+    legal_address: Optional[str] = None
+    legal_email: Optional[str] = None
+    legal_documents_enabled: Optional[bool] = None
     booking_labels: Optional[dict[str, str]] = None
     booking_flow_order: Optional[str] = None
 
@@ -475,6 +491,12 @@ class BusinessAdminDetailOut(BaseModel):
     cancellation_policy_photo: Optional[str] = None
     cancellation_policy_text: Optional[str] = None
     require_receipt_for_prepayment: bool = False
+    legal_name: Optional[str] = None
+    legal_inn: Optional[str] = None
+    legal_ogrn: Optional[str] = None
+    legal_address: Optional[str] = None
+    legal_email: Optional[str] = None
+    legal_documents_enabled: bool = False
     booking_labels: dict[str, str] = Field(default_factory=dict)
     booking_flow_order: str = "service_first"
 

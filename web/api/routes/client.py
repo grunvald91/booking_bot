@@ -52,6 +52,9 @@ from ..schemas import (
 
 router = APIRouter()
 
+# Version bump forces a fresh explicit acceptance when legal texts change.
+LEGAL_DOCUMENT_VERSION = "2026-10-06-v1"
+
 
 # ---------- helpers ----------
 
@@ -380,6 +383,12 @@ async def get_business(business_id: int, db: AsyncSession = Depends(get_db)):
         cancellation_policy_photo=getattr(biz, 'cancellation_policy_photo', None),
         cancellation_policy_text=getattr(biz, 'cancellation_policy_text', None),
         require_receipt_for_prepayment=getattr(biz, 'require_receipt_for_prepayment', False) or False,
+        legal_name=getattr(biz, 'legal_name', None),
+        legal_inn=getattr(biz, 'legal_inn', None),
+        legal_ogrn=getattr(biz, 'legal_ogrn', None),
+        legal_address=getattr(biz, 'legal_address', None),
+        legal_email=getattr(biz, 'legal_email', None),
+        legal_documents_enabled=getattr(biz, 'legal_documents_enabled', False) or False,
         booking_labels=_parse_booking_labels(getattr(biz, 'booking_labels', None)),
         booking_flow_order=(
             getattr(biz, 'booking_flow_order', 'service_first')
@@ -623,6 +632,27 @@ async def create_booking(
     if not business:
         raise HTTPException(status_code=404, detail="Business not found")
 
+    legal_enabled = bool(getattr(business, "legal_documents_enabled", False))
+    legal_accepted_at = None
+    if legal_enabled:
+        # Do not present an incomplete generated document as legally ready.
+        if not (getattr(business, "legal_name", None) and getattr(business, "legal_email", None)):
+            raise HTTPException(
+                status_code=503,
+                detail="Юридические данные бизнеса не заполнены. Запись временно недоступна.",
+            )
+        if body.personal_data_consent is not True:
+            raise HTTPException(
+                status_code=422,
+                detail="Необходимо отдельно дать согласие на обработку персональных данных.",
+            )
+        if body.booking_terms_accepted is not True:
+            raise HTTPException(
+                status_code=422,
+                detail="Необходимо принять условия записи.",
+            )
+        legal_accepted_at = datetime.utcnow()
+
     booking_user = user
     if not booking_user:
         if not body.client_phone:
@@ -774,6 +804,10 @@ async def create_booking(
                     if initial_status == "pending_prepayment"
                     else None
                 ),
+                personal_data_consent_version=(LEGAL_DOCUMENT_VERSION if legal_enabled else None),
+                personal_data_consent_at=legal_accepted_at,
+                booking_terms_version=(LEGAL_DOCUMENT_VERSION if legal_enabled else None),
+                booking_terms_accepted_at=legal_accepted_at,
                 resource_duration_minutes=resource_duration,
                 occupies_resource=service_occupies_resource(service),
             )
@@ -813,7 +847,10 @@ async def create_booking(
     # Fire-and-forget notifications — SAME format as bot (notifications.py)
     async def _send_booking_notifications():
         try:
-            bot_token = "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM50"
+            bot_token = os.getenv("BOT_TOKEN")
+            if not bot_token:
+                logger.error("BOT_TOKEN is not configured; booking Telegram notifications skipped")
+                return
             client_name = body.client_name or (booking_user.full_name if booking_user else "Клиент") or "Клиент"
             client_phone = body.client_phone or (booking_user.phone if booking_user else None)
             client_tg_id = booking_user.telegram_id if booking_user else None
@@ -1347,16 +1384,19 @@ async def _mark_prepayment_sent(booking: Booking, db: AsyncSession) -> dict:
                         [{"text": "❌ Отменить бронь / нет оплаты", "callback_data": f"reject_prepayment:{booking.id}"}]
                     ]
                 }
-                bot_token = "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM50"
-                async with httpx.AsyncClient(timeout=30) as http:
-                    resp = await http.post(
-                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                        json={"chat_id": owner.telegram_id, "text": msg, "parse_mode": "HTML", "reply_markup": prepay_kb},
-                    )
-                    if resp.status_code != 200:
-                        logger.error(f"Telegram sendMessage failed for prepayment booking {booking.id}: {resp.status_code} {resp.text}")
-                    else:
-                        logger.info(f"Prepayment notification sent to owner {owner.telegram_id} for booking {booking.id}")
+                bot_token = os.getenv("BOT_TOKEN")
+                if not bot_token:
+                    logger.error("BOT_TOKEN is not configured; Telegram notification skipped")
+                else:
+                    async with httpx.AsyncClient(timeout=30) as http:
+                        resp = await http.post(
+                            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                            json={"chat_id": owner.telegram_id, "text": msg, "parse_mode": "HTML", "reply_markup": prepay_kb},
+                        )
+                        if resp.status_code != 200:
+                            logger.error(f"Telegram sendMessage failed for prepayment booking {booking.id}: {resp.status_code} {resp.text}")
+                        else:
+                            logger.info(f"Prepayment notification sent to owner {owner.telegram_id} for booking {booking.id}")
             else:
                 logger.warning(f"No owner telegram_id for booking {booking.id}")
         else:
@@ -1381,7 +1421,10 @@ async def _send_receipt_and_notify(booking: Booking, db: AsyncSession, file: Upl
             owner_result = await db.execute(select(User).where(User.id == business.owner_id))
             owner = owner_result.scalar_one_or_none()
             if owner and owner.telegram_id:
-                bot_token = "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM50"
+                bot_token = os.getenv("BOT_TOKEN")
+                if not bot_token:
+                    logger.error("BOT_TOKEN is not configured; receipt Telegram notification skipped")
+                    return {"message": "Receipt recorded; Telegram notification unavailable"}
 
                 file_content = await file.read()
                 content_type = file.content_type or "image/jpeg"

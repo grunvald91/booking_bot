@@ -17,6 +17,7 @@ import { AnalyticsPage } from './pages/admin/AnalyticsPage'
 import { SettingsPage } from './pages/admin/SettingsPage'
 import { SubscriptionsAdminPage } from './pages/admin/SubscriptionsAdminPage'
 import { ChatPage } from './pages/client/ChatPage'
+import { LegalPage } from './pages/client/LegalPage'
 
 /** Redirect /book?business_id=X → /book/X, or /book → / */
 function BookRedirect() {
@@ -94,6 +95,7 @@ function App() {
         />
         <Route path="/subscriptions" element={<SubscriptionsPage />} />
         <Route path="/chat" element={<ChatPage />} />
+        <Route path="/legal/:docType/:businessId" element={<LegalPage />} />
         <Route path="/login" element={<LoginPage />} />
 
         {/* Legacy redirects */}

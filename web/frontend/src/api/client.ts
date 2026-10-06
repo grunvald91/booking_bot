@@ -102,6 +102,12 @@ export interface BusinessDetail extends Business {
   cancellation_policy_photo?: string;
   cancellation_policy_text?: string;
   require_receipt_for_prepayment?: boolean;
+  legal_name?: string;
+  legal_inn?: string;
+  legal_ogrn?: string;
+  legal_address?: string;
+  legal_email?: string;
+  legal_documents_enabled?: boolean;
   booking_labels?: Record<string, string>;
   booking_flow_order?: 'service_first' | 'resource_first';
 }
@@ -206,6 +212,8 @@ export interface CreateBookingData {
   client_name: string;
   client_phone: string;
   notes?: string;
+  personal_data_consent?: boolean;
+  booking_terms_accepted?: boolean;
   repeat_weeks?: number;
 }
 
@@ -307,6 +315,12 @@ export interface BusinessAdminDetail {
   cancellation_policy_photo?: string;
   cancellation_policy_text?: string;
   require_receipt_for_prepayment: boolean;
+  legal_name?: string;
+  legal_inn?: string;
+  legal_ogrn?: string;
+  legal_address?: string;
+  legal_email?: string;
+  legal_documents_enabled?: boolean;
   booking_labels?: Record<string, string>;
   booking_flow_order?: 'service_first' | 'resource_first';
 }
@@ -328,6 +342,12 @@ export interface BusinessUpdateData {
   payment_details?: string;
   cancellation_policy_text?: string;
   require_receipt_for_prepayment?: boolean;
+  legal_name?: string;
+  legal_inn?: string;
+  legal_ogrn?: string;
+  legal_address?: string;
+  legal_email?: string;
+  legal_documents_enabled?: boolean;
   booking_labels?: Record<string, string>;
   booking_flow_order?: 'service_first' | 'resource_first';
 }

@@ -79,6 +79,14 @@ function formatPrice(price?: number | null, isHourly?: boolean) {
   return isHourly ? `${formatted} \u20BD/\u0447` : `${formatted} \u20BD`
 }
 
+function cleanPaymentDetails(value?: string | null) {
+  if (!value) return ''
+  return value
+    .replace(/(?:^|\s*)чек\s+в\s+telegram[-\s]?канале\.?/gi, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
 function formatDuration(minutes?: number | null) {
   if (!minutes || minutes <= 0) return ''
   if (minutes < 60) return `${minutes} \u043C\u0438\u043D`
@@ -377,6 +385,8 @@ function BookingPageInner() {
     return localStorage.getItem('clientPhone') || ''
   })
   const [comment, setComment] = useState('')
+  const [personalDataConsent, setPersonalDataConsent] = useState(false)
+  const [bookingTermsAccepted, setBookingTermsAccepted] = useState(false)
   const [repeatEnabled, setRepeatEnabled] = useState(false)
   const [repeatWeeks, setRepeatWeeks] = useState(4)
   const [createdDates, setCreatedDates] = useState<string[]>([])
@@ -708,8 +718,10 @@ function BookingPageInner() {
     const list: string[] = []
     if (!clientName.trim()) list.push('имя')
     if (!clientPhone.trim()) list.push('телефон')
+    if (business?.legal_documents_enabled && !personalDataConsent) list.push('согласие на обработку персональных данных')
+    if (business?.legal_documents_enabled && !bookingTermsAccepted) list.push('условия записи')
     return list
-  }, [clientName, clientPhone])
+  }, [clientName, clientPhone, business?.legal_documents_enabled, personalDataConsent, bookingTermsAccepted])
 
   // F1: business cover photo (first photo if any) — useMemo ОБЯЗАТЕЛЬНО до if(success) return,
   // иначе разное число хуков между рендерами → React error #300.
@@ -737,6 +749,15 @@ function BookingPageInner() {
       return
     }
     setFieldErrors({})
+
+    if (business?.legal_documents_enabled && !personalDataConsent) {
+      setBookingError('Для записи необходимо отдельно дать согласие на обработку персональных данных.')
+      return
+    }
+    if (business?.legal_documents_enabled && !bookingTermsAccepted) {
+      setBookingError('Для записи необходимо принять условия записи.')
+      return
+    }
 
     setSubmitting(true)
     setBookingError(null)
@@ -770,6 +791,8 @@ function BookingPageInner() {
         client_name: clientName,
         client_phone: clientPhone,
         notes: comment || undefined,
+        personal_data_consent: business?.legal_documents_enabled ? personalDataConsent : undefined,
+        booking_terms_accepted: business?.legal_documents_enabled ? bookingTermsAccepted : undefined,
         repeat_weeks: repeatEnabled ? repeatWeeks : undefined,
       })
       const firstResult: any = Array.isArray(result) && result.length > 0
@@ -877,7 +900,7 @@ function BookingPageInner() {
     const prepaymentEnabled = business?.prepayment_enabled
     const prepaymentPercent = business?.prepayment_percent ?? 100
     const paymentPhone = business?.payment_phone
-    const paymentDetails = business?.payment_details
+    const paymentDetails = cleanPaymentDetails(business?.payment_details)
     const cancellationPolicyPhoto = business?.cancellation_policy_photo
     const cancellationPolicyText = business?.cancellation_policy_text
     const prepaymentAmount = totalPrice > 0 ? Math.ceil(totalPrice * prepaymentPercent / 100) : 0
@@ -2048,6 +2071,11 @@ function BookingPageInner() {
                 rows={3}
                 className="ds-input"
               />
+              {(business?.business_type === 'psychologist' || business?.business_type === 'medical') && (
+                <p className="ds-hint" style={{ marginTop: 6 }}>
+                  Не указывайте здесь диагнозы, сведения о здоровье или интимной жизни. Такие данные требуют отдельного правового основания и режима защиты.
+                </p>
+              )}
             </div>
 
             <div className="ds-field" style={{ marginBottom: 0, marginTop: 13 }}>
@@ -2108,13 +2136,13 @@ function BookingPageInner() {
                       : `${business.prepayment_percent}% = ${formatPrice(Math.ceil(totalPrice * (business.prepayment_percent ?? 100) / 100))}`}
                   </span>
                 </p>
-                {(business.payment_details || business.payment_phone) && (
+                {(cleanPaymentDetails(business.payment_details) || business.payment_phone) && (
                   <p>
                     {'Реквизиты: '}
-                    <span style={{ fontWeight: 600 }}>{business.payment_details || business.payment_phone}</span>
+                    <span style={{ fontWeight: 600 }}>{cleanPaymentDetails(business.payment_details) || business.payment_phone}</span>
                   </p>
                 )}
-                {business.payment_phone && business.payment_details && (
+                {business.payment_phone && cleanPaymentDetails(business.payment_details) && (
                   <p>
                     {'Телефон: '}
                     <span style={{ fontWeight: 600 }}>{business.payment_phone}</span>
@@ -2122,7 +2150,7 @@ function BookingPageInner() {
                 )}
               </div>
               <p className="bk-info-hint">
-                После записи оплатите по указанным реквизитам. Без предоплаты бронь может быть отменена.
+                После записи оплатите по указанным реквизитам и прикрепите чек прямо в ServGo. Владелец получит его через свой канал уведомлений.
               </p>
             </div>
           )}
@@ -2148,6 +2176,67 @@ function BookingPageInner() {
               />
             </div>
           ) : null}
+
+          {business?.legal_documents_enabled && (
+            <div className="ds-card" style={{ padding: 14, marginBottom: 14 }}>
+              <h3 className="ds-h3" style={{ marginBottom: 10 }}>Юридические документы</h3>
+
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', marginBottom: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={personalDataConsent}
+                  onChange={(e) => {
+                    setPersonalDataConsent(e.target.checked)
+                    setBookingError(null)
+                  }}
+                  style={{ width: 20, height: 20, marginTop: 1, flexShrink: 0 }}
+                />
+                <span className="ds-sub" style={{ lineHeight: 1.5 }}>
+                  Даю отдельное согласие на обработку персональных данных.{' '}
+                  <Link
+                    to={`/legal/consent/${business.id}`}
+                    target="_blank"
+                    className="ds-accent"
+                    style={{ textDecoration: 'underline' }}
+                  >
+                    Открыть согласие
+                  </Link>
+                </span>
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={bookingTermsAccepted}
+                  onChange={(e) => {
+                    setBookingTermsAccepted(e.target.checked)
+                    setBookingError(null)
+                  }}
+                  style={{ width: 20, height: 20, marginTop: 1, flexShrink: 0 }}
+                />
+                <span className="ds-sub" style={{ lineHeight: 1.5 }}>
+                  Принимаю{' '}
+                  <Link
+                    to={`/legal/terms/${business.id}`}
+                    target="_blank"
+                    className="ds-accent"
+                    style={{ textDecoration: 'underline' }}
+                  >
+                    условия записи
+                  </Link>
+                  {' '}и ознакомлен(а) с{' '}
+                  <Link
+                    to={`/legal/privacy/${business.id}`}
+                    target="_blank"
+                    className="ds-accent"
+                    style={{ textDecoration: 'underline' }}
+                  >
+                    политикой обработки персональных данных
+                  </Link>.
+                </span>
+              </label>
+            </div>
+          )}
 
           {bookingError && (
             <div className="bk-error-box">
