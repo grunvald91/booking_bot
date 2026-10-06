@@ -5671,7 +5671,7 @@ async def confirm_prepayment_by_owner(callback: CallbackQuery, state: FSMContext
 
         try:
             from bot.services.email_notifications import send_booking_email
-            await send_booking_email(related_bookings, "prepayment_confirmed")
+            await send_booking_email([booking], "prepayment_confirmed")
         except Exception as email_error:
             logger.warning(
                 "Email prepayment confirmation failed for booking %s: %s",
@@ -5796,7 +5796,7 @@ async def reject_prepayment_by_owner(callback: CallbackQuery, state: FSMContext)
 
         try:
             from bot.services.email_notifications import send_booking_email
-            await send_booking_email(related_bookings, "prepayment_rejected")
+            await send_booking_email([booking], "prepayment_rejected")
         except Exception as email_error:
             logger.warning(
                 "Email prepayment rejection failed for booking %s: %s",
