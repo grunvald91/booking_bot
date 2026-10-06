@@ -211,6 +211,7 @@ export interface CreateBookingData {
   time: string;
   client_name: string;
   client_phone: string;
+  client_email?: string;
   notes?: string;
   personal_data_consent?: boolean;
   booking_terms_accepted?: boolean;
@@ -402,6 +403,7 @@ export interface AuthResponse {
     id: number;
     full_name: string;
     phone?: string;
+    email?: string;
     username?: string;
   };
 }
