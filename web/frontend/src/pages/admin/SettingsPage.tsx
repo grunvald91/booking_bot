@@ -205,6 +205,10 @@ export function SettingsPage() {
           legal_documents_enabled: biz.legal_documents_enabled ?? false,
           booking_labels: biz.booking_labels || {},
           booking_flow_order: biz.booking_flow_order || 'service_first',
+          owner_reminders_enabled: biz.owner_reminders_enabled ?? true,
+          owner_reminder_minutes: biz.owner_reminder_minutes?.length ? biz.owner_reminder_minutes : [1440, 120],
+          master_reminders_enabled: biz.master_reminders_enabled ?? true,
+          master_reminder_minutes: biz.master_reminder_minutes?.length ? biz.master_reminder_minutes : [1440, 120],
         })
         try {
           setPhotos(biz.photos ? JSON.parse(biz.photos) : [])
