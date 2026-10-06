@@ -856,6 +856,12 @@ async def create_booking(
         can_c, can_r = _can_modify_booking(loaded)
         result_bookings.append(_booking_to_out(loaded, can_cancel=can_c, can_reschedule=can_r))
 
+    # Email is optional and independent from Telegram/PWA. The task reloads
+    # bookings in its own DB session, so SMTP latency never blocks booking creation.
+    asyncio.create_task(
+        send_booking_email_by_ids([b.id for b in created_bookings], "created")
+    )
+
     # Fire-and-forget notifications — SAME format as bot (notifications.py)
     async def _send_booking_notifications():
         try:
