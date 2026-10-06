@@ -1,4 +1,4 @@
-name: ServGo mail daemon fix
+name: ServGo mail localhost hardening
 
 on:
   push:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  fix:
+  harden:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
@@ -16,7 +16,7 @@ jobs:
     steps:
       - name: Install SSH helper
         run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
-      - name: Fix OpenDKIM and lock SMTP to localhost
+      - name: Harden local SMTP
         shell: bash
         run: |
           python - <<'PY'
@@ -38,49 +38,37 @@ jobs:
                   if n==2: raise
                   time.sleep(3)
           cmd=r'''set -Eeuo pipefail
-          grep -q '^PidFile ' /etc/opendkim.conf || sed -i '/^UserID/a PidFile                 /run/opendkim/opendkim.pid' /etc/opendkim.conf
-          install -d -m 0755 -o opendkim -g opendkim /run/opendkim
-
-          postconf -e 'inet_interfaces = loopback-only'
+          postconf -e 'inet_interfaces = 127.0.0.1'
           postconf -e 'inet_protocols = ipv4'
-          postconf -e 'mydestination = localhost'
           postconf -e 'mynetworks = 127.0.0.0/8'
-          postconf -e 'smtp_helo_name = artur.grunvald1991.fvds.ru'
-          postconf -e 'milter_default_action = accept'
-          postconf -e 'milter_protocol = 6'
-          postconf -e 'smtpd_milters = inet:127.0.0.1:8891'
-          postconf -e 'non_smtpd_milters = inet:127.0.0.1:8891'
+          postconf -e 'smtpd_relay_restrictions = permit_mynetworks,reject_unauth_destination'
+          ufw deny 25/tcp >/dev/null 2>&1 || true
 
-          systemctl reset-failed opendkim || true
+          postfix stop || true
+          sleep 1
+          postfix start
           systemctl restart opendkim
-          systemctl restart postfix
 
-          test "$(systemctl is-active opendkim)" = active
           test "$(systemctl is-active postfix)" = active
+          test "$(systemctl is-active opendkim)" = active
+          test "$(postconf -h inet_interfaces)" = "127.0.0.1"
 
-          echo '--- sockets ---'
-          ss -ltnp | grep -E ':(25|8891)\b' || true
-          if ss -ltn | awk '$4 ~ /:25$/ {print $4}' | grep -Ev '^127\.0\.0\.1:25$' >/dev/null; then
-            echo 'ERROR public SMTP listener detected'
-            exit 1
-          fi
+          listeners=$(ss -ltn | awk '$4 ~ /:25$/ {print $4}')
+          echo "smtp_listeners=$listeners"
+          test "$listeners" = "127.0.0.1:25"
 
           python3 - <<'SMTP'
           import smtplib
-          with smtplib.SMTP('127.0.0.1',25,timeout=5) as smtp:
-              code,_=smtp.ehlo()
+          with smtplib.SMTP('127.0.0.1',25,timeout=5) as s:
+              code,_=s.ehlo()
               assert code==250
           print('local_smtp=ok')
           SMTP
 
-          echo '--- config ---'
-          postconf -n | grep -E '^(myhostname|mydomain|myorigin|inet_interfaces|inet_protocols|smtp_helo_name|.*milters)'
-          echo '--- dkim record ---'
-          cat /etc/opendkim/keys/servgo.ru/s202610.txt
-          echo '--- env ---'
-          grep -E '^SMTP_(HOST|PORT|FROM|FROM_NAME|USE_TLS)=' /opt/booking_bot/.env
+          echo 'ufw_25='
+          ufw status | grep -E '^25/tcp' || true
           '''
-          _,o,e=s.exec_command(cmd,timeout=90)
+          _,o,e=s.exec_command(cmd,timeout=80)
           stdout=o.read().decode('utf-8','replace')
           stderr=e.read().decode('utf-8','replace')
           print(stdout)
