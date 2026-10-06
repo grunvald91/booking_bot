@@ -69,6 +69,7 @@ async def get_or_create_guest_user(
     session: AsyncSession,
     full_name: str,
     phone: Optional[str] = None,
+    email: Optional[str] = None,
 ) -> User:
     """Найти существующего гостевого пользователя (telegram_id < 0) по
     нормализованному телефону, либо создать нового с уникальным
@@ -89,10 +90,25 @@ async def get_or_create_guest_user(
         )
         existing = result.scalars().first()
         if existing:
+            changed = False
+            if full_name and existing.full_name != full_name:
+                existing.full_name = full_name
+                changed = True
+            if email and existing.email != email:
+                existing.email = email
+                changed = True
+            if changed:
+                await session.commit()
+                await session.refresh(existing)
             return existing
 
     guest_telegram_id = -int(datetime.now().timestamp() * 1_000_000)
-    user = User(telegram_id=guest_telegram_id, full_name=full_name, phone=clean_phone)
+    user = User(
+        telegram_id=guest_telegram_id,
+        full_name=full_name,
+        phone=clean_phone,
+        email=email,
+    )
     session.add(user)
     await session.commit()
     await session.refresh(user)

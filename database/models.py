@@ -21,6 +21,7 @@ class User(Base):
     username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     full_name: Mapped[str] = mapped_column(String(255))
     phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(320), nullable=True, index=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

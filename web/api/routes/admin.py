@@ -137,6 +137,7 @@ def _admin_booking_out(b: Booking) -> AdminBookingOut:
         id=b.id,
         client_name=b.client.full_name if b.client else "Unknown",
         client_phone=b.client.phone if b.client else None,
+        client_email=b.client.email if b.client else None,
         service_name=b.service.name if b.service else "",
         service_duration=b.duration_minutes or (b.service.duration_minutes if b.service else None),
         price=b.estimated_price if b.duration_minutes is not None else (b.service.price if b.service else None),
