@@ -11,6 +11,17 @@ BACKUP="/root/servgo-mail-backup-$STAMP"
 mkdir -p "$BACKUP"
 
 export DEBIAN_FRONTEND=noninteractive
+
+# The VPS may be running apt-daily/unattended-upgrades. Wait rather than
+# competing for dpkg/debconf locks.
+for lock in /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/debconf/config.dat; do
+  for _ in $(seq 1 60); do
+    if ! fuser "$lock" >/dev/null 2>&1; then break; fi
+    sleep 2
+  done
+done
+dpkg --configure -a || true
+
 echo "postfix postfix/mailname string $DOMAIN" | debconf-set-selections
 echo "postfix postfix/main_mailer_type select Internet Site" | debconf-set-selections
 apt-get update -qq
