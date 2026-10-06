@@ -384,6 +384,9 @@ function BookingPageInner() {
   const [clientPhone, setClientPhone] = useState(() => {
     return localStorage.getItem('clientPhone') || ''
   })
+  const [clientEmail, setClientEmail] = useState(() => {
+    return localStorage.getItem('clientEmail') || ''
+  })
   const [comment, setComment] = useState('')
   const [personalDataConsent, setPersonalDataConsent] = useState(false)
   const [bookingTermsAccepted, setBookingTermsAccepted] = useState(false)
@@ -432,8 +435,9 @@ function BookingPageInner() {
   // Inputs (для скролла/фокуса при валидации)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const phoneInputRef = useRef<HTMLInputElement>(null)
-  // Подсветка пустых полей после попытки отправки
-  const [fieldErrors, setFieldErrors] = useState<{ name?: boolean; phone?: boolean }>({})
+  const emailInputRef = useRef<HTMLInputElement>(null)
+  // Подсветка пустых/некорректных полей после попытки отправки
+  const [fieldErrors, setFieldErrors] = useState<{ name?: boolean; phone?: boolean; email?: boolean }>({})
 
   // Auto-fill phone (и префилл +7 9 если ничего не нашлось)
   useEffect(() => {
@@ -450,6 +454,10 @@ function BookingPageInner() {
           localStorage.setItem('clientPhone', user.phone)
         } else {
           setPrefillFallback()
+        }
+        if (user?.email) {
+          setClientEmail(user.email)
+          localStorage.setItem('clientEmail', user.email)
         }
       }).catch(() => setPrefillFallback())
     } else {
@@ -735,15 +743,24 @@ function BookingPageInner() {
     if (!selectedDate || !selectedTime || !businessId) return
 
     // Валидация контактов: подсветить пустые поля и проскроллить к первому
-    const errs: { name?: boolean; phone?: boolean } = {}
+    const errs: { name?: boolean; phone?: boolean; email?: boolean } = {}
     if (!clientName.trim()) errs.name = true
     if (!clientPhone.trim()) errs.phone = true
-    if (errs.name || errs.phone) {
+    if (clientEmail.trim() && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(clientEmail.trim())) errs.email = true
+    if (errs.name || errs.phone || errs.email) {
       setFieldErrors(errs)
-      setBookingError(
-        `Заполните: ${[errs.name && 'имя', errs.phone && 'телефон'].filter(Boolean).join(' и ')}`
-      )
-      const target = errs.name ? nameInputRef.current : phoneInputRef.current
+      if (errs.email && !errs.name && !errs.phone) {
+        setBookingError('Проверьте email или оставьте поле пустым.')
+      } else {
+        setBookingError(
+          `Заполните: ${[errs.name && 'имя', errs.phone && 'телефон'].filter(Boolean).join(' и ')}`
+        )
+      }
+      const target = errs.name
+        ? nameInputRef.current
+        : errs.phone
+          ? phoneInputRef.current
+          : emailInputRef.current
       target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       setTimeout(() => target?.focus(), 350)
       return
@@ -778,6 +795,7 @@ function BookingPageInner() {
       })
 
       if (clientPhone) localStorage.setItem('clientPhone', clientPhone)
+      if (clientEmail.trim()) localStorage.setItem('clientEmail', clientEmail.trim().toLowerCase())
 
       const result = await api.createBooking({
         business_id: Number(businessId),
@@ -790,6 +808,7 @@ function BookingPageInner() {
         time: selectedTime,
         client_name: clientName,
         client_phone: clientPhone,
+        client_email: clientEmail.trim() || undefined,
         notes: comment || undefined,
         personal_data_consent: business?.legal_documents_enabled ? personalDataConsent : undefined,
         booking_terms_accepted: business?.legal_documents_enabled ? bookingTermsAccepted : undefined,
@@ -2040,6 +2059,34 @@ function BookingPageInner() {
                 <p className="ds-error" style={{ marginTop: 4, marginBottom: 0 }}>Укажите ваше имя</p>
               )}
             </div>
+            <div className="ds-field">
+              <label className="ds-label">
+                Email <span style={{ fontWeight: 400 }}>(необязательно)</span>
+              </label>
+              <input
+                ref={emailInputRef}
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                value={clientEmail}
+                onChange={(e) => {
+                  setClientEmail(e.target.value)
+                  if (fieldErrors.email) setFieldErrors((p) => ({ ...p, email: false }))
+                }}
+                placeholder="name@example.com"
+                className={`ds-input ${fieldErrors.email ? 'bk-input-error' : ''}`}
+              />
+              {fieldErrors.email ? (
+                <p className="ds-error" style={{ marginTop: 4, marginBottom: 0 }}>
+                  Проверьте адрес электронной почты
+                </p>
+              ) : (
+                <p className="ds-hint" style={{ marginTop: 5 }}>
+                  Если укажете email, ServGo сможет присылать подтверждения и напоминания ещё и по почте.
+                </p>
+              )}
+            </div>
+
             <div className="ds-field">
               <label className="ds-label">
                 Телефон <span style={{ color: 'var(--s-danger)' }}>*</span>
