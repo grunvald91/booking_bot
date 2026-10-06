@@ -25,6 +25,7 @@ from ..database import (
     VenueTimePricing, Subscription, SubscriptionService, EmployeeService,
 )
 from database.crud import get_or_create_guest_user
+from notification_rules import normalize_reminder_minutes
 from database.booking_safety import (
     ACTIVE_BOOKING_STATUSES,
     BookingConflictError,
@@ -32,6 +33,7 @@ from database.booking_safety import (
     ensure_resource_available,
     lock_resource_days,
     service_occupies_resource,
+    contiguous_visit_bookings,
 )
 from ..deps import get_current_admin
 from ..booking_utils import compute_recurring_dates
@@ -107,9 +109,19 @@ def _normalize_booking_labels(value: Optional[dict[str, str]]) -> dict[str, str]
     return result
 
 
+def _normalize_reminder_minutes(value) -> list[int]:
+    return normalize_reminder_minutes(value)
+
+
 def _business_admin_out(business: Business) -> BusinessAdminDetailOut:
     data = {column.name: getattr(business, column.name) for column in Business.__table__.columns}
     data["booking_labels"] = _parse_booking_labels(getattr(business, "booking_labels", None))
+    data["owner_reminder_minutes"] = _normalize_reminder_minutes(
+        getattr(business, "owner_reminder_minutes", None)
+    )
+    data["master_reminder_minutes"] = _normalize_reminder_minutes(
+        getattr(business, "master_reminder_minutes", None)
+    )
     order = getattr(business, "booking_flow_order", "service_first") or "service_first"
     data["booking_flow_order"] = order if order in ("service_first", "resource_first") else "service_first"
     return BusinessAdminDetailOut(**data)
@@ -263,7 +275,28 @@ async def list_bookings(
         .order_by(Booking.booking_date.desc(), Booking.booking_time.desc())
         .limit(200)
     )
-    bookings = result.scalars().all()
+    bookings = list(result.scalars().all())
+
+    try:
+        from bot.services.notification_events import dispatch_booking_event
+        # Recurring manual bookings are distinct visits, so notify each one
+        # independently rather than presenting the whole series as one visit.
+        for created in bookings:
+            await dispatch_booking_event(
+                [created],
+                db,
+                "booking_created",
+                include_client=True,
+                staff_audience="all",
+            )
+    except Exception as notification_error:
+        logger.error(
+            "Manual booking notification failed ids=%s: %s",
+            [item.id for item in bookings],
+            notification_error,
+            exc_info=True,
+        )
+
     return [_admin_booking_out(b) for b in bookings]
 
 
@@ -726,17 +759,17 @@ async def update_booking_status(
     user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update booking status without allowing a reactivated overlap."""
+    """Update a whole visit status and emit the appropriate system event."""
     if data.status not in ("confirmed", "completed", "cancelled", "pending"):
         raise HTTPException(status_code=400, detail="Invalid status")
 
     biz_ids = await _get_owner_business_ids(db, user)
-
     result = await db.execute(
         select(Booking)
         .where(Booking.id == booking_id)
         .options(
             selectinload(Booking.client),
+            selectinload(Booking.business),
             selectinload(Booking.service),
             selectinload(Booking.employee),
         )
@@ -747,6 +780,8 @@ async def update_booking_status(
         raise HTTPException(status_code=404, detail="Booking not found")
     if booking.business_id not in biz_ids:
         raise HTTPException(status_code=403, detail="Not your business")
+
+    old_status = booking.status
     if data.status == "confirmed" and booking.duration_minutes is not None and (
         booking.price_requires_confirmation or booking.prepayment_amount is None
     ):
@@ -755,18 +790,31 @@ async def update_booking_status(
             detail="Укажите окончательную цену и предоплату (0 ₽, если не требуется)",
         )
 
+    visit_statuses = (
+        ("prepayment_sent", "pending_prepayment")
+        if old_status in ("prepayment_sent", "pending_prepayment")
+        else (old_status,)
+    )
+    visit = await contiguous_visit_bookings(db, booking, statuses=visit_statuses)
+    visit_ids = [item.id for item in visit]
+
     target_is_active = data.status in ACTIVE_BOOKING_STATUSES
-    current_is_active = booking.status in ACTIVE_BOOKING_STATUSES
+    current_is_active = old_status in ACTIVE_BOOKING_STATUSES
     if target_is_active and not current_is_active and booking.occupies_resource:
         await lock_resource_days(db, booking.employee_id, [booking.booking_date])
+        visit_duration = sum(
+            booking_resource_duration(item)
+            for item in visit
+            if getattr(item, "occupies_resource", True)
+        )
         try:
             await ensure_resource_available(
                 db,
                 employee_id=booking.employee_id,
                 booking_date=booking.booking_date,
-                booking_time=booking.booking_time,
-                duration_minutes=booking_resource_duration(booking),
-                exclude_booking_ids=[booking.id],
+                booking_time=min(item.booking_time for item in visit),
+                duration_minutes=visit_duration or booking_resource_duration(booking),
+                exclude_booking_ids=visit_ids,
                 acquire_lock=False,
             )
         except BookingConflictError as exc:
@@ -776,7 +824,15 @@ async def update_booking_status(
                 detail="Нельзя вернуть запись: это время уже занято",
             ) from exc
 
-    booking.status = data.status
+    confirmed_at = datetime.utcnow()
+    for item in visit:
+        item.status = data.status
+        if (
+            data.status == "confirmed"
+            and old_status in ("prepayment_sent", "pending_prepayment")
+        ):
+            item.prepayment_confirmed_at = confirmed_at
+
     try:
         await db.commit()
     except IntegrityError as exc:
@@ -789,8 +845,48 @@ async def update_booking_status(
             ) from exc
         raise
 
-    await db.refresh(booking)
-    return _admin_booking_out(booking)
+    event_kind = None
+    if data.status == "cancelled" and old_status != "cancelled":
+        event_kind = "booking_cancelled"
+    elif (
+        data.status == "confirmed"
+        and old_status in ("prepayment_sent", "pending_prepayment")
+    ):
+        # This is the moment a prepayment-gated booking becomes real.
+        event_kind = "booking_created"
+
+    if event_kind:
+        try:
+            from bot.services.notification_events import dispatch_booking_event
+            await dispatch_booking_event(
+                visit,
+                db,
+                event_kind,
+                include_client=True,
+                staff_audience="all",
+            )
+        except Exception as notification_error:
+            logger.error(
+                "Admin status notification failed booking=%s event=%s: %s",
+                booking_id,
+                event_kind,
+                notification_error,
+                exc_info=True,
+            )
+
+    refreshed = (
+        await db.execute(
+            select(Booking)
+            .where(Booking.id == booking_id)
+            .options(
+                selectinload(Booking.client),
+                selectinload(Booking.business),
+                selectinload(Booking.service),
+                selectinload(Booking.employee),
+            )
+        )
+    ).scalar_one()
+    return _admin_booking_out(refreshed)
 
 
 # ---------- POST /admin/bookings/{id}/reschedule ----------
@@ -802,7 +898,7 @@ async def admin_reschedule_booking(
     user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Move a booking under serialized source/target resource locks."""
+    """Move a whole visit atomically and notify every affected party."""
     biz_ids = await _get_owner_business_ids(db, user)
 
     result = await db.execute(
@@ -810,6 +906,7 @@ async def admin_reschedule_booking(
         .where(Booking.id == booking_id)
         .options(
             selectinload(Booking.client),
+            selectinload(Booking.business),
             selectinload(Booking.service),
             selectinload(Booking.employee),
         )
@@ -823,13 +920,25 @@ async def admin_reschedule_booking(
     if booking.status not in ACTIVE_BOOKING_STATUSES:
         raise HTTPException(status_code=400, detail="Эту запись нельзя перенести")
 
+    visit = await contiguous_visit_bookings(
+        db,
+        booking,
+        statuses=ACTIVE_BOOKING_STATUSES,
+    )
+    visit_ids = [item.id for item in visit]
+    visit = sorted(visit, key=lambda item: (item.booking_time, item.id))
+    old_date = visit[0].booking_date
+    old_time = visit[0].booking_time
+
     try:
         h, m = map(int, data.time.split(":"))
         new_time = dt_time(h, m)
     except (ValueError, AttributeError):
         raise HTTPException(status_code=400, detail="Invalid time")
 
-    target_employee_id = data.employee_id if data.employee_id is not None else booking.employee_id
+    target_employee_id = (
+        data.employee_id if data.employee_id is not None else booking.employee_id
+    )
     if target_employee_id:
         target_employee = (
             await db.execute(
@@ -843,8 +952,16 @@ async def admin_reschedule_booking(
         if not target_employee:
             raise HTTPException(status_code=404, detail="Employee/resource not found")
 
-    duration = booking_resource_duration(booking)
-    if booking.duration_minutes is not None:
+    visit_duration = sum(
+        booking_resource_duration(item)
+        for item in visit
+        if getattr(item, "occupies_resource", True)
+    )
+    if visit_duration <= 0:
+        visit_duration = booking_resource_duration(booking)
+
+    is_rental = any(item.duration_minutes is not None for item in visit)
+    if is_rental:
         if target_employee_id != booking.employee_id:
             raise HTTPException(status_code=400, detail="Для смены судна создайте новую заявку")
         business = await db.get(Business, booking.business_id)
@@ -856,7 +973,7 @@ async def admin_reschedule_booking(
                 data.date,
                 business.working_hours_start,
                 business.working_hours_end,
-                duration,
+                visit_duration,
                 [],
                 now=datetime.now(ZoneInfo("Europe/Moscow")).replace(tzinfo=None),
             )
@@ -865,8 +982,6 @@ async def admin_reschedule_booking(
         if data.time not in allowed:
             raise HTTPException(status_code=409, detail="Время вне рабочих часов или уже прошло")
 
-    # Lock both source and target resources in deterministic order so two
-    # simultaneous drag&drop operations cannot swap into each other.
     resource_ids = sorted(
         {
             resource_id
@@ -875,7 +990,7 @@ async def admin_reschedule_booking(
         }
     )
     for resource_id in resource_ids:
-        await lock_resource_days(db, resource_id, [booking.booking_date, data.date])
+        await lock_resource_days(db, resource_id, [old_date, data.date])
 
     try:
         await ensure_resource_available(
@@ -883,22 +998,24 @@ async def admin_reschedule_booking(
             employee_id=target_employee_id,
             booking_date=data.date,
             booking_time=new_time,
-            duration_minutes=duration,
-            exclude_booking_ids=[booking.id],
+            duration_minutes=visit_duration,
+            exclude_booking_ids=visit_ids,
             acquire_lock=False,
         )
     except BookingConflictError as exc:
         await db.rollback()
         raise HTTPException(status_code=409, detail="На это время уже есть запись") from exc
 
-    booking.booking_date = data.date
-    booking.booking_time = new_time
-    booking.reminder_24h_sent = False
-    booking.reminder_2h_sent = False
-    booking.staff_reminder_24h_sent = False
-    booking.staff_reminder_2h_sent = False
-    if data.employee_id is not None:
-        booking.employee_id = target_employee_id
+    current_dt = datetime.combine(data.date, new_time)
+    for item in visit:
+        item.booking_date = data.date
+        item.booking_time = current_dt.time()
+        if data.employee_id is not None:
+            item.employee_id = target_employee_id
+        current_dt += timedelta(minutes=booking_resource_duration(item))
+
+    from bot.services.notification_events import clear_upcoming_reminder_deliveries
+    await clear_upcoming_reminder_deliveries(visit, db)
 
     try:
         await db.commit()
@@ -909,17 +1026,38 @@ async def admin_reschedule_booking(
             raise HTTPException(status_code=409, detail="На это время уже есть запись") from exc
         raise
 
-    result = await db.execute(
-        select(Booking)
-        .where(Booking.id == booking.id)
-        .options(
-            selectinload(Booking.client),
-            selectinload(Booking.service),
-            selectinload(Booking.employee),
+    try:
+        from bot.services.notification_events import dispatch_booking_event
+        await dispatch_booking_event(
+            visit,
+            db,
+            "booking_rescheduled",
+            include_client=True,
+            staff_audience="all",
+            old_date=old_date,
+            old_time=old_time,
         )
-    )
-    booking = result.scalar_one()
-    return _admin_booking_out(booking)
+    except Exception as notification_error:
+        logger.error(
+            "Admin reschedule notification failed booking=%s: %s",
+            booking_id,
+            notification_error,
+            exc_info=True,
+        )
+
+    refreshed = (
+        await db.execute(
+            select(Booking)
+            .where(Booking.id == booking_id)
+            .options(
+                selectinload(Booking.client),
+                selectinload(Booking.business),
+                selectinload(Booking.service),
+                selectinload(Booking.employee),
+            )
+        )
+    ).scalar_one()
+    return _admin_booking_out(refreshed)
 
 
 # ---------- GET /admin/businesses ----------
