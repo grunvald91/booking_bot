@@ -19,6 +19,7 @@ from database.crud import get_business_owners
 from bot.utils.validators import format_date_with_weekday, format_phone
 from bot.utils.business_types import get_terminology, is_venue_rental_type
 from bot.services.webpush import send_booking_webpush, send_staff_booking_webpush
+from bot.services.email_notifications import send_booking_email
 
 
 def get_employee_label(business_type: str) -> str:
@@ -190,9 +191,14 @@ async def send_grouped_24h_reminder(bot: Bot, bookings: list, session: AsyncSess
         except Exception as push_error:
             logger.warning("Web Push 24h reminder failed: %s", push_error)
 
+        email_sent = False
+        try:
+            email_sent = await send_booking_email(bookings, "24h")
+        except Exception as email_error:
+            logger.warning("Email 24h reminder failed: %s", email_error)
+
         # Флаг означает: хотя бы один клиентский канал доставил напоминание.
-        # Полная поканальная история будет вынесена в notification_deliveries.
-        if telegram_sent or push_sent:
+        if telegram_sent or push_sent or email_sent:
             for b in bookings:
                 b.reminder_24h_sent = True
             await session.commit()
@@ -201,10 +207,11 @@ async def send_grouped_24h_reminder(bot: Bot, bookings: list, session: AsyncSess
 
         booking_ids = [b.id for b in bookings]
         logger.info(
-            "24h reminder bookings=%s telegram=%s webpush=%s",
+            "24h reminder bookings=%s telegram=%s webpush=%s email=%s",
             booking_ids,
             telegram_sent,
             push_sent,
+            email_sent,
         )
 
     except Exception as e:
@@ -347,7 +354,13 @@ async def send_grouped_2h_reminder(bot: Bot, bookings: list, session: AsyncSessi
         except Exception as push_error:
             logger.warning("Web Push 2h reminder failed: %s", push_error)
 
-        if telegram_sent or push_sent:
+        email_sent = False
+        try:
+            email_sent = await send_booking_email(bookings, "2h")
+        except Exception as email_error:
+            logger.warning("Email 2h reminder failed: %s", email_error)
+
+        if telegram_sent or push_sent or email_sent:
             for b in bookings:
                 b.reminder_2h_sent = True
             await session.commit()
@@ -356,10 +369,11 @@ async def send_grouped_2h_reminder(bot: Bot, bookings: list, session: AsyncSessi
 
         booking_ids = [b.id for b in bookings]
         logger.info(
-            "2h reminder bookings=%s telegram=%s webpush=%s",
+            "2h reminder bookings=%s telegram=%s webpush=%s email=%s",
             booking_ids,
             telegram_sent,
             push_sent,
+            email_sent,
         )
 
     except Exception as e:

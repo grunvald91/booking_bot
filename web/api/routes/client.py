@@ -23,6 +23,8 @@ from ..photo_transport import create_photo_client
 from ..database import get_db, Business, Service, Employee, EmployeeService, Booking, User, VenueTimePricing
 from ..deps import get_current_user, get_current_user_optional
 from database.crud import get_or_create_guest_user
+from email_utils import normalize_optional_email
+from bot.services.email_notifications import send_booking_email_by_ids
 from database.booking_safety import (
     ACTIVE_BOOKING_STATUSES,
     BookingConflictError,
@@ -653,6 +655,11 @@ async def create_booking(
             )
         legal_accepted_at = datetime.utcnow()
 
+    try:
+        client_email = normalize_optional_email(body.client_email)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     booking_user = user
     if not booking_user:
         if not body.client_phone:
@@ -661,7 +668,12 @@ async def create_booking(
             db,
             body.client_name or "Web Client",
             body.client_phone,
+            client_email,
         )
+    elif client_email and booking_user.email != client_email:
+        # Keep the email the client explicitly supplied for future reminders.
+        # It is committed together with the booking transaction.
+        booking_user.email = client_email
 
     svc_ids = list(body.service_ids) if body.service_ids else []
     if not svc_ids and body.service_id:
@@ -843,6 +855,12 @@ async def create_booking(
         loaded = full.scalar_one()
         can_c, can_r = _can_modify_booking(loaded)
         result_bookings.append(_booking_to_out(loaded, can_cancel=can_c, can_reschedule=can_r))
+
+    # Email is optional and independent from Telegram/PWA. The task reloads
+    # bookings in its own DB session, so SMTP latency never blocks booking creation.
+    asyncio.create_task(
+        send_booking_email_by_ids([b.id for b in created_bookings], "created")
+    )
 
     # Fire-and-forget notifications — SAME format as bot (notifications.py)
     async def _send_booking_notifications():
@@ -1099,6 +1117,17 @@ async def create_booking(
     # (admin.py) sends all notifications after owner confirms payment.
     if not getattr(business, 'prepayment_enabled', False):
         asyncio.create_task(_send_booking_notifications())
+
+    # Email is an optional independent channel. It is sent for both ordinary
+    # and prepayment bookings so the client immediately has a durable link to
+    # the booking status page.
+    if client_email:
+        asyncio.create_task(
+            send_booking_email_by_ids(
+                [booking.id for booking in created_bookings],
+                "created",
+            )
+        )
 
     return result_bookings
 
