@@ -1,0 +1,131 @@
+name: ServGo unified notifications preflight
+
+on:
+  push:
+    branches:
+      - ops/unified-notifications-release-20261006
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Compare production targets and database shape
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, pathlib, subprocess, time
+          import paramiko
+
+          HOST='155.212.162.47'
+          ROOT='/opt/booking_bot'
+          FP='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          BASELINE='a1eec94ec04632144d89b6b2a66bc1ed8e6e4f1a'
+          targets=[
+            'bot/handlers/admin.py',
+            'bot/handlers/client.py',
+            'bot/services/notification_events.py',
+            'bot/services/notifications.py',
+            'bot/services/webpush.py',
+            'database/booking_safety.py',
+            'database/models.py',
+            'notification_rules.py',
+            'web/api/rental.py',
+            'web/api/routes/admin.py',
+            'web/api/routes/client.py',
+            'web/api/routes/notifications.py',
+            'web/api/schemas.py',
+            'web/frontend/src/api/client.ts',
+            'web/frontend/src/pages/admin/SettingsPage.tsx',
+          ]
+
+          def sha(data): return hashlib.sha256(data).hexdigest()
+          current={}
+          baseline={}
+          for p in targets:
+              current[p]=sha(pathlib.Path(p).read_bytes()) if pathlib.Path(p).exists() else 'ABSENT'
+              try:
+                  baseline[p]=sha(subprocess.check_output(['git','show',f'{BASELINE}:{p}']))
+              except subprocess.CalledProcessError:
+                  baseline[p]='ABSENT'
+
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  actual=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if actual!=FP: raise paramiko.SSHException('host key mismatch')
+                  c.get_host_keys().add(h,k.get_name(),k)
+
+          ssh=None
+          for attempt in range(3):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(Pinned())
+              try:
+                  c.connect(HOST,port=22,username='root',password=os.environ['SERVER_PASSWORD'],
+                            look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  ssh=c; break
+              except (paramiko.SSHException,OSError,EOFError):
+                  c.close()
+                  if attempt==2: raise
+                  time.sleep(3)
+
+          sftp=ssh.open_sftp()
+          print('HEAD='+subprocess.check_output(['git','rev-parse','HEAD']).decode().strip())
+          try:
+              try:
+                  with sftp.open(ROOT+'/.release_version','rb') as f:
+                      print('release_version='+f.read().decode('utf-8','replace').strip())
+              except FileNotFoundError:
+                  print('release_version=ABSENT')
+              print('TARGET_COMPARISON_BEGIN')
+              for p in targets:
+                  try:
+                      with sftp.open(ROOT+'/'+p,'rb') as f: remote=sha(f.read())
+                  except FileNotFoundError:
+                      remote='ABSENT'
+                  state='current' if remote==current[p] else ('baseline' if remote==baseline[p] else 'diverged')
+                  print(f'{state}\t{p}\tserver={remote}\tcurrent={current[p]}\tbaseline={baseline[p]}')
+              print('TARGET_COMPARISON_END')
+          finally:
+              sftp.close()
+
+          cmd=r'''set -e
+          printf 'bot='; systemctl is-active booking-bot.service || true
+          printf 'api='; systemctl is-active booking-web-api.service || true
+          printf 'api_health='; curl -sS --max-time 5 -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/health || true
+          cd /opt/booking_bot
+          ./venv/bin/python - <<'DB'
+          import asyncio
+          from sqlalchemy import text
+          from database.database import async_session_maker
+          async def run():
+              async with async_session_maker() as s:
+                  for table in ('businesses','bookings','users','notification_deliveries'):
+                      exists=bool((await s.execute(text("select exists(select 1 from information_schema.tables where table_name=:t)"),{'t':table})).scalar())
+                      print('table_'+table+'='+str(exists))
+                      if exists:
+                          cols=(await s.execute(text("select column_name from information_schema.columns where table_name=:t order by ordinal_position"),{'t':table})).scalars().all()
+                          print('columns_'+table+'='+','.join(cols))
+                  print('push_subscriptions='+str(bool((await s.execute(text("select exists(select 1 from information_schema.tables where table_name='push_subscriptions')"))).scalar())))
+          asyncio.run(run())
+          DB
+          printf 'frontend_dist='; test -f web/frontend/dist/index.html && echo present || echo absent
+          '''
+          _,out,err=ssh.exec_command(cmd,timeout=45)
+          stdout=out.read().decode('utf-8','replace')
+          stderr=err.read().decode('utf-8','replace')
+          status=out.channel.recv_exit_status()
+          print(stdout)
+          if status:
+              print(stderr[-1600:])
+              raise SystemExit(status)
+          ssh.close()
+          PY
