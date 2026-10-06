@@ -76,3 +76,66 @@
     font-weight: 650;
     line-height: 1.25;
 }
+
+
+/* First screen: the two core ServGo systems. */
+.hero-core-systems {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    align-self: stretch;
+}
+.hero-system-card {
+    padding: 22px;
+    border-radius: 22px;
+    background: #fff;
+    border: 1px solid rgba(13, 27, 42, 0.08);
+    box-shadow: 0 16px 40px -28px rgba(13, 27, 42, 0.45);
+}
+.hero-system-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 34px;
+    height: 34px;
+    padding: 0 9px;
+    border-radius: 10px;
+    background: rgba(47, 91, 235, 0.09);
+    color: #2f5beb;
+    font-size: 12px;
+    font-weight: 800;
+}
+.hero-system-card h2 {
+    margin: 14px 0 8px;
+    font-size: clamp(18px, 2vw, 24px);
+    line-height: 1.18;
+}
+.hero-system-card p {
+    margin: 0;
+    line-height: 1.55;
+    opacity: .82;
+}
+.hero-system-card ul {
+    display: grid;
+    gap: 7px;
+    margin: 14px 0 0;
+    padding: 0;
+    list-style: none;
+}
+.hero-system-card li {
+    position: relative;
+    padding-left: 17px;
+    font-size: 13px;
+    line-height: 1.4;
+    font-weight: 650;
+}
+.hero-system-card li::before {
+    content: "✓";
+    position: absolute;
+    left: 0;
+    color: #2f5beb;
+}
+@media (max-width: 760px) {
+    .hero-core-systems { grid-template-columns: 1fr; }
+    .hero-system-card { padding: 18px; }
+}
