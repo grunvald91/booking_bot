@@ -1,0 +1,408 @@
+name: ServGo unified notifications production release
+
+on:
+  push:
+    branches:
+      - ops/unified-notifications-release-20261006
+    paths:
+      - '.github/workflows/unified-notifications-production-release-20261006.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      RELEASE_SHA: eb1608c06ac5ea3f61240fc34276da142cd1d223
+
+    steps:
+      - name: Checkout ops branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard ops branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only "$RELEASE_SHA"..HEAD > /tmp/ops-diff.txt
+          echo "Ops-only changes:"
+          cat /tmp/ops-diff.txt
+          if grep -v '^\.github/workflows/unified-notifications-' /tmp/ops-diff.txt | grep -q .; then
+            echo "::error::Ops branch contains runtime changes beyond release SHA"
+            exit 1
+          fi
+
+      - name: Build frontend
+        working-directory: web/frontend
+        run: |
+          npm ci --legacy-peer-deps
+          npm run build
+
+      - name: Prepare payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/servgo-release
+          mkdir -p /tmp/servgo-release/payload
+          cat > /tmp/servgo-release/targets.txt <<'EOF'
+          bot/handlers/admin.py
+          bot/handlers/client.py
+          bot/services/notification_events.py
+          bot/services/notifications.py
+          bot/services/webpush.py
+          database/booking_safety.py
+          database/models.py
+          notification_rules.py
+          web/api/rental.py
+          web/api/routes/admin.py
+          web/api/routes/client.py
+          web/api/routes/notifications.py
+          web/api/schemas.py
+          migrations/add_legal_consents.sql
+          migrations/add_configurable_staff_notifications.sql
+          EOF
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            mkdir -p "/tmp/servgo-release/payload/$(dirname "$f")"
+            cp "$f" "/tmp/servgo-release/payload/$f"
+          done < /tmp/servgo-release/targets.txt
+          mkdir -p /tmp/servgo-release/payload/web/frontend
+          cp -a web/frontend/dist /tmp/servgo-release/payload/web/frontend/dist
+
+          python - <<'PY'
+          import hashlib, json, subprocess
+          baseline='a1eec94ec04632144d89b6b2a66bc1ed8e6e4f1a'
+          special={'web/api/routes/admin.py':'a84d95714294a30c47a4dacdde91256afafbdae0'}
+          absent={'bot/services/notification_events.py','notification_rules.py'}
+          targets=[
+            'bot/handlers/admin.py','bot/handlers/client.py',
+            'bot/services/notification_events.py','bot/services/notifications.py',
+            'bot/services/webpush.py','database/booking_safety.py','database/models.py',
+            'notification_rules.py','web/api/rental.py','web/api/routes/admin.py',
+            'web/api/routes/client.py','web/api/routes/notifications.py','web/api/schemas.py',
+          ]
+          expected={}
+          for path in targets:
+              if path in absent:
+                  expected[path]='ABSENT'
+                  continue
+              ref=special.get(path,baseline)
+              data=subprocess.check_output(['git','show',f'{ref}:{path}'])
+              expected[path]=hashlib.sha256(data).hexdigest()
+          with open('/tmp/servgo-release/guard.json','w') as f:
+              json.dump({'release_sha':'eb1608c06ac5ea3f61240fc34276da142cd1d223','expected_old':expected},f,indent=2)
+          PY
+
+          tar -czf /tmp/servgo-release/payload.tgz -C /tmp/servgo-release/payload .
+
+      - name: Install SSH client
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Pin production host key
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          ssh-keyscan -T 10 -p 22 155.212.162.47 > /tmp/servgo_known_hosts 2>/dev/null
+          ssh-keygen -lf /tmp/servgo_known_hosts -E sha256 | grep -F 'SHA256:uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU' >/dev/null
+          echo "host_key=verified"
+
+      - name: Upload staged release
+        shell: bash
+        run: |
+          set -euo pipefail
+          OPTS="-o UserKnownHostsFile=/tmp/servgo_known_hosts -o StrictHostKeyChecking=yes"
+          sshpass -e ssh $OPTS root@155.212.162.47 "mkdir -p /opt/booking_bot/.release_staging/unified-notifications-eb1608c-20261006 && chmod 700 /opt/booking_bot/.release_staging/unified-notifications-eb1608c-20261006"
+          sshpass -e scp $OPTS /tmp/servgo-release/payload.tgz root@155.212.162.47:/opt/booking_bot/.release_staging/unified-notifications-eb1608c-20261006/payload.tgz
+          sshpass -e scp $OPTS /tmp/servgo-release/guard.json root@155.212.162.47:/opt/booking_bot/.release_staging/unified-notifications-eb1608c-20261006/guard.json
+
+      - name: Release and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          OPTS="-o UserKnownHostsFile=/tmp/servgo_known_hosts -o StrictHostKeyChecking=yes"
+          sshpass -e ssh $OPTS root@155.212.162.47 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          ROOT=/opt/booking_bot
+          RELEASE=unified-notifications-eb1608c-20261006
+          RELEASE_SHA=eb1608c06ac5ea3f61240fc34276da142cd1d223
+          STAGE=$ROOT/.release_staging/$RELEASE
+          PAYLOAD=$STAGE/payload
+          BACKUP=$ROOT/.release_backups/$RELEASE-$(date +%Y%m%d-%H%M%S)
+
+          cat > $STAGE/runtime-targets.txt <<'EOF'
+          bot/handlers/admin.py
+          bot/handlers/client.py
+          bot/services/notification_events.py
+          bot/services/notifications.py
+          bot/services/webpush.py
+          database/booking_safety.py
+          database/models.py
+          notification_rules.py
+          web/api/rental.py
+          web/api/routes/admin.py
+          web/api/routes/client.py
+          web/api/routes/notifications.py
+          web/api/schemas.py
+          EOF
+
+          cat > $STAGE/migrations.txt <<'EOF'
+          migrations/add_legal_consents.sql
+          migrations/add_configurable_staff_notifications.sql
+          EOF
+
+          rm -rf $PAYLOAD
+          mkdir -p $PAYLOAD
+          tar -xzf $STAGE/payload.tgz -C $PAYLOAD
+
+          cd $ROOT
+          ./venv/bin/python - $STAGE/guard.json <<'PY'
+          import hashlib, json, pathlib, sys
+          root=pathlib.Path('/opt/booking_bot')
+          guard=json.load(open(sys.argv[1]))
+          bad=[]
+          for path,want in guard['expected_old'].items():
+              p=root/path
+              got='ABSENT' if not p.exists() else hashlib.sha256(p.read_bytes()).hexdigest()
+              if got!=want:
+                  bad.append((path,want,got))
+          if bad:
+              for path,want,got in bad:
+                  print(f'guard_mismatch path={path} expected={want} got={got}')
+              raise SystemExit('production source changed after preflight')
+          print('old_state_guard=ok')
+          PY
+
+          mkdir -p $BACKUP/files
+          chmod 700 $BACKUP
+          : > $BACKUP/absent.txt
+
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if [ -f "$ROOT/$f" ]; then
+              mkdir -p "$BACKUP/files/$(dirname "$f")"
+              cp -a "$ROOT/$f" "$BACKUP/files/$f"
+            else
+              echo "$f" >> $BACKUP/absent.txt
+            fi
+          done < $STAGE/runtime-targets.txt
+
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if [ -f "$ROOT/$f" ]; then
+              mkdir -p "$BACKUP/files/$(dirname "$f")"
+              cp -a "$ROOT/$f" "$BACKUP/files/$f"
+            else
+              echo "$f" >> $BACKUP/absent.txt
+            fi
+          done < $STAGE/migrations.txt
+
+          if [ -d "$ROOT/web/frontend/dist" ]; then
+            mkdir -p $BACKUP/files/web/frontend
+            cp -a "$ROOT/web/frontend/dist" $BACKUP/files/web/frontend/dist
+          fi
+          if [ -f "$ROOT/.release_version" ]; then
+            cp -a "$ROOT/.release_version" $BACKUP/release_version
+          fi
+
+          rollback() {
+            code=$?
+            trap - ERR
+            echo "release_failed=yes exit=$code"
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              if [ -f "$BACKUP/files/$f" ]; then
+                mkdir -p "$ROOT/$(dirname "$f")"
+                cp -a "$BACKUP/files/$f" "$ROOT/$f"
+              fi
+            done < $STAGE/runtime-targets.txt
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              if [ -f "$BACKUP/files/$f" ]; then
+                mkdir -p "$ROOT/$(dirname "$f")"
+                cp -a "$BACKUP/files/$f" "$ROOT/$f"
+              fi
+            done < $STAGE/migrations.txt
+            while IFS= read -r f; do
+              [ -n "$f" ] && rm -f "$ROOT/$f"
+            done < $BACKUP/absent.txt
+            if [ -d "$BACKUP/files/web/frontend/dist" ]; then
+              rm -rf "$ROOT/web/frontend/dist"
+              cp -a "$BACKUP/files/web/frontend/dist" "$ROOT/web/frontend/dist"
+            fi
+            if [ -f "$BACKUP/release_version" ]; then
+              cp -a "$BACKUP/release_version" "$ROOT/.release_version"
+            fi
+            systemctl restart booking-web-api.service || true
+            systemctl restart booking-bot.service || true
+            echo "rollback_completed=yes"
+            exit "$code"
+          }
+          trap rollback ERR
+
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            mkdir -p "$ROOT/$(dirname "$f")"
+            install -m 0644 "$PAYLOAD/$f" "$ROOT/$f"
+          done < $STAGE/runtime-targets.txt
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            mkdir -p "$ROOT/$(dirname "$f")"
+            install -m 0644 "$PAYLOAD/$f" "$ROOT/$f"
+          done < $STAGE/migrations.txt
+
+          rm -rf "$ROOT/web/frontend/dist.new-$RELEASE"
+          cp -a "$PAYLOAD/web/frontend/dist" "$ROOT/web/frontend/dist.new-$RELEASE"
+          rm -rf "$ROOT/web/frontend/dist"
+          mv "$ROOT/web/frontend/dist.new-$RELEASE" "$ROOT/web/frontend/dist"
+
+          ./venv/bin/python -m py_compile             bot/handlers/admin.py bot/handlers/client.py             bot/services/notification_events.py bot/services/notifications.py bot/services/webpush.py             database/booking_safety.py database/models.py notification_rules.py             web/api/rental.py web/api/routes/admin.py web/api/routes/client.py             web/api/routes/notifications.py web/api/schemas.py
+          echo python_compile=ok
+
+          ./venv/bin/python - <<'PY'
+          import asyncio
+          from pathlib import Path
+          from sqlalchemy import text
+          from database.database import engine
+
+          files=[
+              Path('migrations/add_legal_consents.sql'),
+              Path('migrations/add_configurable_staff_notifications.sql'),
+          ]
+
+          async def run():
+              for path in files:
+                  statements=[s.strip() for s in path.read_text().split(';') if s.strip()]
+                  for statement in statements:
+                      async with engine.begin() as conn:
+                          await conn.execute(text(statement))
+                  print('migration_applied='+path.name)
+
+          asyncio.run(run())
+          PY
+
+          ./venv/bin/python - <<'PY'
+          from web.api.main import app
+          from bot.services.notification_events import dispatch_booking_event
+          import notification_rules
+          print('imports=ok')
+          PY
+
+          systemctl restart booking-web-api.service
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 2 http://127.0.0.1:8000/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          curl -fsS --max-time 5 http://127.0.0.1:8000/health >/dev/null
+          echo internal_api=200
+
+          systemctl restart booking-bot.service
+          sleep 3
+          test "$(systemctl is-active booking-bot.service)" = active
+          echo bot_service=active
+
+          ./venv/bin/python - <<'PY'
+          import asyncio
+          from sqlalchemy import text
+          from database.database import async_session_maker
+
+          async def run():
+              checks={
+                'businesses':{
+                  'legal_name','legal_inn','legal_ogrn','legal_address','legal_email','legal_documents_enabled',
+                  'owner_reminders_enabled','owner_reminder_minutes','master_reminders_enabled','master_reminder_minutes'
+                },
+                'bookings':{
+                  'personal_data_consent_version','personal_data_consent_at',
+                  'booking_terms_version','booking_terms_accepted_at'
+                },
+              }
+              async with async_session_maker() as s:
+                  for table,required in checks.items():
+                      cols=set((await s.execute(text(
+                        "select column_name from information_schema.columns where table_name=:t"
+                      ),{'t':table})).scalars().all())
+                      missing=required-cols
+                      if missing:
+                          raise RuntimeError(f'missing {table}: {sorted(missing)}')
+                  exists=bool((await s.execute(text(
+                    "select exists(select 1 from information_schema.tables where table_name='notification_deliveries')"
+                  ))).scalar())
+                  if not exists:
+                      raise RuntimeError('notification_deliveries missing')
+                  active_push=(await s.execute(text(
+                    "select count(*) from push_subscriptions where is_active=true"
+                  ))).scalar() or 0
+                  print('active_push_subscriptions='+str(active_push))
+
+          asyncio.run(run())
+          print('database_shape=ok')
+          PY
+
+          ./venv/bin/python - <<'PY'
+          import asyncio
+          from sqlalchemy import select
+          from sqlalchemy.orm import selectinload
+          from database.database import async_session_maker
+          from database.models import Booking
+          from bot.services.notification_events import _staff_telegram_targets, _staff_message
+          from bot.services.webpush import _staff_user_ids
+
+          async def run():
+              async with async_session_maker() as s:
+                  row=(await s.execute(
+                    select(Booking)
+                    .where(Booking.status.in_(['pending','confirmed','prepayment_sent','prepayment_confirmed']))
+                    .options(
+                      selectinload(Booking.business),selectinload(Booking.client),
+                      selectinload(Booking.service),selectinload(Booking.employee)
+                    )
+                    .order_by(Booking.booking_date.desc(),Booking.booking_time.desc())
+                    .limit(1)
+                  )).scalar_one_or_none()
+                  if not row:
+                      print('notification_dry_run=no_active_booking')
+                      return
+                  tg=await _staff_telegram_targets([row],s,'all')
+                  pwa=await _staff_user_ids([row],s,'all')
+                  msg=_staff_message([row],'booking_created')
+                  assert 'Новая подтверждённая запись' in msg
+                  print('notification_dry_run=ok')
+                  print('resolved_staff_telegram_targets='+str(len(tg)))
+                  print('resolved_staff_pwa_users='+str(len(pwa)))
+
+          asyncio.run(run())
+          PY
+
+          ./venv/bin/python - <<'PY'
+          import json, os, urllib.request
+          from dotenv import load_dotenv
+          load_dotenv('/opt/booking_bot/.env')
+          token=os.getenv('BOT_TOKEN','').strip()
+          assert token and ':' in token
+          with urllib.request.urlopen('https://api.telegram.org/bot'+token+'/getMe', timeout=10) as r:
+              data=json.load(r)
+          assert data.get('ok') is True
+          print('telegram_bot_api=ok')
+          PY
+
+          curl -fsS --max-time 10 https://servgo.ru/api/health >/dev/null
+          echo public_api=200
+          curl -fsS --max-time 10 https://servgo.ru/manifest.webmanifest >/dev/null
+          echo manifest=200
+          curl -fsS --max-time 10 https://servgo.ru/sw.js >/dev/null
+          echo service_worker=200
+          curl -fsS --max-time 10 https://servgo.ru/ >/dev/null
+          echo frontend=200
+          curl -fsS --max-time 10 https://servgo.ru/api/notifications/vapid-public-key | ./venv/bin/python -c "import json,sys; d=json.load(sys.stdin); assert len(d.get('public_key',''))>20; print('vapid_endpoint=ok')"
+
+          printf '%s\n' "$RELEASE_SHA" > "$ROOT/.release_version"
+          chmod 644 "$ROOT/.release_version"
+          trap - ERR
+          echo release_status=success
+          echo "backup_retained=$BACKUP"
+          REMOTE
