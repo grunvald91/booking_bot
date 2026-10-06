@@ -1,0 +1,95 @@
+name: ServGo mail server audit
+
+on:
+  push:
+    branches: [audit/servgo-mail-server-20261006]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Install SSH helper
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Audit mail readiness
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, time, paramiko
+          HOST='155.212.162.47'
+          FP='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  a=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if a!=FP: raise paramiko.SSHException('host key mismatch')
+                  c.get_host_keys().add(h,k.get_name(),k)
+          ssh=None
+          for n in range(3):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(Pinned())
+              try:
+                  c.connect(HOST,port=22,username='root',password=os.environ['SERVER_PASSWORD'],
+                            look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  ssh=c; break
+              except (paramiko.SSHException,OSError,EOFError):
+                  c.close()
+                  if n==2: raise
+                  time.sleep(3)
+          cmd=r'''set -e
+          echo '--- OS ---'
+          . /etc/os-release; echo "$PRETTY_NAME"
+          echo '--- hostname ---'
+          hostname
+          hostname -f 2>/dev/null || true
+          echo '--- packages/services ---'
+          for x in postfix dovecot opendkim rspamd; do
+            if command -v "$x" >/dev/null 2>&1 || dpkg -s "$x" >/dev/null 2>&1; then echo "$x=installed"; else echo "$x=absent"; fi
+          done
+          for s in postfix dovecot opendkim rspamd; do
+            printf '%s=' "$s"; systemctl is-active "$s" 2>/dev/null || true
+          done
+          echo '--- listening mail ports ---'
+          ss -ltnp | grep -E ':(25|465|587|993)\b' || true
+          echo '--- public DNS from server ---'
+          if command -v dig >/dev/null 2>&1; then
+            printf 'A servgo.ru='; dig +short A servgo.ru | tr '\n' ' '; echo
+            printf 'A mail.servgo.ru='; dig +short A mail.servgo.ru | tr '\n' ' '; echo
+            printf 'MX servgo.ru='; dig +short MX servgo.ru | tr '\n' ' '; echo
+            printf 'TXT servgo.ru='; dig +short TXT servgo.ru | tr '\n' ' '; echo
+            printf 'DMARC='; dig +short TXT _dmarc.servgo.ru | tr '\n' ' '; echo
+            printf 'PTR='; dig +short -x 155.212.162.47 | tr '\n' ' '; echo
+          else
+            echo 'dig=absent'
+            getent ahostsv4 servgo.ru || true
+            getent ahostsv4 mail.servgo.ru || true
+          fi
+          echo '--- outbound smtp port 25 ---'
+          python3 - <<'NET'
+          import socket
+          hosts=['gmail-smtp-in.l.google.com','mx.yandex.ru']
+          for h in hosts:
+              try:
+                  with socket.create_connection((h,25),timeout=8) as s:
+                      banner=s.recv(200).decode('utf-8','replace').strip()
+                      print(f'{h}:25=ok banner={banner[:100]}')
+              except Exception as e:
+                  print(f'{h}:25=fail {type(e).__name__}:{e}')
+          NET
+          echo '--- TLS cert availability ---'
+          ls -ld /etc/letsencrypt/live/servgo.ru 2>/dev/null || true
+          ls -ld /etc/letsencrypt/live/mail.servgo.ru 2>/dev/null || true
+          '''
+          _,out,err=ssh.exec_command(cmd,timeout=90)
+          stdout=out.read().decode('utf-8','replace')
+          stderr=err.read().decode('utf-8','replace')
+          print(stdout)
+          status=out.channel.recv_exit_status()
+          if status:
+              print(stderr[-1800:])
+              raise SystemExit(status)
+          ssh.close()
+          PY
