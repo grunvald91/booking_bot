@@ -177,3 +177,53 @@ API. Новую таблицу оставить: она не мешает пре
 `servgo_auth`, отсутствующего в репозитории. Это существующее требование
 развёртывания; тесты продавца подключают его роутер и существующие функции записи
 на отдельном FastAPI test app, не подменяя production-модуль авторизации.
+
+## Operator inbox and capability settings
+
+ServGo admin: `/admin/sales` shows the latest 50 active handoffs for the selected
+business, with message previews, timestamps, owner replies and return to AI.
+`/admin/sales/settings` controls enabled state, price reads, specialist selection,
+availability reads, access to the signed-in client's own bookings and booking mode.
+`client_confirmation` creates the real booking only after the client's confirmation
+button; `operator_only` forbids AI booking. Missing price/availability permission
+also forbids booking. Topic exclusions and custom instructions guide the model;
+capability checks run on the server even if the model requests a forbidden tool.
+Existing `Business.ai_instruction` is the initial instruction; saving an empty
+instruction explicitly clears it for the sales agent.
+
+Apply `migrations/add_sales_agent_settings.sql` before this API version starts.
+The JSON policy is tenant-scoped and revision checked. A revoked booking permission
+blocks already-issued cards; booking confirmation locks the business permission
+row until commit. Completed receipts remain idempotent and accessible.
+
+AI Growth OS implements `/studio/products/{servgo_product_uuid}/sales-agent` in
+`grunvald91/Ai_growth_os`. It reads and updates these same settings, rather than a
+separate copy. Configure `SERVGO_PLATFORM_API_TOKEN` (random, >=32 characters) and
+`SERVGO_PLATFORM_BUSINESS_IDS` (comma-separated permitted IDs) in ServGo. Set the
+matching token and `SERVGO_API_BASE_URL` (usually `https://<servgo-host>/api`) only
+on the Growth OS server. It also requires its own owner login password. Neither
+integration token appears in frontend payloads or LLM prompts. Empty business
+scope denies all companies. Do not use the ClaudeHub credential for this channel.
+
+## Booking rule coverage
+
+| Rule | Sales agent behavior |
+| --- | --- |
+| Business / employee slot step and opening hours | Calls existing slot APIs; today's grid stays anchored to opening time, in Europe/Moscow |
+| Busy resources, interval overlaps and concurrent confirmations | Existing shared booking locks and overlap checks; full interval rechecked |
+| Breaks, minimum duration, day off, duty calendar | Checked by shared API/helper, including rental; calendar takes precedence over a single duty date |
+| Service/resource assignment and active state | Tenant catalog, assignment links, available_employee_ids, active resources |
+| Fixed prices and fixed addons | Uses existing ordinary booking function |
+| Prepayment enabled/percent, cancellation terms, receipt requirement | Shown in quote/card; existing booking status, amount and subsequent receipt/payment flow reused |
+| Separate legal consents | Separate client checkboxes; saved by ordinary booking function |
+| Rental duration and hourly base rate | Existing rental API, whole-hour duration 1–12h, business/resource start step; short rental price and deposit decided by operator |
+| Rental deposit | Existing rental policy: operator assigns deposit, max 20%; it does not automatically use the generic business prepayment percent |
+| Business flow order / labels / agent instructions | Supplied to sales prompt; editable instructions and explicit permissions |
+| Complex/time-based/group tariffs, subscriptions, legal-enabled rental, overnight schedules | Ordinary booking form or operator; never silently substituted with a fixed-price booking |
+| Payment verification, receipt upload, reschedule/cancellation | Existing booking status/manage page or operator; agent cannot mark money received |
+
+This is not complete parity with every legacy bot/webapp flow. There are distinct
+ordinary-booking, rental and legacy webapp pricing implementations in ServGo.
+Unsupported scenarios must remain on their existing form/operator path until their
+booking adapters are covered by contract tests. No production migration or rollout
+is performed by this change.

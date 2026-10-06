@@ -449,6 +449,12 @@ async def get_slots(
             raise HTTPException(status_code=404, detail="Service not found")
         requested_duration = service_resource_duration(service)
     requested_duration = requested_duration or interval
+    if employee_id:
+        from ..sales.schedule import resource_works
+        if not await resource_works(db, emp, date, requested_duration):
+            return []
+    if interval <= 0 or interval > 1440:
+        raise HTTPException(409, "Invalid booking interval")
 
     start_time = business.working_hours_start or time(9, 0)
     end_time = business.working_hours_end or time(18, 0)
@@ -457,15 +463,14 @@ async def get_slots(
     if end_time <= start_time:
         end_dt += timedelta(days=1)
 
-    if date == datetime.now().date():
-        now_plus = datetime.now() + timedelta(hours=1)
-        if current < now_plus:
-            current = now_plus
-            minutes = (current.minute // interval + 1) * interval
-            if minutes >= 60:
-                current = current.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-            else:
-                current = current.replace(minute=minutes, second=0, microsecond=0)
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("Europe/Moscow")).replace(tzinfo=None)
+    if date < now.date():
+        return []
+    if date == now.date():
+        import math
+        steps = max(0, math.ceil(((now + timedelta(hours=1)) - current).total_seconds() / (interval * 60)))
+        current += timedelta(minutes=steps * interval)
 
     busy_intervals: list[tuple[datetime, datetime]] = []
     booked_times: set[time] = set()

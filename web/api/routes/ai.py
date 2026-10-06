@@ -23,6 +23,7 @@ from ..sales.engine import chat, response, handoff
 from ..sales.provider import ClaudeHubClient, ProviderError
 from ..sales.state import load_thread, public_pending, visible_history
 from ..sales.tools import ServGoTools
+from ..sales.policy import policy_for, policy_document, PolicyUpdate
 
 router = APIRouter()
 COOKIE_NAME = "servgo_sales_session"
@@ -101,7 +102,7 @@ async def ai_chat(body: AIChatIn, identity=Depends(get_sales_identity), db=Depen
     business = await active_business(db, body.business_id)
     conversation = await load_thread(db, business.id, identity.principal)
     try:
-        provider = ClaudeHubClient() if conversation.mode == "ai" else None
+        provider = ClaudeHubClient() if conversation.mode == "ai" and policy_for(business).enabled else None
         result = await chat(provider, ServGoTools(db, business, identity.user), conversation, body.message.strip())
         conversation.updated_at = datetime.utcnow()
         await db.commit()
@@ -113,12 +114,13 @@ async def ai_chat(body: AIChatIn, identity=Depends(get_sales_identity), db=Depen
 
 @router.get("/ai/history")
 async def ai_history(business_id: int = Query(ge=1), identity=Depends(get_sales_identity), db=Depends(get_db)):
-    await active_business(db, business_id)
+    business = await active_business(db, business_id)
     conversation = await load_thread(db, business_id, identity.principal, create=False)
     if not conversation:
         return {"messages": [], "mode": "ai", "pending_action": None}
     return {"conversation_id": conversation.id, "messages": visible_history(conversation),
-            "stage": conversation.stage, "mode": conversation.mode, "pending_action": public_pending(conversation),
+            "stage": conversation.stage, "mode": conversation.mode,
+            "pending_action": public_pending(conversation) if policy_for(business).allows("create_booking") else None,
             "booking_url": (conversation.action or {}).get("result", {}).get("booking_url")}
 
 
@@ -162,7 +164,11 @@ async def ai_confirm(body: AIConfirmIn, identity=Depends(get_sales_identity), db
         raise HTTPException(409, "Это действие больше не ожидает подтверждения")
     if datetime.fromisoformat(action["expires_at"]) <= datetime.utcnow():
         raise HTTPException(410, "Подтверждение истекло. Запросите новую карточку записи")
+    # Serialize permission revocation with booking commit.
+    await db.execute(select(Business.id).where(Business.id == conversation.business_id).with_for_update())
     business = await active_business(db, conversation.business_id)
+    await db.refresh(business)
+    policy_for(business).require("create_booking")
     tools = ServGoTools(db, business, identity.user)
     ids, booking_url = await tools.book(action, body)
     reply = "Запись создана. " + action["description"] + ". Статус и дальнейшие шаги — на странице записи."
@@ -265,3 +271,67 @@ async def operator_resume(conversation_id: str, user=Depends(get_current_user), 
     conversation.mode, conversation.stage, conversation.handoff_reason = "ai", "needs_analysis", None
     await db.commit()
     return {"ok": True}
+
+
+async def write_policy(db, business_id, body: PolicyUpdate):
+    business = (await db.execute(select(Business).where(Business.id == business_id)
+        .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+    if not business:
+        raise HTTPException(404, "Компания не найдена")
+    revision = (business.sales_agent_settings or {}).get("revision", 0)
+    if body.expected_revision != revision:
+        raise HTTPException(409, "Настройки уже изменены. Обновите страницу перед сохранением")
+    business.sales_agent_settings = {"revision": revision + 1, "policy": body.policy.model_dump()}
+    await db.commit()
+    return policy_document(business)
+
+
+@router.get("/admin/ai/businesses/{business_id}/settings")
+async def owner_settings(business_id: int, user=Depends(get_current_user), db=Depends(get_db)):
+    await require_owner(db, business_id, user)
+    return policy_document(await db.get(Business, business_id))
+
+
+@router.put("/admin/ai/businesses/{business_id}/settings")
+async def owner_update_settings(business_id: int, body: PolicyUpdate,
+                                user=Depends(get_current_user), db=Depends(get_db)):
+    await require_owner(db, business_id, user)
+    return await write_policy(db, business_id, body)
+
+
+def platform_scope(request: Request) -> set[int]:
+    token = os.getenv("SERVGO_PLATFORM_API_TOKEN", "")
+    if len(token) < 32 or not hmac.compare_digest(
+        request.headers.get("Authorization", ""), "Bearer " + token):
+        raise HTTPException(401, "Интеграция платформы не авторизована")
+    try:
+        entries = os.getenv("SERVGO_PLATFORM_BUSINESS_IDS", "").split(",")
+        allowed = {int(value.strip()) for value in entries if value.strip()}
+        if any(value <= 0 for value in allowed):
+            raise ValueError("Invalid scope")
+        return allowed
+    except ValueError:
+        raise HTTPException(503, "Область доступа интеграции не настроена")
+
+
+@router.get("/platform/sales/businesses")
+async def platform_businesses(scope=Depends(platform_scope), db=Depends(get_db)):
+    rows = (await db.execute(select(Business).where(Business.id.in_(scope), Business.is_active.is_(True))
+        .order_by(Business.name))).scalars().all()
+    return [{"id": b.id, "name": b.name} for b in rows]
+
+
+@router.get("/platform/sales/businesses/{business_id}/settings")
+async def platform_settings(business_id: int, scope=Depends(platform_scope), db=Depends(get_db)):
+    if business_id not in scope:
+        raise HTTPException(403, "Компания не включена в доступ интеграции")
+    return policy_document(await active_business(db, business_id))
+
+
+@router.put("/platform/sales/businesses/{business_id}/settings")
+async def platform_update_settings(business_id: int, body: PolicyUpdate,
+                                   scope=Depends(platform_scope), db=Depends(get_db)):
+    if business_id not in scope:
+        raise HTTPException(403, "Компания не включена в доступ интеграции")
+    await active_business(db, business_id)
+    return await write_policy(db, business_id, body)

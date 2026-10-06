@@ -14,11 +14,13 @@ from sqlalchemy.orm import selectinload
 from .database import get_db, Business, Service, Employee, Booking, User, BusinessOwner
 from .deps import get_current_admin
 from .rental_logic import available_starts, price_quote
+from .sales.schedule import resource_works
 from database.booking_safety import (
     ACTIVE_BOOKING_STATUSES,
     BookingConflictError,
     ensure_resource_available,
     lock_resource_days,
+    busy_resource_intervals,
 )
 
 router = APIRouter()
@@ -52,13 +54,11 @@ def _public_status(booking: Booking) -> dict:
 
 
 async def _booked_intervals(db: AsyncSession, business_id: int, employee_id: int, day: date):
-    rows = await db.execute(
-        select(Booking).where(Booking.business_id == business_id, Booking.employee_id == employee_id,
-                              Booking.booking_date == day, Booking.status.in_(ACTIVE))
-        .options(selectinload(Booking.service))
-    )
-    return [(booking.booking_time, booking.duration_minutes or booking.service.duration_minutes or 60)
-            for booking in rows.scalars().all()]
+    # Include neighbouring days: another booking can cross midnight into this day.
+    intervals = await busy_resource_intervals(db, employee_id=employee_id, dates=[day])
+    midnight = datetime.combine(day, time())
+    return [(int((start - midnight).total_seconds() // 60), int((end - start).total_seconds() // 60))
+            for start, end in intervals]
 
 
 async def _rental_context(db: AsyncSession, business_id: int, employee_id: int, lock: bool = False):
@@ -84,7 +84,11 @@ async def rental_slots(business_id: int, date: date, employee_id: int,
     busy = await _booked_intervals(db, business_id, employee.id, date)
     try:
         slots = available_starts(date, business.working_hours_start, business.working_hours_end,
-                                 duration_hours * 60, busy, now=datetime.now(LOCAL_TZ).replace(tzinfo=None))
+                                 duration_hours * 60, busy, now=datetime.now(LOCAL_TZ).replace(tzinfo=None),
+                                 interval=employee.booking_interval_minutes or business.booking_interval_minutes or 60,
+                                 break_start=business.break_start, break_end=business.break_end)
+        if not await resource_works(db, employee, date, duration_hours * 60):
+            slots = []
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     total, needs_quote, _ = price_quote(employee.solo_price_per_hour, duration_hours, [])
@@ -105,10 +109,12 @@ async def create_rental_request(business_id: int, body: RentalRequest, db: Async
         requested_time = time.fromisoformat(body.time)
     except ValueError as exc:
         raise HTTPException(400, 'Invalid time') from exc
-    if requested_time.second or requested_time.minute or requested_time.microsecond:
-        raise HTTPException(400, 'Choose a whole-hour start')
+    if requested_time.second or requested_time.microsecond:
+        raise HTTPException(400, 'Choose a configured slot')
 
     duration_minutes = body.duration_hours * 60
+    if not await resource_works(db, employee, body.date, duration_minutes):
+        raise HTTPException(409, 'Resource schedule or minimum duration does not allow this booking')
 
     # Use the same stable transaction lock as ordinary bookings. This lock
     # exists even while the requested slot has no booking row yet.
@@ -137,6 +143,8 @@ async def create_rental_request(business_id: int, body: RentalRequest, db: Async
             duration_minutes,
             busy,
             now=datetime.now(LOCAL_TZ).replace(tzinfo=None),
+            interval=employee.booking_interval_minutes or business.booking_interval_minutes or 60,
+            break_start=business.break_start, break_end=business.break_end,
         )
     except ValueError as exc:
         await db.rollback()

@@ -10,6 +10,7 @@ from ..schemas import AIChatOut
 from .stages import analyze_stage, system_prompt
 from .state import public_pending, trim_history
 from .tools import ARG_MODELS, TOOL_SCHEMAS
+from .policy import policy_for
 
 MAX_TOOL_ROUNDS = 6
 
@@ -34,11 +35,20 @@ async def chat(provider, tools, conversation, message: str):
         history.append({"role": "assistant", "content": reply})
         conversation.messages = history
         return response(conversation, reply)
+    policy = policy_for(tools.business)
+    if not policy.allows("create_booking") and (conversation.action or {}).get("status") == "pending":
+        conversation.action, conversation.action_id = None, None
+    if not policy.enabled:
+        handoff(conversation, "ИИ отключён настройками компании")
+        reply = "ИИ-консультант отключён. Передал сообщение оператору."
+        conversation.messages = [*history, {"role": "assistant", "content": reply}]
+        return response(conversation, reply)
     conversation.stage, conversation.facts = await analyze_stage(provider, conversation, history)
     prepared = None
     for _ in range(MAX_TOOL_ROUNDS):
         result = await provider.complete([
-            {"role": "system", "content": system_prompt(tools.business, conversation)}, *history], TOOL_SCHEMAS)
+            {"role": "system", "content": system_prompt(tools.business, conversation)}, *history],
+            [schema for schema in TOOL_SCHEMAS if policy.allows(schema["function"]["name"])])
         history.append(result)
         calls = result.get("tool_calls") or []
         if not calls:
@@ -52,6 +62,7 @@ async def chat(provider, tools, conversation, message: str):
                 if name not in ARG_MODELS:
                     raise ValueError("Unknown tool")
                 args = ARG_MODELS[name].model_validate_json(call["function"]["arguments"])
+                await tools.require_tool(name)
                 if conversation.mode == "human":
                     output = {"error": "Диалог уже передан оператору; инструменты ИИ остановлены"}
                 elif name == "create_booking":

@@ -39,6 +39,27 @@ export interface SalesInboxThread {
   updated_at: string;
 }
 
+export interface SalesPolicy {
+  enabled: boolean;
+  booking_mode: 'client_confirmation' | 'operator_only';
+  show_prices: boolean;
+  recommend_specialists: boolean;
+  check_availability: boolean;
+  view_client_bookings: boolean;
+  instructions: string;
+  prohibited_topics: string;
+}
+
+export interface SalesSettings {
+  business_id: number;
+  business_name: string;
+  revision: number;
+  policy: SalesPolicy;
+  always_forbidden: string[];
+  coverage: { rule: string; status: string }[];
+  business_rules: Record<string, string | number | boolean | null>;
+}
+
 export interface Business {
   id: number;
   name: string;
@@ -839,6 +860,10 @@ export const api = {
       body: JSON.stringify({ action_id: actionId }),
     }),
   salesInbox: (businessId: number) => request<SalesInboxThread[]>(`/admin/ai/businesses/${businessId}/conversations`),
+  salesSettings: (businessId: number) => request<SalesSettings>(`/admin/ai/businesses/${businessId}/settings`),
+  saveSalesSettings: (businessId: number, settings: SalesSettings) => request<SalesSettings>(`/admin/ai/businesses/${businessId}/settings`, {
+    method: 'PUT', body: JSON.stringify({ expected_revision: settings.revision, policy: settings.policy }),
+  }),
   salesReply: (conversationId: string, message: string) => request(`/admin/ai/conversations/${conversationId}/reply`, {
     method: 'POST', body: JSON.stringify({ message }),
   }),

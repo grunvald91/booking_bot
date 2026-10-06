@@ -2,6 +2,7 @@
 import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from .policy import policy_for
 
 
 STAGES = {
@@ -50,19 +51,24 @@ async def analyze_stage(provider, conversation, history: list[dict]) -> tuple[st
 
 
 def system_prompt(business, conversation) -> str:
+    policy = policy_for(business)
     now = datetime.now(ZoneInfo("Europe/Moscow")).isoformat(timespec="minutes")
     context = {"business_id": business.id, "name": business.name,
                "description": business.description, "address": business.address,
                "phone": business.phone, "business_type": business.business_type,
-               "business_instructions": business.ai_instruction,
+               "business_instructions": policy.instructions,
                "cancellation_policy": business.cancellation_policy_text,
-               "facts": conversation.facts}
+               "facts": conversation.facts, "agent_policy": policy.model_dump(),
+               "booking_flow_order": business.booking_flow_order,
+               "booking_labels": business.booking_labels}
     return (
         "Ты ИИ-консультант ServGo выбранной компании. Общайся на русском, тепло и кратко. "
         "Помоги подобрать подходящую услугу и завершить продажу настоящей записью. "
         "Отвечай на прямые вопросы сразу, не превращай разговор в анкету. Не дави и не обещай результат лечения. "
         "Для каталога, описаний, цен, специалистов и свободных окон обязательно вызывай инструменты. "
         "Не выдумывай услуги, скидки, отзывы, навыки мастеров и свободное время. "
+        "Соблюдай agent_policy: запрещённые возможности и темы не доступны. Если запись только оператором, передай диалог. "
+        "Учитывай booking_flow_order и названия из booking_labels при выборе услуги и ресурса. "
         "Если данных нет — сообщи об этом и предложи человека. Учитывай запрос клиента на оператора. "
         "business_id и клиент фиксируются сервером; не переключай бизнес инструментами. "
         "create_booking лишь готовит карточку: запись создаётся после нажатия клиентом подтверждения. "
