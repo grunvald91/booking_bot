@@ -1,0 +1,83 @@
+name: ServGo mail final audit
+
+on:
+  push:
+    branches: [audit/servgo-mail-final-20261006]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Install SSH helper
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Verify DKIM and DNS authority
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64,hashlib,os,time,paramiko
+          H='155.212.162.47'; F='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class P(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  a=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if a!=F: raise paramiko.SSHException('host key mismatch')
+                  c.get_host_keys().add(h,k.get_name(),k)
+          s=None
+          for n in range(3):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(P())
+              try:
+                  c.connect(H,username='root',password=os.environ['SERVER_PASSWORD'],look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  s=c; break
+              except Exception:
+                  c.close()
+                  if n==2: raise
+                  time.sleep(3)
+          cmd=r'''set -Eeuo pipefail
+          echo '--- service state ---'
+          systemctl is-active postfix
+          systemctl is-active opendkim
+
+          echo '--- authoritative DNS ---'
+          printf 'NS='; dig +short NS servgo.ru | tr '\n' ' '; echo
+          printf 'SOA='; dig +short SOA servgo.ru | tr '\n' ' '; echo
+          printf 'MX='; dig +short MX servgo.ru | tr '\n' ' '; echo
+          printf 'SPF='; dig +short TXT servgo.ru | tr '\n' ' '; echo
+          printf 'DKIM='; dig +short TXT s202610._domainkey.servgo.ru | tr '\n' ' '; echo
+          printf 'DMARC='; dig +short TXT _dmarc.servgo.ru | tr '\n' ' '; echo
+          printf 'PTR='; dig +short -x 155.212.162.47 | tr '\n' ' '; echo
+
+          echo '--- local-only SMTP ---'
+          ss -ltnp | grep -E ':(25|8891)\b'
+
+          echo '--- DKIM signing smoke ---'
+          before=$(postqueue -p | awk '/^[A-F0-9]/ {print $1}' | tr -d '*!' | tr '\n' ' ')
+          printf 'From: ServGo <no-reply@servgo.ru>\nTo: test@example.invalid\nSubject: ServGo DKIM smoke\nDate: %s\nMessage-ID: <dkim-smoke-%s@servgo.ru>\n\nDKIM smoke test only.\n' "$(date -R)" "$(date +%s)" | /usr/sbin/sendmail -f no-reply@servgo.ru test@example.invalid
+          sleep 2
+          found=''
+          for q in $(postqueue -p | awk '/^[A-F0-9]/ {print $1}' | tr -d '*!'); do
+            if postcat -q "$q" 2>/dev/null | grep -q 'ServGo DKIM smoke'; then
+              found="$q"
+              break
+            fi
+          done
+          test -n "$found"
+          postcat -q "$found" | grep -m1 '^DKIM-Signature:' >/dev/null
+          echo 'dkim_signature_present=yes'
+          postsuper -d "$found" >/dev/null
+          echo 'smoke_queue_cleaned=yes'
+          '''
+          _,o,e=s.exec_command(cmd,timeout=70)
+          stdout=o.read().decode('utf-8','replace')
+          stderr=e.read().decode('utf-8','replace')
+          print(stdout)
+          status=o.channel.recv_exit_status()
+          if status:
+              print(stderr[-1800:])
+              raise SystemExit(status)
+          s.close()
+          PY
