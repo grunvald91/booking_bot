@@ -1555,6 +1555,19 @@ async def update_business(
             raise HTTPException(status_code=422, detail="Invalid booking_flow_order")
         updates["booking_flow_order"] = order
 
+    for reminder_field in ("owner_reminder_minutes", "master_reminder_minutes"):
+        if reminder_field in updates:
+            normalized = normalize_reminder_minutes(
+                updates[reminder_field],
+                fallback=None,
+            )
+            if not normalized:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{reminder_field} must contain at least one interval between 5 and 10080 minutes",
+                )
+            updates[reminder_field] = json.dumps(normalized)
+
     if updates.get("legal_documents_enabled") is True:
         legal_name = (updates.get("legal_name") if "legal_name" in updates else business.legal_name) or ""
         legal_email = (updates.get("legal_email") if "legal_email" in updates else business.legal_email) or ""
