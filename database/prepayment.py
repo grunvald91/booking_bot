@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
-from database.models import Booking
+from database.models import Booking, PrepaymentReview
 
 PAYMENT_WINDOW = timedelta(minutes=10)
 
@@ -65,3 +65,62 @@ async def require_payment_window(db, booking, *, receipt=False, now=None):
     if not receipt and booking.business.require_receipt_for_prepayment:
         raise PaymentWindowError(422, "Для отправки предоплаты необходимо приложить чек")
     return True
+
+
+async def payment_visit(db, booking):
+    from database.booking_safety import contiguous_visit_bookings
+    statuses = ("pending_prepayment", "prepayment_sent") if booking.status in ("pending_prepayment", "prepayment_sent") else (booking.status,)
+    visit = await contiguous_visit_bookings(db, booking, statuses=statuses)
+    # Every payment operation locks the entire visit in the same order.
+    return list((await db.execute(select(Booking).where(Booking.id.in_([item.id for item in visit]))
+        .order_by(Booking.id).with_for_update().execution_options(populate_existing=True)
+        .options(selectinload(Booking.client), selectinload(Booking.business),
+                 selectinload(Booking.service), selectinload(Booking.employee)))).scalars())
+
+
+async def submit_payment(db, booking, *, receipt=False):
+    visit = await payment_visit(db, booking)
+    if booking.status == "prepayment_sent":
+        return []
+    for item in visit:
+        await require_payment_window(db, item, receipt=receipt)
+    for item in visit:
+        item.status = "prepayment_sent"
+        item.version += 1
+    return visit
+
+
+async def review_payment(db, booking, reviewer_id, decision, *, expected_version=None):
+    """Caller commits; one state machine for web and Telegram owner decisions."""
+    visit = await payment_visit(db, booking)
+    if expected_version is not None and booking.version != expected_version:
+        raise PaymentWindowError(409, "Заявка уже изменилась. Обновите список перед проверкой")
+    if decision not in ("confirm", "reject"):
+        raise PaymentWindowError(422, "Неизвестное действие")
+    if booking.status not in ("prepayment_sent", "pending_prepayment"):
+        raise PaymentWindowError(409, "Эта запись уже обработана")
+    if any(item.status not in ("prepayment_sent", "pending_prepayment") for item in visit):
+        raise PaymentWindowError(409, "Часть визита уже обработана. Обновите список")
+    if decision == "reject" and booking.status != "prepayment_sent":
+        raise PaymentWindowError(409, "Нет нового сообщения об оплате для отклонения")
+    now = datetime.utcnow()
+    if decision == "confirm":
+        for item in visit:
+            if item.duration_minutes is not None and (item.price_requires_confirmation or item.prepayment_amount is None):
+                raise PaymentWindowError(409, "Сначала укажите окончательную цену и предоплату")
+            if item.status == "pending_prepayment":
+                deadline = payment_deadline(item)
+                if deadline and deadline <= now:
+                    item.status = "cancelled"
+                    await db.commit()
+                    raise PaymentWindowError(409, "Срок предоплаты истёк. Бронь отменена")
+    for item in visit:
+        db.add(PrepaymentReview(booking_id=item.id, reviewer_id=reviewer_id, decision=decision,
+                               booking_version=item.version))
+        item.version += 1
+        item.status = "confirmed" if decision == "confirm" else "pending_prepayment"
+        item.prepayment_confirmed_at = now if decision == "confirm" else None
+        if decision == "reject":
+            # The owner explicitly offers a fresh ten-minute retry window.
+            item.prepayment_requested_at = now
+    return visit

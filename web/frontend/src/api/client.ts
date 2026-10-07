@@ -281,6 +281,7 @@ export interface CreateBookingData {
 }
 
 export interface AdminBooking {
+  version: number;
   id: number;
   client_name: string;
   client_phone?: string;
@@ -503,6 +504,32 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  emailCapabilities: () => request<{ available: boolean }>('/auth/email/capabilities'),
+  emailAccount: () => request<{ email: string | null; available: boolean }>('/auth/email/account'),
+  emailLogin: (email: string, password: string) => request<AuthResponse>('/auth/email/login', {
+    method: 'POST', body: JSON.stringify({ email, password }),
+  }),
+  emailStart: (data: { email: string; password: string; full_name?: string; purpose: 'register' | 'link' | 'reset' }) =>
+    request<{ challenge_id: string; message: string }>('/auth/email/start', { method: 'POST', body: JSON.stringify(data) }),
+  emailVerify: (challenge_id: string, code: string) => request<AuthResponse>('/auth/email/verify', {
+    method: 'POST', body: JSON.stringify({ challenge_id, code }),
+  }),
+  getPrepayments: (businessId: number, status: string, beforeId?: number) =>
+    request<{ items: AdminBooking[]; next_before_id: number | null }>(`/admin/prepayments?business_id=${businessId}&status=${status}${beforeId ? `&before_id=${beforeId}` : ''}`),
+  getPaymentDetails: (bookingId: number) => request<{ booking: AdminBooking; visit: AdminBooking[]; prepayment_total: number;
+    receipts: { id: number; mime_type: string; size: number; created_at: string }[];
+    reviews: { decision: string; reviewer_id: number; reviewed_at: string }[] }>(`/admin/bookings/${bookingId}/payment-details`),
+  reviewPrepayment: (bookingId: number, decision: 'confirm' | 'reject', expected_version: number) =>
+    request<AdminBooking>(`/admin/bookings/${bookingId}/prepayment-review`, {
+      method: 'POST', body: JSON.stringify({ decision, expected_version }),
+    }),
+  downloadReceipt: async (receiptId: number) => {
+    const response = await fetch(`${API}/admin/receipts/${receiptId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+    });
+    if (!response.ok) throw new Error('Не удалось открыть чек');
+    return response.blob();
+  },
   // Auth
   loginPhone: (phone: string) =>
     request<{ message: string; fallback?: boolean }>('/auth/phone', {
@@ -749,7 +776,7 @@ export const api = {
   // Co-owners
   getOwners: (bizId: number) =>
     request<OwnerInfo[]>(`/admin/businesses/${bizId}/owners`),
-  addOwner: (bizId: number, data: { telegram_id?: number; username?: string }) =>
+  addOwner: (bizId: number, data: { telegram_id?: number; username?: string; email?: string }) =>
     request<OwnerInfo>(`/admin/businesses/${bizId}/owners`, {
       method: 'POST',
       body: JSON.stringify(data),

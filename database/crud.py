@@ -1735,25 +1735,10 @@ async def get_business_subscriptions_stats(
 
 async def get_business_owners(session: AsyncSession, business_id: int) -> List[User]:
     """Получить всех владельцев бизнеса"""
-    result = await session.execute(
-        select(User)
-        .join(BusinessOwner, User.id == BusinessOwner.user_id)
-        .where(BusinessOwner.business_id == business_id)
-    )
-    owners = list(result.scalars().all())
-
-    # Fallback: если в business_owners никого нет, получаем legacy owner
-    if not owners:
-        result = await session.execute(
-            select(User)
-            .join(Business, User.id == Business.owner_id)
-            .where(Business.id == business_id)
-        )
-        legacy_owner = result.scalar_one_or_none()
-        if legacy_owner:
-            owners = [legacy_owner]
-
-    return owners
+    legacy = select(Business.owner_id).where(Business.id == business_id).scalar_subquery()
+    shared = select(BusinessOwner.user_id).where(BusinessOwner.business_id == business_id)
+    result = await session.execute(select(User).where(or_(User.id == legacy, User.id.in_(shared))).order_by(User.id))
+    return list(result.scalars())
 
 
 async def get_business_owners_with_roles(session: AsyncSession, business_id: int) -> List[dict]:

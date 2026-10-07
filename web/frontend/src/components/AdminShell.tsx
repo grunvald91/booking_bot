@@ -7,6 +7,7 @@ import { useTheme } from '../hooks/useTheme'
 const NAV = [
   { to: '/admin', label: 'Панель', Icon: LayoutDashboard },
   { to: '/admin/schedule', label: 'Расписание', Icon: Clock },
+  { to: '/admin/prepayments', label: 'Предоплаты', Icon: Clock },
   { to: '/admin/services', label: 'Услуги', Icon: Scissors },
   { to: '/admin/employees', label: 'Мастера', Icon: Users },
   { to: '/admin/sales', label: 'Диалоги', Icon: MessageCircle },

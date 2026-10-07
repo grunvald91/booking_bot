@@ -28,6 +28,7 @@ const clientNav = [
 const adminNav = [
   { to: '/admin', label: 'Панель', icon: LayoutDashboard },
   { to: '/admin/schedule', label: 'Расписание', icon: Clock },
+  { to: '/admin/prepayments', label: 'Предоплаты', icon: Clock },
   { to: '/admin/services', label: 'Услуги', icon: Scissors },
   { to: '/admin/employees', label: 'Сотрудники', icon: Users },
   { to: '/admin/subscriptions', label: 'Абонементы', icon: Ticket },

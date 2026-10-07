@@ -9,18 +9,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import get_db, User, Business, BusinessOwner
+from database.models import EmailIdentity
 
 SECRET_KEY = os.getenv("JWT_SECRET", "booking-bot-jwt-secret-2026")
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_DAYS = 30
 
 
-def create_token(user_id: int, role: str = "client") -> str:
+def create_token(user_id: int, role: str = "client", *, email_version: int | None = None) -> str:
     """Create a JWT token for the given user."""
     return jwt.encode(
         {
             "sub": str(user_id),
             "role": role,
+            **({"ev": email_version} if email_version is not None else {}),
             "exp": datetime.utcnow() + timedelta(days=TOKEN_EXPIRE_DAYS),
         },
         SECRET_KEY,
@@ -47,6 +49,10 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if "ev" in payload:
+        identity = await db.scalar(select(EmailIdentity).where(EmailIdentity.user_id == user.id))
+        if identity is None or identity.session_version != payload["ev"]:
+            raise HTTPException(401, "Session expired; log in again")
     return user
 
 
@@ -57,14 +63,12 @@ async def get_current_user_optional(
     """Like get_current_user but returns None instead of raising 401."""
     if not authorization or not authorization.startswith("Bearer "):
         return None
-    token = authorization.split(" ", 1)[1]
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id = int(payload["sub"])
-    except (JWTError, ValueError, KeyError):
-        return None
-    result = await db.execute(select(User).where(User.id == user_id))
-    return result.scalar_one_or_none()
+        return await get_current_user(authorization, db)
+    except HTTPException as exc:
+        if exc.status_code == 401:
+            return None
+        raise
 
 
 async def get_current_admin(

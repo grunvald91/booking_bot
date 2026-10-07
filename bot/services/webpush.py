@@ -268,7 +268,7 @@ async def send_staff_booking_webpush(
     payload = {
         "title": title,
         "body": body,
-        "url": "/admin/schedule",
+        "url": "/admin/prepayments" if event_kind == "prepayment_submitted" else "/admin/schedule",
         "booking_id": first.id,
         "tag": f"servgo-{audience}-reminder-{first.id}-{reminder_kind}",
     }

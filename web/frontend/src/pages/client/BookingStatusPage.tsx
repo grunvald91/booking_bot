@@ -306,7 +306,7 @@ export function BookingStatusPage() {
             )}
             <label className="ds-sub" style={{ display: 'block', marginTop: 12 }}>
               {booking.require_receipt_for_prepayment ? 'Приложите чек (обязательно)' : 'Чек об оплате (по желанию)'}
-              <input type="file" accept="image/*,application/pdf" disabled={paymentBusy} onChange={event => setReceipt(event.target.files?.[0] || null)} />
+              <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={paymentBusy} onChange={event => setReceipt(event.target.files?.[0] || null)} />
             </label>
             <button
               type="button"
