@@ -238,6 +238,8 @@ class PublicBookingOut(BaseModel):
     total_price: int
     prepayment_enabled: bool = False
     prepayment_amount: int = 0
+    prepayment_expires_at: Optional[datetime] = None
+    price_requires_confirmation: bool = False
     paid_amount: int = 0
     prepayment_confirmed: bool = False
     payment_phone: Optional[str] = None
@@ -274,6 +276,7 @@ class AdminBookingOut(BaseModel):
     status: str
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
+    version: int = 1
 
 
 class ManualBookingIn(BaseModel):
@@ -530,6 +533,7 @@ class OwnerOut(BaseModel):
 class OwnerAddIn(BaseModel):
     telegram_id: Optional[int] = None
     username: Optional[str] = None
+    email: Optional[str] = None
 
 
 # ---------- Venue Time Pricing CRUD ----------
@@ -609,14 +613,23 @@ class SubscriptionAdminOut(BaseModel):
 # ---------- AI ----------
 
 class AIChatIn(BaseModel):
-    message: str
-    business_id: Optional[int] = None
+    message: str = Field(min_length=1, max_length=4000)
+    business_id: Optional[int] = Field(default=None, ge=1)
 
 
 class AIChatOut(BaseModel):
     reply: str
     pending_action: Optional[dict] = None  # {action_id, description, tool_name, args}
+    conversation_id: Optional[str] = None
+    stage: Optional[str] = None
+    mode: str = "ai"
+    booking_ids: List[int] = Field(default_factory=list)
+    booking_url: Optional[str] = None
 
 
 class AIConfirmIn(BaseModel):
-    action_id: str
+    action_id: str = Field(min_length=36, max_length=36)
+    client_name: Optional[str] = Field(default=None, min_length=2, max_length=120)
+    client_phone: Optional[str] = Field(default=None, min_length=10, max_length=30, pattern=r'^\+?[0-9\s()\-]+$')
+    personal_data_consent: bool = False
+    booking_terms_accepted: bool = False

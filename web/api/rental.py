@@ -14,11 +14,14 @@ from sqlalchemy.orm import selectinload
 from .database import get_db, Business, Service, Employee, Booking, User, BusinessOwner
 from .deps import get_current_admin
 from .rental_logic import available_starts, price_quote
+from .sales.schedule import resource_works
+from database.prepayment import payment_deadline, request_prepayment
 from database.booking_safety import (
     ACTIVE_BOOKING_STATUSES,
     BookingConflictError,
     ensure_resource_available,
     lock_resource_days,
+    busy_resource_intervals,
 )
 
 router = APIRouter()
@@ -48,17 +51,16 @@ def _public_status(booking: Booking) -> dict:
             'time': booking.booking_time.strftime('%H:%M'), 'duration_minutes': booking.duration_minutes,
             'estimated_price': booking.estimated_price,
             'price_requires_confirmation': booking.price_requires_confirmation,
-            'prepayment_amount': booking.prepayment_amount}
+            'prepayment_amount': booking.prepayment_amount,
+            'prepayment_expires_at': payment_deadline(booking)}
 
 
 async def _booked_intervals(db: AsyncSession, business_id: int, employee_id: int, day: date):
-    rows = await db.execute(
-        select(Booking).where(Booking.business_id == business_id, Booking.employee_id == employee_id,
-                              Booking.booking_date == day, Booking.status.in_(ACTIVE))
-        .options(selectinload(Booking.service))
-    )
-    return [(booking.booking_time, booking.duration_minutes or booking.service.duration_minutes or 60)
-            for booking in rows.scalars().all()]
+    # Include neighbouring days: another booking can cross midnight into this day.
+    intervals = await busy_resource_intervals(db, employee_id=employee_id, dates=[day])
+    midnight = datetime.combine(day, time())
+    return [(int((start - midnight).total_seconds() // 60), int((end - start).total_seconds() // 60))
+            for start, end in intervals]
 
 
 async def _rental_context(db: AsyncSession, business_id: int, employee_id: int, lock: bool = False):
@@ -84,7 +86,11 @@ async def rental_slots(business_id: int, date: date, employee_id: int,
     busy = await _booked_intervals(db, business_id, employee.id, date)
     try:
         slots = available_starts(date, business.working_hours_start, business.working_hours_end,
-                                 duration_hours * 60, busy, now=datetime.now(LOCAL_TZ).replace(tzinfo=None))
+                                 duration_hours * 60, busy, now=datetime.now(LOCAL_TZ).replace(tzinfo=None),
+                                 interval=employee.booking_interval_minutes or business.booking_interval_minutes or 60,
+                                 break_start=business.break_start, break_end=business.break_end)
+        if not await resource_works(db, employee, date, duration_hours * 60):
+            slots = []
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     total, needs_quote, _ = price_quote(employee.solo_price_per_hour, duration_hours, [])
@@ -95,15 +101,22 @@ async def rental_slots(business_id: int, date: date, employee_id: int,
 @router.post('/businesses/{business_id}/rental/bookings', status_code=201)
 async def create_rental_booking(business_id: int, body: RentalRequest,
                                 db: AsyncSession = Depends(get_db)):
+    return await create_rental_request(business_id, body, db)
+
+
+async def create_rental_request(business_id: int, body: RentalRequest, db: AsyncSession,
+                                *, user: User | None = None, commit: bool = True):
     business, employee = await _rental_context(db, business_id, body.employee_id)
     try:
         requested_time = time.fromisoformat(body.time)
     except ValueError as exc:
         raise HTTPException(400, 'Invalid time') from exc
-    if requested_time.second or requested_time.minute or requested_time.microsecond:
-        raise HTTPException(400, 'Choose a whole-hour start')
+    if requested_time.second or requested_time.microsecond:
+        raise HTTPException(400, 'Choose a configured slot')
 
     duration_minutes = body.duration_hours * 60
+    if not await resource_works(db, employee, body.date, duration_minutes):
+        raise HTTPException(409, 'Resource schedule or minimum duration does not allow this booking')
 
     # Use the same stable transaction lock as ordinary bookings. This lock
     # exists even while the requested slot has no booking row yet.
@@ -132,6 +145,8 @@ async def create_rental_booking(business_id: int, body: RentalRequest,
             duration_minutes,
             busy,
             now=datetime.now(LOCAL_TZ).replace(tzinfo=None),
+            interval=employee.booking_interval_minutes or business.booking_interval_minutes or 60,
+            break_start=business.break_start, break_end=business.break_end,
         )
     except ValueError as exc:
         await db.rollback()
@@ -175,12 +190,14 @@ async def create_rental_booking(business_id: int, body: RentalRequest,
     if len(client_name) < 2 or not (10 <= len(digits) <= 15):
         raise HTTPException(400, 'Valid name and phone are required')
 
-    client = User(
-        telegram_id=-secrets.randbelow(2**60)-1,
-        full_name=client_name,
-        phone=('+' if client_phone.startswith('+') else '') + digits,
-    )
-    db.add(client)
+    client = user
+    if client is None:
+        client = User(
+            telegram_id=-secrets.randbelow(2**60)-1,
+            full_name=client_name,
+            phone=('+' if client_phone.startswith('+') else '') + digits,
+        )
+        db.add(client)
     await db.flush()
 
     notes = [
@@ -211,7 +228,10 @@ async def create_rental_booking(business_id: int, body: RentalRequest,
     db.add(booking)
 
     try:
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
     except IntegrityError as exc:
         await db.rollback()
         message = str(exc).lower()
@@ -220,6 +240,13 @@ async def create_rental_booking(business_id: int, body: RentalRequest,
         raise
 
     await db.refresh(booking)
+    if commit:
+        await notify_rental_request(booking, db)
+    return {**_public_status(booking), 'tracking_token': booking.notify_token}
+
+
+async def notify_rental_request(booking, db):
+    """Shared post-commit event for web and AI rental requests."""
     try:
         from bot.services.notification_events import dispatch_booking_event
         await dispatch_booking_event(
@@ -236,7 +263,6 @@ async def create_rental_booking(business_id: int, body: RentalRequest,
             notification_error,
             exc_info=True,
         )
-    return {**_public_status(booking), 'tracking_token': booking.notify_token}
 
 
 @router.get('/rental/bookings/{tracking_token}')
@@ -266,10 +292,20 @@ async def update_rental_quote(booking_id: int, body: RentalQuoteUpdate,
         raise HTTPException(403, 'Not your business')
     if booking.status in ('cancelled', 'completed'):
         raise HTTPException(409, 'Booking cannot be quoted')
+    if booking.status not in ('pending', 'pending_prepayment'):
+        if (booking.estimated_price != body.estimated_price or booking.prepayment_amount != body.prepayment_amount):
+            raise HTTPException(409, 'Cannot change a quote after payment submission or confirmation')
+        from .routes.admin import _admin_booking_out
+        return _admin_booking_out(booking)
+    deadline = payment_deadline(booking)
+    if deadline is not None and deadline <= datetime.utcnow():
+        booking.status = 'cancelled'
+        await db.commit()
+        raise HTTPException(409, 'Payment window expired; create a new booking')
     if body.prepayment_amount > body.estimated_price * 0.2:
         raise HTTPException(400, 'Prepayment cannot exceed 20%')
     booking.estimated_price = body.estimated_price
-    booking.prepayment_amount = body.prepayment_amount
+    request_prepayment(booking, body.prepayment_amount)
     booking.price_requires_confirmation = False
     await db.commit()
     from .routes.admin import _admin_booking_out

@@ -28,10 +28,12 @@ const clientNav = [
 const adminNav = [
   { to: '/admin', label: 'Панель', icon: LayoutDashboard },
   { to: '/admin/schedule', label: 'Расписание', icon: Clock },
+  { to: '/admin/prepayments', label: 'Предоплаты', icon: Clock },
   { to: '/admin/services', label: 'Услуги', icon: Scissors },
   { to: '/admin/employees', label: 'Сотрудники', icon: Users },
   { to: '/admin/subscriptions', label: 'Абонементы', icon: Ticket },
   { to: '/admin/analytics', label: 'Аналитика', icon: BarChart3 },
+  { to: '/admin/sales', label: 'Диалоги ИИ', icon: MessageCircle },
   { to: '/admin/settings', label: 'Настройки', icon: Settings },
 ]
 
@@ -226,6 +228,7 @@ export function Layout() {
                 </div>
               </div>
             </div>
+              <Link to="/account" onClick={() => setProfileOpen(false)} className="ds-row" style={{ padding: '10px', display: 'block' }}>Почта и Telegram</Link>
             {isAdminUser && (
               <Link
                 to="/admin"

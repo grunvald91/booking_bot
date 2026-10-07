@@ -3,13 +3,32 @@
 """
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import BigInteger, String, DateTime, ForeignKey, Boolean, Integer, Text, Time, Date, UniqueConstraint
+from sqlalchemy import BigInteger, String, DateTime, ForeignKey, Boolean, Integer, Text, Time, Date, UniqueConstraint, JSON, LargeBinary
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
     """Базовый класс для всех моделей"""
     pass
+
+
+class SalesConversation(Base):
+    """Durable, tenant-scoped sales thread; no model-supplied identity fields."""
+    __tablename__ = "sales_conversations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), index=True)
+    principal: Mapped[str] = mapped_column(String(80))  # user:<id> or guest:<cookie digest>
+    messages: Mapped[list] = mapped_column(JSON, default=list)
+    stage: Mapped[str] = mapped_column(String(32), default="needs_analysis")
+    facts: Mapped[dict] = mapped_column(JSON, default=dict)
+    mode: Mapped[str] = mapped_column(String(16), default="ai")
+    handoff_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    action_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, unique=True)
+    action: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("business_id", "principal", name="uq_sales_business_principal"),)
 
 
 class User(Base):
@@ -43,6 +62,78 @@ class User(Base):
     bookings: Mapped[List["Booking"]] = relationship(back_populates="client", cascade="all, delete-orphan")
     # Связь с абонементами клиента
     client_subscriptions: Mapped[List["ClientSubscription"]] = relationship(back_populates="client", cascade="all, delete-orphan")
+
+
+class EmailIdentity(Base):
+    """Only verified addresses grant login; User.email remains a contact field."""
+    __tablename__ = "email_identities"
+    email: Mapped[str] = mapped_column(String(320), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    session_version: Mapped[int] = mapped_column(Integer, default=1)
+    verified_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class EmailChallenge(Base):
+    __tablename__ = "email_challenges"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    purpose: Mapped[str] = mapped_column(String(16))
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    full_name: Mapped[str] = mapped_column(String(255), default="")
+    password_hash: Mapped[str] = mapped_column(String(255))
+    code_hash: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class AuthRateBucket(Base):
+    __tablename__ = "auth_rate_buckets"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class TelegramLinkRequest(Base):
+    __tablename__ = "telegram_link_requests"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    email_session_version: Mapped[int] = mapped_column(Integer)
+    telegram_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    telegram_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class UserAccountMerge(Base):
+    """Retain old IDs/audit rows; authentication resolves the canonical account."""
+    __tablename__ = "user_account_merges"
+    source_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    target_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    merged_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class BookingReceipt(Base):
+    __tablename__ = "booking_receipts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    booking_id: Mapped[int] = mapped_column(ForeignKey("bookings.id", ondelete="CASCADE"), index=True)
+    mime_type: Mapped[str] = mapped_column(String(32))
+    content: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
+    size: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class PrepaymentReview(Base):
+    __tablename__ = "prepayment_reviews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    booking_id: Mapped[int] = mapped_column(ForeignKey("bookings.id", ondelete="CASCADE"), index=True)
+    reviewer_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    decision: Mapped[str] = mapped_column(String(16))
+    booking_version: Mapped[int] = mapped_column(Integer)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint("booking_id", "booking_version", name="uq_prepayment_review_version"),)
 
 
 class PushSubscription(Base):
@@ -129,6 +220,7 @@ class Business(Base):
     legal_documents_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
     ai_instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # AI-инструкция для бизнеса
+    sales_agent_settings: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -295,6 +387,7 @@ class Booking(Base):
 
     # Предоплата
     prepayment_amount: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Сумма предоплаты
+    prepayment_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     prepayment_confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # Когда подтверждена
 
     # Доказательство принятия юридических документов в момент записи.

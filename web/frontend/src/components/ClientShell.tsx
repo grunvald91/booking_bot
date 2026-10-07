@@ -131,6 +131,7 @@ export function ClientShell({
                   {localStorage.getItem('userName') || 'Пользователь'}
                 </div>
               </div>
+              <Link to="/account" onClick={() => setProfileOpen(false)} className="ds-row" style={{ padding: '10px', display: 'block' }}>Почта и Telegram</Link>
               {isAdminUser && (
                 <Link
                   to="/admin"

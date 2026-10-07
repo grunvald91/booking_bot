@@ -23,6 +23,7 @@ from ..photo_transport import create_photo_client
 from ..database import get_db, Business, Service, Employee, EmployeeService, Booking, User, VenueTimePricing
 from ..deps import get_current_user, get_current_user_optional
 from database.crud import get_or_create_guest_user
+from database.prepayment import payment_deadline
 from email_utils import normalize_optional_email
 from bot.services.email_notifications import send_booking_email_by_ids
 from database.booking_safety import (
@@ -449,6 +450,12 @@ async def get_slots(
             raise HTTPException(status_code=404, detail="Service not found")
         requested_duration = service_resource_duration(service)
     requested_duration = requested_duration or interval
+    if employee_id:
+        from ..sales.schedule import resource_works
+        if not await resource_works(db, emp, date, requested_duration):
+            return []
+    if interval <= 0 or interval > 1440:
+        raise HTTPException(409, "Invalid booking interval")
 
     start_time = business.working_hours_start or time(9, 0)
     end_time = business.working_hours_end or time(18, 0)
@@ -457,15 +464,14 @@ async def get_slots(
     if end_time <= start_time:
         end_dt += timedelta(days=1)
 
-    if date == datetime.now().date():
-        now_plus = datetime.now() + timedelta(hours=1)
-        if current < now_plus:
-            current = now_plus
-            minutes = (current.minute // interval + 1) * interval
-            if minutes >= 60:
-                current = current.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-            else:
-                current = current.replace(minute=minutes, second=0, microsecond=0)
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("Europe/Moscow")).replace(tzinfo=None)
+    if date < now.date():
+        return []
+    if date == now.date():
+        import math
+        steps = max(0, math.ceil(((now + timedelta(hours=1)) - current).total_seconds() / (interval * 60)))
+        current += timedelta(minutes=steps * interval)
 
     busy_intervals: list[tuple[datetime, datetime]] = []
     booked_times: set[time] = set()
@@ -627,6 +633,12 @@ async def create_booking(
     body: CreateBookingIn,
     db: AsyncSession = Depends(get_db),
     user: Optional[User] = Depends(get_current_user_optional),
+):
+    return await create_booking_visit(body, db, user)
+
+
+async def create_booking_visit(
+    body: CreateBookingIn, db: AsyncSession, user: Optional[User], *, commit: bool = True,
 ):
     """Create a complete visit atomically under one resource lock."""
     biz_result = await db.execute(select(Business).where(Business.id == body.business_id))
@@ -793,7 +805,7 @@ async def create_booking(
 
     initial_status = (
         "pending_prepayment"
-        if getattr(business, "prepayment_enabled", False)
+        if getattr(business, "prepayment_enabled", False) and (visit_prepayment_amount or 0) > 0
         else "pending"
     )
 
@@ -828,7 +840,10 @@ async def create_booking(
             current_time += timedelta(minutes=resource_duration)
 
     try:
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
     except IntegrityError as exc:
         await db.rollback()
         message = str(exc).lower()
@@ -856,6 +871,14 @@ async def create_booking(
         can_c, can_r = _can_modify_booking(loaded)
         result_bookings.append(_booking_to_out(loaded, can_cancel=can_c, can_reschedule=can_r))
 
+    if commit:
+        await notify_created_visit(created_bookings, db, business, client_email)
+
+    return result_bookings
+
+
+async def notify_created_visit(created_bookings, db, business, client_email=None):
+    """Shared post-commit events for ordinary and AI-created visits."""
     # Mandatory immediate event after a real booking is created.
     # If prepayment is enabled, this event is intentionally delayed until the
     # owner confirms receipt of payment.
@@ -888,8 +911,6 @@ async def create_booking(
                 "created",
             )
         )
-
-    return result_bookings
 
 
 # ---------- GET /my/bookings ----------
@@ -1192,7 +1213,13 @@ async def get_telegram_photo(file_id: str):
 
 async def _mark_prepayment_sent(booking: Booking, db: AsyncSession) -> dict:
     """Mark payment as sent and request owner confirmation via Telegram + PWA."""
-    booking.status = "prepayment_sent"
+    from database.prepayment import submit_payment, PaymentWindowError
+    try:
+        visit = await submit_payment(db, booking)
+        if not visit:
+            return {"message": "Payment notification already recorded"}
+    except PaymentWindowError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
     await db.commit()
     await db.refresh(booking)
 
@@ -1219,13 +1246,24 @@ async def _mark_prepayment_sent(booking: Booking, db: AsyncSession) -> dict:
 
 async def _send_receipt_and_notify(booking: Booking, db: AsyncSession, file: UploadFile) -> dict:
     """Upload a receipt to owners, then request confirmation through both channels."""
-    booking.status = "prepayment_sent"
+    from database.prepayment import submit_payment, PaymentWindowError
+    try:
+        visit = await submit_payment(db, booking, receipt=True)
+        if not visit:
+            return {"message": "Receipt payment notification already recorded"}
+    except PaymentWindowError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
+    file_content = await file.read(10 * 1024 * 1024 + 1)
+    from database.receipts import save_receipt
+    try:
+        proof = save_receipt(db, booking, file_content)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
     await db.commit()
     await db.refresh(booking)
 
-    file_content = await file.read()
-    content_type = file.content_type or "image/jpeg"
-    filename = file.filename or "receipt.jpg"
+    content_type = proof.mime_type
+    filename = "receipt.pdf" if content_type == "application/pdf" else "receipt.jpg"
     is_pdf = content_type == "application/pdf" or filename.lower().endswith(".pdf")
     bot_token = os.getenv("BOT_TOKEN", "").strip()
 
@@ -1443,9 +1481,16 @@ async def get_booking_by_token(token: str, db: AsyncSession = Depends(get_db)):
         for b in group if b.service
     ]
     total_price = sum(s.price or 0 for s in services)
+    rental = booking.duration_minutes is not None
+    if rental:
+        total_price = booking.estimated_price or 0
+        services = [PublicServiceItem(name=booking.service.name, price=booking.estimated_price, is_additional=False)]
 
     prepay_pct = business.prepayment_percent or 100
-    computed_prepayment = booking.prepayment_amount or int(total_price * prepay_pct / 100)
+    computed_prepayment = (booking.prepayment_amount if booking.prepayment_amount is not None
+        else 0 if rental else int(total_price * prepay_pct / 100))
+    prepayment_required = computed_prepayment > 0 and (
+        rental or bool(business.prepayment_enabled))
     prepayment_confirmed = booking.prepayment_confirmed_at is not None
     paid_amount = computed_prepayment if prepayment_confirmed else 0
     duration_minutes = sum(
@@ -1465,11 +1510,14 @@ async def get_booking_by_token(token: str, db: AsyncSession = Depends(get_db)):
         time=booking.booking_time.strftime("%H:%M"),
         duration_minutes=duration_minutes,
         employee_name=booking.employee.name if booking.employee else None,
-        employee_label="Помещение" if is_venue else term.get("employee", "Мастер"),
+        employee_label=_parse_booking_labels(business.booking_labels).get("resource")
+            or ("Помещение" if is_venue else term.get("employee", "Мастер")),
         services=services,
         total_price=total_price,
-        prepayment_enabled=getattr(business, "prepayment_enabled", False) or False,
-        prepayment_amount=computed_prepayment if getattr(business, "prepayment_enabled", False) else 0,
+        prepayment_enabled=prepayment_required,
+        prepayment_amount=computed_prepayment if prepayment_required else 0,
+        prepayment_expires_at=payment_deadline(booking),
+        price_requires_confirmation=bool(booking.price_requires_confirmation),
         paid_amount=paid_amount,
         prepayment_confirmed=prepayment_confirmed,
         payment_phone=business.payment_phone,

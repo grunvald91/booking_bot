@@ -1,6 +1,7 @@
 """
 Authentication routes.
-Verification code is sent via Telegram bot. Fallback: server log.
+Legacy phone login sends a code through the linked Telegram account.
+Standalone email authentication is provided by email_auth.py.
 """
 import os
 import json
@@ -191,13 +192,12 @@ async def request_code(body: LoginPhoneIn, db: AsyncSession = Depends(get_db)):
     phone = _normalize_phone(body.phone)
     code = f"{random.randint(100000, 999999)}"
     _pending_codes[phone] = (code, time_module.time())
-    logger.warning("AUTH CODE for %s: %s", phone, code)
-
     sent = await _send_code_via_telegram(phone, code, db)
     if sent:
         return {"ok": True, "message": "Код отправлен в Telegram"}
     else:
-        return {"ok": True, "message": "Код отправлен (проверьте Telegram)", "fallback": True}
+        _pending_codes.pop(phone, None)
+        raise HTTPException(503, "Код не доставлен в Telegram. Используйте вход по email")
 
 
 # ---------- POST /auth/verify ----------

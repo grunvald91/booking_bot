@@ -9,6 +9,9 @@ import { BookingStatusPage } from './pages/client/BookingStatusPage'
 import { MyBookingsPage } from './pages/client/MyBookingsPage'
 import { SubscriptionsPage } from './pages/client/SubscriptionsPage'
 import { LoginPage } from './pages/client/LoginPage'
+import { AccountPage } from './pages/client/AccountPage'
+import { PrepaymentsPage } from './pages/admin/PrepaymentsPage'
+import { AdminPaymentAttention } from './components/AdminPaymentAttention'
 import { AdminDashboard } from './pages/admin/AdminDashboard'
 import { SchedulePage } from './pages/admin/SchedulePage'
 import { ServicesPage } from './pages/admin/ServicesPage'
@@ -17,6 +20,9 @@ import { AnalyticsPage } from './pages/admin/AnalyticsPage'
 import { SettingsPage } from './pages/admin/SettingsPage'
 import { SubscriptionsAdminPage } from './pages/admin/SubscriptionsAdminPage'
 import { ChatPage } from './pages/client/ChatPage'
+import { SalesInboxPage } from './pages/admin/SalesInboxPage'
+import { SalesSettingsPage } from './pages/admin/SalesSettingsPage'
+import { RentalBookingStatusPage } from './pages/client/RentalBookingStatusPage'
 import { LegalPage } from './pages/client/LegalPage'
 
 /** Redirect /book?business_id=X → /book/X, or /book → / */
@@ -48,7 +54,8 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
-  const [tgAuthDone, setTgAuthDone] = useState(false)
+  const [tgAuthDone, setTgAuthDone] = useState(() =>
+    !window.Telegram?.WebApp?.initData || sessionStorage.getItem('servgoExplicitLogout') === '1')
 
   useEffect(() => {
     const initData = window.Telegram?.WebApp?.initData
@@ -68,8 +75,6 @@ function App() {
           console.warn('Telegram auto-login failed:', err)
           setTgAuthDone(true)
         })
-    } else {
-      setTgAuthDone(true)
     }
   }, [])
 
@@ -78,13 +83,14 @@ function App() {
   }
 
   return (
-    <Routes>
+    <><AdminPaymentAttention /><Routes>
       <Route element={<Layout />}>
         {/* Client routes */}
         <Route path="/" element={<HomePage />} />
         <Route path="/business/:id" element={<BusinessPage />} />
         <Route path="/book/:businessId" element={<BookingPage />} />
         <Route path="/b/:token" element={<BookingStatusPage />} />
+        <Route path="/rental/b/:token" element={<RentalBookingStatusPage />} />
         <Route
           path="/my"
           element={
@@ -97,6 +103,8 @@ function App() {
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/legal/:docType/:businessId" element={<LegalPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/account" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
+        <Route path="/admin/prepayments" element={<AdminRoute><PrepaymentsPage /></AdminRoute>} />
 
         {/* Legacy redirects */}
         <Route path="/book" element={<BookRedirect />} />
@@ -105,6 +113,8 @@ function App() {
         <Route path="/calendar" element={<LegacyAdminRedirect to="/admin/schedule" />} />
 
         {/* Admin routes */}
+        <Route path="/admin/sales" element={<AdminRoute><SalesInboxPage /></AdminRoute>} />
+        <Route path="/admin/sales/settings" element={<AdminRoute><SalesSettingsPage /></AdminRoute>} />
         <Route
           path="/admin"
           element={
@@ -162,7 +172,7 @@ function App() {
           }
         />
       </Route>
-    </Routes>
+    </Routes></>
   )
 }
 
