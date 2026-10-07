@@ -11,6 +11,7 @@ import { SubscriptionsPage } from './pages/client/SubscriptionsPage'
 import { LoginPage } from './pages/client/LoginPage'
 import { AccountPage } from './pages/client/AccountPage'
 import { PrepaymentsPage } from './pages/admin/PrepaymentsPage'
+import { AdminPaymentAttention } from './components/AdminPaymentAttention'
 import { AdminDashboard } from './pages/admin/AdminDashboard'
 import { SchedulePage } from './pages/admin/SchedulePage'
 import { ServicesPage } from './pages/admin/ServicesPage'
@@ -82,7 +83,7 @@ function App() {
   }
 
   return (
-    <Routes>
+    <><AdminPaymentAttention /><Routes>
       <Route element={<Layout />}>
         {/* Client routes */}
         <Route path="/" element={<HomePage />} />
@@ -171,7 +172,7 @@ function App() {
           }
         />
       </Route>
-    </Routes>
+    </Routes></>
   )
 }
 

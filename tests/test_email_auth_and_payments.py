@@ -15,7 +15,7 @@ import test_sales_agent as sales_fixture
 from database.models import User, Booking, EmailIdentity, EmailChallenge, BookingReceipt, PrepaymentReview
 from database.prepayment import expire_due_prepayments, payment_deadline
 from web.api import deps
-from web.api.routes import email_auth, payments, admin
+from web.api.routes import email_auth, payments, admin, telegram_link
 
 PASSWORD = "Synthetic-password-123"
 PNG = b"\x89PNG\r\n\x1a\nsynthetic-proof"
@@ -24,11 +24,13 @@ PNG = b"\x89PNG\r\n\x1a\nsynthetic-proof"
 class EmailAndPaymentTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.auth_patches = [patch.dict(os.environ, {"SMTP_HOST": "smtp.test.invalid", "SMTP_FROM_EMAIL": "no-reply@example.test",
+            "BOT_USERNAME": "servgo_test_bot", "BOT_TOKEN": "test-token",
             "SERVGO_EMAIL_AUTH_SECRET": "test-only-email-secret-32-characters"}),
             patch.object(deps, "SECRET_KEY", "test-only-jwt-secret-32-characters")]
         for item in self.auth_patches: item.start()
         await sales_fixture.SalesApiTests.asyncSetUp(self)
         self.app.include_router(email_auth.router, prefix="/auth")
+        self.app.include_router(telegram_link.router, prefix="/auth")
         self.app.include_router(admin.router, prefix="/admin")
         self.app.include_router(payments.router, prefix="/admin")
         self.mail = AsyncMock(return_value=True)
@@ -381,3 +383,191 @@ class EmailAndPaymentTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(EmailIdentity)), 1)
             self.assertEqual(await db.scalar(select(func.count()).select_from(User)), 4)
+
+    async def link_start(self, account):
+        headers = {"Authorization": "Bearer " + account["token"]}
+        result = await self.client.post("/auth/telegram-link/start", headers=headers, json={"password": PASSWORD})
+        self.assertEqual(result.status_code, 200, result.text)
+        return headers, result.json()
+
+    async def link_prove(self, request, telegram_id=101):
+        from database.account_link import telegram_claim, telegram_confirm
+        async with self.sessions() as db:
+            claim = await telegram_claim(db, request["url"].split("account_")[1],
+                SimpleNamespace(id=telegram_id, username="demo_owner", full_name="Демо владелец"))
+            await telegram_confirm(db, claim.id, telegram_id)
+            await db.commit()
+
+    async def link_finish(self, headers, request):
+        return await self.client.post("/auth/telegram-link/complete", headers=headers,
+            json={"challenge_id": request["challenge_id"], "password": PASSWORD})
+
+    async def test_email_to_telegram_requires_both_proofs_and_restores_businesses(self):
+        from database.models import Business, BusinessOwner, UserAccountMerge
+        account = await self.register()
+        source = account["user"]["id"]
+        async with self.sessions() as db:
+            business = Business(owner_id=source, name="Email бизнес", business_type="salon")
+            db.add(business)
+            db.add(BusinessOwner(business_id=self.business, user_id=source, role="owner"))
+            await db.flush(); email_business = business.id
+            bid, _ = await self.booking()
+            # Separate session fixture booking committed before this transaction locks anything.
+            row = await db.get(Booking, bid); row.client_id = source
+            await db.commit()
+        headers, request = await self.link_start(account)
+        self.assertEqual((await self.link_finish(headers, request)).status_code, 409)
+        self.assertEqual((await self.client.get('/auth/telegram-link/' + request['challenge_id'], headers=self.outsider_auth)).status_code, 404)
+        await self.link_prove(request)
+        status = await self.client.get('/auth/telegram-link/' + request['challenge_id'], headers=headers)
+        self.assertEqual(status.json()['telegram']['id'], 101)
+        result = await self.link_finish(headers, request)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()['user']['id'], self.owner)
+        self.assertEqual(result.json()['role'], 'admin')
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(Business, email_business)).owner_id, self.owner)
+            self.assertEqual((await db.get(Booking, bid)).client_id, self.owner)
+            self.assertEqual((await db.get(UserAccountMerge, source)).target_user_id, self.owner)
+            self.assertIsNotNone(await db.get(User, source))
+            self.assertEqual((await db.get(EmailIdentity, 'owner@example.test')).user_id, self.owner)
+        self.assertEqual((await self.client.get('/auth/email/account', headers=headers)).status_code, 401)
+        login = await self.client.post('/auth/email/login', json={'email': 'owner@example.test', 'password': PASSWORD})
+        self.assertEqual(login.json()['user']['id'], self.owner)
+        linked = {'Authorization': 'Bearer ' + login.json()['token']}
+        self.assertEqual((await self.client.get(f'/admin/prepayments?business_id={self.business}', headers=linked)).status_code, 200)
+        self.assertEqual((await self.client.get('/auth/email/account', headers=self.owner_auth)).json()['telegram']['id'], 101)
+
+    async def test_forwarded_link_cannot_confirm_a_different_telegram_or_merge_silently(self):
+        from database.account_link import telegram_claim, telegram_confirm, AccountLinkError
+        account = await self.register(); headers, request = await self.link_start(account)
+        async with self.sessions() as db:
+            claim = await telegram_claim(db, request['url'].split('account_')[1], SimpleNamespace(id=103, username=None, full_name='Другой'))
+            await db.commit()
+            with self.assertRaises(AccountLinkError): await telegram_confirm(db, claim.id, 101)
+            await db.rollback()
+        self.assertEqual((await self.link_finish(headers, request)).status_code, 409)
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(EmailIdentity, 'owner@example.test')).user_id, account['user']['id'])
+        self.assertEqual((await self.client.post('/auth/telegram-link/' + request['challenge_id'] + '/cancel', headers=headers)).status_code, 200)
+        self.assertEqual((await self.link_finish(headers, request)).status_code, 409)
+
+    async def test_link_rejects_expiry_wrong_password_and_existing_other_email(self):
+        from database.models import TelegramLinkRequest
+        account = await self.register(); headers, request = await self.link_start(account)
+        wrong = await self.client.post('/auth/telegram-link/complete', headers=headers,
+            json={'challenge_id': request['challenge_id'], 'password': 'Wrong-password-123'})
+        self.assertEqual(wrong.status_code, 401)
+        await self.link_prove(request)
+        challenge, code = await self.begin('telegram@example.test', purpose='link', headers=self.owner_auth)
+        self.assertEqual((await self.verify(challenge, code, self.owner_auth)).status_code, 200)
+        self.assertEqual((await self.link_finish(headers, request)).status_code, 409)
+        async with self.sessions() as db:
+            row = await db.get(TelegramLinkRequest, request['challenge_id']); row.expires_at = datetime.utcnow() - timedelta(seconds=1)
+            await db.commit()
+        self.assertEqual((await self.link_finish(headers, request)).status_code, 409)
+
+    async def test_password_reset_invalidates_telegram_link_proof(self):
+        account = await self.register(); headers, request = await self.link_start(account)
+        await self.link_prove(request)
+        challenge, code = await self.begin(purpose='reset')
+        reset = await self.verify(challenge, code)
+        current = {'Authorization': 'Bearer ' + reset.json()['token']}
+        self.assertEqual((await self.link_finish(current, request)).status_code, 409)
+
+    async def test_concurrent_link_finishes_only_once(self):
+        if not self.pg_schema: self.skipTest('PostgreSQL account-link race')
+        account = await self.register(); headers, request = await self.link_start(account)
+        await self.link_prove(request)
+        results = await asyncio.gather(self.link_finish(headers, request), self.link_finish(headers, request))
+        self.assertEqual(sorted(r.status_code for r in results), [200, 409])
+
+    async def test_attention_is_persistent_cross_business_and_owner_only(self):
+        from database.models import BusinessOwner
+        first, token = await self.booking()
+        await self.submit(token)
+        second, other_token = await self.booking(at=15)
+        async with self.sessions() as db:
+            (await db.get(Booking, second)).business_id = self.other_business
+            await db.commit()
+        await self.submit(other_token)
+        url = '/admin/prepayments/attention'
+        self.assertEqual((await self.client.get(url)).status_code, 401)
+        result = await self.client.get(url, headers=self.owner_auth)
+        self.assertEqual(result.json()['count'], 1)
+        self.assertEqual(result.json()['first']['booking']['id'], first)
+        self.assertEqual(result.headers['cache-control'], 'private, no-store')
+        async with self.sessions() as db:
+            db.add(BusinessOwner(business_id=self.other_business, user_id=self.owner, role='owner'))
+            (await db.get(Booking, first)).prepayment_requested_at = datetime.utcnow() - timedelta(hours=2)
+            await expire_due_prepayments(db); await db.commit()
+        for _ in range(2): self.assertEqual((await self.client.get(url, headers=self.owner_auth)).json()['count'], 2)
+        version = (await self.details(first))['booking']['version']
+        await self.decide(first, 'confirm', version)
+        self.assertEqual((await self.client.get(url, headers=self.owner_auth)).json()['count'], 1)
+        version = (await self.details(second))['booking']['version']
+        await self.decide(second, 'reject', version)
+        self.assertEqual((await self.client.get(url, headers=self.owner_auth)).json()['count'], 0)
+
+    async def test_telegram_link_migration_is_additive_and_repeatable(self):
+        if not self.pg_schema: self.skipTest('PostgreSQL migration')
+        migration = Path('migrations/add_telegram_account_link.sql').read_text()
+        async with self.engine.begin() as connection:
+            for name in ['telegram_link_requests', 'user_account_merges']:
+                await connection.execute(text(f'DROP TABLE {name}'))
+            for _ in range(2):
+                for statement in migration.split(';'):
+                    if statement.strip() and statement.strip() not in {'BEGIN', 'COMMIT'}:
+                        await connection.execute(text(statement))
+        async with self.sessions() as db:
+            self.assertEqual(await db.scalar(select(func.count()).select_from(User)), 3)
+
+    async def test_staff_push_routes_payment_to_review_and_preserves_reminders(self):
+        from database.models import PushSubscription
+        from bot.services import webpush
+        bid, _ = await self.booking()
+        async with self.sessions() as db:
+            db.add(PushSubscription(user_id=self.owner, endpoint='https://push.test.invalid/demo',
+                p256dh='synthetic-key', auth='synthetic-auth', is_active=True))
+            await db.commit()
+            booking = await payments.owned_booking(db, await db.get(User, self.owner), bid)
+            sender = AsyncMock(return_value=1)
+            with patch.object(webpush, 'send_webpush_to_subscriptions', sender):
+                await webpush.send_staff_event_webpush([booking], db, 'prepayment_submitted', audience='owner')
+                payload = sender.call_args.args[1]
+                self.assertEqual(payload['url'], '/admin/prepayments')
+                self.assertEqual(payload['event_kind'], 'prepayment_submitted')
+                await webpush.send_staff_booking_webpush([booking], db, '2h', audience='owner')
+                self.assertEqual(sender.call_args.args[1]['url'], '/admin/schedule')
+
+    async def test_bot_link_requires_matching_private_telegram_update(self):
+        from bot.handlers import account_link
+        account = await self.register(); headers, request = await self.link_start(account)
+        message = SimpleNamespace(chat=SimpleNamespace(type='private'),
+            from_user=SimpleNamespace(id=101, username='demo_owner', full_name='Демо владелец'), answer=AsyncMock())
+        command = SimpleNamespace(args='account_' + request['url'].split('account_')[1])
+        callback = SimpleNamespace(message=SimpleNamespace(chat=SimpleNamespace(type='private'), edit_text=AsyncMock()),
+            data='account_link:' + request['challenge_id'], from_user=SimpleNamespace(id=103), answer=AsyncMock())
+        with patch.object(account_link, 'async_session_maker', self.sessions):
+            await account_link.begin_link(message, command)
+            await account_link.confirm_link(callback)
+            callback.message.edit_text.assert_not_called()
+            self.assertEqual((await self.link_finish(headers, request)).status_code, 409)
+            callback.from_user.id = 101
+            await account_link.confirm_link(callback)
+        callback.message.edit_text.assert_called_once()
+        self.assertEqual((await self.link_finish(headers, request)).status_code, 200)
+
+    async def test_merged_email_phone_cannot_identify_a_guest_as_telegram_owner(self):
+        from database.crud import get_or_create_guest_user
+        account = await self.register(); source = account['user']['id']
+        async with self.sessions() as db:
+            (await db.get(User, source)).phone = '+79991112233'
+            await db.commit()
+        headers, request = await self.link_start(account)
+        await self.link_prove(request)
+        self.assertEqual((await self.link_finish(headers, request)).status_code, 200)
+        async with self.sessions() as db:
+            guest = await get_or_create_guest_user(db, '+79991112233', 'Гость')
+            self.assertNotIn(guest.id, [source, self.owner])
+            self.assertLess(guest.telegram_id, 0)

@@ -548,7 +548,7 @@ export function SettingsPage() {
           <p className="ds-sub" style={{ marginBottom: 10, lineHeight: 1.5 }}>
             Новая подтверждённая запись всегда отправляется клиенту и причастным сотрудникам. Ниже настраиваются только дополнительные напоминания перед визитом.
           </p>
-          <NotificationSetup />
+          <NotificationSetup staff />
 
           {([
             {

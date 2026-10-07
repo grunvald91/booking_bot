@@ -75,3 +75,11 @@ For any production-affecting change, state:
 Use the repository's existing tests first. Add focused regression tests for every bug fix where practical.
 
 A task is not complete merely because code was written; preserve a committed/pushed working checkpoint.
+
+## Mail infrastructure (owner confirmation, 2026-10-07)
+The owner confirms that a self-hosted mail server was already set up. Reuse that
+server through the existing SMTP module for email authentication and notifications.
+Do not assume a paid delivery provider or propose rebuilding mail infrastructure.
+This development workspace has no live SMTP configuration or server access; the
+SMTP endpoint, TLS/DNS setup and delivery health remain to be verified on the
+existing infrastructure. Never invent an endpoint or claim a successful live check.

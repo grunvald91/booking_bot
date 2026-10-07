@@ -505,7 +505,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   emailCapabilities: () => request<{ available: boolean }>('/auth/email/capabilities'),
-  emailAccount: () => request<{ email: string | null; available: boolean }>('/auth/email/account'),
+  emailAccount: () => request<{ email: string | null; available: boolean; telegram: { id: number; username: string | null } | null; telegram_link_available: boolean }>('/auth/email/account'),
+  startTelegramLink: (password: string) => request<{ challenge_id: string; url: string; expires_at: string }>('/auth/telegram-link/start', { method: 'POST', body: JSON.stringify({ password }) }),
+  telegramLinkStatus: (id: string) => request<{ state: string; telegram: { id: number; name: string; username: string | null } | null; business_count: number }>(`/auth/telegram-link/${id}`),
+  completeTelegramLink: (challenge_id: string, password: string) => request<AuthResponse>('/auth/telegram-link/complete', { method: 'POST', body: JSON.stringify({ challenge_id, password }) }),
+  cancelTelegramLink: (id: string) => request(`/auth/telegram-link/${id}/cancel`, { method: 'POST' }),
+  prepaymentAttention: () => request<{ count: number; first: { booking: AdminBooking; business_name: string; business_id: number } | null }>('/admin/prepayments/attention'),
   emailLogin: (email: string, password: string) => request<AuthResponse>('/auth/email/login', {
     method: 'POST', body: JSON.stringify({ email, password }),
   }),
@@ -522,7 +527,7 @@ export const api = {
   reviewPrepayment: (bookingId: number, decision: 'confirm' | 'reject', expected_version: number) =>
     request<AdminBooking>(`/admin/bookings/${bookingId}/prepayment-review`, {
       method: 'POST', body: JSON.stringify({ decision, expected_version }),
-    }),
+    }).then(result => { window.dispatchEvent(new Event('servgo:payment-reviewed')); return result }),
   downloadReceipt: async (receiptId: number) => {
     const response = await fetch(`${API}/admin/receipts/${receiptId}`, {
       headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },

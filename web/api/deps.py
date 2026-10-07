@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import get_db, User, Business, BusinessOwner
-from database.models import EmailIdentity
+from database.models import EmailIdentity, UserAccountMerge
 
 SECRET_KEY = os.getenv("JWT_SECRET", "booking-bot-jwt-secret-2026")
 ALGORITHM = "HS256"
@@ -49,6 +49,11 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    merged = await db.get(UserAccountMerge, user.id)
+    if merged:
+        user = await db.get(User, merged.target_user_id)
+        if user is None:
+            raise HTTPException(401, "User not found")
     if "ev" in payload:
         identity = await db.scalar(select(EmailIdentity).where(EmailIdentity.user_id == user.id))
         if identity is None or identity.session_version != payload["ev"]:

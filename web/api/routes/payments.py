@@ -4,7 +4,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select, or_, and_
+from sqlalchemy import select, or_, and_, func
 from sqlalchemy.orm import selectinload
 
 from database.models import Booking, BookingReceipt, PrepaymentReview
@@ -15,6 +15,20 @@ from .admin import _get_owner_business_ids, _admin_booking_out
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+@router.get("/prepayments/attention")
+async def attention(response: Response, user=Depends(get_current_admin), db=Depends(get_db)):
+    """All owned businesses, independent of the currently selected business."""
+    response.headers["Cache-Control"] = "private, no-store"
+    ids = await _get_owner_business_ids(db, user)
+    query = select(Booking).where(Booking.business_id.in_(ids), Booking.status == "prepayment_sent")
+    count = await db.scalar(select(func.count()).select_from(query.subquery()))
+    first = await db.scalar(query.order_by(Booking.id).limit(1).options(
+        selectinload(Booking.business), selectinload(Booking.client),
+        selectinload(Booking.service), selectinload(Booking.employee)))
+    return {"count": count, "first": {"booking": _admin_booking_out(first),
+        "business_name": first.business.name, "business_id": first.business_id} if first else None}
 
 
 async def owned_booking(db, user, booking_id):
