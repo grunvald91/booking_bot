@@ -1,0 +1,165 @@
+﻿Проект,Пакет,Исходный SHA,Изменение,Путь,Назначение
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,.env.example,"Шаблон: сверить env, не заменять конфигурацию сервера"
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,.github/workflows/pwa-ci.yml,CI/ops: не переносить как runtime автоматически
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,CLAUDE.md,Документация
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,THIRD_PARTY_NOTICES.md,Документация
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,bot/handlers/account_link.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,bot/handlers/admin.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,bot/handlers/client.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,bot/keyboards/admin_kb.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,bot/main.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,bot/services/email_notifications.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,bot/services/notification_events.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,bot/services/notifications.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,bot/services/webpush.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,database/account_link.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,database/crud.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,database/models.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,database/prepayment.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,database/receipts.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,docs/email-login-and-prepayment-review.md,Документация
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,docs/servgo-sales-agent.md,Документация
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,migrations/activate_rental_prepayment_windows.sql,Миграция: учитывать порядок
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,migrations/add_email_auth_and_payment_review.sql,Миграция: учитывать порядок
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,migrations/add_prepayment_requested_at.sql,Миграция: учитывать порядок
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,migrations/add_sales_agent_settings.sql,Миграция: учитывать порядок
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,migrations/add_sales_conversations.sql,Миграция: учитывать порядок
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,migrations/add_telegram_account_link.sql,Миграция: учитывать порядок
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,tests/test_email_auth_and_payments.py,Тесты
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,tests/test_sales_agent.py,Тесты
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,third_party/SalesGPT-LICENSE.txt,Документация
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,third_party/kaia-LICENSE.txt,Документация
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,third_party/langgraph-sales-agent-LICENSE.txt,Документация
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/api/deps.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/api/main.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/api/rental.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/api/rental_logic.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/api/routes/admin.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/api/routes/ai.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/api/routes/auth.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/api/routes/client.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/api/routes/email_auth.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/api/routes/payments.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/api/routes/telegram_link.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/api/sales/__init__.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/api/sales/engine.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/api/sales/policy.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/api/sales/provider.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/api/sales/schedule.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/api/sales/stages.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/api/sales/state.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/api/sales/tools.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/api/schemas.py,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/frontend/public/sw.js,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/frontend/src/App.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/frontend/src/api/client.ts,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/frontend/src/authUtils.ts,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/frontend/src/components/AdminPaymentAttention.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/frontend/src/components/AdminShell.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/frontend/src/components/ClientShell.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/frontend/src/components/EmailAuthForm.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/frontend/src/components/Layout.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/frontend/src/components/NotificationSetup.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/frontend/src/components/TelegramAccountLink.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/frontend/src/pages/admin/PrepaymentsPage.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/frontend/src/pages/admin/SalesInboxPage.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/frontend/src/pages/admin/SalesSettingsPage.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/frontend/src/pages/admin/SchedulePage.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/frontend/src/pages/admin/SettingsPage.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/frontend/src/pages/client/AccountPage.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/frontend/src/pages/client/BookingStatusPage.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/frontend/src/pages/client/BusinessPage.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/frontend/src/pages/client/ChatPage.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,M,web/frontend/src/pages/client/LoginPage.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S1-S13 / PR34,d0537b895ffbc1fb970dd58b462c9b32b0613f29,A,web/frontend/src/pages/client/RentalBookingStatusPage.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S14 / галерея,5a1cc9092c08ee298beb227c1d556219976aeb1c,M,web/frontend/src/pages/client/BookingPage.tsx,Runtime: совмещать с реальными серверными исходниками
+ServGo,S14 / галерея,5a1cc9092c08ee298beb227c1d556219976aeb1c,M,web/frontend/src/pages/client/booking.css,Runtime: совмещать с реальными серверными исходниками
+ServGo,S15 / вариант promo main,5a1cc9092c08ee298beb227c1d556219976aeb1c,M,webapp/niches/_shared.yaml,Runtime: совмещать с реальными серверными исходниками
+ServGo,S15 / вариант promo main,5a1cc9092c08ee298beb227c1d556219976aeb1c,M,webapp/niches/banya.yaml,Runtime: совмещать с реальными серверными исходниками
+ServGo,S15 / вариант promo main,5a1cc9092c08ee298beb227c1d556219976aeb1c,M,webapp/niches/barbershop.yaml,Runtime: совмещать с реальными серверными исходниками
+ServGo,S15 / вариант promo main,5a1cc9092c08ee298beb227c1d556219976aeb1c,M,webapp/niches/beauty.yaml,Runtime: совмещать с реальными серверными исходниками
+ServGo,S15 / вариант promo main,5a1cc9092c08ee298beb227c1d556219976aeb1c,M,webapp/niches/hall-rental.yaml,Runtime: совмещать с реальными серверными исходниками
+ServGo,S15 / вариант promo main,5a1cc9092c08ee298beb227c1d556219976aeb1c,M,webapp/niches/psy.yaml,Runtime: совмещать с реальными серверными исходниками
+ServGo,S15 / вариант promo main,5a1cc9092c08ee298beb227c1d556219976aeb1c,M,webapp/niches/shinomontazh.yaml,Runtime: совмещать с реальными серверными исходниками
+ServGo,S15 / вариант promo main,5a1cc9092c08ee298beb227c1d556219976aeb1c,M,webapp/static/css/niche.css,Runtime: совмещать с реальными серверными исходниками
+ServGo,S15 / вариант promo main,5a1cc9092c08ee298beb227c1d556219976aeb1c,M,webapp/templates/niche.html,Runtime: совмещать с реальными серверными исходниками
+ServGo,S16 / вариант promo PR33,2a56e424b292ace90be18d7626dddf9f0ed55609,M,webapp/niches/_shared.yaml,Runtime: совмещать с реальными серверными исходниками
+ServGo,S16 / вариант promo PR33,2a56e424b292ace90be18d7626dddf9f0ed55609,M,webapp/niches/banya.yaml,Runtime: совмещать с реальными серверными исходниками
+ServGo,S16 / вариант promo PR33,2a56e424b292ace90be18d7626dddf9f0ed55609,M,webapp/niches/barbershop.yaml,Runtime: совмещать с реальными серверными исходниками
+ServGo,S16 / вариант promo PR33,2a56e424b292ace90be18d7626dddf9f0ed55609,M,webapp/niches/beauty.yaml,Runtime: совмещать с реальными серверными исходниками
+ServGo,S16 / вариант promo PR33,2a56e424b292ace90be18d7626dddf9f0ed55609,M,webapp/niches/hall-rental.yaml,Runtime: совмещать с реальными серверными исходниками
+ServGo,S16 / вариант promo PR33,2a56e424b292ace90be18d7626dddf9f0ed55609,M,webapp/niches/psy.yaml,Runtime: совмещать с реальными серверными исходниками
+ServGo,S16 / вариант promo PR33,2a56e424b292ace90be18d7626dddf9f0ed55609,M,webapp/niches/shinomontazh.yaml,Runtime: совмещать с реальными серверными исходниками
+ServGo,S16 / вариант promo PR33,2a56e424b292ace90be18d7626dddf9f0ed55609,M,webapp/static/css/niche.css,Runtime: совмещать с реальными серверными исходниками
+ServGo,S16 / вариант promo PR33,2a56e424b292ace90be18d7626dddf9f0ed55609,M,webapp/templates/niche.html,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G1 / PR124,8bf5452eb32328cc400971629c0387c3bb94f5a2,M,.env.example,"Шаблон: сверить env, не заменять конфигурацию сервера"
+AI Growth OS,G1 / PR124,8bf5452eb32328cc400971629c0387c3bb94f5a2,M,README.md,Документация
+AI Growth OS,G1 / PR124,8bf5452eb32328cc400971629c0387c3bb94f5a2,M,app/api/content_studio.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G1 / PR124,8bf5452eb32328cc400971629c0387c3bb94f5a2,M,app/api/content_studio_design.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G1 / PR124,8bf5452eb32328cc400971629c0387c3bb94f5a2,A,app/api/sales_agent.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G1 / PR124,8bf5452eb32328cc400971629c0387c3bb94f5a2,M,app/core/config.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G1 / PR124,8bf5452eb32328cc400971629c0387c3bb94f5a2,M,app/main.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G1 / PR124,8bf5452eb32328cc400971629c0387c3bb94f5a2,A,app/tools/servgo.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G1 / PR124,8bf5452eb32328cc400971629c0387c3bb94f5a2,A,tests/test_sales_agent_settings.py,Тесты
+AI Growth OS,G2-G3 / PR123,c07d0165ada7380f4e0466fb208ffc4ecd4587d8,M,README.md,Документация
+AI Growth OS,G2-G3 / PR123,c07d0165ada7380f4e0466fb208ffc4ecd4587d8,M,app/api/content_studio.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G2-G3 / PR123,c07d0165ada7380f4e0466fb208ffc4ecd4587d8,M,app/api/content_studio_design.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G2-G3 / PR123,c07d0165ada7380f4e0466fb208ffc4ecd4587d8,A,app/content/presentation.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G2-G3 / PR123,c07d0165ada7380f4e0466fb208ffc4ecd4587d8,M,app/content/telegram.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G2-G3 / PR123,c07d0165ada7380f4e0466fb208ffc4ecd4587d8,M,pyproject.toml,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G2-G3 / PR123,c07d0165ada7380f4e0466fb208ffc4ecd4587d8,M,tests/test_bot_content_contacts.py,Тесты
+AI Growth OS,G2-G3 / PR123,c07d0165ada7380f4e0466fb208ffc4ecd4587d8,A,tests/test_content_presentation.py,Тесты
+AI Growth OS,G2-G3 / PR123,c07d0165ada7380f4e0466fb208ffc4ecd4587d8,M,tests/test_content_studio.py,Тесты
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,M,.env.example,"Шаблон: сверить env, не заменять конфигурацию сервера"
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,M,README.md,Документация
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,A,alembic/versions/0005_comment_service.py,Миграция: учитывать порядок
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,M,app/agents/__init__.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,A,app/api/comments.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,A,app/api/comments_design.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,M,app/api/content_studio.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,M,app/api/content_studio_design.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,A,app/comments/__init__.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,A,app/comments/contracts.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,A,app/comments/gateway.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,A,app/comments/models.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,A,app/comments/platforms.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,A,app/comments/secrets.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,A,app/comments/service.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,A,app/comments/threads.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,A,app/comments/vk.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,M,app/core/config.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,M,app/main.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,M,app/models/__init__.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,M,app/services/artifacts.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,M,docker-compose.prod.yml,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,A,docs/comment-service.md,Документация
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,A,tests/test_comments.py,Тесты
+AI Growth OS,G4-G6 / PR125,c631b8e5ec03d81a5336d76bdd45c31b5dfddc4a,M,tests/test_models.py,Тесты
+AI Growth OS,Отдельно / PR101,9b39146f66fb2eb89e6cc6dc5dd8a7bcc264f4ab,M,README.md,Документация
+AI Growth OS,Отдельно / PR101,9b39146f66fb2eb89e6cc6dc5dd8a7bcc264f4ab,M,app/content/calendar.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,Отдельно / PR101,9b39146f66fb2eb89e6cc6dc5dd8a7bcc264f4ab,M,app/content/service.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,Отдельно / PR101,9b39146f66fb2eb89e6cc6dc5dd8a7bcc264f4ab,M,app/content/worker.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,Отдельно / PR76,d10e3b4bbaf8f7b18dcc460422759ef6655d0fc7,M,.env.example,"Шаблон: сверить env, не заменять конфигурацию сервера"
+AI Growth OS,Отдельно / PR76,d10e3b4bbaf8f7b18dcc460422759ef6655d0fc7,M,app/core/config.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,Отдельно / PR76,d10e3b4bbaf8f7b18dcc460422759ef6655d0fc7,M,app/workflows/daily_growth_review.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,Отдельно / PR76,d10e3b4bbaf8f7b18dcc460422759ef6655d0fc7,M,app/workflows/team_cycle.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,Отдельно / PR76,d10e3b4bbaf8f7b18dcc460422759ef6655d0fc7,M,docker-compose.prod.yml,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,Отдельно / PR76,d10e3b4bbaf8f7b18dcc460422759ef6655d0fc7,M,tests/test_config.py,Тесты
+AI Growth OS,Отдельно / PR76,d10e3b4bbaf8f7b18dcc460422759ef6655d0fc7,M,tests/test_daily_growth_review.py,Тесты
+AI Growth OS,Отдельно / PR76,d10e3b4bbaf8f7b18dcc460422759ef6655d0fc7,M,tests/test_team_cycle.py,Тесты
+AI Growth OS,G7 / исправления intake,1ed48e29ad62a865911b154d34ffffa80850b2fe,M,app/intake/service.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G7 / исправления intake,1ed48e29ad62a865911b154d34ffffa80850b2fe,M,app/intake/sources.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G7 / исправления intake,1ed48e29ad62a865911b154d34ffffa80850b2fe,M,tests/test_company_intake.py,Тесты
+AI Growth OS,G8 / несостоявшийся release,d2f1f106144f8483bd1db69a9bd859baecdf97ee,A,.github/deploy-request.json,CI/ops: не переносить как runtime автоматически
+AI Growth OS,G8 / несостоявшийся release,d2f1f106144f8483bd1db69a9bd859baecdf97ee,A,.github/run-962aa3d9.trigger,CI/ops: не переносить как runtime автоматически
+AI Growth OS,G8 / несостоявшийся release,d2f1f106144f8483bd1db69a9bd859baecdf97ee,A,.github/run-cdc3cdf.trigger,CI/ops: не переносить как runtime автоматически
+AI Growth OS,G8 / несостоявшийся release,d2f1f106144f8483bd1db69a9bd859baecdf97ee,M,.github/workflows/deploy-server.yml,CI/ops: не переносить как runtime автоматически
+AI Growth OS,G8 / несостоявшийся release,d2f1f106144f8483bd1db69a9bd859baecdf97ee,M,app/workflows/article_production.py,Runtime: совмещать с реальными серверными исходниками
+AI Growth OS,G8 / несостоявшийся release,d2f1f106144f8483bd1db69a9bd859baecdf97ee,M,tests/test_articles.py,Тесты
+AI Growth OS,G8 / несостоявшийся release,d2f1f106144f8483bd1db69a9bd859baecdf97ee,M,tests/test_company_intake.py,Тесты
+AI Growth OS,G8 / несостоявшийся release,d2f1f106144f8483bd1db69a9bd859baecdf97ee,M,tests/test_content_factory.py,Тесты
+ServGo,Документы / PR17,6c9f42c5953f6b564d94a1be768ac81ee48ff837,A,AGENTS.md,Документация
+ServGo,Документы / PR17,6c9f42c5953f6b564d94a1be768ac81ee48ff837,A,ARCHITECTURE.md,Документация
+ServGo,Документы / PR17,6c9f42c5953f6b564d94a1be768ac81ee48ff837,A,PRODUCT.md,Документация
+ServGo,Документы / PR17,6c9f42c5953f6b564d94a1be768ac81ee48ff837,A,ROADMAP.md,Документация
+ServGo,Документы / PR17,6c9f42c5953f6b564d94a1be768ac81ee48ff837,A,RULES.md,Документация

@@ -80,6 +80,11 @@ A task is not complete merely because code was written; preserve a committed/pus
 The owner confirms that a self-hosted mail server was already set up. Reuse that
 server through the existing SMTP module for email authentication and notifications.
 Do not assume a paid delivery provider or propose rebuilding mail infrastructure.
-This development workspace has no live SMTP configuration or server access; the
-SMTP endpoint, TLS/DNS setup and delivery health remain to be verified on the
-existing infrastructure. Never invent an endpoint or claim a successful live check.
+The 2026-10-07 release audit found historical evidence: workflow run 37421133374
+confirmed active Postfix/OpenDKIM and DKIM signing on the ServGo server; run
+37421986431 contains a successful setup step. mail.servgo.ru resolves to
+155.212.162.47. A current public DNS check found no MX/SPF, selector s202610 DKIM
+or DMARC; external SMTP 587 refused connection. This does not prove local SMTP
+25 is broken. Runtime SMTP configuration, fresh service state and external
+delivery still require verification. See docs/release-audit-2026-10-07.md.
+Never invent an endpoint or claim a successful live delivery check.
