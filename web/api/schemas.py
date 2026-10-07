@@ -276,6 +276,7 @@ class AdminBookingOut(BaseModel):
     status: str
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
+    version: int = 1
 
 
 class ManualBookingIn(BaseModel):
@@ -532,6 +533,7 @@ class OwnerOut(BaseModel):
 class OwnerAddIn(BaseModel):
     telegram_id: Optional[int] = None
     username: Optional[str] = None
+    email: Optional[str] = None
 
 
 # ---------- Venue Time Pricing CRUD ----------

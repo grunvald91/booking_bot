@@ -687,9 +687,9 @@ class SalesApiTests(unittest.IsolatedAsyncioTestCase):
         invalid = await self.client.post(f"/bookings/by-token/{token}/receipt", files={"file": ("empty.png", b"", "image/png")})
         self.assertEqual(invalid.status_code, 422)
         with patch("bot.services.notification_events.dispatch_booking_event", new=AsyncMock()) as event:
-            uploaded = await self.client.post(f"/bookings/by-token/{token}/receipt", files={"file": ("demo.png", b"synthetic-receipt", "image/png")})
+            uploaded = await self.client.post(f"/bookings/by-token/{token}/receipt", files={"file": ("demo.png", b"\x89PNG\r\n\x1a\nsynthetic-receipt", "image/png")})
             self.assertEqual(uploaded.status_code, 200, uploaded.text)
-            replay = await self.client.post(f"/bookings/by-token/{token}/receipt", files={"file": ("demo.png", b"synthetic-receipt", "image/png")})
+            replay = await self.client.post(f"/bookings/by-token/{token}/receipt", files={"file": ("demo.png", b"\x89PNG\r\n\x1a\nsynthetic-receipt", "image/png")})
             self.assertEqual(replay.status_code, 200)
             self.assertEqual(event.await_count, 1)
         async with self.sessions() as db:

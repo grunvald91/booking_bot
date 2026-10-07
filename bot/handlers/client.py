@@ -905,7 +905,6 @@ async def client_prepayment_sent(callback: CallbackQuery, state: FSMContext):
                     selectinload(Booking.employee),
                 )
                 .where(Booking.id == booking_id)
-                .with_for_update()
             )
         ).scalar_one_or_none()
 
@@ -915,14 +914,15 @@ async def client_prepayment_sent(callback: CallbackQuery, state: FSMContext):
         if not booking.client or booking.client.telegram_id != callback.from_user.id:
             await callback.answer("Это не ваша запись", show_alert=True)
             return
-        if booking.status == "prepayment_sent":
-            await callback.answer("Владелец уже получил запрос на подтверждение")
+        from database.prepayment import submit_payment, PaymentWindowError
+        try:
+            visit = await submit_payment(session, booking)
+            if not visit:
+                await callback.answer("Владелец уже получил запрос на подтверждение")
+                return
+        except PaymentWindowError as exc:
+            await callback.answer(exc.detail, show_alert=True)
             return
-        if booking.status != "pending_prepayment":
-            await callback.answer("Эта запись уже обработана", show_alert=True)
-            return
-
-        booking.status = "prepayment_sent"
         await session.commit()
 
         try:
@@ -992,7 +992,6 @@ async def client_prepayment_receipt_uploaded(message: Message, state: FSMContext
                     selectinload(Booking.employee),
                 )
                 .where(Booking.id == int(booking_id))
-                .with_for_update()
             )
         ).scalar_one_or_none()
         if not booking:
@@ -1003,12 +1002,30 @@ async def client_prepayment_receipt_uploaded(message: Message, state: FSMContext
             await message.answer("Это не ваша запись.")
             await state.clear()
             return
-        if booking.status not in ("pending_prepayment", "prepayment_sent"):
-            await message.answer("Эта запись уже обработана.")
-            await state.clear()
+        from database.prepayment import submit_payment, PaymentWindowError
+        from database.receipts import save_receipt, MAX_RECEIPT_BYTES
+        import io
+        attachment = message.photo[-1] if message.photo else message.document
+        if attachment.file_size and attachment.file_size > MAX_RECEIPT_BYTES:
+            await message.answer("Чек должен быть не больше 10 МБ")
             return
-
-        booking.status = "prepayment_sent"
+        try:
+            buffer = io.BytesIO()
+            await message.bot.download(attachment.file_id, destination=buffer)
+            content = buffer.getvalue()
+            visit = await submit_payment(session, booking, receipt=True)
+            if not visit:
+                await message.answer("Чек уже отправлен владельцу")
+                await state.set_state(BookingStates.waiting_prepayment)
+                return
+            save_receipt(session, booking, content)
+        except (PaymentWindowError, ValueError) as exc:
+            await message.answer(str(exc))
+            return
+        except Exception:
+            logger.exception("Could not persist receipt for booking %s", booking.id)
+            await message.answer("Не удалось сохранить чек. Попробуйте ещё раз")
+            return
         await session.commit()
 
         owners = await get_business_owners(session, booking.business_id)
@@ -1910,4 +1927,3 @@ async def back_to_client_main_menu(callback: CallbackQuery, state: FSMContext):
         reply_markup=client_kb.get_main_menu_keyboard(show_admin_button=show_admin, show_master_button=show_master)
     )
     await callback.answer()
-

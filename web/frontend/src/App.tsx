@@ -9,6 +9,8 @@ import { BookingStatusPage } from './pages/client/BookingStatusPage'
 import { MyBookingsPage } from './pages/client/MyBookingsPage'
 import { SubscriptionsPage } from './pages/client/SubscriptionsPage'
 import { LoginPage } from './pages/client/LoginPage'
+import { AccountPage } from './pages/client/AccountPage'
+import { PrepaymentsPage } from './pages/admin/PrepaymentsPage'
 import { AdminDashboard } from './pages/admin/AdminDashboard'
 import { SchedulePage } from './pages/admin/SchedulePage'
 import { ServicesPage } from './pages/admin/ServicesPage'
@@ -51,7 +53,8 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
-  const [tgAuthDone, setTgAuthDone] = useState(false)
+  const [tgAuthDone, setTgAuthDone] = useState(() =>
+    !window.Telegram?.WebApp?.initData || sessionStorage.getItem('servgoExplicitLogout') === '1')
 
   useEffect(() => {
     const initData = window.Telegram?.WebApp?.initData
@@ -71,8 +74,6 @@ function App() {
           console.warn('Telegram auto-login failed:', err)
           setTgAuthDone(true)
         })
-    } else {
-      setTgAuthDone(true)
     }
   }, [])
 
@@ -101,6 +102,8 @@ function App() {
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/legal/:docType/:businessId" element={<LegalPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/account" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
+        <Route path="/admin/prepayments" element={<AdminRoute><PrepaymentsPage /></AdminRoute>} />
 
         {/* Legacy redirects */}
         <Route path="/book" element={<BookRedirect />} />

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import {
   Building2,
   Camera,
@@ -31,7 +32,7 @@ function parsePhotos(raw?: string | null): string[] {
 
 async function fetchQrBlob(url: string): Promise<string> {
   const token = localStorage.getItem('token')
-  const tgInitData = (window as any).Telegram?.WebApp?.initData || ''
+  const tgInitData = window.Telegram?.WebApp?.initData || ''
   const res = await fetch(url, {
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -459,9 +460,11 @@ export function SettingsPage() {
   // Owners
   const handleAddOwner = async () => {
     if (!businessId || !ownerField.trim()) return
-    const data: { telegram_id?: number; username?: string } = {}
+    const data: { telegram_id?: number; username?: string; email?: string } = {}
     const trimmed = ownerField.trim()
-    if (/^\d+$/.test(trimmed)) {
+    if (trimmed.includes('@') && !trimmed.startsWith('@')) {
+      data.email = trimmed
+    } else if (/^\d+$/.test(trimmed)) {
       data.telegram_id = Number(trimmed)
     } else {
       data.username = trimmed.replace(/^@/, '')
@@ -509,6 +512,7 @@ export function SettingsPage() {
       title="Настройки"
       headerExtra={<BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />}
     >
+      <section className="ds-card" style={{ padding: 14, marginBottom: 12 }}><h2 className="ds-h3">Вход без Telegram</h2><p>Привяжите подтверждённую почту к своему аккаунту.</p><Link to="/account" className="ds-btn ds-btn--primary">Настроить вход по email</Link></section>
       {/* Success toast */}
       {toast && (
         <div
@@ -1347,7 +1351,7 @@ export function SettingsPage() {
                   {owner.user_phone && (
                     <p className="ds-caption" style={{ marginTop: 2 }}>{owner.user_phone}</p>
                   )}
-                  {owner.telegram_id && (
+                  {owner.telegram_id && owner.telegram_id > 0 && (
                     <p className="ds-caption">ID: {owner.telegram_id}</p>
                   )}
                 </div>
@@ -1467,15 +1471,15 @@ export function SettingsPage() {
             </div>
 
             <div className="ds-field">
-              <label className="ds-label">Telegram ID или @username</label>
+              <label className="ds-label">Email, Telegram ID или @username</label>
               <input
                 type="text"
                 value={ownerField}
                 onChange={(e) => setOwnerField(e.target.value)}
-                placeholder="123456789 или @username"
+                placeholder="owner@example.com или @username"
                 className="ds-input"
               />
-              <p className="ds-hint">Введите числовой Telegram ID или имя пользователя</p>
+              <p className="ds-hint">Для доступа без Telegram пользователь должен сначала зарегистрировать и подтвердить email. Совладелец получает права управления бизнесом.</p>
             </div>
 
             <div className="ds-dialog-actions" style={{ marginTop: 16 }}>

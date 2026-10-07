@@ -1213,13 +1213,13 @@ async def get_telegram_photo(file_id: str):
 
 async def _mark_prepayment_sent(booking: Booking, db: AsyncSession) -> dict:
     """Mark payment as sent and request owner confirmation via Telegram + PWA."""
-    from database.prepayment import require_payment_window, PaymentWindowError
+    from database.prepayment import submit_payment, PaymentWindowError
     try:
-        if not await require_payment_window(db, booking):
+        visit = await submit_payment(db, booking)
+        if not visit:
             return {"message": "Payment notification already recorded"}
     except PaymentWindowError as exc:
         raise HTTPException(exc.status_code, exc.detail) from None
-    booking.status = "prepayment_sent"
     await db.commit()
     await db.refresh(booking)
 
@@ -1246,21 +1246,24 @@ async def _mark_prepayment_sent(booking: Booking, db: AsyncSession) -> dict:
 
 async def _send_receipt_and_notify(booking: Booking, db: AsyncSession, file: UploadFile) -> dict:
     """Upload a receipt to owners, then request confirmation through both channels."""
-    from database.prepayment import require_payment_window, PaymentWindowError
+    from database.prepayment import submit_payment, PaymentWindowError
     try:
-        if not await require_payment_window(db, booking, receipt=True):
+        visit = await submit_payment(db, booking, receipt=True)
+        if not visit:
             return {"message": "Receipt payment notification already recorded"}
     except PaymentWindowError as exc:
         raise HTTPException(exc.status_code, exc.detail) from None
     file_content = await file.read(10 * 1024 * 1024 + 1)
-    if not file_content or len(file_content) > 10 * 1024 * 1024:
-        raise HTTPException(422, "Приложите непустой чек размером до 10 МБ")
-    booking.status = "prepayment_sent"
+    from database.receipts import save_receipt
+    try:
+        proof = save_receipt(db, booking, file_content)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
     await db.commit()
     await db.refresh(booking)
 
-    content_type = file.content_type or "image/jpeg"
-    filename = file.filename or "receipt.jpg"
+    content_type = proof.mime_type
+    filename = "receipt.pdf" if content_type == "application/pdf" else "receipt.jpg"
     is_pdf = content_type == "application/pdf" or filename.lower().endswith(".pdf")
     bot_token = os.getenv("BOT_TOKEN", "").strip()
 
@@ -1348,7 +1351,7 @@ async def prepayment_sent(
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     result = await db.execute(
-        select(Booking).options(*_booking_lookup_options()).where(Booking.id == booking_id).with_for_update()
+        select(Booking).options(*_booking_lookup_options()).where(Booking.id == booking_id)
     )
     booking = result.scalar_one_or_none()
     if not booking:
@@ -1373,7 +1376,7 @@ async def upload_receipt(
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     result = await db.execute(
-        select(Booking).options(*_booking_lookup_options()).where(Booking.id == booking_id).with_for_update()
+        select(Booking).options(*_booking_lookup_options()).where(Booking.id == booking_id)
     )
     booking = result.scalar_one_or_none()
     if not booking:
@@ -1398,7 +1401,7 @@ async def prepayment_sent_by_token(
     ownership check is needed or meaningful here.
     """
     result = await db.execute(
-        select(Booking).options(*_booking_lookup_options()).where(Booking.notify_token == token).with_for_update()
+        select(Booking).options(*_booking_lookup_options()).where(Booking.notify_token == token)
     )
     booking = result.scalar_one_or_none()
     if not booking:
@@ -1417,7 +1420,7 @@ async def upload_receipt_by_token(
 ):
     """Same as upload_receipt, but for clients who booked without a Telegram login."""
     result = await db.execute(
-        select(Booking).options(*_booking_lookup_options()).where(Booking.notify_token == token).with_for_update()
+        select(Booking).options(*_booking_lookup_options()).where(Booking.notify_token == token)
     )
     booking = result.scalar_one_or_none()
     if not booking:
