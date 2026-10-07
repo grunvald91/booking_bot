@@ -268,7 +268,7 @@ async def send_staff_booking_webpush(
     payload = {
         "title": title,
         "body": body,
-        "url": "/admin/prepayments" if event_kind == "prepayment_submitted" else "/admin/schedule",
+        "url": "/admin/schedule",
         "booking_id": first.id,
         "tag": f"servgo-{audience}-reminder-{first.id}-{reminder_kind}",
     }
@@ -336,9 +336,10 @@ async def send_staff_event_webpush(
     payload = {
         "title": title,
         "body": body,
-        "url": "/admin/schedule",
+        "url": "/admin/prepayments" if event_kind == "prepayment_submitted" else "/admin/schedule",
         "booking_id": first.id,
         "tag": f"servgo-staff-event-{event_kind}-{first.id}",
+        "event_kind": event_kind,
     }
     sent = await send_webpush_to_subscriptions(subscriptions, payload, session)
     return sent, len(subscriptions)

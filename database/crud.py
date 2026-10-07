@@ -83,10 +83,12 @@ async def get_or_create_guest_user(
     telegram_id=0.
     """
     clean_phone = None
+    from database.models import UserAccountMerge
     if phone:
         clean_phone = phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
         result = await session.execute(
-            select(User).where(User.phone == clean_phone, User.telegram_id < 0).limit(1)
+            select(User).where(User.phone == clean_phone, User.telegram_id < 0,
+                User.id.not_in(select(UserAccountMerge.source_user_id))).limit(1)
         )
         existing = result.scalars().first()
         if existing:

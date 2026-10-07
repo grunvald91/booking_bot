@@ -95,6 +95,26 @@ class AuthRateBucket(Base):
     count: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class TelegramLinkRequest(Base):
+    __tablename__ = "telegram_link_requests"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    email_session_version: Mapped[int] = mapped_column(Integer)
+    telegram_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    telegram_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class UserAccountMerge(Base):
+    """Retain old IDs/audit rows; authentication resolves the canonical account."""
+    __tablename__ = "user_account_merges"
+    source_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    target_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    merged_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class BookingReceipt(Base):
     __tablename__ = "booking_receipts"
     id: Mapped[int] = mapped_column(primary_key=True)

@@ -105,7 +105,10 @@ async def capabilities():
 @router.get("/email/account")
 async def account(user=Depends(deps.get_current_user), db=Depends(get_db)):
     identity = await db.scalar(select(EmailIdentity).where(EmailIdentity.user_id == user.id))
-    return {"email": identity.email if identity else None, "available": configured()}
+    from .telegram_link import bot_username
+    return {"email": identity.email if identity else None, "available": configured(),
+            "telegram": {"id": user.telegram_id, "username": user.username} if user.telegram_id > 0 else None,
+            "telegram_link_available": bot_username() is not None}
 
 
 @router.post("/email/start")
