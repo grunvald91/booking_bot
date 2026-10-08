@@ -109,7 +109,7 @@ async def main():
             r = await api.get(public_path)
             record("tracking_page_api", r.status_code == 200 and r.json()["prepayment_amount"] == 1000)
             r = await api.post(public_path + "/prepayment-sent")
-            record("receipt_required_before_payment_sent", r.status_code == 400)
+            record("receipt_required_before_payment_sent", r.status_code == 422)
             # Valid PNG signature: receipt admission uses signature/size validation.
             png = bytes.fromhex("89504e470d0a1a0a") + b"synthetic-acceptance-proof"
             r = await api.post(public_path + "/receipt", files={"file": ("test.png", png, "image/png")})
