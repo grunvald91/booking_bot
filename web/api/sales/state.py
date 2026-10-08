@@ -47,6 +47,17 @@ def public_pending(conversation):
             "expires_at": action["expires_at"]}
 
 
+def public_slot_offer(conversation):
+    if conversation.mode != "ai" or (conversation.action or {}).get("status") == "pending":
+        return None
+    offer = (conversation.facts or {}).get("_slot_offer")
+    if not isinstance(offer, dict) or not offer.get("slots"):
+        return None
+    if datetime.fromisoformat(offer["expires_at"]) <= datetime.utcnow():
+        return None
+    return {key: offer[key] for key in ("date", "service_id", "duration_hours", "slots", "expires_at")}
+
+
 def visible_history(conversation):
     return [{"id": f"{conversation.id}-{i}", "role": "ai" if m["role"] == "assistant" else "user",
              "text": m["content"]} for i, m in enumerate(conversation.messages)
