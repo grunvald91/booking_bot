@@ -69,7 +69,7 @@ function SlotPicker({ offer, busy, onChoose }: {
         return <button type="button" key={key} aria-pressed={selected === key} disabled={busy || expired}
           className="ds-btn ds-btn--sm"
           style={{ background: selected === key ? 'var(--s-accent-soft)' : 'var(--s-surface-2)',
-            border: selected === key ? '2px solid var(--s-accent)' : '1px solid var(--s-border)',
+            border: selected === key ? '2px solid var(--s-accent)' : '1px solid var(--s-line)',
             textAlign: 'center', minWidth: 94, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
           onClick={() => setSelected(key)}>
           {slot.time} · {slot.employee_name}
