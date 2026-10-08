@@ -204,12 +204,12 @@ function SalesThread({ business }: { business: Business }) {
       setMessages(previous => previous.map(item => item.id === id ? { ...item, status: 'sending' } : item))
     } else {
       setInput('')
-      setMessages(previous => [...previous, { id, role: 'user', text, status: 'sending' }])
+      setMessages(previous => [...previous, { id, role: 'user', text, status: 'sending' } as ChatMessage])
     }
     try {
       const result = await api.aiChat(text, business.id)
       setMessages(previous => [...previous.map(item => item.id === id ? { ...item, status: undefined } : item),
-        { id: crypto.randomUUID(), role: 'ai', text: result.reply, booking_url: result.booking_url }])
+        { id: crypto.randomUUID(), role: 'ai', text: result.reply, booking_url: result.booking_url } as ChatMessage])
       setPending(result.pending_action || null)
       setOffer(result.available_slots || null)
       setMode(result.mode)
