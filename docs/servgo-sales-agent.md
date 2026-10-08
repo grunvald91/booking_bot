@@ -49,7 +49,8 @@ flowchart LR
 CLAUDEHUB_BASE_URL=https://YOUR-CLAUDEHUB-HOST/v1
 CLAUDEHUB_API_KEY=SET-IN-SERVER-ENVIRONMENT
 CLAUDEHUB_MODEL=YOUR-AVAILABLE-MODEL
-CLAUDEHUB_CHAT_MODEL=YOUR-FAST-TOOL-CALLING-MODEL
+CLAUDEHUB_CHAT_MODEL=gpt-6-luna
+CLAUDEHUB_CHAT_API_FORMAT=openai
 CLAUDEHUB_API_FORMAT=openai
 ```
 
@@ -60,12 +61,19 @@ CLAUDEHUB_API_FORMAT=openai
 | `openai` | `{BASE_URL}/chat/completions` | `Authorization: Bearer ...` |
 | `anthropic` | `{BASE_URL}/messages` | `x-api-key`, `anthropic-version: 2023-06-01` |
 
-Для быстрого ответа можно задать отдельную `CLAUDEHUB_CHAT_MODEL` — конкретный
-идентификатор быстрой модели, доступной **на вашем аккаунте** и поддерживающей
-tool/function calling. Если переменная не задана, используется `CLAUDEHUB_MODEL`.
-Для первого теста можно взять `claude-haiku-4-5`: ClaudeHub перечисляет Haiku 4.5 в своей [линейке](https://claudehub.fun/), а Anthropic публикует [точный API-идентификатор](https://platform.claude.com/docs/en/models/haiku-4-5/overview). Доступность с вашим ключом и работу tool calls нужно проверить реальным запросом перед сменой production.\n\nНе задавайте неподтверждённый идентификатор: список доступных моделей и задержка
-ClaudeHub требуют проверки через ваш API. Выбор модели сам по себе не гарантирует
-конкретного времени ответа.
+В AI-бронировании по умолчанию установлена **GPT-6 Luna** (`gpt-6-luna`).
+Это отдельная настройка только для чата записи: `CLAUDEHUB_MODEL`
+и другие сервисы ClaudeHub не изменяются. Если `CLAUDEHUB_CHAT_MODEL` не
+указана, код выбирает `gpt-6-luna`; если указана, используется её значение.
+Смена модели впоследствии требует лишь изменить `CLAUDEHUB_CHAT_MODEL` и
+при необходимости `CLAUDEHUB_CHAT_API_FORMAT` в конфигурации web API.
+
+Для GPT-6 Luna используется OpenAI-совместимый `/chat/completions` с
+`reasoning_effort: none`, поддерживающий tool/function calling согласно
+[документации OpenAI](https://developers.openai.com/api/docs/models/gpt-6-luna).
+Базовый API-ключ и endpoint ClaudeHub остаются прежними. Доступность модели
+именно через ClaudeHub и успешность вызова tools необходимо проверить отдельно
+с рабочим ключом; отправка изменений в GitHub не меняет env работающего сервера.
 
 Вкладка AI немедленно показывает сообщение клиента в состоянии «Отправляется…»,
 а при сетевой ошибке — «Не отправлено · Повторить». Ответы модели безопасно
