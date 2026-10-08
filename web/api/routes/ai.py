@@ -7,8 +7,9 @@ import json
 import os
 import secrets
 import time
+import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import parse_qsl
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
@@ -21,8 +22,8 @@ from ..deps import get_current_user
 from ..schemas import AIChatIn, AIChatOut, AIConfirmIn
 from ..sales.engine import chat, response, handoff
 from ..sales.provider import ClaudeHubClient, ProviderError
-from ..sales.state import load_thread, public_pending, visible_history
-from ..sales.tools import ServGoTools
+from ..sales.state import load_thread, public_pending, public_slot_offer, trim_history, visible_history
+from ..sales.tools import ServGoTools, BookingArgs
 from ..sales.policy import policy_for, policy_document, PolicyUpdate
 
 router = APIRouter()
@@ -121,7 +122,48 @@ async def ai_history(business_id: int = Query(ge=1), identity=Depends(get_sales_
     return {"conversation_id": conversation.id, "messages": visible_history(conversation),
             "stage": conversation.stage, "mode": conversation.mode,
             "pending_action": public_pending(conversation) if policy_for(business).allows("create_booking") else None,
+            "available_slots": public_slot_offer(conversation) if policy_for(business).allows("create_booking") else None,
             "booking_url": (conversation.action or {}).get("result", {}).get("booking_url")}
+
+
+class SelectSlotIn(BaseModel):
+    business_id: int = Field(ge=1)
+    employee_id: int = Field(gt=0)
+    time: str = Field(pattern=r"^\d{2}:\d{2}$")
+
+
+@router.post("/ai/select-slot", response_model=AIChatOut)
+async def ai_select_slot(body: SelectSlotIn, identity=Depends(get_sales_identity), db=Depends(get_db)):
+    # Only the signed-in/guest owner of a live server-created offer may select a time.
+    business = await active_business(db, body.business_id)
+    policy_for(business).require("create_booking")
+    conversation = await load_thread(db, body.business_id, identity.principal, create=False)
+    if not conversation or conversation.mode != "ai":
+        raise HTTPException(409, "Попросите ИИ показать доступное время")
+    offer = public_slot_offer(conversation)
+    if not offer:
+        raise HTTPException(409, "Предложенные окна устарели. Проверьте время ещё раз")
+    slot = next((item for item in offer["slots"]
+                 if item["time"] == body.time and item["employee_id"] == body.employee_id), None)
+    if slot is None:
+        raise HTTPException(409, "Это время не было предложено. Проверьте окна снова")
+    tools = ServGoTools(db, business, identity.user)
+    prepared = await tools.prepare_booking(BookingArgs(
+        service_id=offer["service_id"], employee_id=body.employee_id,
+        date=offer["date"], time=body.time, duration_hours=offer["duration_hours"]))
+    conversation.action_id = str(uuid.uuid4())
+    conversation.action = {**prepared, "status": "pending",
+        "expires_at": (datetime.utcnow() + timedelta(minutes=20)).isoformat()}
+    conversation.stage = "closing"
+    conversation.facts = {k: v for k, v in conversation.facts.items() if k != "_slot_offer"}
+    reply = "Отличный выбор! Проверьте детали и подтвердите запись в карточке ниже 😊"
+    conversation.messages = trim_history([*conversation.messages,
+        {"role": "user", "content": f"Выбираю {offer['date']} в {body.time}, {slot['employee_name']}."},
+        {"role": "assistant", "content": reply}])
+    conversation.updated_at = datetime.utcnow()
+    result = response(conversation, reply)
+    await db.commit()
+    return result
 
 
 class HandoffRequest(BaseModel):
