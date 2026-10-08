@@ -918,10 +918,8 @@ export function SchedulePage() {
     return { count: active.length, revenue, load }
   }, [visibleBookings, viewMode, employees.length])
 
-  const nowMin = useMemo(() => {
-    const n = new Date()
-    return n.getHours() * 60 + n.getMinutes()
-  }, [bookings])
+  const now = new Date()
+  const nowMin = now.getHours() * 60 + now.getMinutes()
 
   const colHeight = TOTAL_MIN * pxPerMin
   const currentBizName = businesses.find((b) => b.id === businessId)?.name
