@@ -22,16 +22,25 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls):
+        # The booking assistant uses a small, dedicated model by default.
+        # ClaudeHub's general model remains unchanged for other services.
+        model = os.getenv("CLAUDEHUB_CHAT_MODEL") or "gpt-6-luna"
+        api_format = os.getenv("CLAUDEHUB_CHAT_API_FORMAT") or (
+            "openai" if model == "gpt-6-luna"
+            else os.getenv("CLAUDEHUB_API_FORMAT", "openai")
+        )
         config = cls(
             os.getenv("CLAUDEHUB_BASE_URL", "").rstrip("/"),
             os.getenv("CLAUDEHUB_API_KEY", ""),
-            os.getenv("CLAUDEHUB_CHAT_MODEL") or os.getenv("CLAUDEHUB_MODEL", ""),
-            os.getenv("CLAUDEHUB_API_FORMAT", "openai"),
+            model,
+            api_format,
         )
         if not all((config.base_url, config.api_key, config.model)):
             raise ProviderError("ИИ-консультант пока не подключён. Используйте обычную форму записи.")
         if config.api_format not in {"openai", "anthropic"}:
             raise ProviderError("Неверная настройка формата API ИИ-консультанта.")
+        if config.model == "gpt-6-luna" and config.api_format != "openai":
+            raise ProviderError("GPT-6 Luna требует OpenAI-совместимый формат API.")
         return config
 
 
@@ -84,8 +93,15 @@ class ClaudeHubClient:
         else:
             url = config.base_url + "/chat/completions"
             headers = {"Authorization": f"Bearer {config.api_key}"}
-            payload = {"model": config.model, "messages": messages,
-                       "temperature": 0.3, "max_tokens": 1200}
+            if config.model == "gpt-6-luna":
+                # GPT-6 Luna's Chat Completions function calling requires
+                # reasoning_effort=none. Use its current completion-token
+                # parameter and omit legacy sampling settings.
+                payload = {"model": config.model, "messages": messages,
+                           "reasoning_effort": "none", "max_completion_tokens": 850}
+            else:
+                payload = {"model": config.model, "messages": messages,
+                           "temperature": 0.3, "max_tokens": 1200}
             if tools:
                 payload.update(tools=tools, tool_choice="auto")
         try:
