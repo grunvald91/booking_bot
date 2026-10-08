@@ -194,6 +194,21 @@ class SalesApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(history.json()["available_slots"])
         self.assertEqual(history.json()["messages"][-2]["role"], "user")
 
+    async def test_new_slot_offer_supersedes_old_pending_card(self):
+        old_action = await self.propose()
+        provider = ScriptedProvider(call("check_availability", service_id=self.service,
+            employee_id=self.employee, date=str(self.day)))
+        with patch.object(ai, "ClaudeHubClient", return_value=provider):
+            offered = await self.client.post("/ai/chat", headers=self.auth,
+                json={"business_id": self.business, "message": "Покажите другое время"})
+        self.assertEqual(offered.status_code, 200, offered.text)
+        self.assertTrue(offered.json()["available_slots"])
+        self.assertIsNone(offered.json()["pending_action"])
+        refused = await self.client.post("/ai/confirm", headers=self.auth,
+            json={"action_id": old_action["action_id"]})
+        self.assertEqual(refused.status_code, 404)
+        self.assertEqual(await self.booking_count(), 0)
+
     async def test_expired_slot_offer_cannot_be_selected(self):
         provider = ScriptedProvider(call("check_availability", service_id=self.service,
             employee_id=self.employee, date=str(self.day)))
