@@ -25,7 +25,7 @@ class LLMConfig:
         config = cls(
             os.getenv("CLAUDEHUB_BASE_URL", "").rstrip("/"),
             os.getenv("CLAUDEHUB_API_KEY", ""),
-            os.getenv("CLAUDEHUB_MODEL", ""),
+            os.getenv("CLAUDEHUB_CHAT_MODEL") or os.getenv("CLAUDEHUB_MODEL", ""),
             os.getenv("CLAUDEHUB_API_FORMAT", "openai"),
         )
         if not all((config.base_url, config.api_key, config.model)):
@@ -62,7 +62,7 @@ def anthropic_payload(messages: list[dict], tools: list[dict], config: LLMConfig
         else:
             converted.append({"role": role, "content": blocks})
     payload = {"model": config.model, "system": "\n\n".join(system),
-               "messages": converted, "max_tokens": 1200, "temperature": 0.3}
+               "messages": converted, "max_tokens": 850, "temperature": 0.3}
     if tools:
         payload["tools"] = [{"name": t["function"]["name"],
                               "description": t["function"]["description"],
