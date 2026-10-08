@@ -11,9 +11,18 @@ export interface SalesPendingAction {
   expires_at: string;
 }
 
+export interface SalesSlotOffer {
+  date: string;
+  service_id: number;
+  duration_hours: number | null;
+  slots: { employee_id: number; employee_name: string; time: string }[];
+  expires_at: string;
+}
+
 export interface SalesChatResult {
   reply: string;
   pending_action?: SalesPendingAction | null;
+  available_slots?: SalesSlotOffer | null;
   mode: 'ai' | 'human';
   booking_url?: string | null;
 }
@@ -880,6 +889,10 @@ export const api = {
       body: JSON.stringify({ message, business_id: businessId }),
     }),
   aiHistory: (businessId: number) => request<SalesHistory>(`/ai/history?business_id=${businessId}`),
+  aiSelectSlot: (businessId: number, employeeId: number, time: string) =>
+    request<SalesChatResult>('/ai/select-slot', {
+      method: 'POST', body: JSON.stringify({ business_id: businessId, employee_id: employeeId, time }),
+    }),
   aiHandoff: (businessId: number) => request<SalesChatResult>('/ai/handoff', {
     method: 'POST', body: JSON.stringify({ business_id: businessId }),
   }),
