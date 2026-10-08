@@ -1,15 +1,36 @@
 """
 Модели базы данных для системы записи
 """
+
+from datetime_utils import utc_now
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import BigInteger, String, DateTime, ForeignKey, Boolean, Integer, Text, Time, Date, UniqueConstraint
+from sqlalchemy import BigInteger, String, DateTime, ForeignKey, Boolean, Integer, Text, Time, Date, UniqueConstraint, JSON, LargeBinary
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
     """Базовый класс для всех моделей"""
     pass
+
+
+class SalesConversation(Base):
+    """Durable, tenant-scoped sales thread; no model-supplied identity fields."""
+    __tablename__ = "sales_conversations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), index=True)
+    principal: Mapped[str] = mapped_column(String(80))  # user:<id> or guest:<cookie digest>
+    messages: Mapped[list] = mapped_column(JSON, default=list)
+    stage: Mapped[str] = mapped_column(String(32), default="needs_analysis")
+    facts: Mapped[dict] = mapped_column(JSON, default=dict)
+    mode: Mapped[str] = mapped_column(String(16), default="ai")
+    handoff_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    action_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, unique=True)
+    action: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (UniqueConstraint("business_id", "principal", name="uq_sales_business_principal"),)
 
 
 class User(Base):
@@ -23,7 +44,7 @@ class User(Base):
     phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(320), nullable=True, index=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     # === SUBSCRIPTION / TARIFF FIELDS ===
     # Тариф пользователя: standard (1 бизнес), business (3 бизнеса), network (безлимит)
@@ -45,6 +66,78 @@ class User(Base):
     client_subscriptions: Mapped[List["ClientSubscription"]] = relationship(back_populates="client", cascade="all, delete-orphan")
 
 
+class EmailIdentity(Base):
+    """Only verified addresses grant login; User.email remains a contact field."""
+    __tablename__ = "email_identities"
+    email: Mapped[str] = mapped_column(String(320), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    session_version: Mapped[int] = mapped_column(Integer, default=1)
+    verified_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
+class EmailChallenge(Base):
+    __tablename__ = "email_challenges"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    purpose: Mapped[str] = mapped_column(String(16))
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    full_name: Mapped[str] = mapped_column(String(255), default="")
+    password_hash: Mapped[str] = mapped_column(String(255))
+    code_hash: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class AuthRateBucket(Base):
+    __tablename__ = "auth_rate_buckets"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class TelegramLinkRequest(Base):
+    __tablename__ = "telegram_link_requests"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    email_session_version: Mapped[int] = mapped_column(Integer)
+    telegram_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    telegram_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class UserAccountMerge(Base):
+    """Retain old IDs/audit rows; authentication resolves the canonical account."""
+    __tablename__ = "user_account_merges"
+    source_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    target_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    merged_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
+class BookingReceipt(Base):
+    __tablename__ = "booking_receipts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    booking_id: Mapped[int] = mapped_column(ForeignKey("bookings.id", ondelete="CASCADE"), index=True)
+    mime_type: Mapped[str] = mapped_column(String(32))
+    content: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
+    size: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
+class PrepaymentReview(Base):
+    __tablename__ = "prepayment_reviews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    booking_id: Mapped[int] = mapped_column(ForeignKey("bookings.id", ondelete="CASCADE"), index=True)
+    reviewer_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    decision: Mapped[str] = mapped_column(String(16))
+    booking_version: Mapped[int] = mapped_column(Integer)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    __table_args__ = (UniqueConstraint("booking_id", "booking_version", name="uq_prepayment_review_version"),)
+
+
 class PushSubscription(Base):
     """Web Push subscription for an installed/browser ServGo client."""
     __tablename__ = "push_subscriptions"
@@ -57,8 +150,8 @@ class PushSubscription(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     failure_count: Mapped[int] = mapped_column(Integer, default=0)
     last_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 class NotificationDelivery(Base):
@@ -78,7 +171,7 @@ class NotificationDelivery(Base):
     offset_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     telegram_sent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     webpush_sent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class Business(Base):
@@ -129,9 +222,10 @@ class Business(Base):
     legal_documents_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
     ai_instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # AI-инструкция для бизнеса
+    sales_agent_settings: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     version: Mapped[int] = mapped_column(Integer, default=1)  # Для оптимистичной блокировки
 
     # Связи
@@ -166,7 +260,7 @@ class MarketingLead(Base):
 
     attribution_confidence: Mapped[str] = mapped_column(String(20), default="unverified")
     status: Mapped[str] = mapped_column(String(30), default="new", index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
 
 
 class BusinessOwner(Base):
@@ -177,7 +271,7 @@ class BusinessOwner(Base):
     business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     role: Mapped[str] = mapped_column(String(20), default="owner")  # owner, co_owner
-    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     added_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     __table_args__ = (UniqueConstraint('business_id', 'user_id', name='uix_business_user'),)
@@ -295,6 +389,7 @@ class Booking(Base):
 
     # Предоплата
     prepayment_amount: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Сумма предоплаты
+    prepayment_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     prepayment_confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # Когда подтверждена
 
     # Доказательство принятия юридических документов в момент записи.
@@ -309,8 +404,8 @@ class Booking(Base):
     reminder_2h_sent: Mapped[bool] = mapped_column(Boolean, default=False)  # Клиенту за 2ч
     staff_reminder_24h_sent: Mapped[bool] = mapped_column(Boolean, default=False)  # Владельцу/мастеру за 24ч
     staff_reminder_2h_sent: Mapped[bool] = mapped_column(Boolean, default=False)  # Владельцу/мастеру за 2ч
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
     version: Mapped[int] = mapped_column(Integer, default=1)  # Для оптимистичной блокировки
 
     # Deep-link secret для подключения анонимного web-клиента к боту:
@@ -339,7 +434,7 @@ class EmployeeDayOff(Base):
     employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"))
     date: Mapped[datetime.date] = mapped_column(Date)
     reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Причина (отпуск, больничный и т.д.)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     # Связи
     employee: Mapped["Employee"] = relationship(back_populates="days_off")
@@ -352,7 +447,7 @@ class EmployeeService(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"))
     service_id: Mapped[int] = mapped_column(ForeignKey("services.id", ondelete="CASCADE"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     # Связи
     employee: Mapped["Employee"] = relationship(back_populates="employee_services")
@@ -371,7 +466,7 @@ class Subscription(Base):
     validity_days: Mapped[int] = mapped_column(Integer)  # Срок действия в днях
     rules: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Правила применения
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     ai_instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # AI-инструкция
 
     # Связи
@@ -403,7 +498,7 @@ class ClientSubscription(Base):
     client_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"))
 
-    purchased_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    purchased_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     expires_at: Mapped[datetime] = mapped_column(DateTime)  # Дата истечения
 
     # Статусы: pending_payment, payment_sent, active, expired, depleted
@@ -427,7 +522,7 @@ class SubscriptionUsage(Base):
     client_subscription_id: Mapped[int] = mapped_column(ForeignKey("client_subscriptions.id", ondelete="CASCADE"))
     service_id: Mapped[int] = mapped_column(ForeignKey("services.id", ondelete="CASCADE"))
     booking_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bookings.id", ondelete="SET NULL"), nullable=True)
-    used_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    used_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     # Связи
     client_subscription: Mapped["ClientSubscription"] = relationship(back_populates="usages")
@@ -446,4 +541,4 @@ class AuthPhoneCode(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     phone: Mapped[str] = mapped_column(String(32), index=True)
     code: Mapped[str] = mapped_column(String(16))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)

@@ -227,7 +227,7 @@ def _client_message(
             )
     elif event_kind == "prepayment_rejected":
         header = "❌ <b>Предоплата не подтверждена</b>"
-        tail = "\n\nПроверьте реквизиты и отправьте подтверждение оплаты ещё раз."
+        tail = "\n\nУ вас ещё 10 минут, чтобы проверить перевод и отправить верный чек. Если деньги уже списаны, не переводите их повторно — свяжитесь с бизнесом."
     else:
         header = "🔔 <b>Статус записи обновлён</b>"
         tail = ""
@@ -312,13 +312,13 @@ async def dispatch_booking_event(
                 [
                     {
                         "text": "✅ Подтвердить оплату",
-                        "callback_data": f"confirm_prepayment:{first.id}",
+                        "callback_data": f"confirm_prepayment:{first.id}:{first.version}",
                     }
                 ],
                 [
                     {
                         "text": "❌ Нет оплаты / отклонить",
-                        "callback_data": f"reject_prepayment:{first.id}",
+                        "callback_data": f"reject_prepayment:{first.id}:{first.version}",
                     }
                 ],
             ]

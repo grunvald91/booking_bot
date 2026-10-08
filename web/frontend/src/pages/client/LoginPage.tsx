@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Phone, Send } from 'lucide-react'
 import { api } from '../../api/client'
 import { ClientShell } from '../../components/ClientShell'
+import { EmailAuthForm } from '../../components/EmailAuthForm'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -84,6 +85,8 @@ export function LoginPage() {
   return (
     <ClientShell backTo="/" title="Вход">
       <div className="ds-form-narrow" style={{ paddingTop: 4 }}>
+        <EmailAuthForm />
+        <p className="ds-hint" style={{ margin: '16px 0' }}>Для аккаунтов с привязанным Telegram доступны прежние способы входа:</p>
         {mode === 'phone' && (
           <div>
             <button

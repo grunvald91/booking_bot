@@ -1,6 +1,8 @@
 """
 Клавиатуры для абонементов
 """
+
+from datetime_utils import utc_now
 from typing import List, Dict, Optional
 from datetime import datetime
 from aiogram.types import InlineKeyboardMarkup
@@ -390,7 +392,7 @@ def get_my_subscriptions_keyboard(
 
         expires_text = ""
         if cs.status == "active" and cs.expires_at:
-            days_left = (cs.expires_at - datetime.utcnow()).days
+            days_left = (cs.expires_at - utc_now()).days
             if days_left > 0:
                 expires_text = f" ({days_left} дн.)"
             else:
