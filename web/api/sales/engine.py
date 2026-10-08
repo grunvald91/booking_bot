@@ -7,8 +7,8 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from ..schemas import AIChatOut
-from .stages import analyze_stage, system_prompt
-from .state import public_pending, trim_history
+from .stages import system_prompt
+from .state import public_pending, public_slot_offer, trim_history
 from .tools import ARG_MODELS, TOOL_SCHEMAS
 from .policy import policy_for
 
@@ -17,7 +17,8 @@ MAX_TOOL_ROUNDS = 6
 
 def response(conversation, reply: str, **kwargs):
     return AIChatOut(reply=reply, conversation_id=conversation.id, stage=conversation.stage,
-                     mode=conversation.mode, pending_action=public_pending(conversation), **kwargs)
+                     mode=conversation.mode, pending_action=public_pending(conversation),
+                     available_slots=public_slot_offer(conversation), **kwargs)
 
 
 def handoff(conversation, reason: str):
@@ -26,10 +27,13 @@ def handoff(conversation, reason: str):
     conversation.handoff_reason = reason
     conversation.action = None
     conversation.action_id = None
+    conversation.facts = {k: v for k, v in (conversation.facts or {}).items() if k != '_slot_offer'}
 
 
 async def chat(provider, tools, conversation, message: str):
     history = trim_history([*conversation.messages, {"role": "user", "content": message}])
+    # The trimmed conversation already supplies context, with no second model call.
+    conversation.facts = {k: v for k, v in (conversation.facts or {}).items() if k != "_slot_offer"}
     if conversation.mode == "human":
         reply = "Диалог передан оператору. Ваше сообщение сохранено для него."
         history.append({"role": "assistant", "content": reply})
@@ -43,7 +47,6 @@ async def chat(provider, tools, conversation, message: str):
         reply = "ИИ-консультант отключён. Передал сообщение оператору."
         conversation.messages = [*history, {"role": "assistant", "content": reply}]
         return response(conversation, reply)
-    conversation.stage, conversation.facts = await analyze_stage(provider, conversation, history)
     prepared = None
     for _ in range(MAX_TOOL_ROUNDS):
         result = await provider.complete([
@@ -56,6 +59,7 @@ async def chat(provider, tools, conversation, message: str):
             history[-1]["content"] = reply
             conversation.messages = history
             return response(conversation, reply)
+        slot_response = None
         for call in calls:
             name = call["function"]["name"]
             try:
@@ -82,6 +86,14 @@ async def chat(provider, tools, conversation, message: str):
                               "instruction": "Диалог сохранён в очереди оператора. Не обещай время ответа."}
                 else:
                     output = await tools.execute_read(name, args)
+                    if name == "check_availability" and "slots" in output and policy.allows("create_booking"):
+                        slot_response = output
+                        conversation.stage = "availability"
+                        conversation.facts = {**conversation.facts, "_slot_offer": {
+                            "service_id": args.service_id, "date": output["date"],
+                            "duration_hours": args.duration_hours, "slots": output["slots"][:120],
+                            "expires_at": (datetime.utcnow() + timedelta(minutes=10)).isoformat(),
+                        }}
             except ValidationError:
                 # Do not echo invalid arguments (may contain contact details or injection text).
                 output = {"error": "Неверные параметры инструмента. Используй объявленную схему."}
@@ -99,9 +111,21 @@ async def chat(provider, tools, conversation, message: str):
             conversation.messages = history
             return response(conversation, reply)
         if prepared is not None:
+            conversation.facts = {k: v for k, v in conversation.facts.items() if k != '_slot_offer'}
             # The confirmation copy comes from the DB, not another model call that
             # could claim a successful booking or alter the price in its wording.
             reply = "Проверьте детали и подтвердите запись в карточке ниже."
+            history.append({"role": "assistant", "content": reply})
+            conversation.messages = history
+            return response(conversation, reply)
+        if slot_response is not None:
+            # Availability is verified by ServGo; skip a model request for text-only slots.
+            if slot_response.get("duration_hours_required"):
+                reply = "С удовольствием помогу! Подскажите, на сколько часов хотите забронировать?"
+            elif slot_response["slots"]:
+                reply = "Нашёл свободное время! Выберите удобный вариант в карточке ниже 😊"
+            else:
+                reply = "На эту дату свободного времени не нашлось. Давайте посмотрим другой день?"
             history.append({"role": "assistant", "content": reply})
             conversation.messages = history
             return response(conversation, reply)
