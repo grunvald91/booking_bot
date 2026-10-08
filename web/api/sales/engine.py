@@ -88,6 +88,12 @@ async def chat(provider, tools, conversation, message: str):
                     output = await tools.execute_read(name, args)
                     if name == "check_availability" and "slots" in output and policy.allows("create_booking"):
                         slot_response = output
+                        # An updated availability offer supersedes an older,
+                        # still-pending confirmation card (unless this same turn
+                        # already prepared a fresh booking).
+                        if prepared is None and (conversation.action or {}).get("status") == "pending":
+                            conversation.action = None
+                            conversation.action_id = None
                         conversation.stage = "availability"
                         conversation.facts = {**conversation.facts, "_slot_offer": {
                             "service_id": args.service_id, "date": output["date"],
