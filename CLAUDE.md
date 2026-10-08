@@ -75,3 +75,7 @@ For any production-affecting change, state:
 Use the repository's existing tests first. Add focused regression tests for every bug fix where practical.
 
 A task is not complete merely because code was written; preserve a committed/pushed working checkpoint.
+
+## GitHub Actions budget policy (mandatory)
+
+Before planning or executing any CI, deployment or GitHub Actions operation, read and follow [AGENTS.md](AGENTS.md). Its cost, safety, diagnostics, limits and reporting rules apply equally to Claude Code and any delegated agent. Do not bypass them through issue comments or other automation triggers.
