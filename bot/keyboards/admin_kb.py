@@ -220,7 +220,7 @@ def get_booking_admin_actions_keyboard(booking_id: int, show_prepayment_confirm:
 
     if show_prepayment_confirm:
         builder.button(text="✅ Подтвердить оплату", callback_data=f"confirm_prepayment:{booking_id}", style="success")
-        builder.button(text="❌ Отменить бронь / нет оплаты", callback_data=f"reject_prepayment:{booking_id}", style="danger")
+        builder.button(text="❌ Нет поступления / отклонить", callback_data=f"reject_prepayment:{booking_id}", style="danger")
     else:
         builder.button(text="✅ Подтвердить", callback_data=f"admin_confirm:{booking_id}", style="success")
         builder.button(text="✔️ Завершить", callback_data=f"admin_complete:{booking_id}", style="success")

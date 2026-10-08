@@ -176,6 +176,7 @@ function BookingDetailModal({
           >
             {STATUS_LABELS[booking.status] || booking.status}
           </span>
+          {['pending_prepayment', 'prepayment_sent'].includes(booking.status) && <div><Link to="/admin/prepayments" style={{ color: 'var(--s-accent)' }}>Проверить предоплату и открыть чек</Link></div>}
         </div>
         {booking.is_rental && booking.status !== 'cancelled' && booking.status !== 'completed' && (
           <div className="mb-4 rounded-xl p-3 text-sm" style={{ background: 'var(--s-surface-2)' }}>
@@ -207,7 +208,7 @@ function BookingDetailModal({
                 <CheckCircle size={16} /> Подтвердить
               </button>
             )}
-            <button onClick={() => onStatusChange(booking.id, 'completed')} disabled={updating}
+            <button onClick={() => onStatusChange(booking.id, 'completed')} disabled={updating || ['pending_prepayment', 'prepayment_sent'].includes(booking.status)}
               className="flex items-center justify-center gap-1.5 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
               style={{ background: 'var(--st-completed)' }}>
               <CheckCircle size={16} /> Завершить
