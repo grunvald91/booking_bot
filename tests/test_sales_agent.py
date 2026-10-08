@@ -890,6 +890,48 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         result = await provider.complete([{"role": "system", "content": "Демо"}, {"role": "user", "content": "Каталог"}], TOOL_SCHEMAS)
         self.assertEqual(result["tool_calls"][0]["function"]["name"], "get_services")
 
+    async def test_luna_default_and_override_are_independent_of_global_model(self):
+        with patch.dict(os.environ, {
+            "CLAUDEHUB_BASE_URL": "https://hub.example.test/v1",
+            "CLAUDEHUB_API_KEY": "test-only",
+            "CLAUDEHUB_MODEL": "claude-opus-5-5",
+            "CLAUDEHUB_CHAT_MODEL": "",
+            "CLAUDEHUB_API_FORMAT": "anthropic",
+            "CLAUDEHUB_CHAT_API_FORMAT": "",
+        }):
+            config = LLMConfig.from_env()
+            self.assertEqual(config.model, "gpt-6-luna")
+            self.assertEqual(config.api_format, "openai")
+            with patch.dict(os.environ, {
+                "CLAUDEHUB_CHAT_MODEL": "test-future-model",
+                "CLAUDEHUB_CHAT_API_FORMAT": "anthropic",
+            }):
+                future = LLMConfig.from_env()
+                self.assertEqual(future.model, "test-future-model")
+                self.assertEqual(future.api_format, "anthropic")
+
+    async def test_luna_chat_completions_uses_no_reasoning_for_tool_calls(self):
+        from web.api.sales.tools import TOOL_SCHEMAS
+        async def upstream(request):
+            self.assertEqual(str(request.url), "https://hub.example.test/v1/chat/completions")
+            payload = json.loads(request.content)
+            self.assertEqual(payload["model"], "gpt-6-luna")
+            self.assertEqual(payload["reasoning_effort"], "none")
+            self.assertEqual(payload["max_completion_tokens"], 850)
+            self.assertNotIn("temperature", payload)
+            self.assertNotIn("max_tokens", payload)
+            self.assertIn("tools", payload)
+            return httpx.Response(200, json={"choices": [{"message": call("get_services")}]})
+        provider = ClaudeHubClient(
+            LLMConfig("https://hub.example.test/v1", "test-only", "gpt-6-luna"),
+            httpx.MockTransport(upstream),
+        )
+        result = await provider.complete(
+            [{"role": "system", "content": "Демо"}, {"role": "user", "content": "Каталог"}],
+            TOOL_SCHEMAS,
+        )
+        self.assertEqual(result["tool_calls"][0]["function"]["name"], "get_services")
+
     async def test_anthropic_roundtrip_converts_all_tool_results(self):
         async def upstream(request):
             self.assertEqual(str(request.url), "https://hub.example.test/v1/messages")
