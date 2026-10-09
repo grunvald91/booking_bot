@@ -111,6 +111,7 @@ async def ai_chat(body: AIChatIn, identity=Depends(get_sales_identity), db=Depen
         return AIChatOut(reply="Выберите компанию, чтобы я подобрал услугу и проверил время записи.")
     business = await active_business(db, body.business_id)
     conversation = await load_thread(db, business.id, identity.principal)
+    provider = None
     try:
         provider = ClaudeHubClient() if conversation.mode == "ai" and policy_for(business).enabled else None
         result = await chat(provider, ServGoTools(db, business, identity.user), conversation, body.message.strip())
@@ -120,6 +121,10 @@ async def ai_chat(body: AIChatIn, identity=Depends(get_sales_identity), db=Depen
     except ProviderError as exc:
         await db.rollback()
         raise HTTPException(503, str(exc)) from exc
+    finally:
+        # One pooled connection per chat turn, never shared across customers.
+        if provider is not None and hasattr(provider, "aclose"):
+            await provider.aclose()
 
 
 @router.get("/ai/history")
