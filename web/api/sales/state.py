@@ -1,4 +1,6 @@
 """SQL state and cross-worker serialization, keyed by (business, authenticated principal)."""
+
+from datetime_utils import utc_now
 import hashlib
 import uuid
 from datetime import datetime
@@ -39,7 +41,7 @@ def public_pending(conversation):
     action = conversation.action
     if not action or action.get("status") != "pending":
         return None
-    if datetime.fromisoformat(action["expires_at"]) <= datetime.utcnow():
+    if datetime.fromisoformat(action["expires_at"]) <= utc_now():
         return None
     return {"action_id": conversation.action_id, "tool_name": "create_booking",
             **{k: action[k] for k in ("description", "requires_contact", "requires_legal_consent",
@@ -53,7 +55,7 @@ def public_slot_offer(conversation):
     offer = (conversation.facts or {}).get("_slot_offer")
     if not isinstance(offer, dict) or not offer.get("slots"):
         return None
-    if datetime.fromisoformat(offer["expires_at"]) <= datetime.utcnow():
+    if datetime.fromisoformat(offer["expires_at"]) <= utc_now():
         return None
     return {key: offer[key] for key in ("date", "service_id", "duration_hours", "slots", "expires_at")}
 

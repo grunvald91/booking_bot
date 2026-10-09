@@ -1,10 +1,9 @@
-import { useState, useEffect } from 'react'
+import { lazy, Suspense, useState, useEffect } from 'react'
 import { Routes, Route, Navigate, useSearchParams } from 'react-router-dom'
 import { api } from './api/client'
 import { Layout } from './components/Layout'
 import { HomePage } from './pages/client/HomePage'
 import { BusinessPage } from './pages/client/BusinessPage'
-import { BookingPage } from './pages/client/BookingPage'
 import { BookingStatusPage } from './pages/client/BookingStatusPage'
 import { MyBookingsPage } from './pages/client/MyBookingsPage'
 import { SubscriptionsPage } from './pages/client/SubscriptionsPage'
@@ -13,17 +12,19 @@ import { AccountPage } from './pages/client/AccountPage'
 import { PrepaymentsPage } from './pages/admin/PrepaymentsPage'
 import { AdminPaymentAttention } from './components/AdminPaymentAttention'
 import { AdminDashboard } from './pages/admin/AdminDashboard'
-import { SchedulePage } from './pages/admin/SchedulePage'
 import { ServicesPage } from './pages/admin/ServicesPage'
 import { EmployeesPage } from './pages/admin/EmployeesPage'
 import { AnalyticsPage } from './pages/admin/AnalyticsPage'
-import { SettingsPage } from './pages/admin/SettingsPage'
 import { SubscriptionsAdminPage } from './pages/admin/SubscriptionsAdminPage'
 import { ChatPage } from './pages/client/ChatPage'
 import { SalesInboxPage } from './pages/admin/SalesInboxPage'
 import { SalesSettingsPage } from './pages/admin/SalesSettingsPage'
 import { RentalBookingStatusPage } from './pages/client/RentalBookingStatusPage'
 import { LegalPage } from './pages/client/LegalPage'
+
+const BookingPage = lazy(() => import('./pages/client/BookingPage').then(module => ({ default: module.BookingPage })))
+const SchedulePage = lazy(() => import('./pages/admin/SchedulePage').then(module => ({ default: module.SchedulePage })))
+const SettingsPage = lazy(() => import('./pages/admin/SettingsPage').then(module => ({ default: module.SettingsPage })))
 
 /** Redirect /book?business_id=X → /book/X, or /book → / */
 function BookRedirect() {
@@ -83,7 +84,7 @@ function App() {
   }
 
   return (
-    <><AdminPaymentAttention /><Routes>
+    <><AdminPaymentAttention /><Suspense fallback={<div role="status" className="flex min-h-[30vh] items-center justify-center">Загрузка…</div>}><Routes>
       <Route element={<Layout />}>
         {/* Client routes */}
         <Route path="/" element={<HomePage />} />
@@ -172,7 +173,7 @@ function App() {
           }
         />
       </Route>
-    </Routes></>
+    </Routes></Suspense></>
   )
 }
 

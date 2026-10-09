@@ -31,6 +31,7 @@ export interface SalesHistory {
   messages: { id: string; role: 'user' | 'ai'; text: string }[];
   mode: 'ai' | 'human';
   pending_action?: SalesPendingAction | null;
+  available_slots?: SalesSlotOffer | null;
   booking_url?: string | null;
 }
 
