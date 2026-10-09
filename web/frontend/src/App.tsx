@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState, useEffect } from 'react'
 import { Routes, Route, Navigate, useSearchParams } from 'react-router-dom'
-import { api } from './api/client'
+import { api, ApiError } from './api/client'
+import { clearLogin, saveLogin } from './authUtils'
 import { Layout } from './components/Layout'
 import { HomePage } from './pages/client/HomePage'
 import { BusinessPage } from './pages/client/BusinessPage'
@@ -55,32 +56,49 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
-  const [tgAuthDone, setTgAuthDone] = useState(() =>
-    !window.Telegram?.WebApp?.initData || sessionStorage.getItem('servgoExplicitLogout') === '1')
+  const [authReady, setAuthReady] = useState(false)
 
   useEffect(() => {
-    const initData = window.Telegram?.WebApp?.initData
-    const explicitLogout = sessionStorage.getItem('servgoExplicitLogout') === '1'
-
-    if (initData && !explicitLogout) {
-      // Always refresh role from server — owner status may have changed,
-      // and stale userRole='client' in localStorage hides admin UI.
-      api.telegramAuth(initData)
-        .then((res) => {
-          localStorage.setItem('token', res.token)
-          localStorage.setItem('userRole', res.role || 'client')
-          localStorage.setItem('userName', res.user.full_name || 'Пользователь')
-          setTgAuthDone(true)
-        })
-        .catch((err) => {
-          console.warn('Telegram auto-login failed:', err)
-          setTgAuthDone(true)
-        })
+    let active = true
+    async function restoreAuth() {
+      try {
+        if (sessionStorage.getItem('servgoExplicitLogout') === '1') return
+        const initData = window.Telegram?.WebApp?.initData
+        if (initData) {
+          try {
+            saveLogin(await api.telegramAuth(initData))
+            return
+          } catch (error) {
+            console.warn('Telegram auto-login failed:', error)
+          }
+        }
+        if (localStorage.getItem('token')) {
+          try {
+            await api.getMe()
+            return
+          } catch (error) {
+            // Preserve the session during temporary network/server outages.
+            if (!(error instanceof ApiError) || error.status !== 401) return
+            clearLogin()
+          }
+        }
+        // Existing browser cookie from an authenticated Telegram session.
+        // Never use it after the user explicitly logged out.
+        try {
+          saveLogin(await api.sharedSession())
+        } catch {
+          // Not every visitor has a shared Telegram session.
+        }
+      } finally {
+        if (active) setAuthReady(true)
+      }
     }
+    void restoreAuth()
+    return () => { active = false }
   }, [])
 
-  if (!tgAuthDone) {
-    return null // Wait for Telegram auth to complete before rendering routes
+  if (!authReady) {
+    return <div role="status" style={{ padding: 24 }}>Проверяем вход…</div>
   }
 
   return (
