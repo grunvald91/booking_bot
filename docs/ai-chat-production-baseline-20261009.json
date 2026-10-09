@@ -95,5 +95,9 @@
     "src/pages/client/BookingPage.tsx": "a0ff41daf07067d4be3933952758dc6ec2b9708630a5fa77febec4ecd9fa1a8d",
     "src/pages/client/LegalPage.tsx": "c1403038426e3ef689e0534a00689022147fb256dc5dba5c319fdb8d069f99ce",
     "src/pages/client/BusinessPage.tsx": "ae526ee02669123595b4171572312bf41836af83f37dc8d34e6d7f7d60e19402"
+  },
+  "public_html_rewrite": {
+    "source": "<script src=\"https://telegram.org/js/telegram-web-app.js\" async></script>",
+    "target": "<script src=\"https://tg.servgo.ru/js/telegram-web-app.js\" async></script><script src=\"/servgo-shared-auth.js?v=20260528_1035\" defer></script>"
   }
 }

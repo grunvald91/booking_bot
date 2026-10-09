@@ -37,5 +37,14 @@ elif mode == "dist":
     if any(not name.startswith("assets/") or any(pathlib.Path(name).name in text for text in texts) for name in extras):
         raise ValueError("Unexplained active production assets.")
     print("Active reference build matches production byte for byte; retained historical assets:", len(extras))
+elif mode == "public":
+    rewrite = manifest["public_html_rewrite"]
+    expected = root.read_text()
+    if expected.count(rewrite["source"]) != 1:
+        raise ValueError("Reviewed HTML rewrite source differs")
+    expected = expected.replace(rewrite["source"], rewrite["target"])
+    if pathlib.Path(destination[0]).read_text() != expected:
+        raise ValueError("Public HTML differs from reviewed nginx transformation")
+    print("Public HTML matches release with reviewed nginx transformation.")
 else:
     raise ValueError("Unknown verification mode")
