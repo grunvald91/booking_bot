@@ -193,7 +193,7 @@ export function PrepaymentsPage() {
       {bulkSummary && <p role="status" className="ds-sub" style={{ marginTop: 8 }}>{bulkSummary}</p>}
     </div>}
     {error && <p role="alert" style={{ color: 'var(--s-danger)' }}>{error}</p>}
-    {loading && <p role="status">Загрузка…</p>
+    {loading && <p role="status">Загрузка…</p>}
     {!loading && !items.length && <p>Заявок в этом списке нет.</p>}
     <div style={{ display: 'grid', gap: 10 }}>
       {items.map(item => <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
