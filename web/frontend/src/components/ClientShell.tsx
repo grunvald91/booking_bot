@@ -15,6 +15,8 @@ import {
 } from 'lucide-react'
 import { useTheme } from '../hooks/useTheme'
 import { Logo } from './Logo'
+import { api } from '../api/client'
+import { clearLogin } from '../authUtils'
 
 const NAV = [
   { to: '/', label: 'Главная', Icon: Home },
@@ -62,10 +64,14 @@ export function ClientShell({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [profileOpen])
 
-  const handleLogout = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('userRole')
-    localStorage.removeItem('userName')
+  const handleLogout = async () => {
+    sessionStorage.setItem('servgoExplicitLogout', '1')
+    clearLogin()
+    try {
+      await api.logout()
+    } catch {
+      // Local logout remains effective even if the network is unavailable.
+    }
     window.location.href = '/'
   }
 
