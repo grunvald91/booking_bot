@@ -52,7 +52,7 @@ ssh "${OPT[@]}" "$TARGET" "python3 - '$SERVICE' <<'PY'
 import pathlib, subprocess, sys
 pid = subprocess.check_output(['systemctl', 'show', sys.argv[1], '--property=MainPID', '--value'], text=True).strip()
 if not pid.isdigit() or int(pid) < 2: sys.exit('Web API not running')
-env = dict(item.split(b'=', 1) for item in pathlib.Path('/proc/' + pid + '/environ').read_bytes().split(b'\\0') if b'=' in item)
+env = dict(item.split(b'=', 1) for item in pathlib.Path('/proc/' + pid + '/environ').read_bytes().split(b'\0') if b'=' in item)
 chat_model = env.get(b'CLAUDEHUB_CHAT_MODEL', b'')
 if chat_model and chat_model != b'gpt-6-luna': sys.exit('Existing AI model override needs review')
 if not env.get(b'CLAUDEHUB_BASE_URL') or not env.get(b'CLAUDEHUB_API_KEY'): sys.exit('ClaudeHub credentials not configured for API')
