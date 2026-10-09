@@ -65,8 +65,15 @@ def _validate_init_data(init_data: str) -> dict | None:
 async def get_sales_identity(request: Request, response: Response, db=Depends(get_db)):
     authorization = request.headers.get("Authorization")
     if authorization:
-        user = await get_current_user(authorization, db)
-        return SalesIdentity(f"user:{user.id}", user)
+        try:
+            user = await get_current_user(authorization, db)
+            return SalesIdentity(f"user:{user.id}", user)
+        except HTTPException as exc:
+            if exc.status_code != 401:
+                raise
+            # The sales chat explicitly supports guests. A stale browser JWT
+            # must not make its public endpoints unusable. Do NOT reuse the
+            # previous user's conversation or identity on failed validation.
     init_data = request.headers.get("X-Telegram-Init-Data")
     if init_data:
         telegram = _validate_init_data(init_data)
