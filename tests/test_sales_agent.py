@@ -128,6 +128,26 @@ class SalesApiTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             return await db.scalar(select(func.count()).select_from(Booking))
 
+    async def test_first_llm_call_sees_relevant_catalog_but_not_other_business(self):
+        async with self.sessions() as db:
+            db.add_all([
+                Service(business_id=self.business, name="Помывка шин",
+                        price=500, duration_minutes=15, is_active=True),
+                Service(business_id=self.other_business, name="Чужая секретная помывка",
+                        price=999, duration_minutes=15, is_active=True),
+            ])
+            await db.commit()
+        provider = ScriptedProvider({"role": "assistant", "content": "Уточните название услуги"})
+        with patch.object(ai, "ClaudeHubClient", return_value=provider):
+            reply = await self.client.post("/ai/chat", headers=self.auth, json={
+                "business_id": self.business, "message": "Мне нужна помывка колёс"})
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(len(provider.requests), 1)
+        first_prompt = provider.requests[0][0][0]["content"]
+        self.assertIn("Помывка шин", first_prompt)
+        self.assertIn("possibly_related", first_prompt)
+        self.assertNotIn("Чужая секретная помывка", first_prompt)
+
     async def test_sales_tools_to_atomic_booking_and_replay(self):
         provider = ScriptedProvider(call("get_services"), call("get_service_details", service_id=self.service),
             call("get_prices", service_id=self.service), call("get_specialists", service_id=self.service),
