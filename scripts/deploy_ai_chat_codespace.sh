@@ -63,6 +63,8 @@ verify_server_baseline() {
   [[ "$wanted_dist" == "$actual_dist" ]]
 }
 verify_server_baseline || deny "Production changed after the reviewed audit."
+curl -fsS --max-time 15 https://servgo.ru/ > "$LOCAL_TMP/public-before.html" || deny "Public frontend unavailable before deployment."
+python3 scripts/verify_ai_chat_release.py public "$MANIFEST" "$LOCAL_TMP/base/web/frontend/dist/index.html" "$LOCAL_TMP/public-before.html" || deny "Public frontend transformation needs review."
 
 # Never print production environment variables, credentials or session data.
 ssh "${OPT[@]}" "$TARGET" "python3 - '$SERVICE' <<'PY'
@@ -103,7 +105,8 @@ ssh "${OPT[@]}" "$TARGET" "set -e; cd '$REMOTE'; stage='$REMOTE/.releases/ai-cha
 ssh "${OPT[@]}" "$TARGET" "systemctl is-active --quiet '$SERVICE' && for attempt in 1 2 3 4 5 6 7 8 9 10; do if curl -fsS --max-time 3 http://127.0.0.1:8000/health >/dev/null && curl -fsS --max-time 3 http://127.0.0.1:8000/openapi.json | python3 -c 'import json,sys; paths=json.load(sys.stdin)[\"paths\"]; assert \"/ai/chat\" in paths and \"/ai/select-slot\" in paths'; then exit 0; fi; sleep 2; done; exit 1" || rollback
 
 curl -fsS --max-time 15 https://servgo.ru/ > "$LOCAL_TMP/public-index.html" || rollback
-cmp -s "$LOCAL_TMP/public-index.html" web/frontend/dist/index.html || rollback
+echo "API health and AI routes VERIFIED; checking public frontend"
+python3 scripts/verify_ai_chat_release.py public "$MANIFEST" web/frontend/dist/index.html "$LOCAL_TMP/public-index.html" || rollback
 ssh "${OPT[@]}" "$TARGET" "python3 - '$SERVICE' <<'PY'
 import json, pathlib, subprocess, sys, time, urllib.request, urllib.error
 pid = subprocess.check_output(['systemctl', 'show', sys.argv[1], '--property=MainPID', '--value'], text=True).strip()
