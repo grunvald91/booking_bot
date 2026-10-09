@@ -18,6 +18,7 @@ const nichePresentations = [
   { label: 'Бани и сауны', href: 'https://promo.servgo.ru/banya' },
   { label: 'Барбершопы', href: 'https://promo.servgo.ru/barbershop' },
   { label: 'Салоны красоты', href: 'https://promo.servgo.ru/beauty' },
+  { label: 'Маникюр и ногтевые студии', href: 'https://promo.servgo.ru/manicure' },
   { label: 'Аренда залов и фотостудий', href: 'https://promo.servgo.ru/hall-rental' },
   { label: 'Психологи и коучи', href: 'https://promo.servgo.ru/psy' },
   { label: 'Шиномонтаж', href: 'https://promo.servgo.ru/shinomontazh' },
@@ -69,7 +70,7 @@ export function HomePage() {
           <span className="ds-accent">на услуги</span>
         </h1>
         <p className="ds-sub" style={{ marginTop: 8, maxWidth: 340, marginLeft: 'auto', marginRight: 'auto' }}>
-          Выберите салон и запишитесь на удобное время
+          Выберите компанию, услугу и свободное время без звонка
         </p>
       </div>
 
@@ -104,8 +105,8 @@ export function HomePage() {
           >
             <Briefcase size={30} style={{ color: 'var(--s-muted)' }} />
           </div>
-          <h2 className="ds-h2" style={{ marginBottom: 6 }}>Пока нет доступных салонов</h2>
-          <p className="ds-hint" style={{ margin: 0 }}>Скоро здесь появятся салоны для записи</p>
+          <h2 className="ds-h2" style={{ marginBottom: 6 }}>Пока нет доступных компаний</h2>
+          <p className="ds-hint" style={{ margin: 0 }}>Скоро здесь появятся компании для онлайн-записи</p>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 14 }}>
@@ -218,7 +219,7 @@ export function HomePage() {
           ServGo для бизнеса
         </p>
         <h2 style={{ margin: '8px 0 14px', fontSize: 20, lineHeight: 1.2, fontWeight: 800 }}>
-          Презентации для конкретных ниш
+          Онлайн-запись для вашего бизнеса
         </h2>
 
         <nav
