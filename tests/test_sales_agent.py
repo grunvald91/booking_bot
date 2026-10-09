@@ -428,6 +428,17 @@ class SalesApiTests(unittest.IsolatedAsyncioTestCase):
         history = await self.client.get("/ai/history", headers=self.auth, params={"business_id": self.business})
         self.assertEqual(history.json()["messages"], [])
 
+    async def test_stale_bearer_cannot_break_guest_chat_or_access_bookings(self):
+        # Browsers can retain tokens issued before JWT_SECRET changed.
+        stale = {"Authorization": "Bearer invalid-old-token"}
+        guest = await self.client.get("/ai/history", headers=stale,
+            params={"business_id": self.business})
+        self.assertEqual(guest.status_code, 200, guest.text)
+        self.assertEqual(guest.json()["messages"], [])
+        # Protected resources must still reject invalid tokens.
+        protected = await self.client.get("/my/bookings", headers=stale)
+        self.assertEqual(protected.status_code, 401)
+
     async def test_telegram_data_requires_fresh_auth_date_and_signature(self):
         token = "telegram-test-only"
         def signed(auth_date):
