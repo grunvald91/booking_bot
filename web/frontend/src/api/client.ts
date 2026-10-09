@@ -494,6 +494,23 @@ export interface AuthResponse {
 
 const API = '/api';
 
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+export interface TelegramLoginPayload {
+  id: number
+  auth_date: number
+  hash: string
+  first_name?: string
+  last_name?: string
+  username?: string
+  photo_url?: string
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = localStorage.getItem('token');
   const tgInitData = window.Telegram?.WebApp?.initData || '';
@@ -508,7 +525,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    throw new ApiError(res.status, text || `HTTP ${res.status}`);
   }
   return res.json();
 }
@@ -562,6 +579,12 @@ export const api = {
       body: JSON.stringify({ init_data: initData }),
     }),
   getMe: () => request<AuthResponse['user']>('/auth/me'),
+  sharedSession: () => request<AuthResponse>('/auth/session'),
+  telegramLogin: (data: TelegramLoginPayload) => request<AuthResponse>('/auth/telegram-login', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 
   // PWA / Web Push
   getPushPublicKey: () =>
