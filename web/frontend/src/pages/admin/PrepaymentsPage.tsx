@@ -17,6 +17,9 @@ export function PrepaymentsPage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState<number[]>([])
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null)
+  const [bulkSummary, setBulkSummary] = useState('')
   const [proof, setProof] = useState<{ url: string; mime: string } | null>(null)
   const activeKey = useRef('')
   const extraPages = useRef(false)
@@ -31,12 +34,86 @@ export function PrepaymentsPage() {
   useEffect(() => {
     activeKey.current = `${selectedId}/${filter}`
     extraPages.current = false
-    setDetails(null); setError(''); setLoading(true)
+    setDetails(null); setError(''); setBulkSummary(''); setSelected([]); setLoading(true)
     void load()
     const timer = setInterval(() => { if (!extraPages.current) void load() }, 15000)
     return () => clearInterval(timer)
   }, [load, selectedId, filter])
   useEffect(() => () => { if (proof) URL.revokeObjectURL(proof.url) }, [proof])
+
+  function toggle(id: number) {
+    setSelected(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id])
+  }
+
+  async function selectAllPending() {
+    if (!selectedId || busy || filter !== 'prepayment_sent') return
+    setBusy(true); setError(''); setBulkSummary('')
+    const key = activeKey.current
+    try {
+      // Select the entire paginated queue, not only the first 50 visible rows.
+      // Bound the action so a huge backlog cannot exhaust the browser.
+      let before: number | undefined
+      const all: AdminBooking[] = []
+      const cap = 500
+      let remaining = true
+      while (remaining && all.length < cap) {
+        const page = await api.getPrepayments(selectedId, 'prepayment_sent', before)
+        if (key !== activeKey.current) return
+        all.push(...page.items)
+        remaining = page.next_before_id !== null
+        before = page.next_before_id || undefined
+      }
+      const unique = [...new Map(all.map(item => [item.id, item])).values()]
+      extraPages.current = true
+      setItems(unique)
+      setCursor(remaining ? before || null : null)
+      setSelected(unique.filter(item => item.status === 'prepayment_sent').map(item => item.id))
+      if (remaining) setBulkSummary('Выбраны первые 500 заявок. Оставшиеся можно обработать следующим действием.')
+    } catch (err) { if (key === activeKey.current) setError(errorMessage(err)) }
+    finally { setBusy(false) }
+  }
+
+  async function reviewSelected(action: 'confirm' | 'reject') {
+    if (busy || filter !== 'prepayment_sent') return
+    const candidates = items.filter(item => selected.includes(item.id) && item.status === 'prepayment_sent')
+    if (!candidates.length) return
+    const message = action === 'confirm'
+      ? `Подтвердить фактическое поступление денег по ${candidates.length} заявкам? Убедитесь, что все переводы действительно получены. Одной отметки клиента недостаточно.`
+      : `Не подтверждать поступление денег по ${candidates.length} заявкам? Клиентам снова откроется 10-минутный срок для исправления.`
+    if (!window.confirm(message)) return
+    const key = activeKey.current
+    setBusy(true); setError(''); setBulkSummary('')
+    setBulkProgress({ done: 0, total: candidates.length })
+    let success = 0
+    const failed: number[] = []
+    try {
+      // Existing endpoint enforces ownership, version and per-visit state rules.
+      // Sequential requests avoid competing row locks on multi-service visits.
+      for (const booking of candidates) {
+        if (key !== activeKey.current) break
+        try {
+          await api.reviewPrepayment(booking.id, action, booking.version)
+          success += 1
+          setSelected(current => current.filter(id => id !== booking.id))
+        } catch {
+          failed.push(booking.id) // Includes concurrent changes and sibling visit entries.
+        }
+        setBulkProgress({ done: success + failed.length, total: candidates.length })
+      }
+      setBulkSummary(`Обработано: ${success} из ${candidates.length}. ${failed.length
+        ? `Не обработано: ${failed.length}. Обновите список и проверьте оставшиеся записи.`
+        : 'Все выбранные заявки обработаны.'}`)
+      if (key === activeKey.current) {
+        setDetails(null)
+        extraPages.current = false
+        setSelected([])
+        await load()
+      }
+    } finally {
+      setBusy(false)
+      setBulkProgress(null)
+    }
+  }
 
   async function open(id: number) {
     setBusy(true); setError(''); setProof(null)
@@ -76,16 +153,45 @@ export function PrepaymentsPage() {
   }
 
   return <AdminShell title="Предоплаты" subtitle="Поступление денег проверяет владелец" headerExtra={<BusinessSelector businesses={businesses} selectedId={selectedId} onSelect={selectBusiness} />}>
-    <label className="ds-field" style={{ margin: '12px 0' }}>Показать<select className="ds-input" value={filter} onChange={e => setFilter(e.target.value)}>
+    <label className="ds-field" style={{ margin: '12px 0' }}>Показать<select className="ds-input" value={filter} disabled={busy} onChange={e => setFilter(e.target.value)}> 
       <option value="prepayment_sent">На проверке</option><option value="pending_prepayment">Ожидают отправки</option><option value="all">Все предоплаты</option>
     </select></label>
+    {filter === 'prepayment_sent' && <div className="ds-card" style={{ padding: 14, margin: '12px 0' }}>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button type="button" className="ds-btn ds-btn--ghost ds-btn--sm" disabled={busy || loading}
+          onClick={() => void selectAllPending()}>Выбрать все заявки</button>
+        <button type="button" className="ds-btn ds-btn--ghost ds-btn--sm" disabled={busy || !selected.length}
+          onClick={() => setSelected([])}>Снять выделение</button>
+        <span className="ds-sub">Выбрано: {selected.length}</span>
+      </div>
+      {selected.length > 0 && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+        <button type="button" className="ds-btn ds-btn--primary ds-btn--sm" disabled={busy}
+          onClick={() => void reviewSelected('confirm')}>Подтвердить поступление ({selected.length})</button>
+        <button type="button" className="ds-btn ds-btn--ghost ds-btn--sm" disabled={busy}
+          onClick={() => void reviewSelected('reject')}>Не подтверждаю ({selected.length})</button>
+      </div>}
+      <p className="ds-hint" style={{ marginTop: 10 }}>Действие применяется только к выбранным заявкам.
+        Перед подтверждением проверьте реальные поступления в банке.
+        Для нескольких услуг одного визита достаточно одного подтверждения — сервер обновит весь визит.</p>
+      {bulkProgress && <p role="status" className="ds-sub">Обработка: {bulkProgress.done} из {bulkProgress.total}…</p>}
+      {bulkSummary && <p role="status" className="ds-sub" style={{ marginTop: 8 }}>{bulkSummary}</p>}
+    </div>}
     {error && <p role="alert" style={{ color: 'var(--s-danger)' }}>{error}</p>}
-    {loading && <p role="status">Загрузка…</p>}
+    {loading && <p role="status">Загрузка…</p>
     {!loading && !items.length && <p>Заявок в этом списке нет.</p>}
     <div style={{ display: 'grid', gap: 10 }}>
-      {items.map(item => <button key={item.id} className="ds-card" disabled={busy} style={{ padding: 14, textAlign: 'left' }} onClick={() => void open(item.id)}>
-        <strong>{item.client_name} · {item.prepayment_amount == null ? 'Сумма не указана' : `${item.prepayment_amount} ₽`}</strong><p>{item.service_name} · {item.date} {item.time}</p><span>{labels[item.status] || item.status}</span>
-      </button>)}
+      {items.map(item => <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {filter === 'prepayment_sent' && item.status === 'prepayment_sent' && (
+          <input type="checkbox" aria-label={`Выбрать заявку №${item.id}`} checked={selected.includes(item.id)}
+            disabled={busy} onChange={() => toggle(item.id)}
+            style={{ width: 20, height: 20, flexShrink: 0, accentColor: 'var(--s-accent)' }} />
+        )}
+        <button className="ds-card" disabled={busy} style={{ padding: 14, textAlign: 'left', flex: 1 }}
+          onClick={() => void open(item.id)}>
+          <strong>{item.client_name} · {item.prepayment_amount == null ? 'Сумма не указана' : `${item.prepayment_amount} ₽`}</strong>
+          <p>{item.service_name} · {item.date} {item.time}</p><span>{labels[item.status] || item.status}</span>
+        </button>
+      </div>)}
     </div>
     {cursor && <button className="ds-btn ds-btn--ghost" disabled={busy} onClick={() => void more()}>Загрузить ещё</button>}
     <button className="ds-btn ds-btn--ghost" disabled={busy} onClick={() => { extraPages.current = false; void load() }}>Обновить список</button>
