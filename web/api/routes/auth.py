@@ -383,6 +383,20 @@ async def telegram_auth(
     return token_out
 
 
+# ---------- POST /auth/logout ----------
+
+@router.post("/logout")
+async def logout(response: Response):
+    """End the browser's shared Telegram session as well as its local JWT."""
+    cookie_options = auth_cookie_kwargs()
+    response.delete_cookie(
+        auth_cookie_name(),
+        path=cookie_options.get("path", "/"),
+        domain=cookie_options.get("domain"),
+    )
+    return {"ok": True}
+
+
 # ---------- GET /auth/me ----------
 
 @router.get("/me", response_model=UserOut)
