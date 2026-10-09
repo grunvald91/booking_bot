@@ -4,9 +4,13 @@ from __future__ import annotations
 import json
 import os
 import uuid
+import logging
+import time
 from dataclasses import dataclass
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderError(RuntimeError):
@@ -83,6 +87,12 @@ class ClaudeHubClient:
     def __init__(self, config: LLMConfig | None = None, transport=None):
         self.config = config or LLMConfig.from_env()
         self.transport = transport
+        self._client: httpx.AsyncClient | None = None
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     async def complete(self, messages: list[dict], tools: list[dict]) -> dict:
         config = self.config
@@ -104,11 +114,15 @@ class ClaudeHubClient:
                            "temperature": 0.3, "max_tokens": 1200}
             if tools:
                 payload.update(tools=tools, tool_choice="auto")
+        started = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=40, transport=self.transport) as client:
-                response = await client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-                data = response.json()
+            # Reuse the TLS connection across consecutive model/tool rounds.
+            if self._client is None:
+                self._client = httpx.AsyncClient(timeout=40, transport=self.transport)
+            response = await self._client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            logger.info("ServGo sales LLM request completed in %.2fs", time.perf_counter() - started)
             if config.api_format == "anthropic":
                 content = []
                 calls = []
