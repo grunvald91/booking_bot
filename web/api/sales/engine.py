@@ -1,4 +1,6 @@
 """Bounded stage → assistant → tools → assistant cycle inspired by SalesGPT and LangGraph."""
+
+from datetime_utils import utc_now
 import json
 import uuid
 from datetime import datetime, timedelta
@@ -76,7 +78,7 @@ async def chat(provider, tools, conversation, message: str):
                         prepared = await tools.prepare_booking(args)
                         conversation.action_id = str(uuid.uuid4())
                         conversation.action = {**prepared, "status": "pending",
-                            "expires_at": (datetime.utcnow() + timedelta(minutes=20)).isoformat()}
+                            "expires_at": (utc_now() + timedelta(minutes=20)).isoformat()}
                         conversation.stage = "closing"
                         output = {"status": "awaiting_confirmation", "description": prepared["description"],
                                   "instruction": "Запись ещё не создана. Клиент должен нажать кнопку подтверждения."}
@@ -98,7 +100,7 @@ async def chat(provider, tools, conversation, message: str):
                         conversation.facts = {**conversation.facts, "_slot_offer": {
                             "service_id": args.service_id, "date": output["date"],
                             "duration_hours": args.duration_hours, "slots": output["slots"][:120],
-                            "expires_at": (datetime.utcnow() + timedelta(minutes=10)).isoformat(),
+                            "expires_at": (utc_now() + timedelta(minutes=10)).isoformat(),
                         }}
             except ValidationError:
                 # Do not echo invalid arguments (may contain contact details or injection text).

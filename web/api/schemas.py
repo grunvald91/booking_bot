@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import date, time, datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------- Auth ----------
@@ -35,8 +35,7 @@ class UserOut(BaseModel):
     email: Optional[str] = None
     username: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TokenOut(BaseModel):
@@ -66,8 +65,7 @@ class ServiceOut(BaseModel):
     pricing_type: Optional[str] = 'fixed'
     group_pricing: Optional[List[GroupPricingTier]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TimePricingOut(BaseModel):
@@ -96,8 +94,7 @@ class EmployeeOut(BaseModel):
     venue_time_pricing: List[TimePricingOut] = []
     service_ids: List[int] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BusinessOut(BaseModel):
@@ -112,8 +109,7 @@ class BusinessOut(BaseModel):
     photos: Optional[str] = None
     services_count: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BusinessDetailOut(BusinessOut):
@@ -434,8 +430,7 @@ class SubscriptionOut(BaseModel):
     services: List[SubscriptionServiceOut] = []
     is_active: bool = True
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ClientSubscriptionOut(BaseModel):
@@ -514,8 +509,7 @@ class BusinessAdminDetailOut(BaseModel):
     booking_labels: dict[str, str] = Field(default_factory=dict)
     booking_flow_order: str = "service_first"
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---------- Owners ----------
@@ -606,8 +600,7 @@ class SubscriptionAdminOut(BaseModel):
     is_active: bool = True
     services: List[SubscriptionServiceOut] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---------- AI ----------

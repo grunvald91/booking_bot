@@ -219,7 +219,7 @@ class SalesApiTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             row = (await db.execute(select(SalesConversation))).scalar_one()
             facts = dict(row.facts)
-            facts["_slot_offer"]["expires_at"] = (datetime.utcnow() - timedelta(seconds=1)).isoformat()
+            facts["_slot_offer"] = {**facts["_slot_offer"], "expires_at": (datetime.utcnow() - timedelta(seconds=1)).isoformat()}
             row.facts = facts
             await db.commit()
         denied = await self.client.post("/ai/select-slot", headers=self.auth, json={

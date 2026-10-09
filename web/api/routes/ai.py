@@ -1,6 +1,8 @@
 """ServGo sales chat with tenant-scoped SQL history and atomic booking confirmation."""
 from __future__ import annotations
 
+from datetime_utils import utc_now
+
 import hashlib
 import hmac
 import json
@@ -105,7 +107,7 @@ async def ai_chat(body: AIChatIn, identity=Depends(get_sales_identity), db=Depen
     try:
         provider = ClaudeHubClient() if conversation.mode == "ai" and policy_for(business).enabled else None
         result = await chat(provider, ServGoTools(db, business, identity.user), conversation, body.message.strip())
-        conversation.updated_at = datetime.utcnow()
+        conversation.updated_at = utc_now()
         await db.commit()
         return result
     except ProviderError as exc:
@@ -153,14 +155,14 @@ async def ai_select_slot(body: SelectSlotIn, identity=Depends(get_sales_identity
         date=offer["date"], time=body.time, duration_hours=offer["duration_hours"]))
     conversation.action_id = str(uuid.uuid4())
     conversation.action = {**prepared, "status": "pending",
-        "expires_at": (datetime.utcnow() + timedelta(minutes=20)).isoformat()}
+        "expires_at": (utc_now() + timedelta(minutes=20)).isoformat()}
     conversation.stage = "closing"
     conversation.facts = {k: v for k, v in conversation.facts.items() if k != "_slot_offer"}
     reply = "Отличный выбор! Проверьте детали и подтвердите запись в карточке ниже 😊"
     conversation.messages = trim_history([*conversation.messages,
         {"role": "user", "content": f"Выбираю {offer['date']} в {body.time}, {slot['employee_name']}."},
         {"role": "assistant", "content": reply}])
-    conversation.updated_at = datetime.utcnow()
+    conversation.updated_at = utc_now()
     result = response(conversation, reply)
     await db.commit()
     return result
@@ -179,7 +181,7 @@ async def ai_handoff(body: HandoffRequest, identity=Depends(get_sales_identity),
     reply = "Диалог передан оператору. Его ответ появится здесь."
     conversation.messages = [*conversation.messages, {"role": "user", "content": reason},
         {"role": "assistant", "content": reply}]
-    conversation.updated_at = datetime.utcnow()
+    conversation.updated_at = utc_now()
     await db.commit()
     return response(conversation, reply)
 
@@ -204,7 +206,7 @@ async def ai_confirm(body: AIConfirmIn, identity=Depends(get_sales_identity), db
         return AIChatOut.model_validate(action["result"])
     if action["status"] != "pending" or conversation.mode != "ai":
         raise HTTPException(409, "Это действие больше не ожидает подтверждения")
-    if datetime.fromisoformat(action["expires_at"]) <= datetime.utcnow():
+    if datetime.fromisoformat(action["expires_at"]) <= utc_now():
         raise HTTPException(410, "Подтверждение истекло. Запросите новую карточку записи")
     # Serialize permission revocation with booking commit.
     await db.execute(select(Business.id).where(Business.id == conversation.business_id).with_for_update())
@@ -219,7 +221,7 @@ async def ai_confirm(body: AIConfirmIn, identity=Depends(get_sales_identity), db
     history.append({"role": "assistant", "content": reply})
     conversation.messages = history
     conversation.action = {**action, "status": "completed"}
-    conversation.updated_at = datetime.utcnow()
+    conversation.updated_at = utc_now()
     result = response(conversation, reply, booking_ids=ids, booking_url=booking_url)
     conversation.action = {**conversation.action, "result": result.model_dump(mode="json")}
     # Booking INSERT and confirmation receipt commit together. Advisory/row locks
@@ -302,7 +304,7 @@ async def operator_reply(conversation_id: str, body: OperatorMessage,
     if conversation.mode != "human":
         raise HTTPException(409, "Диалог уже возвращён ИИ")
     conversation.messages = [*conversation.messages, {"role": "assistant", "content": body.message.strip()}]
-    conversation.updated_at = datetime.utcnow()
+    conversation.updated_at = utc_now()
     await db.commit()
     return {"ok": True}
 
