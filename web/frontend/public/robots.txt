@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /login
+Disallow: /my
+Disallow: /b/
+Disallow: /chat
+
+Sitemap: https://servgo.ru/sitemap.xml
