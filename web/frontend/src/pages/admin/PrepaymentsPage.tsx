@@ -85,24 +85,40 @@ export function PrepaymentsPage() {
     setBusy(true); setError(''); setBulkSummary('')
     setBulkProgress({ done: 0, total: candidates.length })
     let success = 0
+    let alreadyUpdated = 0
+    let stopped = false
     const failed: number[] = []
     try {
       // Existing endpoint enforces ownership, version and per-visit state rules.
       // Sequential requests avoid competing row locks on multi-service visits.
       for (const booking of candidates) {
-        if (key !== activeKey.current) break
+        if (key !== activeKey.current) { stopped = true; break }
         try {
           await api.reviewPrepayment(booking.id, action, booking.version)
           success += 1
           setSelected(current => current.filter(id => id !== booking.id))
-        } catch {
-          failed.push(booking.id) // Includes concurrent changes and sibling visit entries.
+        } catch (err) {
+          // Another item in the same visit may have been updated already.
+          // Re-read its actual status rather than counting a 409 as a failed payment.
+          let resolved = false
+          try {
+            const current = await api.getPaymentDetails(booking.id)
+            resolved = current.booking.status === (action === 'confirm' ? 'confirmed' : 'pending_prepayment')
+          } catch { /* Keep the item as a failure. */ }
+          if (resolved) alreadyUpdated += 1
+          else failed.push(booking.id)
+          if (err instanceof Error && 'status' in err &&
+            ((err as Error & { status?: number }).status === 401 ||
+             (err as Error & { status?: number }).status === 403)) {
+            stopped = true
+            break
+          }
         }
-        setBulkProgress({ done: success + failed.length, total: candidates.length })
+        setBulkProgress({ done: success + alreadyUpdated + failed.length, total: candidates.length })
       }
-      setBulkSummary(`Обработано: ${success} из ${candidates.length}. ${failed.length
-        ? `Не обработано: ${failed.length}. Обновите список и проверьте оставшиеся записи.`
-        : 'Все выбранные заявки обработаны.'}`)
+      setBulkSummary(`Подтверждено выполненных действий: ${success}; уже переведены в нужный статус: ${alreadyUpdated}; ошибок: ${failed.length}.
+        ${stopped ? 'Обработка остановлена до конца списка.' : ''}${failed.length
+          ? ' Проверьте оставшиеся заявки и обновите список.' : ''}`)
       if (key === activeKey.current) {
         setDetails(null)
         extraPages.current = false
