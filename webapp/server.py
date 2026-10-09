@@ -936,18 +936,17 @@ async def serve_niche_landing(request: web.Request) -> web.Response:
 async def sitemap_handler(request: web.Request) -> web.Response:
     """Dynamic /sitemap.xml — enumerates all niche landings."""
     from webapp.niches import list_niches
-    from datetime import datetime
-
-    today = datetime.utcnow().strftime('%Y-%m-%d')
+    # Do not claim that unchanged pages were modified today.
+    # Sitemap entries intentionally omit optional lastmod values.
     base = 'https://promo.servgo.ru'
 
     urls = [
-        f'  <url><loc>{base}/</loc><lastmod>{today}</lastmod>'
+        f'  <url><loc>{base}/</loc>'
         f'<changefreq>weekly</changefreq><priority>1.0</priority></url>'
     ]
     for slug in list_niches():
         urls.append(
-            f'  <url><loc>{base}/{slug}</loc><lastmod>{today}</lastmod>'
+            f'  <url><loc>{base}/{slug}</loc>'
             f'<changefreq>weekly</changefreq><priority>0.9</priority></url>'
         )
 
