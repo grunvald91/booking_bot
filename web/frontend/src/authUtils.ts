@@ -8,6 +8,12 @@ export function errorMessage(error: unknown) {
   } catch { return message }
 }
 
+export function clearLogin() {
+  localStorage.removeItem('token')
+  localStorage.removeItem('userRole')
+  localStorage.removeItem('userName')
+}
+
 export function saveLogin(res: AuthResponse) {
   localStorage.setItem('token', res.token)
   localStorage.setItem('userRole', res.role)
