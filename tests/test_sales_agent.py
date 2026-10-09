@@ -429,7 +429,12 @@ class SalesApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(history.json()["messages"], [])
 
     async def test_stale_bearer_cannot_break_guest_chat_or_access_bookings(self):
-        # Browsers can retain tokens issued before JWT_SECRET changed.
+        # Authenticated conversation content must NOT leak after a JWT expires.
+        with patch.object(ai, "ClaudeHubClient", return_value=ScriptedProvider()):
+            authenticated = await self.client.post("/ai/chat", headers=self.auth,
+                json={"business_id": self.business, "message": "Личная запись клиента"})
+        self.assertEqual(authenticated.status_code, 200, authenticated.text)
+
         stale = {"Authorization": "Bearer invalid-old-token"}
         guest = await self.client.get("/ai/history", headers=stale,
             params={"business_id": self.business})
