@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://tech.servgo.ru/sitemap.xml
