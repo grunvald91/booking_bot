@@ -59,7 +59,7 @@ verify_server_baseline() {
     actual="$(ssh "${OPT[@]}" "$TARGET" "sha256sum '${REMOTE}/${p}'" | cut -d' ' -f1)" || return 1
     [[ "$wanted" == "$actual" ]] || return 1
   done
-  actual_dist="$(ssh "${OPT[@]}" "$TARGET" "cd '$REMOTE/web/frontend/dist' && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1")" || return 1
+  actual_dist="$(ssh "${OPT[@]}" "$TARGET" "cd '$REMOTE/web/frontend/dist' && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1")" || return 1
   [[ "$wanted_dist" == "$actual_dist" ]]
 }
 verify_server_baseline || deny "Production changed after the reviewed audit."
