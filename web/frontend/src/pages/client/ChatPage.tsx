@@ -1,6 +1,6 @@
 import { Fragment, useState, useRef, useEffect, useCallback } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Bot, Send, Check, X, Loader2 } from 'lucide-react'
+import { Bot, Send, Check, X, Loader2, RotateCw } from 'lucide-react'
 import { api, type Business, type SalesPendingAction, type SalesConfirmation, type SalesSlotOffer } from '../../api/client'
 import { ClientShell } from '../../components/ClientShell'
 
@@ -262,10 +262,23 @@ function SalesThread({ business }: { business: Business }) {
           <div className="ds-text" style={{ maxWidth: '85%', whiteSpace: 'pre-wrap', padding: '12px 14px', borderRadius: 16, background: message.role === 'user' ? 'var(--s-accent-soft)' : 'var(--s-surface-2)' }}>
             {message.role === 'ai' ? <RichMessage text={message.text} /> : message.text}
             {message.status === 'sending' && <p className="ds-sub" role="status">Отправляется…</p>}
-            {message.status === 'failed' && <button type="button" className="ds-chip"
-              style={{ marginTop: 6 }} disabled={busy} onClick={() => void send(message.text, message.id)}>
-              Не отправлено · Повторить
-            </button>}
+            {message.status === 'failed' && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+                gap: 7, marginTop: 6 }}>
+                <span className="ds-caption" style={{ color: 'var(--s-danger)' }}>Не отправлено</span>
+                <button type="button" aria-label="Отправить сообщение повторно"
+                  title="Повторить отправку" disabled={busy}
+                  onClick={() => void send(message.text, message.id)}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 32, height: 32, flexShrink: 0, padding: 0,
+                    borderRadius: '50%', border: '1px solid var(--s-line)',
+                    background: 'var(--s-surface-2)', color: 'var(--s-accent)',
+                    cursor: busy ? 'not-allowed' : 'pointer',
+                    opacity: busy ? 0.5 : 1 }}>
+                  <RotateCw size={16} strokeWidth={2} aria-hidden="true" />
+                </button>
+              </div>
+            )}
             {message.booking_url && <div style={{ marginTop: 8 }}><Link className="ds-accent" to={message.booking_url}>Открыть запись</Link></div>}
           </div>
         </div>)}
