@@ -22,6 +22,7 @@ class CatalogMatchingTests(unittest.TestCase):
                     SimpleNamespace(id=3, name="Маникюр", description="", sort_order=1)]
         self.assertEqual(rank_services(services, "хочу подстричься")[0][0].id, 2)
         self.assertGreater(score_service("маникюр", "Маникюр"), 0.9)
+        self.assertEqual(rank_services(services, "маникур")[0][0].id, 3)
         self.assertEqual(rank_services(services, "ремонт компьютера"), [])
         self.assertIn("мойка", normalized_tokens("Помывка шин"))
 
