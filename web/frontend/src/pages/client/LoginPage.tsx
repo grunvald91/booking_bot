@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Phone, Send } from 'lucide-react'
-import { api } from '../../api/client'
+import { api, type TelegramLoginPayload } from '../../api/client'
+import { errorMessage, saveLogin } from '../../authUtils'
 import { ClientShell } from '../../components/ClientShell'
 import { EmailAuthForm } from '../../components/EmailAuthForm'
 
@@ -14,12 +15,49 @@ export function LoginPage() {
   const [error, setError] = useState('')
   const [codeSentVia, setCodeSentVia] = useState<'telegram' | 'fallback'>('telegram')
   const codeRefs = useRef<(HTMLInputElement | null)[]>([])
+  const telegramWidgetRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (mode === 'code' && codeRefs.current[0]) {
       codeRefs.current[0]?.focus()
     }
   }, [mode])
+
+  useEffect(() => {
+    if (mode !== 'phone' || !telegramWidgetRef.current) return
+    const host = telegramWidgetRef.current
+    const callbackWindow = window as Window & {
+      servgoTelegramWidgetAuth?: (data: TelegramLoginPayload) => void
+    }
+    let active = true
+    callbackWindow.servgoTelegramWidgetAuth = (data) => {
+      setLoading(true)
+      setError('')
+      void api.telegramLogin(data)
+        .then(result => {
+          if (!active) return
+          saveLogin(result)
+          navigate(result.role === 'client' ? '/my' : '/admin', { replace: true })
+        })
+        .catch(err => { if (active) setError(errorMessage(err)) })
+        .finally(() => { if (active) setLoading(false) })
+    }
+    const script = document.createElement('script')
+    script.async = true
+    script.src = 'https://telegram.org/js/telegram-widget.js?22'
+    script.setAttribute('data-telegram-login', 'Sochiservice_bot')
+    script.setAttribute('data-size', 'large')
+    script.setAttribute('data-onauth', 'window.servgoTelegramWidgetAuth(user)')
+    script.onerror = () => {
+      if (active) setError('Не удалось загрузить вход через Telegram. Попробуйте вход по email.')
+    }
+    host.appendChild(script)
+    return () => {
+      active = false
+      script.remove()
+      delete callbackWindow.servgoTelegramWidgetAuth
+    }
+  }, [mode, navigate])
 
   const handleSendCode = async () => {
     if (!phone) return
@@ -29,8 +67,8 @@ export function LoginPage() {
       const res = await api.loginPhone(phone)
       setCodeSentVia(res.fallback ? 'fallback' : 'telegram')
       setMode('code')
-    } catch {
-      setError('Не удалось отправить код. Проверьте номер.')
+    } catch (err) {
+      setError(errorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -55,13 +93,10 @@ export function LoginPage() {
         setError('')
         try {
           const res = await api.verifyCode(phone, fullCode)
-          localStorage.setItem('token', res.token)
-          localStorage.setItem('userRole', res.role)
-          localStorage.setItem('userName', res.user.full_name)
-          sessionStorage.removeItem('servgoExplicitLogout')
+          saveLogin(res)
           navigate(res.role === 'admin' || res.role === 'owner' ? '/admin' : '/')
-        } catch {
-          setError('Неверный код. Попробуйте снова.')
+        } catch (err) {
+          setError(errorMessage(err))
           setCode(['', '', '', '', '', ''])
           codeRefs.current[0]?.focus()
         } finally {
@@ -78,8 +113,7 @@ export function LoginPage() {
   }
 
   const handleTelegramLogin = () => {
-    sessionStorage.removeItem('servgoExplicitLogout')
-    window.open('https://t.me/Sochiservice_bot?start=login', '_blank')
+    window.open('https://t.me/Sochiservice_bot', '_blank', 'noopener,noreferrer')
   }
 
   return (
@@ -89,14 +123,17 @@ export function LoginPage() {
         <p className="ds-hint" style={{ margin: '16px 0' }}>Для аккаунтов с привязанным Telegram доступны прежние способы входа:</p>
         {mode === 'phone' && (
           <div>
-            <button
-              onClick={handleTelegramLogin}
-              className="ds-btn ds-btn--block"
-              style={{ background: '#0088cc', color: '#fff', marginBottom: 16 }}
-            >
-              <Send size={18} />
-              Войти через Telegram
-            </button>
+            <div className="ds-card" style={{ padding: 16, marginBottom: 14, textAlign: 'center' }}>
+              <p className="ds-text" style={{ marginBottom: 12, fontWeight: 600 }}>Войти через Telegram</p>
+              <div ref={telegramWidgetRef} style={{ minHeight: 40, display: 'flex', justifyContent: 'center' }} />
+              <p className="ds-hint" style={{ marginTop: 10 }}>
+                Авторизуйтесь кнопкой Telegram выше. Простое открытие бота не выполняет вход на сайт.
+              </p>
+              <button type="button" onClick={handleTelegramLogin}
+                className="ds-btn ds-btn--ghost ds-btn--sm" style={{ marginTop: 8 }}>
+                <Send size={16} /> Открыть бота
+              </button>
+            </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '16px 0' }}>
               <div style={{ flex: 1, height: 1, background: 'var(--s-line)' }} />
@@ -133,8 +170,8 @@ export function LoginPage() {
             {error && <p className="ds-error" style={{ justifyContent: 'center', marginTop: 10 }}>{error}</p>}
 
             <p className="ds-hint" style={{ textAlign: 'center', marginTop: 14 }}>
-              Если у вас есть бизнес — войдите через Telegram или по телефону.
-              Роль администратора определится автоматически.
+              Код придёт через @Sochiservice_bot, только если этот номер уже привязан к вашему аккаунту.
+              При отсутствии кода используйте вход через Telegram выше или прежний подтверждённый email.
             </p>
           </div>
         )}
