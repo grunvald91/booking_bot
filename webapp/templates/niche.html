@@ -31,13 +31,13 @@
       "url":{{ ("https://promo.servgo.ru/" + niche.slug) | tojson }},
       "provider":{"@type":"Organization","name":"ServGo","url":"https://servgo.ru"},
       "areaServed":"RU",
-      "serviceType":"Цифровая платформа развития сервисного бизнеса"
+      "serviceType":{{ niche.meta.title | tojson }}
     }
     </script>
 </head>
 <body data-niche="{{ niche.slug }}">
 <header class="topbar">
-    <a class="brand" href="#top" aria-label="ServGo"><span class="brand-mark">SG</span><span class="brand-name">ServGo</span></a>
+    <a class="brand" href="/" aria-label="ServGo — все решения для бизнеса"><span class="brand-mark">SG</span><span class="brand-name">ServGo</span></a>
     <nav class="nav-links" aria-label="Главная навигация">
         <a href="#pains">Боли</a>
         <a href="#system">Как решаем</a>
@@ -116,7 +116,7 @@
 </section>
 
 <section class="section band-white" id="inside">
-    <div class="section-heading"><p class="eyebrow">Работает сейчас</p><h2>Что уже входит в ServGo</h2><p>Это не список обещаний. Эти части уже есть в системе или в рабочем маркетинговом контуре ServGo.</p></div>
+    <div class="section-heading"><p class="eyebrow">Возможности ServGo</p><h2>Базовая онлайн-запись и дополнительные инструменты</h2><p>Функции записи доступны в базовой части. AI-инструменты для маркетинга подключаются отдельно; доступность конкретных модулей уточняйте перед оплатой.</p></div>
     <div class="capability-grid">{% for cap in niche.capability_grid %}<div><span></span>{{ cap }}</div>{% endfor %}</div>
 </section>
 
