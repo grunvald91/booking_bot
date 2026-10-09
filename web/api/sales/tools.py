@@ -17,6 +17,7 @@ from ..rental_logic import price_quote
 from ..schemas import CreateBookingIn
 from .policy import policy_for, SalesPolicy
 from .schedule import resource_works
+from .service_match import rank_services
 
 
 class ToolArgs(BaseModel):
@@ -260,18 +261,41 @@ class ServGoTools:
                 "requires_legal_consent": bool(self.business.legal_documents_enabled),
                 "business_id": self.business.id, "cancellation_policy": self.business.cancellation_policy_text}
 
+    async def catalog_hint(self, message: str) -> str:
+        """Small, trusted catalog snapshot saves an avoidable first LLM/tool round."""
+        if not self.policy.enabled:
+            return ""
+        services = list((await self.db.execute(select(Service).where(
+            Service.business_id == self.business.id, Service.is_active.is_(True))
+            .order_by(Service.sort_order, Service.id).limit(80))).scalars())
+        matched = rank_services(services, message, max_results=5)
+        display = services[:35]
+        # Include relevant items beyond the first page without inventing an ID.
+        seen = {s.id for s in display}
+        display.extend(s for s, _ in matched if s.id not in seen)
+        catalog = [{"id": s.id, "name": s.name[:100],
+                    "additional": bool(s.is_additional),
+                    **({"price": s.price} if self.policy.show_prices else {})}
+                   for s in display]
+        possible = [{"id": s.id, "name": s.name[:100], "score": score}
+                    for s, score in matched]
+        return json.dumps({"catalog": catalog, "possibly_related": possible,
+                           "truncated": len(services) > len(display)}, ensure_ascii=False)
+
     async def execute_read(self, name: str, args: ToolArgs) -> dict:
         await self.require_tool(name)
         if name == "get_services":
             query = select(Service).where(Service.business_id == self.business.id, Service.is_active.is_(True))
-            if args.query:
-                # Search literal text, not user-supplied SQL LIKE wildcard patterns.
-                escaped = args.query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-                query = query.where(Service.name.ilike(f"%{escaped}%", escape="\\"))
-            services = (await self.db.execute(query.order_by(Service.sort_order, Service.id).limit(50))).scalars().all()
+            services = list((await self.db.execute(query.order_by(Service.sort_order, Service.id).limit(200))).scalars())
+            if args.query.strip():
+                ranked = rank_services(services, args.query.strip(), max_results=15)
+                services = [service for service, _ in ranked]
+            else:
+                services = services[:50]
             return {"services": [{"id": s.id, "name": s.name, "price": s.price if self.policy.show_prices else None,
                 "duration_minutes": s.duration_minutes, "is_additional": s.is_additional,
-                "description": (s.description or "")[:300]} for s in services]}
+                "description": (s.description or "")[:300]} for s in services],
+                "possible_matches_need_confirmation": bool(args.query.strip())}
         if name == "get_service_details":
             data = self.service_data(await self.service(args.service_id))
             if not self.policy.show_prices:
