@@ -9,11 +9,54 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="ServGo" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <title>ServGo</title>
+    <title>ServGo — онлайн-запись на услуги и инструменты для бизнеса</title>
+    <meta name="description" content="ServGo — онлайн-запись на услуги через сайт и Telegram. Для бизнеса: управление расписанием, подтверждение предоплаты, инструменты ИИ-маркетинга и учёта смен." />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <link rel="canonical" href="https://servgo.ru/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ServGo" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta property="og:url" content="https://servgo.ru/" />
+    <meta property="og:title" content="ServGo — онлайн-запись на услуги и инструменты для бизнеса" />
+    <meta property="og:description" content="Запись на услуги онлайн. Инструменты для бизнеса: расписание, уведомления, ИИ-маркетинг и учёт смен." />
+    <meta name="twitter:card" content="summary" />
+    <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Organization","name":"ServGo","url":"https://servgo.ru/","email":"grunvaldlab@gmail.com","description":"Платформа для записи на услуги и инструменты управления сервисным бизнесом."},{"@type":"WebSite","name":"ServGo","url":"https://servgo.ru/","inLanguage":"ru-RU"},{"@type":"SoftwareApplication","name":"ServGo","url":"https://servgo.ru/","applicationCategory":"BusinessApplication","operatingSystem":"Web","description":"Онлайн-запись на услуги, расписание и инструменты для сервисного бизнеса."}]}</script>
+    <style>
+      .seo-fallback{box-sizing:border-box;margin:0 auto;max-width:780px;padding:36px 20px 48px;color:#173052;font:16px/1.55 system-ui,-apple-system,Segoe UI,Arial,sans-serif}
+      .seo-fallback h1{font-size:clamp(27px,5vw,42px);line-height:1.15;margin:20px 0 14px}
+      .seo-fallback h2{font-size:22px;margin:32px 0 12px}
+      .seo-fallback p{max-width:670px}
+      .seo-fallback nav{display:flex;flex-wrap:wrap;gap:16px}
+      .seo-fallback a{color:#0f6fff}
+      .seo-fallback ul{padding-left:24px}
+      .seo-fallback .seo-brand{font-weight:800;font-size:22px;color:#102c4b;text-decoration:none}
+    </style>
     <script src="https://telegram.org/js/telegram-web-app.js" async></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Semantic content for search engines and visitors without JavaScript.
+           React replaces this fallback on mount; the interactive app is unchanged. -->
+      <main class="seo-fallback">
+        <nav aria-label="Навигация ServGo">
+          <a class="seo-brand" href="/">ServGo</a>
+          <a href="https://promo.servgo.ru/">Для бизнеса</a>
+          <a href="https://promo.servgo.ru/beauty">Салонам красоты</a>
+          <a href="https://promo.servgo.ru/banya">Баням и саунам</a>
+        </nav>
+        <h1>ServGo — онлайн-запись на услуги</h1>
+        <p>Выбирайте заведение и записывайтесь на удобное время через сайт. ServGo помогает клиентам находить свободные слоты, а компаниям — управлять расписанием и записями.</p>
+        <h2>ServGo для сервисного бизнеса</h2>
+        <p>Цифровая платформа для малого бизнеса: онлайн-запись через сайт и Telegram, уведомления, настройка предоплаты и управление расписанием. Также развиваются инструменты ИИ-маркетинга для создания контента и модуль учёта смен сотрудников.</p>
+        <ul>
+          <li>Онлайн-запись клиентов без ручного согласования времени.</li>
+          <li>Управление услугами, расписанием и уведомлениями.</li>
+          <li>Маркетинговые инструменты и решения для сотрудников.</li>
+        </ul>
+        <p>Решения для <a href="https://promo.servgo.ru/beauty">салонов красоты</a>, <a href="https://promo.servgo.ru/barbershop">барбершопов</a>, <a href="https://promo.servgo.ru/banya">бань и саун</a>, <a href="https://promo.servgo.ru/hall-rental">аренды залов</a>, <a href="https://promo.servgo.ru/psy">психологов</a> и <a href="https://promo.servgo.ru/shinomontazh">шиномонтажа</a>.</p>
+        <footer><p>Контакты: <a href="mailto:grunvaldlab@gmail.com">grunvaldlab@gmail.com</a> · <a href="tel:+79023911399">8 902 391-13-99</a></p></footer>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
