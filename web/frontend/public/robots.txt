@@ -1,0 +1,18 @@
+# ServGo main site
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin
+Disallow: /my
+Disallow: /chat
+Disallow: /login
+Disallow: /schedule
+Disallow: /analytics
+Disallow: /calendar
+Disallow: /b/
+Disallow: /book
+Disallow: /business/
+Disallow: /subscriptions
+Disallow: /legal/
+
+Sitemap: https://servgo.ru/sitemap.xml
