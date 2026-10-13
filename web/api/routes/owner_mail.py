@@ -35,7 +35,7 @@ from ..deps import get_current_user
 
 router = APIRouter(prefix="/owner-mail", tags=["owner-mail"])
 COOKIE = "servgo_owner_mail"
-ADDRESS = re.compile(r"^[^@\s<>]+@[^@\s<>]+\.[A-Za-z]{2,63}$")
+ADDRESS = re.compile(r"^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9](?:[A-Za-z0-9.\\-]*[A-Za-z0-9])?\\.[A-Za-z]{2,63}$")
 HOST = "https://mail.servgo.ru"
 
 
@@ -82,6 +82,10 @@ def db_open():
         CREATE TABLE IF NOT EXISTS deliveries (
           id TEXT PRIMARY KEY, prospect_id TEXT NOT NULL,
           status TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS direct_mail (
+          id TEXT PRIMARY KEY, email TEXT NOT NULL, subject TEXT NOT NULL,
+          body TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL
         );
     """)
     try:
