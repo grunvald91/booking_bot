@@ -487,3 +487,47 @@ def outbox(_: User = Depends(mail_owner)):
 @router.get("/permission")
 def permission(_: User = Depends(require_owner)):
     return {"allowed": True}
+
+
+def imap_message(uid: str):
+    if not re.fullmatch(r"[1-9][0-9]{0,18}", uid):
+        raise ValueError("Invalid UID")
+    user = os.getenv("SERVGO_MAIL_IMAP_USER", "")
+    password = os.getenv("SERVGO_MAIL_IMAP_PASSWORD", "")
+    if not user or not password:
+        raise ValueError("IMAP not configured")
+    with imaplib.IMAP4_SSL("mail.servgo.ru", 993, timeout=12) as imap:
+        imap.login(user, password)
+        ok, _ = imap.select("INBOX", readonly=True)
+        if ok != "OK":
+            raise ValueError("Cannot select INBOX")
+        ok, data = imap.uid("fetch", uid.encode("ascii"), "(BODY.PEEK[])")
+        if ok != "OK":
+            raise ValueError("Message not found")
+        raw = next((row[1] for row in data if isinstance(row, tuple)), None)
+        if not raw or len(raw) > 400_000:
+            raise ValueError("Message is missing or oversized")
+        msg = email.message_from_bytes(raw, policy=email.policy.default)
+        body = msg.get_body(preferencelist=("plain",))
+        text = ""
+        if body:
+            value = body.get_content()
+            if isinstance(value, str):
+                text = value[:30_000]
+        if not text and not msg.is_multipart():
+            value = msg.get_content()
+            if isinstance(value, str) and msg.get_content_type() == "text/plain":
+                text = value[:30_000]
+        return {
+            "uid": uid, "from": _mime(msg.get("From")),
+            "subject": _mime(msg.get("Subject")),
+            "date": str(msg.get("Date") or "")[:100], "body": text,
+        }
+
+
+@router.get("/api/message/{uid}")
+async def read_message(uid: str, _: User = Depends(mail_owner)):
+    try:
+        return await asyncio.to_thread(imap_message, uid)
+    except (ValueError, OSError, imaplib.IMAP4.error, KeyError):
+        raise HTTPException(404, "Письмо недоступно") from None
