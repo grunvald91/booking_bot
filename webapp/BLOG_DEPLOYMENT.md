@@ -7,6 +7,7 @@
 - `/blog/sitemap.xml` — отдельная карта блога на домене `BLOG_PUBLIC_ORIGIN`.
 - На `promo.servgo.ru` материалы также добавляются в общий `/sitemap.xml`, если `BLOG_PUBLIC_ORIGIN=https://promo.servgo.ru`.
 - Материалы редакционно хранятся в `webapp/blog_content.py`; шаблон `webapp/templates/blog.html`, стиль `webapp/static/css/blog.css`.
+- Индивидуальные SVG-обложки находятся в `webapp/static/blog/*.svg`; используются в каталоге, статьях и блоке связанных материалов. Текстовый `alt` и подпись каждой иллюстрации заданы в контенте. SVG не содержат внешних скриптов и вымышленных показателей.
 - Главная презентационная страница и страницы ниш ведут в блог.
 
 ## ВАЖНО: выбор публичного домена
@@ -39,7 +40,7 @@
 
 Файлы для точечной выкладки:
 `webapp/server.py`, `webapp/blog_content.py`, `webapp/templates/blog.html`,
-`webapp/static/css/blog.css`, `webapp/templates/landing.html`,
+`webapp/static/css/blog.css`, `webapp/static/blog/*.svg`, `webapp/templates/landing.html`,
 `webapp/templates/niche.html`.
 
 Миграций БД нет. Для новых обработчиков нужен перезапуск процесса `webapp`.
