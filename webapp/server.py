@@ -896,6 +896,56 @@ async def index_handler(request: web.Request) -> web.Response:
     return web.Response(text=html, content_type='text/html')
 
 
+
+async def blog_handler(request: web.Request) -> web.Response:
+    """Server-rendered, indexable editorial blog and individual articles."""
+    from webapp.blog_content import (
+        BLOG_ARTICLES, BLOG_ARTICLES_BY_SLUG, BLOG_CATEGORIES,
+        BLOG_PUBLIC_ORIGIN, filter_blog_articles,
+    )
+
+    slug = request.match_info.get("article_slug")
+    article = None
+    query = ""
+    topic = "all"
+    if slug is not None:
+        article = BLOG_ARTICLES_BY_SLUG.get(slug)
+        if article is None:
+            raise web.HTTPNotFound()
+        articles = []
+        # Prefer the same topic while keeping related links useful.
+        related = [
+            item for item in BLOG_ARTICLES
+            if item["slug"] != slug and item["topic"] == article["topic"]
+        ][:2]
+        if len(related) < 2:
+            related += [
+                item for item in BLOG_ARTICLES
+                if item["slug"] != slug and item not in related
+            ][:2 - len(related)]
+        canonical = f"{BLOG_PUBLIC_ORIGIN}/blog/{article['slug']}"
+    else:
+        query = request.query.get("q", "").strip()[:120]
+        requested_topic = request.query.get("topic", "")
+        topic = requested_topic if requested_topic in dict(BLOG_CATEGORIES) else "all"
+        articles = filter_blog_articles(topic, query)
+        related = []
+        canonical = f"{BLOG_PUBLIC_ORIGIN}/blog"
+
+    template = _niche_jinja_env.get_template("blog.html")
+    html = template.render(
+        origin=BLOG_PUBLIC_ORIGIN,
+        canonical=canonical,
+        article=article,
+        articles=articles,
+        related=related,
+        categories=BLOG_CATEGORIES,
+        selected_topic=topic,
+        query=query,
+    )
+    return web.Response(text=html, content_type="text/html", charset="utf-8")
+
+
 _NICHE_TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 _niche_jinja_env = jinja2.Environment(
     loader=jinja2.FileSystemLoader(_NICHE_TEMPLATES_DIR),
@@ -936,6 +986,7 @@ async def serve_niche_landing(request: web.Request) -> web.Response:
 async def sitemap_handler(request: web.Request) -> web.Response:
     """Dynamic /sitemap.xml — enumerates all niche landings."""
     from webapp.niches import list_niches
+    from webapp.blog_content import BLOG_ARTICLES, BLOG_PUBLIC_ORIGIN
     from datetime import datetime
 
     today = datetime.utcnow().strftime('%Y-%m-%d')
@@ -950,6 +1001,19 @@ async def sitemap_handler(request: web.Request) -> web.Response:
             f'  <url><loc>{base}/{slug}</loc><lastmod>{today}</lastmod>'
             f'<changefreq>weekly</changefreq><priority>0.9</priority></url>'
         )
+
+    # Sitemaps may list only canonical URLs belonging to this hostname.
+    if BLOG_PUBLIC_ORIGIN == base:
+        urls.append(
+            f'  <url><loc>{base}/blog</loc>'
+            '<changefreq>weekly</changefreq><priority>0.8</priority></url>'
+        )
+        for article in BLOG_ARTICLES:
+            urls.append(
+                f'  <url><loc>{base}/blog/{article["slug"]}</loc>'
+                f'<lastmod>{article["updated"]}</lastmod>'
+                '<changefreq>monthly</changefreq><priority>0.7</priority></url>'
+            )
 
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -3919,6 +3983,10 @@ def create_webapp() -> web.Application:
 
     # Статические файлы
     app.router.add_static('/static', static_path)
+
+    # Публичный SEO-блог: доступен без аккаунта и JavaScript.
+    app.router.add_get('/blog', blog_handler)
+    app.router.add_get('/blog/{article_slug:[a-z0-9-]+}', blog_handler)
 
     # SEO / индексация — регистрируем до catch-all /{slug}, иначе
     # serve_niche_landing поймает /sitemap.xml и /robots.txt и вернёт 404.
