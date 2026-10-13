@@ -14,6 +14,7 @@
     <meta property="og:site_name" content="ServGo">
     <meta property="og:url" content="{{ canonical }}">
     <meta property="og:image" content="{{ origin }}/static/og.png">
+    {# The PNG sharing image stays until raster OG covers exist; SVG works as on-page artwork. #}
     <meta name="twitter:card" content="summary_large_image">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
     <link rel="stylesheet" href="/static/css/landing.css?v=12">
@@ -179,22 +180,69 @@
                          alt="{{ article.image_alt }}" decoding="async" fetchpriority="high">
                     <figcaption>{{ article.image_caption }}</figcaption>
                 </figure>
+                {% if article.summary %}
+                <aside class="blog-takeaways" aria-labelledby="takeaways-title">
+                    <h2 id="takeaways-title">Коротко, если нет времени читать</h2>
+                    <ul>{% for point in article.summary %}<li>{{ point }}</li>{% endfor %}</ul>
+                </aside>
+                {% endif %}
+                {% if article.method_note %}<p class="blog-method-note">{{ article.method_note }}</p>{% endif %}
                 {% for section in article.sections %}
                     <section aria-labelledby="section-{{ loop.index }}">
                         <h2 id="section-{{ loop.index }}">{{ section.title }}</h2>
                         {% for paragraph in section.paragraphs %}<p>{{ paragraph }}</p>{% endfor %}
+                        {% if section.figure %}
+                        <figure class="blog-inline-figure">
+                            <img src="/static/blog/{{ section.figure }}" alt="{{ section.figure_alt }}"
+                                 loading="lazy" decoding="async" width="1200" height="650">
+                            <figcaption>{{ section.figure_caption }}</figcaption>
+                        </figure>
+                        {% endif %}
+                        {% if section.table %}
+                        <div class="blog-data-scroll" role="region" tabindex="0" aria-label="Таблица: {{ section.title }}">
+                            <table class="blog-data-table">
+                                <thead><tr>{% for label in section.table_headers %}<th scope="col">{{ label }}</th>{% endfor %}</tr></thead>
+                                <tbody>{% for row in section.table %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+                            </table>
+                        </div>
+                        {% endif %}
                         {% if section.bullets %}
                         <ul>{% for bullet in section.bullets %}<li>{{ bullet }}</li>{% endfor %}</ul>
+                        {% endif %}
+                        {% if section.example %}
+                        <div class="blog-example">
+                            <h3>{{ section.example_title or 'Практический пример' }}</h3>
+                            <div class="blog-example-content">{{ section.example }}</div>
+                        </div>
                         {% endif %}
                     </section>
                     {% if not loop.last %}<div class="blog-divider" aria-hidden="true"></div>{% endif %}
                 {% endfor %}
-                <p><strong>Главная мысль:</strong> удобство для клиента, ясные правила работы и регулярная проверка результата важнее количества инструментов.</p>
+                {% if article.pitfall %}
+                <aside class="blog-pitfall">
+                    <h2>Типичная ошибка</h2><p>{{ article.pitfall }}</p>
+                </aside>
+                {% endif %}
+                {% if article.today %}
+                <section class="blog-today" aria-labelledby="today-heading">
+                    <h2 id="today-heading">Что можно сделать уже сегодня</h2>
+                    <ol>{% for action in article.today %}<li>{{ action }}</li>{% endfor %}</ol>
+                </section>
+                {% endif %}
+                {% if article.sources %}
+                <section class="blog-sources" aria-labelledby="sources-heading">
+                    <h2 id="sources-heading">Полезные первоисточники</h2>
+                    <ul>{% for title,url in article.sources %}
+                        <li><a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ title }} ↗</a></li>
+                    {% endfor %}</ul>
+                </section>
+                {% endif %}
                 <a class="blog-text-link" href="/blog">← Вернуться ко всем статьям</a>
             </article>
             <aside class="blog-side" aria-label="Оглавление статьи">
                 <h2>В этой статье</h2>
                 <ol>{% for section in article.sections %}<li><a href="#section-{{ loop.index }}">{{ section.title }}</a></li>{% endfor %}</ol>
+                <p class="blog-side-small">Примеры внутри статей приведены для объяснения, а не как подтверждённые результаты клиентов.</p>
             </aside>
         </div>
         {% if related %}
@@ -215,10 +263,10 @@
         <div class="blog-wrap">
             <aside class="blog-cta" aria-label="О платформе ServGo">
                 <div><span class="blog-kicker" style="color:#AEC3FF">ServGo для бизнеса</span>
-                    <h2>Хотите применить эти идеи на практике?</h2>
-                    <p>Маркетинг и запись клиентов могут работать в одной системе.</p>
+                    <h2>{{ article.cta_title or 'Хотите применить эти идеи на практике?' }}</h2>
+                    <p>{{ article.cta_text or 'Маркетинг и запись клиентов могут работать в одной системе.' }}</p>
                 </div>
-                <a class="primary-action" href="/#launch">Узнать о ServGo <span aria-hidden="true">↗</span></a>
+                <a class="primary-action" href="{{ article.cta_href or '/#launch' }}">{{ article.cta_label or 'Узнать о ServGo' }} <span aria-hidden="true">↗</span></a>
             </aside>
         </div>
     {% endif %}
