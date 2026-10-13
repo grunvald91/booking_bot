@@ -910,10 +910,10 @@ async def blog_sitemap_handler(request: web.Request) -> web.Response:
             f'<lastmod>{article["updated"]}</lastmod></url>'
         )
     xml = (
-        '<?xml version="1.0" encoding="UTF-8"?>\\n'
-        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\\n'
-        + '\\n'.join(rows)
-        + '\\n</urlset>\\n'
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + '\n'.join(rows)
+        + '\n</urlset>\n'
     )
     return web.Response(text=xml, content_type='application/xml')
 
