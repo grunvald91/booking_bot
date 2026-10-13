@@ -44,6 +44,12 @@ def test_blog_slugs_unique_and_publication_data():
     for article in BLOG_ARTICLES:
         assert re.fullmatch(r"[a-z0-9-]+", article["slug"])
         assert article["title"] and article["description"] and article["lead"]
+        assert article["image_alt"] and article["image_caption"]
+        svg = ROOT / "webapp" / "static" / "blog" / (article["slug"] + ".svg")
+        assert svg.is_file(), f"Missing article illustration: {svg}"
+        from xml.etree import ElementTree
+        root = ElementTree.parse(svg).getroot()
+        assert root.tag.endswith("svg")
         assert article["sections"]
         for section in article["sections"]:
             assert section["title"] and section["paragraphs"]
@@ -63,6 +69,8 @@ def test_index_render_is_server_side_and_has_internal_links():
     assert 'rel="canonical" href="https://promo.servgo.ru/blog"' in html
     assert 'href="/blog/ai-marketing-for-small-business"' in html
     assert 'role="search"' in html
+    assert 'src="/static/blog/ai-marketing-for-small-business.svg"' in html
+    assert html.count('src="/static/blog/') == len(BLOG_ARTICLES)
     assert 'href="/#launch"' in html
     assert '"url": "https://promo.servgo.ru/blog"' in html
 
@@ -79,6 +87,10 @@ def test_article_pages_have_readable_content_and_valid_json_ld():
         schema = json.loads(scripts[0])
         assert schema["@type"] == "BlogPosting"
         assert schema["headline"] == article["title"]
+        assert schema["image"].endswith(article["slug"] + ".svg")
+        assert f'src="/static/blog/{article["slug"]}.svg"' in html
+        assert f'alt="{article["image_alt"]}"' in html
+        assert "<figcaption>" + article["image_caption"] + "</figcaption>" in html
         assert schema["mainEntityOfPage"]["@id"].endswith(article["slug"])
 
 
