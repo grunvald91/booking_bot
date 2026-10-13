@@ -176,7 +176,6 @@ class ProspectData(BaseModel):
     email: str = Field(min_length=5, max_length=250)
     website: str = Field(default="", max_length=500)
     notes: str = Field(default="", max_length=2000)
-    consent: str = Field(default="", max_length=1000)
 
 
 @router.get("/api/status")
@@ -214,7 +213,7 @@ def add_prospect(value: ProspectData, _: User = Depends(mail_owner)):
         try:
             db.execute("INSERT INTO prospects VALUES (?,?,?,?,?,?,0)",
                        (item_id, value.company.strip(), address,
-                        value.website.strip(), value.notes.strip(), value.consent.strip()))
+                        value.website.strip(), value.notes.strip(), ""))
         except sqlite3.IntegrityError:
             raise HTTPException(409, "Адрес уже сохранён") from None
     return {"id": item_id}
@@ -371,7 +370,6 @@ async def generate_draft(prospect_id: str, _: User = Depends(mail_owner)):
 class Approval(BaseModel):
     subject: str = Field(min_length=3, max_length=180)
     body: str = Field(min_length=30, max_length=4000)
-    consent: str = Field(min_length=6, max_length=1000)
 
 
 @router.post("/api/approve/{prospect_id}")
@@ -381,7 +379,6 @@ def approve_draft(prospect_id: str, data: Approval, _: User = Depends(mail_owner
         d = db.execute("SELECT * FROM drafts WHERE prospect_id=?", (prospect_id,)).fetchone()
         if not p or not d or d["state"] != "draft" or p["excluded"]:
             raise HTTPException(409, "Нет доступного черновика")
-        db.execute("UPDATE prospects SET consent=? WHERE id=?", (data.consent.strip(), prospect_id))
         db.execute("UPDATE drafts SET subject=?,body=?,reviewed=1 WHERE prospect_id=?",
                    (data.subject.strip(), data.body.strip(), prospect_id))
     return {"approved": True}
@@ -396,7 +393,7 @@ def send_draft(prospect_id: str, _: User = Depends(mail_owner)):
         db.execute("BEGIN IMMEDIATE")
         p = db.execute("SELECT * FROM prospects WHERE id=?", (prospect_id,)).fetchone()
         d = db.execute("SELECT * FROM drafts WHERE prospect_id=?", (prospect_id,)).fetchone()
-        if not p or not d or p["excluded"] or not p["consent"] or not d["reviewed"] or d["state"] != "draft":
+        if not p or not d or p["excluded"] or not d["reviewed"] or d["state"] != "draft":
             raise HTTPException(409, "Отправка не разрешена или уже выполнялась")
         since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         used = db.execute("SELECT count(*) FROM deliveries WHERE created_at >= ?", (since,)).fetchone()[0]
