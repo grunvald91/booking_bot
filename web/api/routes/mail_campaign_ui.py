@@ -24,3 +24,20 @@ def campaign_dashboard(_=Depends(mail_owner)):
             ),
         },
     )
+
+
+@router.get("/api/mailbox-dashboard")
+def mailbox_dashboard(_=Depends(mail_owner)):
+    return FileResponse(
+        Path(__file__).with_name("owner_mail_ui.html"),
+        media_type="text/html",
+        headers={
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+            "Content-Security-Policy": (
+                "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline'; connect-src 'self'; "
+                "frame-ancestors 'none'; base-uri 'none'"
+            ),
+        },
+    )
