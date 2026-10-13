@@ -1,0 +1,389 @@
+"""ServGo platform-owner mail workspace; protected by the booking login."""
+import asyncio
+import email
+import email.policy
+import imaplib
+import json
+import os
+import re
+import secrets
+import smtplib
+import sqlite3
+from datetime import datetime, timedelta, timezone
+from email.header import decode_header, make_header
+from email.message import EmailMessage
+from email.utils import formataddr
+from pathlib import Path
+from uuid import uuid4
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse, RedirectResponse
+from jose import JWTError, jwt
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..database import User, get_db
+from ..deps import get_current_user
+
+router = APIRouter(prefix="/owner-mail", tags=["owner-mail"])
+COOKIE = "servgo_owner_mail"
+ADDRESS = re.compile(r"^[^@\s<>]+@[^@\s<>]+\.[A-Za-z]{2,63}$")
+HOST = "https://mail.servgo.ru"
+
+
+def secret():
+    key = os.getenv("SERVGO_MAIL_SESSION_SECRET", "")
+    if len(key) < 32:
+        raise HTTPException(503, "Настройка почтового кабинета не завершена")
+    return key
+
+
+def owner(user):
+    expected_user = os.getenv("SERVGO_MAIL_OWNER_USER_ID", "")
+    expected_tg = os.getenv("SERVGO_MAIL_OWNER_TELEGRAM_ID", "")
+    return bool((expected_user and str(user.id) == expected_user) or
+                (expected_tg and str(user.telegram_id) == expected_tg))
+
+
+def require_owner(user: User = Depends(get_current_user)):
+    if not owner(user):
+        raise HTTPException(403, "Только владелец платформы")
+    return user
+
+
+def db_open():
+    root = Path(os.getenv("SERVGO_MAIL_DATA_DIR", "/var/lib/servgo-owner-mail"))
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if root.stat().st_mode & 0o077:
+        raise HTTPException(503, "Небезопасные права каталога")
+    db = sqlite3.connect(root / "mail.sqlite", timeout=15)
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA busy_timeout=15000")
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS claims (token_id TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS prospects (
+          id TEXT PRIMARY KEY, company TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
+          website TEXT NOT NULL, notes TEXT NOT NULL,
+          consent TEXT NOT NULL DEFAULT '', excluded INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS drafts (
+          prospect_id TEXT PRIMARY KEY, subject TEXT NOT NULL, body TEXT NOT NULL,
+          reviewed INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'draft'
+        );
+        CREATE TABLE IF NOT EXISTS deliveries (
+          id TEXT PRIMARY KEY, prospect_id TEXT NOT NULL,
+          status TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+    """)
+    return db
+
+
+def sign(user_id, kind, seconds, **extra):
+    return jwt.encode(
+        {"sub": str(user_id), "kind": kind,
+         "exp": datetime.now(timezone.utc) + timedelta(seconds=seconds), **extra},
+        secret(), algorithm="HS256")
+
+
+def verify(token, kind):
+    try:
+        value = jwt.decode(token, secret(), algorithms=["HS256"])
+        if value.get("kind") != kind:
+            raise ValueError("Bad purpose")
+        return value
+    except (JWTError, ValueError, TypeError):
+        raise HTTPException(401, "Повторите вход через ServGo") from None
+
+
+async def mail_owner(request: Request, session: AsyncSession = Depends(get_db)):
+    raw = request.cookies.get(COOKIE)
+    if not raw:
+        raise HTTPException(401, "Сначала войдите в ServGo")
+    token = verify(raw, "mail-session")
+    try:
+        user_id = int(token["sub"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(401, "Неверная сессия") from None
+    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not user or not owner(user):
+        raise HTTPException(403, "Нет доступа")
+    if request.method not in {"GET", "HEAD"}:
+        if request.headers.get("origin") != HOST:
+            raise HTTPException(403, "Недопустимое происхождение запроса")
+    return user
+
+
+@router.post("/entry")
+def entry(user: User = Depends(require_owner)):
+    ticket = sign(user.id, "mail-entry", 60, jti=uuid4().hex)
+    return {"url": HOST + "/claim?ticket=" + ticket}
+
+
+@router.get("/claim")
+async def claim(ticket: str, session: AsyncSession = Depends(get_db)):
+    data = verify(ticket, "mail-entry")
+    try:
+        user_id = int(data["sub"])
+        jti = str(data["jti"])
+    except (KeyError, ValueError, TypeError):
+        raise HTTPException(401, "Неверная ссылка") from None
+    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not user or not owner(user):
+        raise HTTPException(403, "Нет доступа")
+    with db_open() as db:
+        try:
+            db.execute("INSERT INTO claims VALUES (?)", (jti,))
+        except sqlite3.IntegrityError:
+            raise HTTPException(401, "Ссылка использована") from None
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie(COOKIE, sign(user.id, "mail-session", 28800),
+                        secure=True, httponly=True, samesite="strict", max_age=28800)
+    response.headers.update({"Referrer-Policy": "no-referrer", "Cache-Control": "no-store"})
+    return response
+
+
+@router.get("/app")
+def app_page(_: User = Depends(mail_owner)):
+    path = Path(__file__).resolve().parent / "owner_mail_ui.html"
+    return FileResponse(path, media_type="text/html", headers={
+        "Cache-Control": "no-store",
+        "Content-Security-Policy": (
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; connect-src 'self'; "
+            "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+        ),
+    })
+
+
+class ProspectData(BaseModel):
+    company: str = Field(min_length=2, max_length=150)
+    email: str = Field(min_length=5, max_length=250)
+    website: str = Field(default="", max_length=500)
+    notes: str = Field(default="", max_length=2000)
+    consent: str = Field(default="", max_length=1000)
+
+
+@router.get("/api/status")
+def status(_: User = Depends(mail_owner)):
+    return {
+        "owner": True, "inbox_ready": bool(os.getenv("SERVGO_MAIL_IMAP_PASSWORD")),
+        "smtp_ready": bool(os.getenv("SERVGO_MAIL_FROM")),
+        "ai_ready": bool(os.getenv("CLAUDEHUB_API_KEY") or os.getenv("XAI_API_KEY")),
+    }
+
+
+@router.get("/api/prospects")
+def prospects(_: User = Depends(mail_owner)):
+    with db_open() as db:
+        return [dict(x) for x in db.execute("""
+            SELECT p.*, d.subject, d.body, d.reviewed, d.state
+            FROM prospects p LEFT JOIN drafts d ON d.prospect_id=p.id
+            ORDER BY p.rowid DESC LIMIT 500
+        """).fetchall()]
+
+
+@router.post("/api/prospects")
+def add_prospect(value: ProspectData, _: User = Depends(mail_owner)):
+    address = value.email.strip().lower()
+    if not ADDRESS.fullmatch(address):
+        raise HTTPException(422, "Проверьте email")
+    if value.website:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(value.website)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.username
+                or parsed.password or parsed.port not in (None, 443)):
+            raise HTTPException(422, "Нужна ссылка HTTPS")
+    item_id = uuid4().hex
+    with db_open() as db:
+        try:
+            db.execute("INSERT INTO prospects VALUES (?,?,?,?,?,?,0)",
+                       (item_id, value.company.strip(), address,
+                        value.website.strip(), value.notes.strip(), value.consent.strip()))
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "Адрес уже сохранён") from None
+    return {"id": item_id}
+
+
+async def hub(prompt):
+    key = os.getenv("CLAUDEHUB_API_KEY") or os.getenv("XAI_API_KEY")
+    if not key:
+        raise HTTPException(503, "Ключ ClaudeHub не подключён")
+    body = {
+        "model": os.getenv("SERVGO_MAIL_AI_MODEL", "grok-4.7"),
+        "messages": [{"role": "system", "content": "Отвечай только JSON без пояснений."},
+                     {"role": "user", "content": prompt}],
+        "max_completion_tokens": 1200,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            result = await client.post("https://api.claudehub.fun/v1/chat/completions",
+                                       headers={"Authorization": "Bearer " + key}, json=body)
+            result.raise_for_status()
+        raw = result.json()["choices"][0]["message"]["content"].strip()
+        if raw.startswith(chr(96) * 3):
+            raw = raw.strip(chr(96) + "json\n ")
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            raise ValueError("Not JSON object")
+        return parsed
+    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
+        raise HTTPException(502, "Модель не вернула корректный результат") from None
+
+
+@router.post("/api/draft/{prospect_id}")
+async def generate_draft(prospect_id: str, _: User = Depends(mail_owner)):
+    with db_open() as db:
+        p = db.execute("SELECT * FROM prospects WHERE id=?", (prospect_id,)).fetchone()
+        current = db.execute("SELECT * FROM drafts WHERE prospect_id=?", (prospect_id,)).fetchone()
+    if not p or p["excluded"] or (current and current["state"] != "draft"):
+        raise HTTPException(409, "Компания недоступна для нового черновика")
+    # The model receives only the provided notes: no invented web research.
+    context = json.dumps({
+        "company": p["company"], "website": p["website"],
+        "notes_from_owner_unverified": p["notes"],
+        "offer": "ServGo: онлайн-запись через сайт и Telegram, уведомления, ИИ-маркетинг",
+        "link": "https://servgo.ru",
+    }, ensure_ascii=False)
+    proposal = await hub(
+        "Подготовь персональное B2B-предложение на русском языке для компании. "
+        "Если сведений недостаточно, не придумывай ни отзывы, ни проблемы, ни цифры. "
+        "Коротко, без давления, до 1400 символов; одна ясная ссылка. "
+        'Только JSON {"subject":"...","body":"..."}.\n' + context
+    )
+    subject, body = proposal.get("subject"), proposal.get("body")
+    if not isinstance(subject, str) or not isinstance(body, str) or not (
+        3 <= len(subject) <= 180 and 30 <= len(body) <= 4000
+    ):
+        raise HTTPException(502, "Некорректный черновик")
+    critic = await hub(
+        'Проверь письмо на существенные недостоверные факты и выдуманные результаты. '
+        'Только JSON {"critical":true/false,"reason":"..."}.\n'
+        + context + "\n" + json.dumps(proposal, ensure_ascii=False)
+    )
+    critical = bool(critic.get("critical"))
+    with db_open() as db:
+        db.execute("""INSERT INTO drafts VALUES (?,?,?,0,'draft')
+            ON CONFLICT(prospect_id) DO UPDATE SET subject=excluded.subject,
+            body=excluded.body,reviewed=0,state='draft'""",
+            (prospect_id, subject, body))
+    return {"subject": subject, "body": body,
+            "critic_warning": str(critic.get("reason", ""))[:500] if critical else "",
+            "facts_verified": False, "sent": False}
+
+
+class Approval(BaseModel):
+    subject: str = Field(min_length=3, max_length=180)
+    body: str = Field(min_length=30, max_length=4000)
+    consent: str = Field(min_length=6, max_length=1000)
+
+
+@router.post("/api/approve/{prospect_id}")
+def approve_draft(prospect_id: str, data: Approval, _: User = Depends(mail_owner)):
+    with db_open() as db:
+        p = db.execute("SELECT * FROM prospects WHERE id=?", (prospect_id,)).fetchone()
+        d = db.execute("SELECT * FROM drafts WHERE prospect_id=?", (prospect_id,)).fetchone()
+        if not p or not d or d["state"] != "draft" or p["excluded"]:
+            raise HTTPException(409, "Нет доступного черновика")
+        db.execute("UPDATE prospects SET consent=? WHERE id=?", (data.consent.strip(), prospect_id))
+        db.execute("UPDATE drafts SET subject=?,body=?,reviewed=1 WHERE prospect_id=?",
+                   (data.subject.strip(), data.body.strip(), prospect_id))
+    return {"approved": True}
+
+
+@router.post("/api/send/{prospect_id}")
+def send_draft(prospect_id: str, _: User = Depends(mail_owner)):
+    sender = os.getenv("SERVGO_MAIL_FROM", "")
+    if not ADDRESS.fullmatch(sender):
+        raise HTTPException(503, "Не настроен исходящий адрес")
+    with db_open() as db:
+        db.execute("BEGIN IMMEDIATE")
+        p = db.execute("SELECT * FROM prospects WHERE id=?", (prospect_id,)).fetchone()
+        d = db.execute("SELECT * FROM drafts WHERE prospect_id=?", (prospect_id,)).fetchone()
+        if not p or not d or p["excluded"] or not p["consent"] or not d["reviewed"] or d["state"] != "draft":
+            raise HTTPException(409, "Отправка не разрешена или уже выполнялась")
+        since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        used = db.execute("SELECT count(*) FROM deliveries WHERE created_at >= ?", (since,)).fetchone()[0]
+        if used >= 20:
+            raise HTTPException(429, "Лимит 20 писем за 24 часа")
+        delivery_id = uuid4().hex
+        db.execute("UPDATE drafts SET state='sending' WHERE prospect_id=?", (prospect_id,))
+        db.execute("INSERT INTO deliveries VALUES (?,?,?,?)",
+                   (delivery_id, prospect_id, "delivery_unknown", datetime.now(timezone.utc).isoformat()))
+        recipient, subject, body = p["email"], d["subject"], d["body"]
+    message = EmailMessage()
+    message["From"] = formataddr(("ServGo", sender))
+    message["To"], message["Subject"] = recipient, subject
+    message["Message-ID"] = "<" + delivery_id + "@servgo.ru>"
+    message.set_content(body)
+    try:
+        with smtplib.SMTP("127.0.0.1", 25, timeout=15) as smtp:
+            refusal = smtp.send_message(message, from_addr=sender, to_addrs=[recipient])
+            if refusal:
+                raise smtplib.SMTPRecipientsRefused(refusal)
+    except (OSError, smtplib.SMTPException):
+        raise HTTPException(503, "Статус отправки неизвестен, повторение заблокировано") from None
+    with db_open() as db:
+        db.execute("UPDATE deliveries SET status='smtp_accepted' WHERE id=?", (delivery_id,))
+        db.execute("UPDATE drafts SET state='smtp_accepted' WHERE prospect_id=?", (prospect_id,))
+    return {"status": "smtp_accepted", "delivered": False}
+
+
+@router.post("/api/exclude/{prospect_id}")
+def exclude(prospect_id: str, _: User = Depends(mail_owner)):
+    with db_open() as db:
+        db.execute("UPDATE prospects SET excluded=1 WHERE id=?", (prospect_id,))
+    return {"excluded": True}
+
+
+def _mime(value):
+    try:
+        return str(make_header(decode_header(str(value or ""))))[:300]
+    except (UnicodeError, ValueError):
+        return ""
+
+
+def imap_headers():
+    user = os.getenv("SERVGO_MAIL_IMAP_USER", "")
+    password = os.getenv("SERVGO_MAIL_IMAP_PASSWORD", "")
+    if not user or not password:
+        raise ValueError("IMAP credentials not configured")
+    with imaplib.IMAP4_SSL("mail.servgo.ru", 993, timeout=12) as imap:
+        imap.login(user, password)
+        ok, _ = imap.select("INBOX", readonly=True)
+        if ok != "OK":
+            raise ValueError("Mailbox unavailable")
+        ok, result = imap.uid("search", None, "ALL")
+        if ok != "OK":
+            return []
+        items = []
+        for uid in result[0].split()[-50:][::-1]:
+            ok, parts = imap.uid("fetch", uid, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])")
+            if ok != "OK":
+                continue
+            content = next((item[1] for item in parts if isinstance(item, tuple)), None)
+            if content:
+                head = email.message_from_bytes(content, policy=email.policy.default)
+                items.append({"uid": uid.decode(), "from": _mime(head.get("From")),
+                              "subject": _mime(head.get("Subject")),
+                              "date": str(head.get("Date") or "")[:100]})
+        return items
+
+
+@router.get("/api/inbox")
+async def inbox(_: User = Depends(mail_owner)):
+    try:
+        return await asyncio.to_thread(imap_headers)
+    except (ValueError, OSError, imaplib.IMAP4.error):
+        raise HTTPException(503, "Входящие недоступны. Нужен работающий IMAP") from None
+
+
+@router.get("/api/outbox")
+def outbox(_: User = Depends(mail_owner)):
+    with db_open() as db:
+        return [dict(x) for x in db.execute("""
+            SELECT l.status,l.created_at,p.company,p.email
+            FROM deliveries l JOIN prospects p ON p.id=l.prospect_id
+            ORDER BY l.created_at DESC LIMIT 100
+        """).fetchall()]
