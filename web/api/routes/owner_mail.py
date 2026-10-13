@@ -164,7 +164,7 @@ async def claim(ticket: str, session: AsyncSession = Depends(get_db)):
 
 @router.get("/app")
 def app_page(_: User = Depends(mail_owner)):
-    path = Path(__file__).resolve().parent / "owner_mail_ui.html"
+    path = Path(__file__).resolve().parent / "mail_campaign_dashboard.html"
     return FileResponse(path, media_type="text/html", headers={
         "Cache-Control": "no-store",
         "Content-Security-Policy": (
