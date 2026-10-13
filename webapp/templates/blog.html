@@ -25,6 +25,7 @@
         "@type": "BlogPosting",
         "headline": {{ article.title | tojson }},
         "description": {{ article.description | tojson }},
+        "image": {{ (origin + "/static/blog/" + article.slug + ".svg") | tojson }},
         "mainEntityOfPage": {"@type":"WebPage","@id":{{ canonical | tojson }}},
         "dateModified": {{ article.updated | tojson }},
         "author": {"@type":"Organization","name":"ServGo","url":{{ origin | tojson }}},
@@ -114,19 +115,18 @@
                             <p>{{ featured.description }}</p>
                             <span class="blog-text-link">Читать статью <span aria-hidden="true">→</span></span>
                         </div>
-                        <div class="blog-feature-art art-{{ featured.visual }}" aria-hidden="true">
-                            <div class="blog-art-panel">
-                                <span class="art-line"></span><span class="art-line"></span><span class="art-line"></span>
-                                <span class="art-action"></span>
-                            </div>
+                        <div class="blog-feature-art">
+                            <img src="/static/blog/{{ featured.slug }}.svg" width="1200" height="650"
+                                 alt="{{ featured.image_alt }}" loading="eager" decoding="async">
                         </div>
                     </a>
                     {% if articles | length > 1 %}
                     <div class="blog-cards" aria-label="Другие статьи">
                         {% for post in articles[1:] %}
                         <a class="blog-card" href="/blog/{{ post.slug }}">
-                            <div class="blog-card-art art-{{ post.visual }}" aria-hidden="true">
-                                <span class="art-symbol">{{ '✦' if post.topic == 'marketing' else ('✓' if post.topic == 'booking' else '↗') }}</span>
+                            <div class="blog-card-art">
+                                <img src="/static/blog/{{ post.slug }}.svg" width="1200" height="650"
+                                     alt="{{ post.image_alt }}" loading="lazy" decoding="async">
                             </div>
                             <div class="blog-card-body">
                                 <span class="blog-kicker">{{ post.category }}</span>
@@ -174,6 +174,11 @@
         </header>
         <div class="blog-wrap blog-reading-layout">
             <article class="blog-article-body" aria-label="{{ article.title }}">
+                <figure class="blog-article-figure">
+                    <img src="/static/blog/{{ article.slug }}.svg" width="1200" height="650"
+                         alt="{{ article.image_alt }}" decoding="async" fetchpriority="high">
+                    <figcaption>{{ article.image_caption }}</figcaption>
+                </figure>
                 {% for section in article.sections %}
                     <section aria-labelledby="section-{{ loop.index }}">
                         <h2 id="section-{{ loop.index }}">{{ section.title }}</h2>
@@ -199,7 +204,7 @@
                 <div class="blog-cards">
                 {% for post in related %}
                     <a class="blog-card" href="/blog/{{ post.slug }}">
-                        <div class="blog-card-art art-{{ post.visual }}" aria-hidden="true"><span class="art-symbol">{{ '✦' if post.topic == 'marketing' else ('✓' if post.topic == 'booking' else '↗') }}</span></div>
+                        <div class="blog-card-art"><img src="/static/blog/{{ post.slug }}.svg" width="1200" height="650" alt="{{ post.image_alt }}" loading="lazy" decoding="async"></div>
                         <div class="blog-card-body"><span class="blog-kicker">{{ post.category }}</span><h3>{{ post.title }}</h3><p>{{ post.description }}</p><span class="blog-text-link">Читать <span aria-hidden="true">→</span></span></div>
                     </a>
                 {% endfor %}
