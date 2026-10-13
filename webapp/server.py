@@ -897,6 +897,27 @@ async def index_handler(request: web.Request) -> web.Response:
 
 
 
+async def blog_sitemap_handler(request: web.Request) -> web.Response:
+    """Dedicated sitemap, including when the blog is served on servgo.ru."""
+    from xml.sax.saxutils import escape
+    from webapp.blog_content import BLOG_ARTICLES, BLOG_PUBLIC_ORIGIN
+
+    base = escape(BLOG_PUBLIC_ORIGIN)
+    rows = [f'<url><loc>{base}/blog</loc></url>']
+    for article in BLOG_ARTICLES:
+        rows.append(
+            f'<url><loc>{base}/blog/{article["slug"]}</loc>'
+            f'<lastmod>{article["updated"]}</lastmod></url>'
+        )
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\\n'
+        + '\\n'.join(rows)
+        + '\\n</urlset>\\n'
+    )
+    return web.Response(text=xml, content_type='application/xml')
+
+
 async def blog_handler(request: web.Request) -> web.Response:
     """Server-rendered, indexable editorial blog and individual articles."""
     from webapp.blog_content import (
@@ -3985,6 +4006,7 @@ def create_webapp() -> web.Application:
     app.router.add_static('/static', static_path)
 
     # Публичный SEO-блог: доступен без аккаунта и JavaScript.
+    app.router.add_get('/blog/sitemap.xml', blog_sitemap_handler)
     app.router.add_get('/blog', blog_handler)
     app.router.add_get('/blog/{article_slug:[a-z0-9-]+}', blog_handler)
 
