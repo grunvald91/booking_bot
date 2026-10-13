@@ -64,7 +64,7 @@ def test_index_render_is_server_side_and_has_internal_links():
     assert 'href="/blog/ai-marketing-for-small-business"' in html
     assert 'role="search"' in html
     assert 'href="/#launch"' in html
-    assert '"/blog' not in html  # JSON-LD absolute URLs only
+    assert '"url": "https://promo.servgo.ru/blog"' in html
 
 
 def test_article_pages_have_readable_content_and_valid_json_ld():
