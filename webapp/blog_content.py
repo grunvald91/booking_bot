@@ -202,6 +202,14 @@ BLOG_ARTICLES = (
     },
 )
 
+# Keep the simple original content as a fallback and layer on reviewed,
+# useful editorial versions without changing public slugs.
+from webapp.blog_editorial import EDITORIAL_UPDATES
+
+BLOG_ARTICLES = tuple(
+    {**article, **EDITORIAL_UPDATES.get(article["slug"], {})}
+    for article in BLOG_ARTICLES
+)
 BLOG_ARTICLES_BY_SLUG = {article["slug"]: article for article in BLOG_ARTICLES}
 
 
