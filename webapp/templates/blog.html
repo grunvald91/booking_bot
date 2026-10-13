@@ -198,6 +198,17 @@
                             <figcaption>{{ section.figure_caption }}</figcaption>
                         </figure>
                         {% endif %}
+                        {% if section.gallery %}
+                        <div class="blog-demo-gallery" role="group" aria-label="Скриншоты демонстрационного интерфейса ServGo: {{ section.title }}">
+                            {% for shot in section.gallery %}
+                            <figure class="blog-demo-shot">
+                                <img src="/static/blog/{{ shot.src }}" alt="{{ shot.alt }}"
+                                     loading="lazy" decoding="async" width="360" height="737">
+                                <figcaption>{{ shot.caption }}</figcaption>
+                            </figure>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
                         {% if section.table %}
                         <div class="blog-data-scroll" role="region" tabindex="0" aria-label="Таблица: {{ section.title }}">
                             <table class="blog-data-table">
