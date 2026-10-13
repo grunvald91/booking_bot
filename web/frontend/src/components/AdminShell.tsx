@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { OwnerMailEntry } from './OwnerMailEntry'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, Clock, Scissors, Users, Settings, Moon, Sun, LogOut } from 'lucide-react'
@@ -48,6 +49,7 @@ export function AdminShell({
           {subtitle != null && <div className="ds-sub" style={{ marginTop: 2 }}>{subtitle}</div>}
         </div>
         {headerExtra}
+        <OwnerMailEntry />
         <button className="ds-icon-btn bordered" onClick={toggleTheme} aria-label="Тема">
           {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
         </button>
