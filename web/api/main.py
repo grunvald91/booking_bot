@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .routes import (
     client, admin, auth, ai, subscriptions, notifications, owner_mail,
     mail_campaign_api, mail_campaign_review, mail_campaign_analytics,
-    mail_campaign_unsubscribe,
+    mail_campaign_unsubscribe, mail_campaign_ui,
 )
 from . import rental
 
@@ -33,6 +33,7 @@ app.include_router(mail_campaign_api.router)
 app.include_router(mail_campaign_review.router)
 app.include_router(mail_campaign_analytics.router)
 app.include_router(mail_campaign_unsubscribe.router)
+app.include_router(mail_campaign_ui.router)
 app.include_router(client.router, tags=["client"])
 app.include_router(rental.router, tags=["rental"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
