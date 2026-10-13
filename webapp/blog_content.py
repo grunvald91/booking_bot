@@ -18,6 +18,8 @@ BLOG_CATEGORIES = (
 BLOG_ARTICLES = (
     {
         "slug": "ai-marketing-for-small-business",
+        "image_alt": "Редакционный план публикаций и три этапа работы с ИИ: идея, черновик, публикация.",
+        "image_caption": "Планирование контента от идеи до публикации.",
         "topic": "marketing",
         "category": "ИИ и маркетинг",
         "visual": "ai",
@@ -63,6 +65,8 @@ BLOG_ARTICLES = (
     },
     {
         "slug": "online-booking-without-missed-messages",
+        "image_alt": "Сравнение разрозненных сообщений клиентов и единого календаря свободного времени.",
+        "image_caption": "Все записи — в одном расписании.",
         "topic": "booking",
         "category": "Онлайн-запись",
         "visual": "calendar",
@@ -108,6 +112,8 @@ BLOG_ARTICLES = (
     },
     {
         "slug": "fill-empty-slots-in-beauty-salon",
+        "image_alt": "Интерьер салона красоты и открытые интервалы для записи клиентов.",
+        "image_caption": "Свободные окна, которые клиент легко найдёт.",
         "topic": "growth",
         "category": "Рост бизнеса",
         "visual": "growth",
@@ -153,6 +159,8 @@ BLOG_ARTICLES = (
     },
     {
         "slug": "measure-marketing-without-vanity-metrics",
+        "image_alt": "Этапы пути клиента: просмотры, переходы, заявки и подтверждённые записи.",
+        "image_caption": "От просмотров к реальным обращениям и записям.",
         "topic": "marketing",
         "category": "ИИ и маркетинг",
         "visual": "metrics",
