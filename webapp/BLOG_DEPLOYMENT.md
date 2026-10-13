@@ -8,6 +8,10 @@
 - На `promo.servgo.ru` материалы также добавляются в общий `/sitemap.xml`, если `BLOG_PUBLIC_ORIGIN=https://promo.servgo.ru`.
 - Материалы редакционно хранятся в `webapp/blog_content.py`; шаблон `webapp/templates/blog.html`, стиль `webapp/static/css/blog.css`.
 - Индивидуальные SVG-обложки находятся в `webapp/static/blog/*.svg`; используются в каталоге, статьях и блоке связанных материалов. Текстовый `alt` и подпись каждой иллюстрации заданы в контенте. SVG не содержат внешних скриптов и вымышленных показателей.
+- Редакционные подробные версии находятся в `webapp/blog_editorial.py` и накладываются по стабильным slug: краткие выводы, пошаговые действия, примеры, реальные ссылки, учебные расчёты, схемы, таблицы, контекстные CTA.
+- Дополнительные схемы в `webapp/static/blog/`: `booking-client-path.svg`, `booking-payment-states.svg`, `beauty-schedule-check.svg`, `marketing-week-plan.svg`, `marketing-funnel-example.svg`. Изображения подписаны как схема/учебный пример; их нельзя выдавать за скриншоты или фактические результаты клиентов.
+- **Исходный автономный HTML сегодняшнего клиентского демо** (`servgo_booking_client_flow_v9.html` и отдельные HTML этапов) **в ветке GitHub не обнаружен**. Поэтому настоящие скриншоты из него пока не включены. Когда оригинал будет доступен на файловой поверхности, заменять схемы только на фактические снимки по этим же смысловым этапам, обезличив персональные данные. Не утверждать, что диаграммы — скриншоты.
+
 - Главная презентационная страница и страницы ниш ведут в блог.
 
 ## ВАЖНО: выбор публичного домена
@@ -29,7 +33,7 @@
 ## Перед публикацией
 
 - Редактор должен проверить исходные факты, формулировки и дату обновления каждой статьи. Не использовать фиктивные отзывы, результаты, количество клиентов или обещания.
-- `pytest -q tests/test_public_blog.py`.
+- `pytest -q tests/test_public_blog.py` (включая разбор XML всех дополнительных SVG и проверку заполненности практических блоков).
 - Проверить `python -m compileall -q webapp/blog_content.py webapp/server.py`.
 - Пройти руками каталог, поиск, пустой результат, фильтр рубрик, все статьи, ссылки и мобильную версию.
 - Проверить, что неизвестный slug отдаёт 404; `/blog/sitemap.xml` имеет XML MIME-type, `/robots.txt` не запрещает блог.
@@ -39,7 +43,7 @@
 ## Продакшен и откат
 
 Файлы для точечной выкладки:
-`webapp/server.py`, `webapp/blog_content.py`, `webapp/templates/blog.html`,
+`webapp/server.py`, `webapp/blog_content.py`, `webapp/blog_editorial.py`, `webapp/templates/blog.html`,
 `webapp/static/css/blog.css`, `webapp/static/blog/*.svg`, `webapp/templates/landing.html`,
 `webapp/templates/niche.html`.
 
