@@ -43,7 +43,7 @@ dialog{border:1px solid var(--border);border-radius:21px;padding:26px;box-shadow
 <section class="main">
   <div class="heading">
     <div><h1 id="page-title">ИИ-предложения</h1><p id="page-subtitle">Подготовка персональных писем компаниям — основной сценарий ServGo Mail</p></div>
-    <div class="row"><button id="refresh" class="outline">↻ Обновить</button><button id="bulk" class="secondary">⇪ Загрузить адреса</button><button id="prepare-all" class="secondary">✦ Создать предложения</button><button id="new" class="primary">+ Адресат</button></div>
+    <div class="row"><button id="refresh" class="outline">↻ Обновить</button><button id="bulk" class="secondary">⇪ Загрузить адреса</button><button id="prepare-all" class="secondary">✦ Создать предложения</button><button id="new" class="secondary">+ Адресат</button><button id="compose" class="primary">✉ Написать</button></div>
   </div>
   <div class="cards">
     <div class="metric"><small>Адресатов в списке</small><strong id="m-companies">—</strong></div>
@@ -71,6 +71,23 @@ dialog{border:1px solid var(--border);border-radius:21px;padding:26px;box-shadow
   <div class="field"><label>Компании (до 100 строк)</label><textarea id="bulk-rows" style="min-height:210px" required placeholder="hello@example.ru&#10;office@example.org&#10;Студия Мята;mail@company.com;https://company.com;Студия красоты"></textarea></div>
   <div class="row" style="justify-content:flex-end"><button class="outline" value="cancel">Отмена</button><button class="primary" value="save">Импортировать</button></div></form>
 </dialog>
+<dialog id="compose-dialog">
+  <form id="compose-form">
+    <h2>Новое письмо</h2>
+    <p>Введите email, подготовьте текст самостоятельно или с ИИ. Сохранять адрес в контактах не обязательно.</p>
+    <div class="field"><label>Кому</label><input id="compose-to" type="email" maxlength="250" required placeholder="office@example.com"></div>
+    <div class="field"><label>Название компании (для ИИ, необязательно)</label><input id="compose-company" maxlength="150" placeholder="Название компании"></div>
+    <div class="field"><label>Сайт компании (для ИИ, необязательно)</label><input id="compose-website" type="url" maxlength="500" placeholder="https://example.com"></div>
+    <div class="field"><label>Заметка (для ИИ, необязательно)</label><input id="compose-notes" maxlength="2500" placeholder="Услуги, особенности и потребности"></div>
+    <div class="field"><label>Тема</label><input id="compose-subject" minlength="3" maxlength="180" required></div>
+    <div class="field"><label>Текст</label><textarea id="compose-body" minlength="1" maxlength="20000" required style="min-height:180px"></textarea></div>
+    <div class="row" style="justify-content:flex-end">
+       <button id="compose-close" type="button" class="outline">Отмена</button>
+       <button id="compose-ai" type="button" class="secondary">✦ Подготовить с ИИ</button>
+       <button id="compose-submit" type="submit" class="primary">Отправить</button>
+    </div>
+  </form>
+</dialog>
 <div class="toast" id="toast"></div>
 <script>
 const tabs={inbox:["Входящие","Корреспонденция ServGo и ответы компаний","Письма"],outbox:["Отправленные","История принятия писем почтовым сервером","Отправки"],prospects:["Адресаты","Список адресов для персональных предложений","Адресаты"],drafts:["ИИ-предложения","Черновики персональных рекламных писем для каждого адресата","Черновики"]};
@@ -89,7 +106,56 @@ async function loadData(draw=true){const responses=await Promise.allSettled([api
 $("bulk").onclick=()=>$("bulk-dialog").showModal();
 $("bulk-form").onsubmit=e=>{if(e.submitter?.value!=="save")return;e.preventDefault();withError(async()=>{const lines=$("bulk-rows").value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);if(lines.length>100)throw new Error("Максимум 100 компаний за раз");let okay=0,failed=0;for(const line of lines){const fields=line.split(";").map(x=>x.trim());const isAddress=fields.length===1;const email=isAddress?fields[0]:fields[1];const company=isAddress?email:fields[0];const website=isAddress?"":fields[2]||"";const notes=isAddress?"":fields[3]||"";try{await api("/prospects","POST",{company,email,website,notes});okay++}catch{failed++}}$("bulk-dialog").close();$("bulk-rows").value="";await loadData();displayTab("prospects");notify("Добавлено: "+okay+" · Пропущено/ошибки: "+failed)})};
 $("prepare-all").onclick=()=>withError(async()=>{const work=state.prospects.filter(x=>!x.subject&&!x.excluded).slice(0,10);if(!work.length){notify("Нет компаний без черновиков");return}if(!confirm("Создать до "+work.length+" персональных черновиков через ClaudeHub? Письма отправлены не будут."))return;let okay=0;for(const p of work){try{await api("/draft/"+p.id,"POST");okay++}catch(e){notify(p.company+": "+e.message)}}await loadData();displayTab("drafts");notify("Подготовлено черновиков: "+okay+" из "+work.length)})};
-document.querySelectorAll("[data-tab]").forEach(x=>x.onclick=()=>displayTab(x.dataset.tab));$("refresh").onclick=()=>withError(async()=>{await loadData();notify("Данные обновлены")});$("new").onclick=()=>$("create-dialog").showModal();$("company-form").onsubmit=e=>{if(e.submitter?.value!=="save")return;e.preventDefault();withError(async()=>{const f=new FormData(e.currentTarget);const payload=Object.fromEntries(f.entries());await api("/prospects","POST",payload);$("create-dialog").close();$("company-form").reset();displayTab("prospects");await loadData();notify("Компания добавлена")})};loadData();
+document.querySelectorAll("[data-tab]").forEach(x=>x.onclick=()=>displayTab(x.dataset.tab));$("refresh").onclick=()=>withError(async()=>{await loadData();notify("Данные обновлены")});$("new").onclick=()=>$("create-dialog").showModal();$("company-form").onsubmit=e=>{if(e.submitter?.value!=="save")return;e.preventDefault();withError(async()=>{const f=new FormData(e.currentTarget);const payload=Object.fromEntries(f.entries());await api("/prospects","POST",payload);$("create-dialog").close();$("company-form").reset();displayTab("prospects");await loadData();notify("Компания добавлена")})};
+let directSendId = null;
+$("compose").onclick = () => $("compose-dialog").showModal();
+$("compose-close").onclick = () => $("compose-dialog").close();
+$("compose-form").querySelectorAll("input,textarea").forEach(field => {
+  field.addEventListener("input", () => { directSendId = null; });
+});
+$("compose-ai").onclick = () => withError(async () => {
+  const recipient = $("compose-to").value.trim();
+  if (!recipient) { notify("Укажите email получателя"); return; }
+  const button = $("compose-ai");
+  button.disabled = true;
+  try {
+    const data = await api("/direct-draft", "POST", {
+      recipient: recipient,
+      company: $("compose-company").value,
+      website: $("compose-website").value,
+      notes: $("compose-notes").value
+    });
+    $("compose-subject").value = data.subject;
+    $("compose-body").value = data.body;
+    directSendId = null;
+    notify(data.critic_warning || "Черновик готов. Проверьте содержание.");
+  } finally { button.disabled = false; }
+});
+$("compose-form").onsubmit = event => {
+  event.preventDefault();
+  withError(async () => {
+    const recipient = $("compose-to").value.trim();
+    if (!confirm("Отправить письмо на " + recipient + "?")) return;
+    const button = $("compose-submit");
+    button.disabled = true;
+    directSendId = directSendId || crypto.randomUUID().replaceAll("-", "");
+    try {
+      await api("/direct-send", "POST", {
+        recipient: recipient,
+        subject: $("compose-subject").value,
+        body: $("compose-body").value,
+        request_id: directSendId
+      });
+      $("compose-dialog").close();
+      $("compose-form").reset();
+      directSendId = null;
+      await loadData();
+      displayTab("outbox");
+      notify("Письмо принято SMTP. Доставка адресату не подтверждена.");
+    } finally { button.disabled = false; }
+  });
+};
+loadData();
 </script>
 </body>
 </html>
