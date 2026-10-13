@@ -99,3 +99,61 @@ def test_search_value_is_escaped_and_empty_state_honest():
     assert '<script>alert(1)</script>' not in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert "Пока ничего не нашли" in html
+
+
+def test_rewritten_articles_have_useful_editorial_material():
+    required = {
+        "online-booking-without-missed-messages": {"figure", "example"},
+        "fill-empty-slots-in-beauty-salon": {"table", "example"},
+        "ai-marketing-for-small-business": {"table", "example"},
+        "measure-marketing-without-vanity-metrics": {"table", "example"},
+    }
+    for article in BLOG_ARTICLES:
+        assert len(article["sections"]) >= 5
+        assert len(article["summary"]) >= 3
+        assert len(article["today"]) >= 3
+        assert article["pitfall"] and article["method_note"]
+        assert article["cta_label"] and article["cta_href"]
+        for feature in required[article["slug"]]:
+            assert any(feature in section for section in article["sections"])
+        for section in article["sections"]:
+            assert section["paragraphs"], article["slug"]
+            if section.get("table"):
+                assert section["table_headers"]
+                assert all(len(row) == len(section["table_headers"]) for row in section["table"])
+            if section.get("figure"):
+                assert section["figure_alt"] and section["figure_caption"]
+                from xml.etree import ElementTree
+                path = ROOT / "webapp" / "static" / "blog" / section["figure"]
+                assert path.is_file(), str(path)
+                assert ElementTree.parse(path).getroot().tag.endswith("svg")
+            if section.get("example"):
+                assert section["example_title"]
+
+
+def test_editorial_artwork_and_practical_sections_in_html():
+    for article in BLOG_ARTICLES:
+        html = _render(article=article)
+        assert "Коротко, если нет времени читать" in html
+        assert "Что можно сделать уже сегодня" in html
+        assert "Типичная ошибка" in html
+        assert 'class="blog-inline-figure"' in html
+        assert article["cta_label"] in html
+        assert article["method_note"] in html
+        assert 'href="javascript:' not in html.lower()
+        for section in article["sections"]:
+            if section.get("figure"):
+                assert f'/static/blog/{section["figure"]}' in html
+            if section.get("table"):
+                assert "<table" in html
+            if section.get("example"):
+                assert section["example_title"] in html
+
+
+def test_sources_link_to_official_docs_only():
+    articles = {a["slug"]: a for a in BLOG_ARTICLES}
+    for slug in ("ai-marketing-for-small-business", "measure-marketing-without-vanity-metrics"):
+        assert articles[slug]["sources"]
+        for _name, link in articles[slug]["sources"]:
+            assert link.startswith("https://")
+            assert "google." in link or "developers.google.com" in link
