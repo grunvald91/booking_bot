@@ -1,5 +1,11 @@
 """ServGo platform-owner mail workspace; protected by the booking login."""
 import asyncio
+import http.client
+import ipaddress
+import socket
+import ssl
+from contextlib import contextmanager
+from html.parser import HTMLParser
 import email
 import email.policy
 import imaplib
@@ -53,6 +59,7 @@ def require_owner(user: User = Depends(get_current_user)):
     return user
 
 
+@contextmanager
 def db_open():
     root = Path(os.getenv("SERVGO_MAIL_DATA_DIR", "/var/lib/servgo-owner-mail"))
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -77,7 +84,14 @@ def db_open():
           status TEXT NOT NULL, created_at TEXT NOT NULL
         );
     """)
-    return db
+    try:
+        yield db
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def sign(user_id, kind, seconds, **extra):
@@ -206,6 +220,72 @@ def add_prospect(value: ProspectData, _: User = Depends(mail_owner)):
     return {"id": item_id}
 
 
+class VisibleHTML(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.hidden = 0
+        self.parts = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {"script", "style", "noscript"}:
+            self.hidden += 1
+
+    def handle_endtag(self, tag):
+        if tag in {"script", "style", "noscript"} and self.hidden:
+            self.hidden -= 1
+
+    def handle_data(self, value):
+        if not self.hidden:
+            self.parts.append(value)
+
+
+def research_public_site(url: str) -> dict:
+    """Pinned-DNS HTTPS only; no redirects or private addresses."""
+    if not url:
+        return {"source": "", "excerpt": "", "status": "Сайт не указан"}
+    from urllib.parse import urlsplit
+    try:
+        parsed = urlsplit(url)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.port not in (None, 443)
+                or parsed.username or parsed.password):
+            return {"source": url, "excerpt": "", "status": "Недопустимый адрес сайта"}
+        addresses = {item[4][0] for item in socket.getaddrinfo(
+            parsed.hostname, 443, type=socket.SOCK_STREAM
+        )}
+        if not addresses or any(not ipaddress.ip_address(addr).is_global for addr in addresses):
+            return {"source": url, "excerpt": "", "status": "Сайт не является публичным"}
+        ip = sorted(addresses)[0]
+
+        class PinnedHTTPS(http.client.HTTPSConnection):
+            def connect(self):
+                sock = socket.create_connection((ip, 443), timeout=8)
+                self.sock = ssl.create_default_context().wrap_socket(
+                    sock, server_hostname=parsed.hostname
+                )
+
+        conn = PinnedHTTPS(parsed.hostname, 443, timeout=8)
+        try:
+            path = (parsed.path or "/") + ("?" + parsed.query if parsed.query else "")
+            conn.request("GET", path, headers={
+                "Host": parsed.hostname, "Accept-Encoding": "identity",
+                "User-Agent": "ServGo-Prospect-Research/1.0",
+            })
+            res = conn.getresponse()
+            if res.status != 200 or "text/html" not in res.getheader("Content-Type", ""):
+                return {"source": url, "excerpt": "", "status": "HTTP " + str(res.status)}
+            raw = res.read(150001)
+            if len(raw) > 150000:
+                return {"source": url, "excerpt": "", "status": "Страница слишком велика"}
+            parser = VisibleHTML()
+            parser.feed(raw.decode("utf-8", errors="replace"))
+            text = " ".join(" ".join(parser.parts).split())[:5500]
+            return {"source": url, "excerpt": text, "status": "Прочитан публичный сайт"}
+        finally:
+            conn.close()
+    except (OSError, ValueError, http.client.HTTPException):
+        return {"source": url, "excerpt": "", "status": "Сайт недоступен"}
+
+
 async def hub(prompt):
     key = os.getenv("CLAUDEHUB_API_KEY") or os.getenv("XAI_API_KEY")
     if not key:
@@ -239,9 +319,10 @@ async def generate_draft(prospect_id: str, _: User = Depends(mail_owner)):
         current = db.execute("SELECT * FROM drafts WHERE prospect_id=?", (prospect_id,)).fetchone()
     if not p or p["excluded"] or (current and current["state"] != "draft"):
         raise HTTPException(409, "Компания недоступна для нового черновика")
-    # The model receives only the provided notes: no invented web research.
+    evidence = await asyncio.to_thread(research_public_site, p["website"])
     context = json.dumps({
         "company": p["company"], "website": p["website"],
+        "website_evidence": evidence,
         "notes_from_owner_unverified": p["notes"],
         "offer": "ServGo: онлайн-запись через сайт и Telegram, уведомления, ИИ-маркетинг",
         "link": "https://servgo.ru",
@@ -250,6 +331,7 @@ async def generate_draft(prospect_id: str, _: User = Depends(mail_owner)):
         "Подготовь персональное B2B-предложение на русском языке для компании. "
         "Если сведений недостаточно, не придумывай ни отзывы, ни проблемы, ни цифры. "
         "Коротко, без давления, до 1400 символов; одна ясная ссылка. "
+        "Персонализация основана на цитируемых фактах сайта, не на догадках. "
         'Только JSON {"subject":"...","body":"..."}.\n' + context
     )
     subject, body = proposal.get("subject"), proposal.get("body")
@@ -262,7 +344,20 @@ async def generate_draft(prospect_id: str, _: User = Depends(mail_owner)):
         'Только JSON {"critical":true/false,"reason":"..."}.\n'
         + context + "\n" + json.dumps(proposal, ensure_ascii=False)
     )
-    critical = bool(critic.get("critical"))
+    critical = critic.get("critical") is True
+    if critical:
+        corrected = await hub(
+            'Исправь только существенные ошибки ниже. Сохрани удачную структуру '
+            'и не добавляй неподтверждённых фактов. '
+            'Только JSON {"subject":"...","body":"..."}.\n'
+            + context + "\nПредыдущий текст:\n" + json.dumps(proposal, ensure_ascii=False)
+            + "\nЗамечание:\n" + str(critic.get("reason", ""))[:600]
+        )
+        new_subject, new_body = corrected.get("subject"), corrected.get("body")
+        if isinstance(new_subject, str) and isinstance(new_body, str) and (
+            3 <= len(new_subject) <= 180 and 30 <= len(new_body) <= 4000
+        ):
+            subject, body = new_subject, new_body
     with db_open() as db:
         db.execute("""INSERT INTO drafts VALUES (?,?,?,0,'draft')
             ON CONFLICT(prospect_id) DO UPDATE SET subject=excluded.subject,
