@@ -387,3 +387,8 @@ def outbox(_: User = Depends(mail_owner)):
             FROM deliveries l JOIN prospects p ON p.id=l.prospect_id
             ORDER BY l.created_at DESC LIMIT 100
         """).fetchall()]
+
+
+@router.get("/permission")
+def permission(_: User = Depends(require_owner)):
+    return {"allowed": True}
