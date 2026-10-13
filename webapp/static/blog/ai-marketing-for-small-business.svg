@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="650" viewBox="0 0 1200 650" role="img"><defs>
+<linearGradient id="blue" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#2F5BEB"/><stop offset="1" stop-color="#7C3AED"/></linearGradient>
+<linearGradient id="fade" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#E9EEFD"/></linearGradient>
+<filter id="shadow" x="-25%" y="-30%" width="150%" height="170%"><feDropShadow dx="0" dy="16" stdDeviation="19" flood-color="#0D1B2A" flood-opacity=".15"/></filter>
+</defs><rect width="1200" height="650" fill="#F3F5FC"/>
+<rect x="0" y="0" width="1200" height="650" fill="#F7F7FC"/>
+<circle cx="1030" cy="50" r="230" fill="#ECE5FD"/><circle cx="128" cy="608" r="235" fill="#DCE6FF"/>
+<g transform="translate(125 78) rotate(-7 300 270)" filter="url(#shadow)">
+ <rect x="0" y="0" width="600" height="510" rx="28" fill="#fff"/>
+ <rect x="38" y="40" width="135" height="12" rx="6" fill="#2F5BEB"/>
+ <rect x="38" y="72" width="360" height="25" rx="9" fill="#0D1B2A"/>
+ <rect x="38" y="109" width="270" height="12" rx="6" fill="#C3CBDB"/>
+ <rect x="38" y="158" width="523" height="1" fill="#E6E9EF"/>
+ <text x="40" y="205" font-size="25" font-weight="700" fill="#0D1B2A" font-family="Arial,sans-serif">Контент-план</text>
+ <g fill="#F0F3FC"><rect x="38" y="235" width="158" height="118" rx="15"/><rect x="217" y="235" width="158" height="118" rx="15"/><rect x="396" y="235" width="166" height="118" rx="15"/></g>
+ <rect x="54" y="250" width="125" height="58" rx="11" fill="#DDEAFF"/><rect x="233" y="250" width="125" height="58" rx="11" fill="#DCCFFF"/><rect x="412" y="250" width="134" height="58" rx="11" fill="#CDEFE4"/>
+ <g fill="#99A8BE"><rect x="57" y="322" width="98" height="8" rx="4"/><rect x="236" y="322" width="107" height="8" rx="4"/><rect x="415" y="322" width="110" height="8" rx="4"/></g>
+ <g fill="#E9EDF8"><rect x="39" y="390" width="522" height="12" rx="6"/><rect x="39" y="418" width="468" height="12" rx="6"/><rect x="39" y="446" width="490" height="12" rx="6"/></g>
+</g>
+<g filter="url(#shadow)"><rect x="790" y="128" width="295" height="135" rx="25" fill="#0D1B2A"/><text x="824" y="173" font-size="20" fill="#B5C8FF" font-family="Arial,sans-serif" font-weight="700">01  ИДЕЯ</text><path d="M858 207h167" stroke="#7085BD" stroke-width="10" stroke-linecap="round"/><path d="M858 230h113" stroke="#7085BD" stroke-width="8" stroke-linecap="round"/></g>
+<g filter="url(#shadow)"><rect x="753" y="294" width="316" height="137" rx="25" fill="#fff"/><text x="792" y="340" font-size="20" fill="#2F5BEB" font-family="Arial,sans-serif" font-weight="700">02  ЧЕРНОВИК</text><rect x="793" y="368" width="211" height="10" rx="5" fill="#C7D4F2"/><rect x="793" y="389" width="160" height="9" rx="4" fill="#DBE3F5"/></g>
+<g filter="url(#shadow)"><rect x="824" y="463" width="288" height="117" rx="25" fill="url(#blue)"/><text x="855" y="508" font-size="19" fill="#fff" font-family="Arial,sans-serif" font-weight="700">03  ПУБЛИКАЦИЯ</text><circle cx="869" cy="546" r="12" fill="#fff" opacity=".85"/><path d="M895 546h170" stroke="#DBD4FE" stroke-width="8" stroke-linecap="round"/></g>
+<path d="M1014 263v28M924 431v30" stroke="#7C3AED" stroke-width="6" stroke-linecap="round" stroke-dasharray="4 14"/>
+<circle cx="720" cy="80" r="31" fill="#F5B54C"/><path d="M707 80l8 8 17-21" stroke="#fff" stroke-width="7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
