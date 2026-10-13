@@ -186,3 +186,12 @@
  .blog-page .blog-takeaways h2,.blog-page .blog-today h2 {font-size:21px}
  .blog-page .blog-data-table {font-size:12px}
 }
+
+/* On narrow phones, swipe a detailed process diagram rather than shrinking text. */
+@media (max-width:720px) {
+  .blog-page .blog-inline-figure {overflow-x:auto;overscroll-behavior-x:contain;padding-bottom:4px}
+  .blog-page .blog-inline-figure img {min-width:760px;max-width:none;width:760px}
+  .blog-page .blog-inline-figure figcaption {max-width:100%;position:sticky;left:0;background:#fff;padding:7px 2px}
+  .blog-page .blog-reading-layout {display:flex;flex-direction:column}
+  .blog-page .blog-reading-layout .blog-side {order:-1}
+}
