@@ -148,3 +148,41 @@
 @media (prefers-reduced-motion:reduce) {
  .blog-page .blog-feature,.blog-page .blog-card,.blog-page .blog-topic { transition:none; }
 }
+
+/* Editorial formats — factual examples, accessible tables and additional figures. */
+.blog-page .blog-takeaways {padding:27px 29px;margin:0 0 28px;border:1px solid #D6E0F7;border-radius:22px;background:#F1F5FF}
+.blog-page .blog-takeaways h2 {font-size:23px;margin:0 0 14px}
+.blog-page .blog-takeaways ul {margin:0}
+.blog-page .blog-takeaways li {font-size:15px;padding-top:6px;padding-bottom:6px}
+.blog-page .blog-method-note {border-left:3px solid var(--blue);padding:11px 17px;background:#F8FAFD;color:var(--gray);font-size:13px;line-height:1.7;margin:0 0 32px}
+.blog-page .blog-inline-figure {margin:28px 0 32px}
+.blog-page .blog-inline-figure img {display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:17px;background:#F3F5FA}
+.blog-page .blog-inline-figure figcaption {font-size:12px;line-height:1.6;color:var(--gray);margin-top:10px}
+.blog-page .blog-example {margin:26px 0 33px;padding:24px 26px;border:1px solid #D5DBEA;border-radius:17px;background:#F7F9FD}
+.blog-page .blog-example h3 {font-size:16px;font-weight:800;margin:0 0 14px;color:var(--navy)}
+.blog-page .blog-example-content {white-space:pre-line;overflow-wrap:anywhere;font:500 14px/1.8 var(--font);color:#2E405A}
+.blog-page .blog-data-scroll {max-width:100%;overflow-x:auto;border:1px solid var(--line);border-radius:16px;margin:24px 0 29px}
+.blog-page .blog-data-table {width:100%;border-collapse:collapse;font-size:13px;min-width:450px}
+.blog-page .blog-data-table th {background:#EFF3FB;color:var(--navy);text-align:left;font-weight:800;padding:14px 16px}
+.blog-page .blog-data-table td {padding:13px 16px;color:#39455B;border-top:1px solid var(--line);vertical-align:top}
+.blog-page .blog-data-table tbody tr:nth-child(even){background:#FAFBFE}
+.blog-page .blog-pitfall {background:#FFF7ED;border-left:4px solid #D98B38;padding:22px 25px;margin:43px 0 22px;border-radius:5px 17px 17px 5px}
+.blog-page .blog-pitfall h2 {margin:0 0 10px;font-size:21px}
+.blog-page .blog-pitfall p {margin:0;font-size:15px}
+.blog-page .blog-today {border:1px solid #CFE6D9;background:#F2FAF5;border-radius:19px;padding:23px 25px;margin:30px 0}
+.blog-page .blog-today h2 {margin:0 0 18px;font-size:23px}
+.blog-page .blog-today ol {list-style:decimal;padding-left:24px;margin:0;display:grid;gap:11px}
+.blog-page .blog-today li {padding-left:4px;line-height:1.65;font-size:15px;color:#294637}
+.blog-page .blog-today li:before {content:none}
+.blog-page .blog-sources {margin:40px 0}
+.blog-page .blog-sources h2 {font-size:22px;margin:0 0 13px}
+.blog-page .blog-sources ul {margin:0}
+.blog-page .blog-sources li:before {content:"↗";color:var(--blue)}
+.blog-page .blog-sources a {color:#244BD6;text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere}
+.blog-page .blog-side .blog-side-small {font-size:11px;line-height:1.6;margin:22px 0 0;border-top:1px solid var(--line);padding-top:15px;color:var(--gray)}
+@media (max-width:720px) {
+ .blog-page .blog-takeaways,.blog-page .blog-example,.blog-page .blog-today {padding:19px}
+ .blog-page .blog-article-body h2 {scroll-margin-top:95px}
+ .blog-page .blog-takeaways h2,.blog-page .blog-today h2 {font-size:21px}
+ .blog-page .blog-data-table {font-size:12px}
+}
