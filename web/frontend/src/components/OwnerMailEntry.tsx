@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Mail } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
 
 /** Server-confirmed platform-owner navigation. Never trust userRole/localStorage for privileges. */
 export function OwnerMailEntry() {
   const [allowed, setAllowed] = useState(false)
   const [busy, setBusy] = useState(false)
+  const { pathname } = useLocation()
 
   useEffect(() => {
     const token = localStorage.getItem('token')
@@ -19,7 +21,7 @@ export function OwnerMailEntry() {
       if (active) setAllowed(false)
     })
     return () => { active = false }
-  }, [])
+  }, [pathname])
 
   const open = async () => {
     const token = localStorage.getItem('token')
