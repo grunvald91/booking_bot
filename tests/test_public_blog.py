@@ -103,8 +103,8 @@ def test_search_value_is_escaped_and_empty_state_honest():
 
 def test_rewritten_articles_have_useful_editorial_material():
     required = {
-        "online-booking-without-missed-messages": {"figure", "example"},
-        "fill-empty-slots-in-beauty-salon": {"table", "example"},
+        "online-booking-without-missed-messages": {"gallery", "example"},
+        "fill-empty-slots-in-beauty-salon": {"gallery", "table", "example"},
         "ai-marketing-for-small-business": {"table", "example"},
         "measure-marketing-without-vanity-metrics": {"table", "example"},
     }
@@ -121,6 +121,14 @@ def test_rewritten_articles_have_useful_editorial_material():
             if section.get("table"):
                 assert section["table_headers"]
                 assert all(len(row) == len(section["table_headers"]) for row in section["table"])
+            if section.get("gallery"):
+                for shot in section["gallery"]:
+                    assert shot["src"].startswith("real/") and shot["src"].endswith(".webp")
+                    assert shot["alt"] and shot["caption"]
+                    binary = ROOT / "webapp" / "static" / "blog" / shot["src"]
+                    assert binary.is_file(), str(binary)
+                    blob = binary.read_bytes()
+                    assert blob[:4] == b"RIFF" and blob[8:12] == b"WEBP", str(binary)
             if section.get("figure"):
                 assert section["figure_alt"] and section["figure_caption"]
                 from xml.etree import ElementTree
@@ -137,11 +145,16 @@ def test_editorial_artwork_and_practical_sections_in_html():
         assert "Коротко, если нет времени читать" in html
         assert "Что можно сделать уже сегодня" in html
         assert "Типичная ошибка" in html
-        assert 'class="blog-inline-figure"' in html
+        assert ('class="blog-inline-figure"' in html) or ('class="blog-demo-gallery"' in html)
         assert article["cta_label"] in html
         assert article["method_note"] in html
         assert 'href="javascript:' not in html.lower()
         for section in article["sections"]:
+            if section.get("gallery"):
+                assert 'class="blog-demo-gallery"' in html
+                for shot in section["gallery"]:
+                    assert f'/static/blog/{shot["src"]}' in html
+                    assert shot["caption"] in html
             if section.get("figure"):
                 assert f'/static/blog/{section["figure"]}' in html
             if section.get("table"):
@@ -157,3 +170,31 @@ def test_sources_link_to_official_docs_only():
         for _name, link in articles[slug]["sources"]:
             assert link.startswith("https://")
             assert "google." in link or "developers.google.com" in link
+
+
+def test_real_screenshots_match_uploaded_demo_paths():
+    articles = {a["slug"]: a for a in BLOG_ARTICLES}
+    booking = [
+        shot["src"]
+        for section in articles["online-booking-without-missed-messages"]["sections"]
+        for shot in section.get("gallery", ())
+    ]
+    salon = [
+        shot["src"]
+        for section in articles["fill-empty-slots-in-beauty-salon"]["sections"]
+        for shot in section.get("gallery", ())
+    ]
+    assert set(booking) == {
+        "real/client-home.webp",
+        "real/client-services.webp",
+        "real/client-staff.webp",
+        "real/client-calendar.webp",
+        "real/client-review.webp",
+        "real/client-prepayment.webp",
+        "real/client-payment-pending.webp",
+        "real/client-confirmed.webp",
+    }
+    assert "real/admin-calendar.webp" in salon
+    assert "real/client-calendar.webp" in salon
+    assert "real/client-confirmed.webp" in salon
+    assert all("галере" not in src for src in booking + salon)
