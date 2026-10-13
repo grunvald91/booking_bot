@@ -401,8 +401,8 @@ def send_draft(prospect_id: str, _: User = Depends(mail_owner)):
             raise HTTPException(409, "Отправка не разрешена или уже выполнялась")
         since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         used = db.execute("SELECT count(*) FROM deliveries WHERE created_at >= ?", (since,)).fetchone()[0]
-        if used >= 20:
-            raise HTTPException(429, "Лимит 20 писем за 24 часа")
+        if used >= int(os.getenv("SERVGO_MAIL_DAILY_LIMIT", "100")):
+            raise HTTPException(429, "Суточный лимит писем достигнут")
         delivery_id = uuid4().hex
         db.execute("UPDATE drafts SET state='sending' WHERE prospect_id=?", (prospect_id,))
         db.execute("INSERT INTO deliveries VALUES (?,?,?,?)",
@@ -475,13 +475,143 @@ async def inbox(_: User = Depends(mail_owner)):
         raise HTTPException(503, "Входящие недоступны. Нужен работающий IMAP") from None
 
 
+
+
+class DirectDraftInput(BaseModel):
+    recipient: str = Field(min_length=5, max_length=250)
+    company: str = Field(default="", max_length=150)
+    website: str = Field(default="", max_length=500)
+    notes: str = Field(default="", max_length=2500)
+
+
+class DirectSendInput(BaseModel):
+    recipient: str = Field(min_length=5, max_length=250)
+    subject: str = Field(min_length=3, max_length=180)
+    body: str = Field(min_length=1, max_length=20000)
+    request_id: str = Field(min_length=32, max_length=32)
+
+
+def clean_recipient(value: str) -> str:
+    address = value.strip().lower()
+    if not ADDRESS.fullmatch(address):
+        raise HTTPException(422, "Введите один корректный email")
+    return address
+
+
+def validate_subject(value: str) -> str:
+    subject = value.strip()
+    if len(subject) < 3 or any(ord(char) < 32 for char in subject):
+        raise HTTPException(422, "Проверьте тему письма")
+    return subject
+
+
+@router.post("/api/direct-draft")
+async def direct_draft(info: DirectDraftInput, _: User = Depends(mail_owner)):
+    """AI draft for an arbitrary email address, never requiring a contact."""
+    recipient = clean_recipient(info.recipient)
+    website = info.website.strip()
+    if website:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(website)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.port not in (None, 443) or parsed.username or parsed.password:
+            raise HTTPException(422, "Укажите обычный HTTPS-сайт")
+    evidence = await asyncio.to_thread(research_public_site, website)
+    context = json.dumps({
+        "recipient": recipient, "company": info.company,
+        "website_information": evidence,
+        "owner_notes_unverified": info.notes,
+        "offer": "ServGo: онлайн-запись через сайт и Telegram, уведомления, ИИ-маркетинг",
+        "landing": "https://servgo.ru",
+    }, ensure_ascii=False)
+    output = await hub(
+        "Напиши персональное деловое письмо, опираясь только на факты из данных. "
+        "Если сайт не указан, не придумывай специализацию компании или результаты. "
+        "Короткий текст с одним призывом к действию. Только JSON "
+        '{"subject":"...","body":"..."}.\n' + context
+    )
+    subject, body = output.get("subject"), output.get("body")
+    if not isinstance(subject, str) or not isinstance(body, str) or not (3 <= len(subject) <= 180 and 30 <= len(body) <= 4000):
+        raise HTTPException(502, "Некорректный черновик")
+    critique = await hub(
+        'Проверь исключительно существенные ошибки и неподтверждённые факты. '
+        'Только JSON {"critical":true/false,"reason":"..."}.\n'
+        + context + "\nЧерновик:\n" + json.dumps(output, ensure_ascii=False)
+    )
+    warning = ""
+    if critique.get("critical") is True:
+        warning = str(critique.get("reason", ""))[:350]
+        corrected = await hub(
+            "Исправь критические фактические ошибки из замечания. "
+            "Не добавляй новых фактов. Только JSON "
+            '{"subject":"...","body":"..."}.\n'
+            + context + "\nЧерновик:\n" + json.dumps(output, ensure_ascii=False)
+            + "\nЗамечания:\n" + warning
+        )
+        maybe_subject, maybe_body = corrected.get("subject"), corrected.get("body")
+        if isinstance(maybe_subject, str) and isinstance(maybe_body, str) and 3 <= len(maybe_subject) <= 180 and 30 <= len(maybe_body) <= 4000:
+            subject, body = maybe_subject, maybe_body
+    return {
+        "recipient": recipient, "subject": validate_subject(subject),
+        "body": body, "critic_warning": warning,
+        "research_status": evidence["status"], "sent": False,
+    }
+
+
+@router.post("/api/direct-send")
+def direct_send(info: DirectSendInput, _: User = Depends(mail_owner)):
+    """One explicit owner click, no address-book lookup or consent questionnaire."""
+    recipient = clean_recipient(info.recipient)
+    subject = validate_subject(info.subject)
+    if not re.fullmatch(r"[a-f0-9]{32}", info.request_id):
+        raise HTTPException(422, "Неверный идентификатор отправки")
+    sender = os.getenv("SERVGO_MAIL_FROM", "").strip()
+    if not ADDRESS.fullmatch(sender):
+        raise HTTPException(503, "Исходящий адрес ServGo не настроен")
+    now = datetime.now(timezone.utc)
+    with db_open() as db:
+        db.execute("BEGIN IMMEDIATE")
+        old = db.execute("SELECT status FROM direct_mail WHERE id=?", (info.request_id,)).fetchone()
+        if old:
+            raise HTTPException(409, "Это письмо уже было обработано. Проверьте отправленные")
+        count = db.execute("""
+            SELECT
+              (SELECT count(*) FROM direct_mail WHERE created_at>=?) +
+              (SELECT count(*) FROM deliveries WHERE created_at>=?)
+        """, ((now - timedelta(days=1)).isoformat(), (now - timedelta(days=1)).isoformat())).fetchone()[0]
+        if count >= int(os.getenv("SERVGO_MAIL_DAILY_LIMIT", "100")):
+            raise HTTPException(429, "Суточный лимит писем достигнут")
+        db.execute("""INSERT INTO direct_mail (id,email,subject,body,status,created_at)
+            VALUES (?,?,?,?,?,?)""",
+            (info.request_id, recipient, subject, info.body, "delivery_unknown", now.isoformat()))
+    message = EmailMessage()
+    message["From"] = formataddr(("ServGo", sender))
+    message["To"] = recipient
+    message["Subject"] = subject
+    message["Message-ID"] = "<" + info.request_id + "@servgo.ru>"
+    message.set_content(info.body)
+    try:
+        with smtplib.SMTP("127.0.0.1", 25, timeout=15) as smtp:
+            failed = smtp.send_message(message, from_addr=sender, to_addrs=[recipient])
+            if failed:
+                raise smtplib.SMTPRecipientsRefused(failed)
+    except (OSError, smtplib.SMTPException):
+        # Timeout could have happened after DATA. No automatic retry.
+        raise HTTPException(503, "Не могу подтвердить отправку. Проверьте историю") from None
+    with db_open() as db:
+        db.execute("UPDATE direct_mail SET status='smtp_accepted' WHERE id=?", (info.request_id,))
+    return {"status": "smtp_accepted", "delivery_confirmed": False}
+
 @router.get("/api/outbox")
 def outbox(_: User = Depends(mail_owner)):
     with db_open() as db:
         return [dict(x) for x in db.execute("""
-            SELECT l.status,l.created_at,p.company,p.email
-            FROM deliveries l JOIN prospects p ON p.id=l.prospect_id
-            ORDER BY l.created_at DESC LIMIT 100
+            SELECT status,created_at,company,email FROM (
+              SELECT l.status,l.created_at,p.company,p.email
+              FROM deliveries l JOIN prospects p ON p.id=l.prospect_id
+              UNION ALL
+              SELECT d.status,d.created_at,d.email AS company,d.email
+              FROM direct_mail d
+            ) ORDER BY created_at DESC LIMIT 100
         """).fetchall()]
 
 
