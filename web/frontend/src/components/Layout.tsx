@@ -16,6 +16,7 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { Logo } from './Logo'
+import { OwnerMailEntry } from './OwnerMailEntry'
 import { PwaInstallPrompt } from './PwaInstallPrompt'
 
 const clientNav = [
@@ -143,6 +144,8 @@ export function Layout() {
                   })}
                 </>
               )}
+
+              <OwnerMailEntry />
 
               {isLoggedIn ? (
                 <div className="flex items-center gap-2 ml-2">
