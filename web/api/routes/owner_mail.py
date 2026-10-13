@@ -35,7 +35,7 @@ from ..deps import get_current_user
 
 router = APIRouter(prefix="/owner-mail", tags=["owner-mail"])
 COOKIE = "servgo_owner_mail"
-ADDRESS = re.compile(r"^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9](?:[A-Za-z0-9.\\-]*[A-Za-z0-9])?\\.[A-Za-z]{2,63}$")
+ADDRESS = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,63}$")
 HOST = "https://mail.servgo.ru"
 
 
