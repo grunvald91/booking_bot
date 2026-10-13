@@ -33,22 +33,22 @@ dialog{border:1px solid var(--border);border-radius:21px;padding:26px;box-shadow
 <aside>
   <div class="brand"><span class="brand-mark">S</span><div>ServGo<div class="sub">Личная почта</div></div></div>
   <nav class="nav">
-    <button data-tab="inbox" class="active"><b>✉</b><span>Входящие</span></button>
+    <button data-tab="drafts" class="active"><b>✦</b><span>ИИ-предложения</span></button>
+    <button data-tab="prospects"><b>♧</b><span>Адресаты</span></button>
+    <button data-tab="inbox"><b>✉</b><span>Ответы и входящие</span></button>
     <button data-tab="outbox"><b>↗</b><span>Отправленные</span></button>
-    <button data-tab="prospects"><b>♧</b><span>Компании</span></button>
-    <button data-tab="drafts"><b>✦</b><span>ИИ-предложения</span></button>
   </nav>
   <div class="little"><b>Личный доступ</b>Почта закрыта для клиентов, сотрудников и владельцев подключённых компаний.<br><a href="https://servgo.ru/admin" style="color:#176edb;font-weight:750">← Вернуться в ServGo</a></div>
 </aside>
 <section class="main">
   <div class="heading">
-    <div><h1 id="page-title">Входящие</h1><p id="page-subtitle">Корреспонденция ServGo и ответы компаний</p></div>
-    <div class="row"><button id="refresh" class="outline">↻ Обновить</button><button id="bulk" class="secondary">⇪ Список адресов</button><button id="prepare-all" class="secondary">✦ Черновики</button><button id="new" class="primary">+ Компания</button></div>
+    <div><h1 id="page-title">ИИ-предложения</h1><p id="page-subtitle">Подготовка персональных писем компаниям — основной сценарий ServGo Mail</p></div>
+    <div class="row"><button id="refresh" class="outline">↻ Обновить</button><button id="bulk" class="secondary">⇪ Список адресов</button><button id="prepare-all" class="secondary">✦ Создать предложения</button><button id="new" class="primary">+ Компания</button></div>
   </div>
   <div class="cards">
-    <div class="metric"><small>Компаний в базе</small><strong id="m-companies">—</strong></div>
+    <div class="metric"><small>Адресатов в списке</small><strong id="m-companies">—</strong></div>
     <div class="metric"><small>ИИ-черновиков</small><strong id="m-drafts">—</strong></div>
-    <div class="metric"><small>Принято SMTP</small><strong id="m-sent">—</strong></div>
+    <div class="metric"><small>Писем принято SMTP</small><strong id="m-sent">—</strong></div>
   </div>
   <div class="workspace">
     <div class="panel"><div class="panel-head"><span id="list-title">Письма</span><small class="muted" id="list-count"></small></div><div class="message-list" id="list"></div><div class="status-line" id="service-status">Подключение к почтовому сервису...</div></div>
@@ -73,8 +73,8 @@ dialog{border:1px solid var(--border);border-radius:21px;padding:26px;box-shadow
 </dialog>
 <div class="toast" id="toast"></div>
 <script>
-const tabs={inbox:["Входящие","Корреспонденция ServGo и ответы компаний","Письма"],outbox:["Отправленные","История принятия писем почтовым сервером","Отправки"],prospects:["Компании","Персональные предложения и контакты бизнеса","Контакты"],drafts:["ИИ-предложения","Подготовка, проверка и согласование текста","Черновики"]};
-const state={tab:"inbox",selected:null,prospects:[],inbox:[],outbox:[],status:{}};
+const tabs={inbox:["Входящие","Корреспонденция ServGo и ответы компаний","Письма"],outbox:["Отправленные","История принятия писем почтовым сервером","Отправки"],prospects:["Адресаты","Список адресов для персональных предложений","Адресаты"],drafts:["ИИ-предложения","Черновики персональных рекламных писем для каждого адресата","Черновики"]};
+const state={tab:"drafts",selected:null,prospects:[],inbox:[],outbox:[],status:{}};
 const $=id=>document.getElementById(id);
 const escapeHtml=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function notify(message){const t=$("toast");t.textContent=message;t.style.display="block";clearTimeout(window.__toastTimeout);window.__toastTimeout=setTimeout(()=>t.style.display="none",4200)}
