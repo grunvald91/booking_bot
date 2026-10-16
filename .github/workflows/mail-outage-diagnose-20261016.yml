@@ -48,51 +48,25 @@ jobs:
           cmd=r'''set +e
           sec(){ echo; echo "===== $1 ====="; }
           mask(){ sed -E 's/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+)/***@\1/g; s/(ticket|token)=[^ &"]+/\1=***/g'; }
-          sec RUN2_NGINX_SERVGO_MAIL_ROUTES
-          f=$(grep -lE 'server_name[^;]*\bservgo\.ru' /etc/nginx/sites-enabled/* | head -3); echo "$f"
-          for x in $f; do echo "--- $x"; grep -nE 'server_name|listen|location|proxy_pass|return|try_files|root ' "$x" | head -60; done
-          sec RUN2_ACCESS_LOG_MAIL_ENTRY_TODAY
-          for L in /var/log/nginx/access.log /var/log/nginx/*servgo*access*.log; do [ -f "$L" ] || continue; echo "--- $L"; grep -E 'owner-mail|"(GET|POST) /mail[ ?]|/claim' "$L" | grep -E '16/Oct/2026|17/Oct/2026' | awk '{print $1,$4,$6,$7,$9,$10}' | mask | tail -40; done
-          sec RUN2_MAILHOST_ACCESS_TODAY
-          grep -h 'mail.servgo.ru' /var/log/nginx/*.log 2>/dev/null | grep -E '16/Oct/2026|17/Oct/2026' | awk '{print $1,$4,$6,$7,$9}' | mask | tail -30
-          grep -l . /var/log/nginx/*.log 2>/dev/null | head -20
-          sec RUN2_DIST_MAIL_ENTRY
-          D=/opt/booking_bot/web/frontend/dist; ls -l --time-style=+%F_%T $D/index.html; ls -l --time-style=+%F_%T $D/assets/*.js 2>/dev/null | tail -5
-          grep -l 'owner-mail/entry' $D/assets/*.js 2>/dev/null | while read j; do echo "--- $j"; grep -oE '.{160}owner-mail/entry.{200}' "$j" | head -3; done
-          grep -c 'MailEntryPage\|Открываем почту' $D/assets/*.js 2>/dev/null | grep -v ':0'
-          ls -ld --time-style=+%F_%T $D.bak_20261016 2>&1
-          sec RUN2_OWNER_MAIL_ROUTES
-          grep -nE '@router\.(get|post|put|delete)|^router *=|prefix' /opt/booking_bot/web/api/routes/owner_mail.py | head -40
-          grep -rnE 'owner_mail|mail_campaign' /opt/booking_bot/web/api/main.py /opt/booking_bot/web/api/app.py 2>/dev/null | head
-          sec RUN2_POSTFIX_GOOGLE_TODAY
-          journalctl -u 'postfix*' --since '2026-10-16 00:00' --no-pager -o short-iso 2>/dev/null | grep -Ei 'google|gmail' | mask | tail -40
-          echo '--- delivered/sent today'
-          journalctl -u 'postfix*' --since '2026-10-16 00:00' --no-pager -o short-iso 2>/dev/null | grep -E 'status=(sent|deferred|bounced)|lmtp.*status' | mask | tail -40
-          echo '--- grep mail.log for google today'
-          grep -hEi 'google|gmail' /var/log/mail.log /var/log/mail.log.1 2>/dev/null | grep -E '^(Oct 1[56]|2026-10-1[56])' | mask | tail -40
-          sec RUN2_MAILDIR_RECENT_HEADERS
-          for m in $(ls -t /var/mail/vhosts/servgo.ru/support/Maildir/new/ 2>/dev/null | head -4); do f=/var/mail/vhosts/servgo.ru/support/Maildir/new/$m; stat -c '%y' "$f"; grep -m3 -iE '^(From|Date|Subject):' "$f" | mask; done
-          sec RUN2_CAMPAIGN_STORE
-          ls -la --time-style=+%F_%T /var/lib/servgo-owner-mail
-          for db in /var/lib/servgo-owner-mail/*.db /var/lib/servgo-owner-mail/*.sqlite*; do [ -f "$db" ] || continue; echo "--- $db"; python3 - "$db" <<'SQ'
-          import sqlite3,sys
-          c=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True)
-          for (t,) in c.execute("select name from sqlite_master where type='table'"):
-              cols=[r[1] for r in c.execute(f'pragma table_info({t})')]
-              n=c.execute(f'select count(*) from {t}').fetchone()[0]
-              line=f'{t}: rows={n}'
-              if 'status' in cols:
-                  line+=' '+str(c.execute(f'select status,count(*) from {t} group by status').fetchall())
-              print(line)
-          SQ
-          done
-          sec RUN2_WORKER
-          systemctl status servgo-mail-worker --no-pager 2>&1 | head -8
-          journalctl -u servgo-mail-worker --since '-3 days' --no-pager -o short-iso 2>/dev/null | mask | tail -30
-          sec RUN2_WEBAPI_TODAY_ERRORS
-          journalctl -u booking-web-api --since '2026-10-16 00:00' --no-pager -o short-iso 2>/dev/null | grep -E 'owner-mail| 5[0-9][0-9] |Traceback|Error|Exception' | grep -vE ' 200 OK' | mask | tail -40
-          sec RUN2_MAIL_SESSION_CHECK
-          grep -nE 'max_age|COOKIE|cookie_name|SESSION_HOURS|samesite|domain=' /opt/booking_bot/web/api/routes/owner_mail.py | head -20
+          sec RUN3_WEBAPP_VHOST
+          for x in $(grep -lE 'server_name[^;]*servgo\.ru' /etc/nginx/sites-enabled/* 2>/dev/null | grep -vE 'growth|mail-servgo|promo' | sort -u); do echo "--- $x"; grep -vE '^\s*(#|$)' "$x" | grep -Ev 'ssl_(session|protocols|ciphers|prefer|dhparam)|include /etc/letsencrypt' | head -140; done
+          grep -lR 'servgo.ru' /etc/nginx/sites-enabled/ 2>/dev/null
+          sec RUN3_LOG_FILES
+          grep -hoE 'access_log\s+[^ ;]+' -R /etc/nginx/ 2>/dev/null | sort -u
+          sec RUN3_USER_REQUESTS_TODAY
+          for L in $(grep -hoE 'access_log\s+[^ ;]+' -R /etc/nginx/ 2>/dev/null | awk '{print $2}' | sort -u) /var/log/nginx/access.log; do [ -f "$L" ] || continue; r=$(grep -E '^195\.178\.110\.18 ' "$L" | grep -E '16/Oct/2026|17/Oct/2026' | grep -E 'mail|owner|login|/api/auth' | awk '{print $4,$6,$7,$9,$11}' | mask | tail -40); [ -n "$r" ] && { echo "--- $L"; echo "$r"; }; done
+          sec RUN3_REDIRECT_PROBES
+          for u in https://www.servgo.ru/api/owner-mail/entry http://servgo.ru/api/owner-mail/entry https://servgo.ru/api/owner-mail/entry https://servgo.ru/api/owner-mail/entry/ ; do h=$(echo "$u" | sed -E 's#https?://([^/]+).*#\1#'); pr=$(echo "$u" | cut -d: -f1); port=443; [ "$pr" = http ] && port=80; printf '%s POST -> ' "$u"; curl -sk -o /dev/null -m 8 -X POST -w '%{http_code} %{redirect_url}\n' --resolve "$h:$port:127.0.0.1" "$u"; done
+          printf 'www /mail -> '; curl -sk -o /dev/null -m 8 -w '%{http_code} %{redirect_url}\n' --resolve www.servgo.ru:443:127.0.0.1 https://www.servgo.ru/mail
+          sec RUN3_INDEX_BUNDLE
+          grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' /opt/booking_bot/web/frontend/dist/index.html
+          grep -oE 'serviceWorker|registerSW|sw\.js' /opt/booking_bot/web/frontend/dist/index.html | sort -u
+          ls -l --time-style=+%F_%T /opt/booking_bot/web/frontend/dist/sw.js /opt/booking_bot/web/frontend/dist/*.webmanifest 2>&1
+          sec RUN3_MAIL_UI_AUTH
+          grep -nE 'mailbox-dashboard|def .*owner|Depends\(|HTTPException\(401' /opt/booking_bot/web/api/routes/mail_campaign_ui.py | head -20
+          grep -nE 'def mail_owner' -A16 /opt/booking_bot/web/api/routes/owner_mail.py | head -24
+          grep -nE 'logout|delete_cookie' /opt/booking_bot/web/api/routes/owner_mail.py /opt/booking_bot/web/api/routes/mail_campaign_dashboard.html /opt/booking_bot/web/api/routes/owner_mail_ui.html | head
+          grep -nE 'mailbox-dashboard|location\.(href|assign)|401' /opt/booking_bot/web/api/routes/mail_campaign_dashboard.html | head -20
           '''
           _,o,e=s.exec_command(cmd,timeout=120)
           print(o.read().decode('utf-8','replace'))
