@@ -48,25 +48,12 @@ jobs:
           cmd=r'''set +e
           sec(){ echo; echo "===== $1 ====="; }
           mask(){ sed -E 's/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+)/***@\1/g; s/(ticket|token)=[^ &"]+/\1=***/g'; }
-          sec RUN3_WEBAPP_VHOST
-          for x in $(grep -lE 'server_name[^;]*servgo\.ru' /etc/nginx/sites-enabled/* 2>/dev/null | grep -vE 'growth|mail-servgo|promo' | sort -u); do echo "--- $x"; grep -vE '^\s*(#|$)' "$x" | grep -Ev 'ssl_(session|protocols|ciphers|prefer|dhparam)|include /etc/letsencrypt' | head -140; done
-          grep -lR 'servgo.ru' /etc/nginx/sites-enabled/ 2>/dev/null
-          sec RUN3_LOG_FILES
-          grep -hoE 'access_log\s+[^ ;]+' -R /etc/nginx/ 2>/dev/null | sort -u
-          sec RUN3_USER_REQUESTS_TODAY
-          for L in $(grep -hoE 'access_log\s+[^ ;]+' -R /etc/nginx/ 2>/dev/null | awk '{print $2}' | sort -u) /var/log/nginx/access.log; do [ -f "$L" ] || continue; r=$(grep -E '^195\.178\.110\.18 ' "$L" | grep -E '16/Oct/2026|17/Oct/2026' | grep -E 'mail|owner|login|/api/auth' | awk '{print $4,$6,$7,$9,$11}' | mask | tail -40); [ -n "$r" ] && { echo "--- $L"; echo "$r"; }; done
-          sec RUN3_REDIRECT_PROBES
-          for u in https://www.servgo.ru/api/owner-mail/entry http://servgo.ru/api/owner-mail/entry https://servgo.ru/api/owner-mail/entry https://servgo.ru/api/owner-mail/entry/ ; do h=$(echo "$u" | sed -E 's#https?://([^/]+).*#\1#'); pr=$(echo "$u" | cut -d: -f1); port=443; [ "$pr" = http ] && port=80; printf '%s POST -> ' "$u"; curl -sk -o /dev/null -m 8 -X POST -w '%{http_code} %{redirect_url}\n' --resolve "$h:$port:127.0.0.1" "$u"; done
-          printf 'www /mail -> '; curl -sk -o /dev/null -m 8 -w '%{http_code} %{redirect_url}\n' --resolve www.servgo.ru:443:127.0.0.1 https://www.servgo.ru/mail
-          sec RUN3_INDEX_BUNDLE
-          grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' /opt/booking_bot/web/frontend/dist/index.html
-          grep -oE 'serviceWorker|registerSW|sw\.js' /opt/booking_bot/web/frontend/dist/index.html | sort -u
-          ls -l --time-style=+%F_%T /opt/booking_bot/web/frontend/dist/sw.js /opt/booking_bot/web/frontend/dist/*.webmanifest 2>&1
-          sec RUN3_MAIL_UI_AUTH
-          grep -nE 'mailbox-dashboard|def .*owner|Depends\(|HTTPException\(401' /opt/booking_bot/web/api/routes/mail_campaign_ui.py | head -20
-          grep -nE 'def mail_owner' -A16 /opt/booking_bot/web/api/routes/owner_mail.py | head -24
-          grep -nE 'logout|delete_cookie' /opt/booking_bot/web/api/routes/owner_mail.py /opt/booking_bot/web/api/routes/mail_campaign_dashboard.html /opt/booking_bot/web/api/routes/owner_mail_ui.html | head
-          grep -nE 'mailbox-dashboard|location\.(href|assign)|401' /opt/booking_bot/web/api/routes/mail_campaign_dashboard.html | head -20
+          sec RUN4_MAIL_FLOW_16OCT
+          zcat -f /var/log/nginx/access.log.1 /var/log/nginx/access.log 2>/dev/null | grep '16/Oct/2026' | grep -E '"(GET|POST) /(mail|login|admin)[ ?/]|owner-mail|/claim|/api/auth' | awk '{print $1,$4,$6,$7,$9,$12,$13,$14}' | mask | tail -80
+          sec RUN4_CLIENT_195
+          zcat -f /var/log/nginx/access.log.1 2>/dev/null | grep -E '^195\.178\.110\.18 ' | awk '{print $4,$6,$7,$9,$11,$12,$13}' | mask | tail -25
+          sec RUN4_MAILHOST_USER_AGENTS
+          zcat -f /var/log/nginx/access.log.1 2>/dev/null | grep '16/Oct/2026' | grep -E '"GET /(api/)?(owner-mail|mailbox-dashboard|campaigns)|"GET / HTTP' | awk -F'"' '{print $1,$2,$3,$6}' | grep -vE 'bot|crawl|spider' | mask | tail -30
           '''
           _,o,e=s.exec_command(cmd,timeout=120)
           print(o.read().decode('utf-8','replace'))
