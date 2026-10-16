@@ -23,7 +23,7 @@ from ..database import get_db, Business, Service, Employee, Booking, User, Venue
 from ..deps import get_current_user, get_current_user_optional
 from ..schemas import AIChatIn, AIChatOut, AIConfirmIn
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM50")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 
 # Import EmployeeService directly from models (not re-exported by web database)
 from database.models import EmployeeService
@@ -48,6 +48,10 @@ def _validate_init_data(init_data: str) -> Optional[dict]:
         # Create data-check-string
         sorted_items = sorted(data_check.items())
         data_check_string = "\n".join(f"{k}={v}" for k, v in sorted_items)
+
+        if not BOT_TOKEN:
+            logger.warning("BOT_TOKEN is not configured; rejecting initData")
+            return None
 
         # HMAC-SHA256 with WebAppData key
         secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
@@ -747,7 +751,10 @@ def _schedule_owner_notification(business: Business, booking: Booking, service: 
     """Fire-and-forget notification to owner via Telegram Bot API."""
     import asyncio
 
-    bot_token = os.getenv("BOT_TOKEN", "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM50")
+    bot_token = os.getenv("BOT_TOKEN", "").strip()
+    if not bot_token:
+        logger.warning("BOT_TOKEN is not configured; skipping owner notification")
+        return
 
     async def _send():
         try:
@@ -784,7 +791,10 @@ def _schedule_owner_payment_notification(booking: Booking):
     """Fire-and-forget payment notification to owner."""
     import asyncio
 
-    bot_token = os.getenv("BOT_TOKEN", "8334888136:AAGNj5q_5gChU63lU4kGMF5MPtbOV2WDM50")
+    bot_token = os.getenv("BOT_TOKEN", "").strip()
+    if not bot_token:
+        logger.warning("BOT_TOKEN is not configured; skipping owner notification")
+        return
 
     async def _send():
         try:
