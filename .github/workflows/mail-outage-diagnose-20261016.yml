@@ -47,71 +47,54 @@ jobs:
                   time.sleep(3)
           cmd=r'''set +e
           sec(){ echo; echo "===== $1 ====="; }
-          sec UPTIME; uptime; date -u
-          sec DISK; df -h / /var | sort -u; df -ih / | tail -1
-          sec MEMORY; free -m
-          sec SERVICES
-          for u in postfix postfix@- dovecot opendkim fail2ban nginx booking-bot; do printf '%s=' "$u"; systemctl is-active "$u" 2>&1; done
-          systemctl list-units --type=service --all --no-pager --no-legend | grep -Ei 'servgo|booking|mail|uvicorn|api|growth' | head -30
-          sec FAILED_UNITS; systemctl --failed --no-pager --no-legend
-          sec LISTENERS; ss -lntp | grep -E ':(25|465|587|993|143|80|443|8000|8891)\b'
-          sec UFW; ufw status verbose 2>&1 | head -40
-          sec IPTABLES_25; iptables -S 2>/dev/null | grep -E 'dport (25|465|587|993)' | head
-          sec FAIL2BAN; fail2ban-client status 2>&1 | head; for j in $(fail2ban-client status 2>/dev/null | sed -n 's/.*Jail list:\s*//p' | tr ',' ' '); do printf '%s banned=' "$j"; fail2ban-client status "$j" 2>/dev/null | sed -n 's/.*Currently banned:\s*//p'; done
-          sec POSTCONF
-          postconf inet_interfaces inet_protocols myhostname mydestination mynetworks virtual_mailbox_domains virtual_transport smtpd_tls_cert_file smtpd_tls_key_file smtpd_milters non_smtpd_milters milter_default_action smtp_helo_name relayhost smtpd_relay_restrictions smtpd_recipient_restrictions 2>&1
-          sec POSTFIX_CHECK; postfix check 2>&1 | tail -20; echo "rc=$?"
-          sec MASTER_CF_ACTIVE; grep -vE '^\s*(#|$)' /etc/postfix/master.cf | grep -E '^(smtp|submission|smtps)\s'
-          sec QUEUE; postqueue -p 2>&1 | tail -1; postqueue -p 2>&1 | grep -E '^\s*\(' | sort | uniq -c | sort -rn | head -15
-          sec DOVECOT; doveconf -n 2>&1 | grep -E '^(protocols|ssl|ssl_cert|mail_location|listen)' ; ls -l /var/spool/postfix/private/ 2>&1 | grep -E 'dovecot-lmtp|auth'
-          sec MAILDIR; for d in new cur; do printf '%s=' $d; find /var/mail/vhosts/servgo.ru/support/Maildir/$d -type f 2>/dev/null | wc -l; done
-          printf 'newest_new='; ls -t --time-style=+%FT%T /var/mail/vhosts/servgo.ru/support/Maildir/new 2>/dev/null | head -1; stat -c '%y' "$(ls -td /var/mail/vhosts/servgo.ru/support/Maildir/new/* 2>/dev/null | head -1)" 2>/dev/null
-          du -sh /var/mail/vhosts 2>/dev/null
-          sec CERTS
-          for c in /etc/letsencrypt/live/*/fullchain.pem; do echo "$c"; openssl x509 -in "$c" -noout -subject -enddate -ext subjectAltName 2>&1 | tr '\n' ' '; echo; done
-          sec CERTBOT_TIMER; systemctl is-active certbot.timer 2>&1; systemctl list-timers --no-pager 2>/dev/null | grep -i certbot
-          sec DNS
-          for q in "MX servgo.ru" "A mail.servgo.ru" "A servgo.ru" "TXT servgo.ru" "TXT _dmarc.servgo.ru" "NS servgo.ru"; do printf '%s: ' "$q"; dig +short +time=3 $q @8.8.8.8 | tr '\n' ' '; echo; done
-          printf 'PTR: '; dig +short -x 155.212.162.47 @8.8.8.8
-          sec NGINX_TEST; nginx -t 2>&1 | tail -3
-          sec NGINX_MAIL_VHOST
-          for f in $(grep -lR 'mail.servgo.ru' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null); do echo "--- $f"; ls -l "$f"; grep -vE '^\s*(#|$)' "$f" | grep -Ev 'ssl_(session|protocols|ciphers|prefer)' | head -60; done
-          sec LOCAL_HTTP
-          for p in / /claim /api/campaigns /owner-mail/app; do printf '%s -> ' "$p"; curl -sk -o /dev/null -m 8 -w '%{http_code}\n' --resolve mail.servgo.ru:443:127.0.0.1 "https://mail.servgo.ru$p"; done
-          printf 'api8000 /owner-mail/app -> '; curl -s -o /dev/null -m 8 -w '%{http_code}\n' http://127.0.0.1:8000/owner-mail/app
-          printf 'servgo.ru/api/owner-mail/permission -> '; curl -sk -o /dev/null -m 8 -w '%{http_code}\n' --resolve servgo.ru:443:127.0.0.1 https://servgo.ru/api/owner-mail/permission
-          sec LOCAL_SMTP_BANNERS
-          python3 - <<'SMTP'
-          import smtplib,ssl,socket
-          for host,port in (('127.0.0.1',25),('155.212.162.47',25),('127.0.0.1',587)):
-              try:
-                  s=smtplib.SMTP(host,port,timeout=6); code,msg=s.ehlo(); print(f'{host}:{port} ehlo={code} starttls={"starttls" in msg.decode().lower()}'); s.quit()
-              except Exception as e: print(f'{host}:{port} FAIL {type(e).__name__}: {e}')
-          try:
-              ctx=ssl.create_default_context(); r=socket.create_connection(('127.0.0.1',993),timeout=6); t=ctx.wrap_socket(r,server_hostname='mail.servgo.ru'); print('993 tls ok', t.recv(80)); t.close()
-          except Exception as e: print(f'993 FAIL {type(e).__name__}: {e}')
-          SMTP
-          sec OWNER_MAIL_ENV_KEYS_ONLY
-          pid=$(systemctl show -p MainPID --value booking-bot 2>/dev/null)
-          for u in $(systemctl list-units --type=service --no-legend --no-pager | awk '{print $1}' | grep -Ei 'booking|servgo|api'); do
-            p=$(systemctl show -p MainPID --value "$u"); [ "$p" -gt 0 ] 2>/dev/null || continue
-            printf '%s pid=%s keys: ' "$u" "$p"; tr '\0' '\n' </proc/$p/environ 2>/dev/null | grep -E '^(SERVGO_MAIL|SMTP_)' | cut -d= -f1 | tr '\n' ' '; echo
+          mask(){ sed -E 's/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+)/***@\1/g; s/(ticket|token)=[^ &"]+/\1=***/g'; }
+          sec RUN2_NGINX_SERVGO_MAIL_ROUTES
+          f=$(grep -lE 'server_name[^;]*\bservgo\.ru' /etc/nginx/sites-enabled/* | head -3); echo "$f"
+          for x in $f; do echo "--- $x"; grep -nE 'server_name|listen|location|proxy_pass|return|try_files|root ' "$x" | head -60; done
+          sec RUN2_ACCESS_LOG_MAIL_ENTRY_TODAY
+          for L in /var/log/nginx/access.log /var/log/nginx/*servgo*access*.log; do [ -f "$L" ] || continue; echo "--- $L"; grep -E 'owner-mail|"(GET|POST) /mail[ ?]|/claim' "$L" | grep -E '16/Oct/2026|17/Oct/2026' | awk '{print $1,$4,$6,$7,$9,$10}' | mask | tail -40; done
+          sec RUN2_MAILHOST_ACCESS_TODAY
+          grep -h 'mail.servgo.ru' /var/log/nginx/*.log 2>/dev/null | grep -E '16/Oct/2026|17/Oct/2026' | awk '{print $1,$4,$6,$7,$9}' | mask | tail -30
+          grep -l . /var/log/nginx/*.log 2>/dev/null | head -20
+          sec RUN2_DIST_MAIL_ENTRY
+          D=/opt/booking_bot/web/frontend/dist; ls -l --time-style=+%F_%T $D/index.html; ls -l --time-style=+%F_%T $D/assets/*.js 2>/dev/null | tail -5
+          grep -l 'owner-mail/entry' $D/assets/*.js 2>/dev/null | while read j; do echo "--- $j"; grep -oE '.{160}owner-mail/entry.{200}' "$j" | head -3; done
+          grep -c 'MailEntryPage\|Открываем почту' $D/assets/*.js 2>/dev/null | grep -v ':0'
+          ls -ld --time-style=+%F_%T $D.bak_20261016 2>&1
+          sec RUN2_OWNER_MAIL_ROUTES
+          grep -nE '@router\.(get|post|put|delete)|^router *=|prefix' /opt/booking_bot/web/api/routes/owner_mail.py | head -40
+          grep -rnE 'owner_mail|mail_campaign' /opt/booking_bot/web/api/main.py /opt/booking_bot/web/api/app.py 2>/dev/null | head
+          sec RUN2_POSTFIX_GOOGLE_TODAY
+          journalctl -u 'postfix*' --since '2026-10-16 00:00' --no-pager -o short-iso 2>/dev/null | grep -Ei 'google|gmail' | mask | tail -40
+          echo '--- delivered/sent today'
+          journalctl -u 'postfix*' --since '2026-10-16 00:00' --no-pager -o short-iso 2>/dev/null | grep -E 'status=(sent|deferred|bounced)|lmtp.*status' | mask | tail -40
+          echo '--- grep mail.log for google today'
+          grep -hEi 'google|gmail' /var/log/mail.log /var/log/mail.log.1 2>/dev/null | grep -E '^(Oct 1[56]|2026-10-1[56])' | mask | tail -40
+          sec RUN2_MAILDIR_RECENT_HEADERS
+          for m in $(ls -t /var/mail/vhosts/servgo.ru/support/Maildir/new/ 2>/dev/null | head -4); do f=/var/mail/vhosts/servgo.ru/support/Maildir/new/$m; stat -c '%y' "$f"; grep -m3 -iE '^(From|Date|Subject):' "$f" | mask; done
+          sec RUN2_CAMPAIGN_STORE
+          ls -la --time-style=+%F_%T /var/lib/servgo-owner-mail
+          for db in /var/lib/servgo-owner-mail/*.db /var/lib/servgo-owner-mail/*.sqlite*; do [ -f "$db" ] || continue; echo "--- $db"; python3 - "$db" <<'SQ'
+          import sqlite3,sys
+          c=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True)
+          for (t,) in c.execute("select name from sqlite_master where type='table'"):
+              cols=[r[1] for r in c.execute(f'pragma table_info({t})')]
+              n=c.execute(f'select count(*) from {t}').fetchone()[0]
+              line=f'{t}: rows={n}'
+              if 'status' in cols:
+                  line+=' '+str(c.execute(f'select status,count(*) from {t} group by status').fetchall())
+              print(line)
+          SQ
           done
-          ls -ld /var/lib/servgo-owner-mail 2>&1
-          sec MAIL_LOG_ERRORS_24H
-          journalctl -u postfix* -u dovecot -u opendkim --since '-24h' --no-pager -o short-iso 2>/dev/null | grep -Ei 'fatal|panic|error|warning|reject|refused|denied|timed out|deferred|bounced|cannot|fail' | sed -E 's/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+)/***@\1/g' | tail -60
-          sec MAIL_LOG_LAST
-          (tail -n 60 /var/log/mail.log 2>/dev/null || journalctl -u postfix* --no-pager -n 60) | sed -E 's/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+)/***@\1/g'
-          sec SERVICE_START_TIMES
-          for u in postfix dovecot opendkim nginx booking-bot; do printf '%s ' "$u"; systemctl show -p ActiveEnterTimestamp,NRestarts --value "$u" | tr '\n' ' '; echo; done
-          sec BOOKING_API_OWNER_MAIL_ERRORS
-          for u in $(systemctl list-units --type=service --no-legend --no-pager | awk '{print $1}' | grep -Ei 'booking|servgo|api'); do echo "--- $u"; journalctl -u "$u" --since '-24h' --no-pager -o short-iso 2>/dev/null | grep -Ei 'owner.mail|mail_campaign|smtp|imap|Traceback|Error' | sed -E 's/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+)/***@\1/g' | tail -25; done
-          sec RECENT_CHANGES
-          ls -la --time-style=+%F_%T /opt/servgo-releases/20261016/ 2>/dev/null | head
-          find /etc/postfix /etc/dovecot /etc/opendkim /etc/nginx /etc/ufw -newermt '-3 days' -type f -printf '%TF_%TT %p\n' 2>/dev/null | sort | tail -20
-          find /opt/booking_bot/web/api/routes -name 'owner_mail*' -o -name 'mail_campaign*' 2>/dev/null | xargs -r ls -l --time-style=+%F_%T
+          sec RUN2_WORKER
+          systemctl status servgo-mail-worker --no-pager 2>&1 | head -8
+          journalctl -u servgo-mail-worker --since '-3 days' --no-pager -o short-iso 2>/dev/null | mask | tail -30
+          sec RUN2_WEBAPI_TODAY_ERRORS
+          journalctl -u booking-web-api --since '2026-10-16 00:00' --no-pager -o short-iso 2>/dev/null | grep -E 'owner-mail| 5[0-9][0-9] |Traceback|Error|Exception' | grep -vE ' 200 OK' | mask | tail -40
+          sec RUN2_MAIL_SESSION_CHECK
+          grep -nE 'max_age|COOKIE|cookie_name|SESSION_HOURS|samesite|domain=' /opt/booking_bot/web/api/routes/owner_mail.py | head -20
           '''
-          _,o,e=s.exec_command(cmd,timeout=150)
+          _,o,e=s.exec_command(cmd,timeout=120)
           print(o.read().decode('utf-8','replace'))
           err=e.read().decode('utf-8','replace')
           if err.strip(): print('--- stderr ---'); print(err[-2500:])
