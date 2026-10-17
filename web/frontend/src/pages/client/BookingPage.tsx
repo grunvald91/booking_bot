@@ -1,66 +1,28 @@
 import { useState, useEffect, useMemo, useRef, Component, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
-import { ClientShell } from '../../components/ClientShell'
-import { NotificationSetup } from '../../components/NotificationSetup'
-import { downloadBookingIcs } from '../../utils/calendar'
-import './booking.css'
-
-// Защита от белого экрана: если в success-рендере что-то падает,
-// клиент должен увидеть хоть какое-то сообщение, а не пустоту.
-class SuccessErrorBoundary extends Component<{ children: ReactNode; bookingId?: number | null; notifyToken?: string | null }, { error: Error | null }> {
-  state: { error: Error | null } = { error: null }
-  static getDerivedStateFromError(error: Error) { return { error } }
-  componentDidCatch(error: Error) {
-    try { console.error('Booking success render crashed:', error) } catch {}
-  }
-  render() {
-    if (this.state.error) {
-      const publicUrl = this.props.notifyToken
-        ? `${window.location.origin}/b/${this.props.notifyToken}`
-        : null
-      return (
-        <div className="bk-fallback">
-          <div className="bk-fallback-icon is-ok">✅</div>
-          <h2 className="ds-h1">Запись создана</h2>
-          <p className="ds-sub bk-fallback-sub">
-            Бронь сохранена{this.props.bookingId ? ` (№${this.props.bookingId})` : ''}. Подробности и статус доступны по ссылке.
-          </p>
-          {publicUrl && (
-            <a href={publicUrl} className="ds-btn ds-btn--primary" style={{ marginBottom: 12 }}>
-              Открыть страницу брони
-            </a>
-          )}
-          <Link to="/" className="ds-accent" style={{ fontSize: 13, textDecoration: 'underline' }}>На главную</Link>
-        </div>
-      )
-    }
-    return this.props.children
-  }
-}
 import {
   Calendar,
   Clock,
-  CheckCircle,
+  Check,
   ChevronLeft,
   ChevronRight,
-  ChevronDown,
-  Scissors,
+  ArrowLeft,
+  ArrowRight,
+  Sparkles,
   User,
-  Plus,
-  Minus,
-  Check,
-  DoorOpen,
-  Music,
   Users,
   UserCheck,
+  DoorOpen,
   Package,
   CreditCard,
-  MapPin,
-  Navigation,
   Paperclip,
-  Repeat,
+  Plus,
+  Minus,
   Info,
   X,
+  Bell,
+  Send,
 } from 'lucide-react'
 import {
   api,
@@ -70,13 +32,17 @@ import {
   type CalculatePriceResponse,
 } from '../../api/client'
 import { getTelegramUser } from '../../utils/telegram'
+import { downloadBookingIcs } from '../../utils/calendar'
+import { NotificationSetup } from '../../components/NotificationSetup'
+import { Logo } from '../../components/Logo'
+import './booking-flow.css'
 
 // ── Helpers ──
 
 function formatPrice(price?: number | null, isHourly?: boolean) {
-  if (price == null) return '\u2014'
+  if (price == null) return '—'
   const formatted = new Intl.NumberFormat('ru-RU').format(price)
-  return isHourly ? `${formatted} \u20BD/\u0447` : `${formatted} \u20BD`
+  return isHourly ? `${formatted} ₽/ч` : `${formatted} ₽`
 }
 
 function cleanPaymentDetails(value?: string | null) {
@@ -89,10 +55,10 @@ function cleanPaymentDetails(value?: string | null) {
 
 function formatDuration(minutes?: number | null) {
   if (!minutes || minutes <= 0) return ''
-  if (minutes < 60) return `${minutes} \u043C\u0438\u043D`
+  if (minutes < 60) return `${minutes} мин`
   const h = Math.floor(minutes / 60)
   const m = minutes % 60
-  return m ? `${h} \u0447 ${m} \u043C\u0438\u043D` : `${h} \u0447`
+  return m ? `${h} ч ${m} мин` : `${h} ч`
 }
 
 function getRoomPriceRange(room: EmployeeWithPricing): string {
@@ -101,7 +67,7 @@ function getRoomPriceRange(room: EmployeeWithPricing): string {
   const min = Math.min(...prices)
   const max = Math.max(...prices)
   if (min === max) return formatPrice(min, true)
-  return `${new Intl.NumberFormat('ru-RU').format(min)}\u2013${new Intl.NumberFormat('ru-RU').format(max)} \u20BD/\u0447`
+  return `${new Intl.NumberFormat('ru-RU').format(min)}–${new Intl.NumberFormat('ru-RU').format(max)} ₽/ч`
 }
 
 function parsePhotos(raw?: string | null): string[] {
@@ -115,7 +81,25 @@ function parsePhotos(raw?: string | null): string[] {
   return []
 }
 
-function linkifyText(text: string): React.ReactNode {
+function photoSrc(photo: string): string {
+  if (/^https?:\/\//i.test(photo) || photo.startsWith('/')) return photo
+  return `/api/telegram-photo/${encodeURIComponent(photo)}`
+}
+
+function resourcePhotos(resource: EmployeeWithPricing): string[] {
+  return Array.from(
+    new Set(
+      [resource.primary_photo, ...parsePhotos(resource.photos), resource.photo_url]
+        .filter((photo): photo is string => typeof photo === 'string' && photo.trim().length > 0)
+    )
+  )
+}
+
+function initials(name: string) {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('')
+}
+
+function linkifyText(text: string): ReactNode {
   const urlPattern = /(https?:\/\/[^\s]+|(?:vk\.com|t\.me)\/[^\s]+)/gi
   const parts = text.split(urlPattern)
   if (parts.length === 1) return text
@@ -123,7 +107,7 @@ function linkifyText(text: string): React.ReactNode {
     if (/^(https?:\/\/|vk\.com\/|t\.me\/)/i.test(part)) {
       const href = part.startsWith('http') ? part : `https://${part}`
       return (
-        <a key={i} href={href} target="_blank" rel="noopener noreferrer" className="ds-accent" style={{ textDecoration: 'underline' }}>
+        <a key={i} href={href} target="_blank" rel="noopener noreferrer">
           {part}
         </a>
       )
@@ -132,231 +116,41 @@ function linkifyText(text: string): React.ReactNode {
   })
 }
 
-const DAYS_RU = ['\u0412\u0441', '\u041F\u043D', '\u0412\u0442', '\u0421\u0440', '\u0427\u0442', '\u041F\u0442', '\u0421\u0431']
-const MONTHS_RU = [
-  '\u042F\u043D\u0432\u0430\u0440\u044C', '\u0424\u0435\u0432\u0440\u0430\u043B\u044C', '\u041C\u0430\u0440\u0442',
-  '\u0410\u043F\u0440\u0435\u043B\u044C', '\u041C\u0430\u0439', '\u0418\u044E\u043D\u044C',
-  '\u0418\u044E\u043B\u044C', '\u0410\u0432\u0433\u0443\u0441\u0442', '\u0421\u0435\u043D\u0442\u044F\u0431\u0440\u044C',
-  '\u041E\u043A\u0442\u044F\u0431\u0440\u044C', '\u041D\u043E\u044F\u0431\u0440\u044C', '\u0414\u0435\u043A\u0430\u0431\u0440\u044C',
-]
-
-function formatDateRu(dateStr: string) {
-  const d = new Date(dateStr)
-  return `${d.getDate()} ${MONTHS_RU[d.getMonth()].toLowerCase()}, ${DAYS_RU[d.getDay()]}`
+function dateKey(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-// ── Calendar ──
-
-function CalendarPicker({
-  selected,
-  onSelect,
-}: {
-  selected: string | null
-  onSelect: (date: string) => void
-}) {
-  const today = new Date()
-  const [currentMonth, setCurrentMonth] = useState(
-    new Date(today.getFullYear(), today.getMonth(), 1)
-  )
-
-  const days = useMemo(() => {
-    const year = currentMonth.getFullYear()
-    const month = currentMonth.getMonth()
-    const firstDay = new Date(year, month, 1).getDay()
-    const daysInMonth = new Date(year, month + 1, 0).getDate()
-
-    const result: (Date | null)[] = []
-    const startIdx = firstDay === 0 ? 6 : firstDay - 1
-    for (let i = 0; i < startIdx; i++) result.push(null)
-    for (let d = 1; d <= daysInMonth; d++) result.push(new Date(year, month, d))
-    return result
-  }, [currentMonth])
-
-  const prevMonth = () =>
-    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))
-  const nextMonth = () =>
-    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))
-
-  return (
-    <div className="ds-card bk-cal">
-      <div className="bk-cal-head">
-        <button
-          onClick={prevMonth}
-          className="bk-cal-nav"
-          aria-label="Предыдущий месяц"
-        >
-          <ChevronLeft size={20} />
-        </button>
-        <h3>
-          {MONTHS_RU[currentMonth.getMonth()]} {currentMonth.getFullYear()}
-        </h3>
-        <button
-          onClick={nextMonth}
-          className="bk-cal-nav"
-          aria-label="Следующий месяц"
-        >
-          <ChevronRight size={20} />
-        </button>
-      </div>
-
-      <div className="bk-cal-weekdays">
-        {['\u041F\u043D', '\u0412\u0442', '\u0421\u0440', '\u0427\u0442', '\u041F\u0442', '\u0421\u0431', '\u0412\u0441'].map((d) => (
-          <span key={d}>{d}</span>
-        ))}
-      </div>
-
-      <div className="bk-cal-days">
-        {days.map((day, idx) => {
-          if (!day) return <div key={`empty-${idx}`} />
-          const dateStr = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
-          const isPast = day < new Date(today.getFullYear(), today.getMonth(), today.getDate())
-          const isSelected = selected === dateStr
-          const isToday =
-            day.getDate() === today.getDate() &&
-            day.getMonth() === today.getMonth() &&
-            day.getFullYear() === today.getFullYear()
-
-          return (
-            <button
-              key={dateStr}
-              disabled={isPast}
-              onClick={() => onSelect(dateStr)}
-              className={`bk-cal-day ${isSelected ? 'is-selected' : isToday ? 'is-today' : ''}`}
-            >
-              {day.getDate()}
-            </button>
-          )
-        })}
-      </div>
-    </div>
-  )
+function dateFromKey(key: string) {
+  const [y, m, d] = key.split('-').map(Number)
+  return new Date(y, m - 1, d)
 }
 
-// ── Helper: scroll into view ──
-function scrollToRef(ref: React.RefObject<HTMLDivElement | null>, delay = 300) {
-  setTimeout(() => {
-    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, delay)
+function ruDate(key: string) {
+  return dateFromKey(key).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
 }
 
-// ── Section header ──
-function SectionHeader({
-  icon,
-  title,
-  subtitle,
-  onInfo,
-  infoLabel,
-}: {
-  icon: React.ReactNode
-  title: string
-  subtitle?: string
-  onInfo?: () => void
-  infoLabel?: string
-}) {
-  return (
-    <>
-      <div className="bk-section-head">
-        <span className="ico">{icon}</span>
-        <h2 className="ds-h2" style={{ flex: 1 }}>{title}</h2>
-        {onInfo && (
-          <button
-            type="button"
-            onClick={onInfo}
-            className="ds-icon-btn bordered"
-            aria-label={infoLabel || `Подробнее: ${title}`}
-            title="Подробнее"
-            style={{ width: 30, height: 30, flexShrink: 0 }}
-          >
-            <Info size={16} />
-          </button>
-        )}
-      </div>
-      {subtitle && <p className="ds-sub bk-section-sub">{subtitle}</p>}
-      {!subtitle && <div className="bk-section-sub" />}
-    </>
-  )
+function ruDateLong(key: string) {
+  const s = dateFromKey(key).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })
+  return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
-type InfoModalData = {
-  title: string
-  description?: string
-  details?: string[]
-  photos?: string[]
+// Винительный падеж для стандартных названий шагов («Выберите услугу»).
+// Для кастомных названий бизнеса используем форму «Выберите: …».
+const ACCUSATIVE: Record<string, string> = {
+  'услуга': 'услугу', 'мастер': 'мастера', 'специалист': 'специалиста', 'зал': 'зал',
+  'дата': 'дату', 'время': 'время', 'доп. услуги': 'доп. услуги',
+}
+function choosePhrase(verb: string, label: string) {
+  const acc = ACCUSATIVE[label.trim().toLowerCase()]
+  return acc ? `${verb} ${acc}` : `${verb}: ${label.toLowerCase()}`
 }
 
-function infoPhotoSrc(photo: string): string {
-  if (/^https?:\/\//i.test(photo) || photo.startsWith('/')) return photo
-  return `/api/telegram-photo/${encodeURIComponent(photo)}`
-}
-
-function InfoModal({ data, onClose }: { data: InfoModalData; onClose: () => void }) {
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
-
-  return (
-    <div
-      role="presentation"
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.55)',
-        display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 12,
-      }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={data.title}
-        onClick={(e) => e.stopPropagation()}
-        className="ds-card"
-        style={{ width: 'min(560px, 100%)', maxHeight: '80vh', overflowY: 'auto', padding: 18, borderRadius: 18 }}
-      >
-        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
-          <h2 className="ds-h2" style={{ flex: 1 }}>{data.title}</h2>
-          <button type="button" onClick={onClose} className="ds-icon-btn bordered" aria-label="Закрыть">
-            <X size={18} />
-          </button>
-        </div>
-        {data.photos && data.photos.length > 0 && (
-          <div className="bk-info-gallery" aria-label={`Фотографии: ${data.title}`}>
-            {data.photos.map((photo, i) => {
-              const src = infoPhotoSrc(photo)
-              return (
-                <a
-                  key={`${photo}-${i}`}
-                  href={src}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="bk-info-gallery-item"
-                  aria-label={`Открыть фото ${i + 1} из ${data.photos!.length}`}
-                >
-                  <img
-                    src={src}
-                    alt={`${data.title} — фото ${i + 1}`}
-                    loading={i === 0 ? 'eager' : 'lazy'}
-                  />
-                </a>
-              )
-            })}
-          </div>
-        )}
-        <p className="ds-text" style={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
-          {data.description?.trim() || 'Подробное описание пока не добавлено.'}
-        </p>
-        {data.details && data.details.length > 0 && (
-          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {data.details.filter(Boolean).map((detail, i) => (
-              <div key={i} className="ds-sub">{detail}</div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  )
+function plural(n: number, one: string, few: string, many: string) {
+  const m10 = n % 10
+  const m100 = n % 100
+  if (m10 === 1 && m100 !== 11) return one
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few
+  return many
 }
 
 function resourceSupportsService(resource: EmployeeWithPricing | null | undefined, serviceId: number): boolean {
@@ -365,6 +159,110 @@ function resourceSupportsService(resource: EmployeeWithPricing | null | undefine
   return ids.length === 0 || ids.includes(serviceId)
 }
 
+// ── Error boundaries ──
+
+// Защита от белого экрана: если в итоговом экране что-то падает,
+// клиент должен увидеть хоть какое-то сообщение, а не пустоту.
+class SuccessErrorBoundary extends Component<{ children: ReactNode; bookingId?: number | null; notifyToken?: string | null }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null }
+  static getDerivedStateFromError(error: Error) { return { error } }
+  componentDidCatch(error: Error) {
+    try { console.error('Booking success render crashed:', error) } catch { /* noop */ }
+  }
+  render() {
+    if (this.state.error) {
+      const publicUrl = this.props.notifyToken
+        ? `${window.location.origin}/b/${this.props.notifyToken}`
+        : null
+      return (
+        <div className="bf-fallback">
+          <div className="bf-orb"><Check /></div>
+          <h2 className="bf-h2">Запись создана</h2>
+          <p className="bf-intro">
+            Бронь сохранена{this.props.bookingId ? ` (№${this.props.bookingId})` : ''}. Подробности и статус доступны по ссылке.
+          </p>
+          {publicUrl && <a href={publicUrl} className="bf-primary" style={{ flex: 'none', width: '100%' }}>Открыть страницу брони</a>}
+          <Link to="/" className="bf-text-alt">На главную</Link>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+// ── Info sheet («Подробнее») ──
+
+type InfoModalData = {
+  title: string
+  description?: string
+  details?: string[]
+  photos?: string[]
+}
+
+function InfoSheet({ data, onClose }: { data: InfoModalData; onClose: () => void }) {
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return (
+    <div className="bf-sheet-ov" role="presentation" onClick={onClose}>
+      <div className="bf-sheet" role="dialog" aria-modal="true" aria-label={data.title} onClick={(e) => e.stopPropagation()}>
+        <div className="bf-sheet-grip" />
+        <div className="bf-sheet-head">
+          <h3>{data.title}</h3>
+          <button type="button" className="bf-sheet-close" onClick={onClose} aria-label="Закрыть"><X size={17} /></button>
+        </div>
+        {data.photos && data.photos.length > 0 && (
+          <div className="bf-gallery" aria-label={`Фотографии: ${data.title}`}>
+            {data.photos.map((photo, i) => (
+              <a key={`${photo}-${i}`} href={photoSrc(photo)} target="_blank" rel="noopener noreferrer" aria-label={`Открыть фото ${i + 1} из ${data.photos!.length}`}>
+                <img src={photoSrc(photo)} alt={`${data.title} — фото ${i + 1}`} loading={i === 0 ? 'eager' : 'lazy'} />
+              </a>
+            ))}
+          </div>
+        )}
+        <p>{data.description?.trim() ? linkifyText(data.description) : 'Подробное описание пока не добавлено.'}</p>
+        {data.details && data.details.filter(Boolean).length > 0 && (
+          <div className="details">
+            {data.details.filter(Boolean).map((detail, i) => <div key={i}>{detail}</div>)}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Иллюстрация обложки, если у бизнеса нет фото ──
+
+function HeroArt() {
+  return (
+    <svg viewBox="0 0 900 485" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <defs>
+        <linearGradient id="bfSky" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#eef5fd" />
+          <stop offset="0.55" stopColor="#dce9f7" />
+          <stop offset="1" stopColor="#c3d8ef" />
+        </linearGradient>
+        <radialGradient id="bfGlow" cx="0.72" cy="0.3" r="0.6">
+          <stop offset="0" stopColor="#ffffff" stopOpacity="0.95" />
+          <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+      <rect width="900" height="485" fill="url(#bfSky)" />
+      <rect width="900" height="485" fill="url(#bfGlow)" />
+      <circle cx="640" cy="120" r="150" fill="none" stroke="#f8fdff" strokeOpacity="0.7" strokeWidth="18" />
+      <path d="M330 485V210a120 120 0 0 1 240 0v275" fill="#ffffff" fillOpacity="0.45" stroke="#fafcff" strokeOpacity="0.8" strokeWidth="22" />
+      <rect x="360" y="370" width="180" height="46" rx="23" fill="#5f88b0" />
+      <rect x="378" y="404" width="144" height="16" rx="8" fill="#4a7399" />
+      <ellipse cx="450" cy="470" rx="320" ry="40" fill="#ffffff" fillOpacity="0.5" />
+    </svg>
+  )
+}
+
+type Screen = 'home' | 'services' | 'resource' | 'calendar' | 'extras' | 'review' | 'prepay' | 'done'
+
 // ── Main Component ──
 
 function BookingPageInner() {
@@ -372,30 +270,35 @@ function BookingPageInner() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
 
-  const preselectedServiceId = searchParams.get('service')
-    ? Number(searchParams.get('service'))
-    : null
-  const preselectedEmployeeId = searchParams.get('employee')
-    ? Number(searchParams.get('employee'))
-    : null
+  const preselectedServiceId = searchParams.get('service') ? Number(searchParams.get('service')) : null
+  const preselectedEmployeeId = searchParams.get('employee') ? Number(searchParams.get('employee')) : null
 
   // Business data
   const [business, setBusiness] = useState<BusinessDetail | null>(null)
+  const [loadError, setLoadError] = useState(false)
   const [services, setServices] = useState<Service[]>([])
   const [additionalServices, setAdditionalServices] = useState<Service[]>([])
   const [employees, setEmployees] = useState<EmployeeWithPricing[]>([])
   const [infoModal, setInfoModal] = useState<InfoModalData | null>(null)
 
+  // Navigation
+  const [screen, setScreen] = useState<Screen>('home')
+  const historyRef = useRef<Screen[]>([])
+
   // Selections
-  const [selectedRoom, setSelectedRoom] = useState<EmployeeWithPricing | null>(null)
   const [selectedServices, setSelectedServices] = useState<Service[]>([])
-  const [selectedService, setSelectedService] = useState<Service | null>(null)
-  const [selectedEmployee, setSelectedEmployee] = useState<EmployeeWithPricing | null>(null)
+  const [selectedResource, setSelectedResource] = useState<EmployeeWithPricing | null>(null)
+  const [anyResource, setAnyResource] = useState(false)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [selectedTime, setSelectedTime] = useState<string | null>(null)
+  const [extrasSeen, setExtrasSeen] = useState(false)
   const [isSoloPricing, setIsSoloPricing] = useState(false)
   const [selectedAddons, setSelectedAddons] = useState<Set<number>>(new Set())
   const [addonHours, setAddonHours] = useState<Record<number, number>>({})
+  const [month, setMonth] = useState(() => {
+    const t = new Date()
+    return new Date(t.getFullYear(), t.getMonth(), 1)
+  })
 
   // Price
   const [priceData, setPriceData] = useState<CalculatePriceResponse | null>(null)
@@ -410,20 +313,16 @@ function BookingPageInner() {
   const [clientName, setClientName] = useState(
     tgUser ? [tgUser.first_name, tgUser.last_name].filter(Boolean).join(' ') : ''
   )
-  const [clientPhone, setClientPhone] = useState(() => {
-    return localStorage.getItem('clientPhone') || ''
-  })
-  const [clientEmail, setClientEmail] = useState(() => {
-    return localStorage.getItem('clientEmail') || ''
-  })
+  const [clientPhone, setClientPhone] = useState(() => localStorage.getItem('clientPhone') || '')
+  const [clientEmail, setClientEmail] = useState(() => localStorage.getItem('clientEmail') || '')
   const [comment, setComment] = useState('')
+  const [moreOpen, setMoreOpen] = useState(false)
   const [personalDataConsent, setPersonalDataConsent] = useState(false)
   const [bookingTermsAccepted, setBookingTermsAccepted] = useState(false)
   const [repeatEnabled, setRepeatEnabled] = useState(false)
   const [repeatWeeks, setRepeatWeeks] = useState(4)
   const [createdDates, setCreatedDates] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
-  const [success, setSuccess] = useState(false)
   const [bookingError, setBookingError] = useState<string | null>(null)
   const [createdBookingId, setCreatedBookingId] = useState<number | null>(null)
   const [createdNotifyToken, setCreatedNotifyToken] = useState<string | null>(null)
@@ -434,48 +333,25 @@ function BookingPageInner() {
   const [pendingReceipt, setPendingReceipt] = useState<File | null>(null)
   const [pendingReceiptPreview, setPendingReceiptPreview] = useState<string | null>(null)
   const [receiptError, setReceiptError] = useState<string | null>(null)
-
-  // Auto-skip toast
-  const [skipToast, setSkipToast] = useState<string | null>(null)
-  useEffect(() => {
-    if (!skipToast) return
-    const t = setTimeout(() => setSkipToast(null), 1200)
-    return () => clearTimeout(t)
-  }, [skipToast])
-
-  function flashAutoPick(label: string, scrollRef?: React.RefObject<HTMLDivElement | null>) {
-    setSkipToast(label)
-    if (scrollRef) {
-      // Дать клиенту увидеть toast 0.8с, потом проскроллить дальше
-      setTimeout(() => scrollToRef(scrollRef, 0), 800)
-    }
-  }
-
-  // Section refs for auto-scroll
-  const refService = useRef<HTMLDivElement>(null)
-  const refEmployee = useRef<HTMLDivElement>(null)
-  const refRoom = useRef<HTMLDivElement>(null)
-  const refVenueServices = useRef<HTMLDivElement>(null)
-  const refDate = useRef<HTMLDivElement>(null)
-  const refTime = useRef<HTMLDivElement>(null)
-  const refFormat = useRef<HTMLDivElement>(null)
-  const refAddons = useRef<HTMLDivElement>(null)
-  const refConfirm = useRef<HTMLDivElement>(null)
-  // Inputs (для скролла/фокуса при валидации)
+  const [paymentError, setPaymentError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<{ name?: boolean; phone?: boolean; email?: boolean }>({})
   const nameInputRef = useRef<HTMLInputElement>(null)
   const phoneInputRef = useRef<HTMLInputElement>(null)
   const emailInputRef = useRef<HTMLInputElement>(null)
-  // Подсветка пустых/некорректных полей после попытки отправки
-  const [fieldErrors, setFieldErrors] = useState<{ name?: boolean; phone?: boolean; email?: boolean }>({})
+
+  // Toast
+  const [toast, setToast] = useState<string | null>(null)
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 2200)
+    return () => clearTimeout(t)
+  }, [toast])
 
   // Auto-fill phone (и префилл +7 9 если ничего не нашлось)
   useEffect(() => {
     if (clientPhone) return
     const token = localStorage.getItem('token')
-    const setPrefillFallback = () => {
-      // Префиксы РФ-номера, чтобы клиенту не вводить лишнее
-      setClientPhone((v) => v || '+7 9')
-    }
+    const setPrefillFallback = () => setClientPhone((v) => v || '+7 9')
     if (token) {
       api.getMe().then((user) => {
         if (user?.phone) {
@@ -495,7 +371,11 @@ function BookingPageInner() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const isVenue = business?.business_type === 'venue_rental'
+  const multiService = isVenue || !!business?.allow_multiple_services
   const flowOrder = business?.booking_flow_order === 'resource_first' ? 'resource_first' : 'service_first'
+  const hasResources = employees.length > 0
+  // Для обычного бизнеса в порядке «сначала услуга» специалист необязателен («Любой специалист»).
+  const resourceOptional = !isVenue && flowOrder === 'service_first'
   const labels = useMemo(() => ({
     service: business?.booking_labels?.service?.trim() || 'Услуга',
     resource: business?.booking_labels?.resource?.trim() || (isVenue ? 'Зал' : 'Мастер'),
@@ -504,23 +384,17 @@ function BookingPageInner() {
     time: business?.booking_labels?.time?.trim() || 'Время',
   }), [business?.booking_labels, isVenue])
 
-  const selectedResource = isVenue ? selectedRoom : selectedEmployee
   const availableServices = useMemo(() => {
     if (flowOrder !== 'resource_first' || !selectedResource) return services
     return services.filter((service) => resourceSupportsService(selectedResource, service.id))
   }, [flowOrder, selectedResource, services])
 
   const availableResources = useMemo(() => {
-    if (flowOrder !== 'service_first') return employees
-    if (isVenue) {
-      if (selectedServices.length === 0) return employees
-      return employees.filter((resource) =>
-        selectedServices.every((service) => resourceSupportsService(resource, service.id))
-      )
-    }
-    if (!selectedService) return employees
-    return employees.filter((resource) => resourceSupportsService(resource, selectedService.id))
-  }, [flowOrder, employees, isVenue, selectedServices, selectedService])
+    if (flowOrder !== 'service_first' || selectedServices.length === 0) return employees
+    return employees.filter((resource) =>
+      selectedServices.every((service) => resourceSupportsService(resource, service.id))
+    )
+  }, [flowOrder, employees, selectedServices])
 
   // Load business data
   useEffect(() => {
@@ -533,111 +407,80 @@ function BookingPageInner() {
         setAdditionalServices(biz.services.filter((s: Service) => s.is_active && s.is_additional))
         setEmployees(biz.employees || [])
         const found = preselectedServiceId
-          ? biz.services.find((service: Service) => service.id === preselectedServiceId)
+          ? biz.services.find((service: Service) => service.id === preselectedServiceId && service.is_active && !service.is_additional)
           : undefined
         const emp = preselectedEmployeeId
           ? (biz.employees || []).find((resource) => resource.id === preselectedEmployeeId)
           : undefined
         const order = biz.booking_flow_order === 'resource_first' ? 'resource_first' : 'service_first'
         const compatible = !found || !emp || resourceSupportsService(emp, found.id)
-
-        if (biz.business_type === 'venue_rental') {
-          if (emp && (compatible || order === 'resource_first')) setSelectedRoom(emp)
-          if (found && (compatible || order === 'service_first')) setSelectedServices([found])
-        } else {
-          if (emp && (compatible || order === 'resource_first')) setSelectedEmployee(emp)
-          if (found && (compatible || order === 'service_first')) setSelectedService(found)
-        }
+        if (emp && (compatible || order === 'resource_first')) setSelectedResource(emp)
+        if (found && (compatible || order === 'service_first')) setSelectedServices([found])
       })
-      .catch(() => {})
+      .catch(() => setLoadError(true))
   }, [businessId, preselectedServiceId, preselectedEmployeeId])
 
   // Total duration
   const totalDuration = useMemo(() => {
-    if (isVenue) {
-      return selectedServices.reduce((sum, s) => sum + (s.duration_minutes ?? 0), 0)
-    }
-    return selectedService?.duration_minutes ?? 60
-  }, [isVenue, selectedServices, selectedService])
+    if (selectedServices.length === 0) return 0
+    if (selectedServices.length === 1 && !isVenue) return selectedServices[0].duration_minutes ?? 60
+    return selectedServices.reduce((sum, s) => sum + (s.duration_minutes ?? 0), 0)
+  }, [isVenue, selectedServices])
 
   // Load slots
   useEffect(() => {
     if (!selectedDate || !businessId) return
-    const serviceId = isVenue
-      ? (selectedServices[0]?.id ?? 0)
-      : (selectedService?.id ?? 0)
+    const serviceId = selectedServices[0]?.id ?? 0
     if (!serviceId) return
-
     setLoadingSlots(true)
-    const resourceId = isVenue ? selectedRoom?.id : selectedEmployee?.id
     api
-      .getSlots(Number(businessId), serviceId, selectedDate, resourceId, totalDuration)
+      .getSlots(Number(businessId), serviceId, selectedDate, selectedResource?.id, totalDuration)
       .then(setSlots)
       .catch(() => setSlots([]))
       .finally(() => setLoadingSlots(false))
-  }, [businessId, selectedDate, isVenue, selectedServices, selectedService, selectedRoom, selectedEmployee, totalDuration])
+  }, [businessId, selectedDate, selectedServices, selectedResource, totalDuration])
 
-  // Auto-pick when a visible step has exactly one option.
+  // Auto-pick when a step has exactly one option.
   useEffect(() => {
-    if (isVenue || selectedService) return
-    if (flowOrder === 'resource_first' && employees.length > 0 && !selectedEmployee) return
+    if (!business || selectedServices.length > 0) return
+    if (flowOrder === 'resource_first' && hasResources && !selectedResource) return
     const candidates = flowOrder === 'resource_first' ? availableServices : services
     if (candidates.length === 1) {
-      const only = candidates[0]
-      setSelectedService(only)
-      flashAutoPick(`${labels.service}: ${only.name}`, refDate)
+      setSelectedServices([candidates[0]])
+      setToast(`Выбрано — ${labels.service.toLowerCase()}: ${candidates[0].name}`)
     }
-  }, [isVenue, selectedService, flowOrder, employees.length, selectedEmployee, availableServices, services, labels.service])
+  }, [business, selectedServices.length, flowOrder, hasResources, selectedResource, availableServices, services, labels.service])
 
   useEffect(() => {
-    if (isVenue || selectedEmployee) return
-    if (flowOrder === 'service_first' && !selectedService) return
-    const candidates = flowOrder === 'service_first' ? availableResources : employees
-    if (candidates.length === 1) {
-      const only = candidates[0]
-      setSelectedEmployee(only)
-      flashAutoPick(`${labels.resource}: ${only.name}`, flowOrder === 'resource_first' ? refService : refDate)
-    }
-  }, [isVenue, selectedEmployee, flowOrder, selectedService, availableResources, employees, labels.resource])
-
-  useEffect(() => {
-    if (!isVenue || selectedRoom) return
+    if (!business || selectedResource) return
     if (flowOrder === 'service_first' && selectedServices.length === 0) return
     const candidates = flowOrder === 'service_first' ? availableResources : employees
     if (candidates.length === 1) {
-      const only = candidates[0]
-      setSelectedRoom(only)
-      flashAutoPick(`${labels.resource}: ${only.name}`, flowOrder === 'resource_first' ? refVenueServices : refDate)
+      setSelectedResource(candidates[0])
+      setToast(`Выбрано — ${labels.resource.toLowerCase()}: ${candidates[0].name}`)
     }
-  }, [isVenue, selectedRoom, flowOrder, selectedServices.length, availableResources, employees, labels.resource])
+  }, [business, selectedResource, flowOrder, selectedServices.length, availableResources, employees, labels.resource])
 
   // Единственный слот времени
   useEffect(() => {
-    if (!selectedDate || selectedTime || slots.length !== 1) return
-    const only = slots[0]
-    setSelectedTime(only)
-    flashAutoPick(`${labels.time}: ${only}`, refConfirm)
-  }, [selectedDate, slots, selectedTime, labels.time])
+    if (!selectedDate || selectedTime || loadingSlots || slots.length !== 1) return
+    setSelectedTime(slots[0])
+    setToast(`Свободно только ${slots[0]} — время выбрано`)
+  }, [selectedDate, slots, selectedTime, loadingSlots])
 
   // Calculate price for venue
   useEffect(() => {
-    if (!isVenue || !selectedRoom || !selectedTime || !businessId || totalDuration <= 0) {
+    if (!isVenue || !selectedResource || !selectedTime || !businessId || totalDuration <= 0) {
       setPriceData(null)
       return
     }
     setPriceLoading(true)
     api
-      .calculatePrice(
-        Number(businessId),
-        selectedRoom.id,
-        selectedTime,
-        totalDuration,
-        selectedDate || undefined
-      )
+      .calculatePrice(Number(businessId), selectedResource.id, selectedTime, totalDuration, selectedDate || undefined)
       .then(setPriceData)
       .catch(() => setPriceData(null))
       .finally(() => setPriceLoading(false))
-  }, [isVenue, selectedRoom, selectedTime, totalDuration, businessId, selectedDate])
+  }, [isVenue, selectedResource, selectedTime, totalDuration, businessId, selectedDate])
 
   // Addon total
   const addonTotal = useMemo(() => {
@@ -645,11 +488,7 @@ function BookingPageInner() {
     additionalServices.forEach((svc) => {
       if (!selectedAddons.has(svc.id)) return
       const base = svc.price ?? 0
-      if (svc.is_hourly_price) {
-        total += base * (addonHours[svc.id] ?? 1)
-      } else {
-        total += base
-      }
+      total += svc.is_hourly_price ? base * (addonHours[svc.id] ?? 1) : base
     })
     return total
   }, [additionalServices, selectedAddons, addonHours])
@@ -657,34 +496,66 @@ function BookingPageInner() {
   // Total price
   const totalPrice = useMemo(() => {
     if (isVenue) {
-      if (isSoloPricing && selectedRoom?.solo_price_per_hour) {
+      if (isSoloPricing && selectedResource?.solo_price_per_hour) {
         const hours = Math.max(1, totalDuration / 60)
-        return selectedRoom.solo_price_per_hour * hours + addonTotal
+        return selectedResource.solo_price_per_hour * hours + addonTotal
       }
       const basePrice = (priceData?.has_time_price && priceData?.total)
         ? priceData.total
         : selectedServices.reduce((sum, s) => sum + (s.price ?? 0), 0)
       return basePrice + addonTotal
     }
-    const servicePrice = selectedService?.price ?? 0
-    return servicePrice + addonTotal
-  }, [isVenue, isSoloPricing, selectedRoom, totalDuration, priceData, addonTotal, selectedService, selectedServices])
+    return selectedServices.reduce((sum, s) => sum + (s.price ?? 0), 0) + addonTotal
+  }, [isVenue, isSoloPricing, selectedResource, totalDuration, priceData, addonTotal, selectedServices])
 
-  // Addon toggle
-  const toggleAddon = (svcId: number) => {
-    setSelectedAddons((prev) => {
-      const next = new Set(prev)
-      if (next.has(svcId)) {
-        next.delete(svcId)
-      } else {
-        next.add(svcId)
-      }
-      return next
-    })
+  const hasFormatChoice = isVenue && !!selectedResource?.solo_price_per_hour
+  const hasExtrasStep = additionalServices.length > 0 || hasFormatChoice
+  const prepaymentNeeded = !!business?.prepayment_enabled && totalPrice > 0
+  // Шаг предоплаты учитываем в счётчике заранее, чтобы «Шаг N / M» не прыгал после выбора услуги.
+  const prepaymentStep = !!business?.prepayment_enabled && (totalPrice > 0 || (selectedServices.length === 0 && services.some((s) => (s.price ?? 0) > 0)))
+  const prepaymentPercent = business?.prepayment_percent ?? 100
+  const prepaymentAmount = totalPrice > 0 ? Math.ceil(totalPrice * prepaymentPercent / 100) : 0
+
+  // ── Шаги ──
+  const selectionSteps = useMemo<Screen[]>(() => {
+    const steps: Screen[] = flowOrder === 'resource_first'
+      ? [...(hasResources ? ['resource' as Screen] : []), 'services']
+      : ['services', ...(hasResources ? ['resource' as Screen] : [])]
+    steps.push('calendar')
+    if (hasExtrasStep) steps.push('extras')
+    steps.push('review')
+    if (prepaymentStep) steps.push('prepay')
+    return steps
+  }, [flowOrder, hasResources, hasExtrasStep, prepaymentStep])
+
+  const servicesDone = selectedServices.length > 0
+  const resourceDone = !hasResources || !!selectedResource || (resourceOptional && anyResource)
+  const dateDone = !!selectedDate && !!selectedTime
+
+  function nextNeeded(): Screen {
+    for (const step of selectionSteps) {
+      if (step === 'services' && !servicesDone) return 'services'
+      if (step === 'resource' && !resourceDone) return 'resource'
+      if (step === 'calendar' && !dateDone) return 'calendar'
+      if (step === 'extras' && !extrasSeen) return 'extras'
+    }
+    return 'review'
   }
 
-  const setAddonHourCount = (svcId: number, hours: number) => {
-    setAddonHours((prev) => ({ ...prev, [svcId]: Math.max(1, hours) }))
+  function go(next: Screen, record = true) {
+    // Календарь и проверка требуют выбранных услуги и ресурса.
+    let target = next
+    if (target === 'calendar' && (!servicesDone || !resourceDone)) target = nextNeeded()
+    if ((target === 'extras' || target === 'review') && (!servicesDone || !resourceDone || !dateDone)) target = nextNeeded()
+    if (target === screen) return
+    if (record) historyRef.current.push(screen)
+    setScreen(target)
+  }
+
+  function back() {
+    const prev = historyRef.current.pop()
+    if (prev) setScreen(prev)
+    else setScreen('home')
   }
 
   const resetDownstream = () => {
@@ -693,43 +564,83 @@ function BookingPageInner() {
     setSlots([])
     setPriceData(null)
     setIsSoloPricing(false)
-    setSelectedAddons(new Set())
-    setAddonHours({})
+    setExtrasSeen(false)
   }
 
-  const chooseEmployee = (employee: EmployeeWithPricing) => {
-    setSelectedEmployee(employee)
-    if (flowOrder === 'resource_first' && selectedService && !resourceSupportsService(employee, selectedService.id)) {
-      setSelectedService(null)
+  // После выбора на шаге — сразу дальше (решение одной рукой, как в макете V8).
+  const advanceAfter = (state: { services?: Service[]; resource?: EmployeeWithPricing | null; any?: boolean; date?: boolean }) => {
+    const sDone = (state.services ?? selectedServices).length > 0
+    const rRes = state.resource !== undefined ? state.resource : selectedResource
+    const rDone = !hasResources || !!rRes || (resourceOptional && (state.any ?? anyResource))
+    const dDone = state.date ?? dateDone
+    for (const step of selectionSteps) {
+      if (step === 'services' && !sDone) return go('services')
+      if (step === 'resource' && !rDone) return go('resource')
+      if (step === 'calendar' && !dDone) {
+        historyRef.current.push(screen)
+        return setScreen('calendar')
+      }
+      if (step === 'extras' && !extrasSeen) {
+        historyRef.current.push(screen)
+        return setScreen('extras')
+      }
     }
-    resetDownstream()
-    scrollToRef(flowOrder === 'resource_first' ? refService : refDate)
-  }
-
-  const chooseRoom = (room: EmployeeWithPricing) => {
-    setSelectedRoom(room)
-    if (flowOrder === 'resource_first') {
-      setSelectedServices((prev) => prev.filter((service) => resourceSupportsService(room, service.id)))
-    }
-    resetDownstream()
-    scrollToRef(flowOrder === 'resource_first' ? refVenueServices : refDate)
+    historyRef.current.push(screen)
+    setScreen('review')
   }
 
   const chooseService = (service: Service) => {
-    setSelectedService(service)
-    if (flowOrder === 'service_first') setSelectedEmployee(null)
+    if (multiService) {
+      setSelectedServices((prev) =>
+        prev.some((item) => item.id === service.id)
+          ? prev.filter((item) => item.id !== service.id)
+          : [...prev, service]
+      )
+      if (flowOrder === 'service_first' && selectedResource && !resourceSupportsService(selectedResource, service.id)) {
+        setSelectedResource(null)
+      }
+      resetDownstream()
+      return
+    }
+    const nextServices = [service]
+    setSelectedServices(nextServices)
+    let res = selectedResource
+    if (flowOrder === 'service_first' && res && !resourceSupportsService(res, service.id)) {
+      res = null
+      setSelectedResource(null)
+    }
     resetDownstream()
-    scrollToRef(employees.length > 0 && flowOrder === 'service_first' ? refEmployee : refDate)
+    advanceAfter({ services: nextServices, resource: res, date: false })
   }
 
-  const toggleVenueService = (service: Service) => {
-    setSelectedServices((prev) =>
-      prev.some((item) => item.id === service.id)
-        ? prev.filter((item) => item.id !== service.id)
-        : [...prev, service]
-    )
-    if (flowOrder === 'service_first') setSelectedRoom(null)
+  const chooseResource = (resource: EmployeeWithPricing | null) => {
+    setSelectedResource(resource)
+    setAnyResource(resource === null)
+    let nextServices = selectedServices
+    if (resource && flowOrder === 'resource_first') {
+      nextServices = selectedServices.filter((service) => resourceSupportsService(resource, service.id))
+      setSelectedServices(nextServices)
+    }
     resetDownstream()
+    advanceAfter({ services: nextServices, resource, any: resource === null, date: false })
+  }
+
+  const chooseTime = (time: string) => {
+    setSelectedTime(time)
+    advanceAfter({ date: true })
+  }
+
+  const toggleAddon = (svcId: number) => {
+    setSelectedAddons((prev) => {
+      const next = new Set(prev)
+      if (next.has(svcId)) next.delete(svcId)
+      else next.add(svcId)
+      return next
+    })
+  }
+
+  const setAddonHourCount = (svcId: number, hours: number) => {
+    setAddonHours((prev) => ({ ...prev, [svcId]: Math.max(1, hours) }))
   }
 
   const showServiceInfo = (service: Service) => {
@@ -747,57 +658,34 @@ function BookingPageInner() {
       resource.area_sqm ? `Площадь: ${resource.area_sqm} м²` : '',
       getRoomPriceRange(resource) ? `Стоимость: ${getRoomPriceRange(resource)}` : '',
     ].filter(Boolean)
-    const photos = Array.from(
-      new Set(
-        [resource.primary_photo, ...parsePhotos(resource.photos), resource.photo_url]
-          .filter((photo): photo is string => typeof photo === 'string' && photo.trim().length > 0)
-      )
-    )
-    setInfoModal({ title: resource.name, description: resource.description, details, photos })
+    setInfoModal({ title: resource.name, description: resource.description, details, photos: resourcePhotos(resource) })
   }
 
-  // Список незаполненного для подсказки над кнопкой
-  const missingFields = useMemo(() => {
-    const list: string[] = []
-    if (!clientName.trim()) list.push('имя')
-    if (!clientPhone.trim()) list.push('телефон')
-    if (business?.legal_documents_enabled && !personalDataConsent) list.push('согласие на обработку персональных данных')
-    if (business?.legal_documents_enabled && !bookingTermsAccepted) list.push('условия записи')
-    return list
-  }, [clientName, clientPhone, business?.legal_documents_enabled, personalDataConsent, bookingTermsAccepted])
-
-  // F1: business cover photo (first photo if any) — useMemo ОБЯЗАТЕЛЬНО до if(success) return,
-  // иначе разное число хуков между рендерами → React error #300.
-  const businessCover = useMemo(() => {
-    const ids = parsePhotos(business?.photos)
-    return ids[0] ?? null
-  }, [business?.photos])
+  const businessPhotos = useMemo(() => parsePhotos(business?.photos), [business?.photos])
+  const businessCover = businessPhotos[0] ?? null
 
   // Submit
   const handleSubmit = async () => {
     if (!selectedDate || !selectedTime || !businessId) return
 
-    // Валидация контактов: подсветить пустые поля и проскроллить к первому
+    // Валидация контактов: подсветить пустые поля и сфокусировать первое
     const errs: { name?: boolean; phone?: boolean; email?: boolean } = {}
     if (!clientName.trim()) errs.name = true
-    if (!clientPhone.trim()) errs.phone = true
-    if (clientEmail.trim() && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(clientEmail.trim())) errs.email = true
+    if (!clientPhone.trim() || clientPhone.replace(/\D/g, '').length < 10) errs.phone = true
+    if (clientEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail.trim())) errs.email = true
     if (errs.name || errs.phone || errs.email) {
       setFieldErrors(errs)
       if (errs.email && !errs.name && !errs.phone) {
+        setMoreOpen(true)
         setBookingError('Проверьте email или оставьте поле пустым.')
       } else {
-        setBookingError(
-          `Заполните: ${[errs.name && 'имя', errs.phone && 'телефон'].filter(Boolean).join(' и ')}`
-        )
+        setBookingError(`Заполните: ${[errs.name && 'имя', errs.phone && 'телефон'].filter(Boolean).join(' и ')}`)
       }
-      const target = errs.name
-        ? nameInputRef.current
-        : errs.phone
-          ? phoneInputRef.current
-          : emailInputRef.current
-      target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      setTimeout(() => target?.focus(), 350)
+      const target = errs.name ? nameInputRef.current : errs.phone ? phoneInputRef.current : emailInputRef.current
+      setTimeout(() => {
+        target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        target?.focus()
+      }, 50)
       return
     }
     setFieldErrors({})
@@ -814,19 +702,11 @@ function BookingPageInner() {
     setSubmitting(true)
     setBookingError(null)
     try {
-      const serviceIds = isVenue
-        ? selectedServices.map((s) => s.id)
-        : selectedService
-          ? [selectedService.id]
-          : []
-
       const additionalServiceIds = Array.from(selectedAddons)
       const additionalServiceHoursMap: Record<string, number> = {}
       additionalServiceIds.forEach((id) => {
         const svc = additionalServices.find((s) => s.id === id)
-        if (svc?.is_hourly_price) {
-          additionalServiceHoursMap[String(id)] = addonHours[id] ?? 1
-        }
+        if (svc?.is_hourly_price) additionalServiceHoursMap[String(id)] = addonHours[id] ?? 1
       })
 
       if (clientPhone) localStorage.setItem('clientPhone', clientPhone)
@@ -834,11 +714,11 @@ function BookingPageInner() {
 
       const result = await api.createBooking({
         business_id: Number(businessId),
-        service_ids: serviceIds,
+        service_ids: selectedServices.map((s) => s.id),
         additional_service_ids: additionalServiceIds.length > 0 ? additionalServiceIds : undefined,
         additional_service_hours: Object.keys(additionalServiceHoursMap).length > 0 ? additionalServiceHoursMap : undefined,
         is_solo_booking: isVenue && isSoloPricing ? true : undefined,
-        employee_id: isVenue ? selectedRoom?.id : selectedEmployee?.id,
+        employee_id: selectedResource?.id,
         date: selectedDate,
         time: selectedTime,
         client_name: clientName,
@@ -849,6 +729,7 @@ function BookingPageInner() {
         booking_terms_accepted: business?.legal_documents_enabled ? bookingTermsAccepted : undefined,
         repeat_weeks: repeatEnabled ? repeatWeeks : undefined,
       })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const firstResult: any = Array.isArray(result) && result.length > 0
         ? result[0]
         : (result && typeof result === 'object' && 'id' in result ? result : null)
@@ -856,6 +737,7 @@ function BookingPageInner() {
         setCreatedBookingId(firstResult.id)
         setCreatedNotifyToken(firstResult.notify_token ?? null)
         if (Array.isArray(result) && repeatEnabled) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const uniqueDates = Array.from(new Set(result.map((b: any) => b.date).filter(Boolean))) as string[]
           setCreatedDates(uniqueDates)
         }
@@ -872,30 +754,29 @@ function BookingPageInner() {
               time: firstResult.time || selectedTime || '',
               saved_at: Date.now(),
             }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const idx = list.findIndex((x: any) => x?.token === entry.token)
             if (idx >= 0) list[idx] = entry
             else list.unshift(entry)
             localStorage.setItem('myBookings', JSON.stringify(list.slice(0, 20)))
-          } catch {}
+          } catch { /* noop */ }
         }
       }
       setBookingError(null)
-      setSuccess(true)
-    } catch (err: any) {
+      // После создания брони назад в выбор не возвращаемся.
+      historyRef.current = []
+      setScreen(prepaymentNeeded ? 'prepay' : 'done')
+    } catch (err: unknown) {
       console.error('Booking creation error:', err)
-      const msg = err?.message || ''
+      const msg = err instanceof Error ? err.message : ''
       if (repeatEnabled) {
         try {
           const parsed = JSON.parse(msg)
-          setBookingError(
-            parsed?.detail
-              ? `Не удалось создать серию — ${parsed.detail}`
-              : 'Не удалось создать серию записей. Попробуйте другое время.'
-          )
+          setBookingError(parsed?.detail ? `Не удалось создать серию — ${parsed.detail}` : 'Не удалось создать серию записей. Попробуйте другое время.')
         } catch {
           setBookingError('Не удалось создать серию записей. Попробуйте другое время.')
         }
-      } else if (msg.includes('409') || msg.includes('already taken')) {
+      } else if (msg.includes('409') || msg.includes('already taken') || msg.includes('Занято')) {
         setBookingError('Это время уже занято. Выберите другое время.')
       } else {
         setBookingError('Не удалось создать запись. Попробуйте ещё раз.')
@@ -905,1457 +786,860 @@ function BookingPageInner() {
     }
   }
 
-  // Summary helpers
-  const selectedRoomOrEmployee = isVenue ? selectedRoom : selectedEmployee
-  const mainServiceLabel = isVenue
-    ? selectedServices.map((s) => s.name).join(', ')
-    : selectedService?.name ?? ''
-
-  // ── Visibility conditions ──
-  const hasServiceSelection = isVenue ? selectedServices.length > 0 : !!selectedService
-  const resourceSatisfied = isVenue
-    ? !!selectedRoom
-    : (flowOrder === 'resource_first' && employees.length > 0 ? !!selectedEmployee : true)
-  const showServiceSection = flowOrder === 'service_first'
-    || (isVenue ? !!selectedRoom : employees.length === 0 || !!selectedEmployee)
-  const showEmployeeSection = !isVenue && employees.length > 0
-    && (flowOrder === 'resource_first' || !!selectedService)
-  const showRoomSection = isVenue && (flowOrder === 'resource_first' || selectedServices.length > 0)
-  const showDateSection = hasServiceSelection && resourceSatisfied
-  const showTimeSection = showDateSection && !!selectedDate
-  const showFormatSection = isVenue && !!selectedTime && !!selectedRoom?.solo_price_per_hour
-  const showAddonsSection = !!selectedTime && additionalServices.length > 0
-  const showConfirmSection = hasServiceSelection && resourceSatisfied && !!selectedDate && !!selectedTime
-
-  const nextRef = (() => {
-    if (isVenue) {
-      if (flowOrder === 'resource_first') {
-        if (!selectedRoom) return null
-        if (selectedServices.length === 0) return refVenueServices
-      } else {
-        if (selectedServices.length === 0) return null
-        if (!selectedRoom) return refRoom
-      }
-      if (!selectedDate) return refDate
-      if (!selectedTime) return refTime
-      if (selectedRoom?.solo_price_per_hour && !showConfirmSection) return refFormat
-      return null
+  const handlePaymentSent = async () => {
+    setPaymentError(null)
+    try {
+      // QR-клиент без логина в Telegram → шлём по notify_token (без auth).
+      if (createdNotifyToken) await api.prepaymentSentByToken(createdNotifyToken)
+      else if (createdBookingId) await api.prepaymentSent(createdBookingId)
+      else return
+      setPaymentSent(true)
+      // Публичная страница брони — там поллинг и обновление статуса после проверки владельцем.
+      if (createdNotifyToken) navigate(`/b/${createdNotifyToken}`)
+    } catch {
+      setPaymentError('Не удалось сообщить владельцу об оплате. Проверьте соединение и попробуйте ещё раз.')
     }
-    if (flowOrder === 'resource_first' && employees.length > 0 && !selectedEmployee) return null
-    if (!selectedService) return flowOrder === 'resource_first' ? refService : null
-    if (!selectedDate) return refDate
-    if (!selectedTime) return refTime
-    return null
-  })()
+  }
 
-  // ── Success screen ──
-
-  if (success) {
-    const prepaymentEnabled = business?.prepayment_enabled
-    const prepaymentPercent = business?.prepayment_percent ?? 100
-    const paymentPhone = business?.payment_phone
-    const paymentDetails = cleanPaymentDetails(business?.payment_details)
-    const cancellationPolicyPhoto = business?.cancellation_policy_photo
-    const cancellationPolicyText = business?.cancellation_policy_text
-    const prepaymentAmount = totalPrice > 0 ? Math.ceil(totalPrice * prepaymentPercent / 100) : 0
-
-    const handlePaymentSent = async () => {
-      try {
-        // QR-клиент без логина в Telegram → шлём по notify_token (без auth).
-        // Залогиненный клиент — по id брони.
-        if (createdNotifyToken) {
-          await api.prepaymentSentByToken(createdNotifyToken)
-        } else if (createdBookingId) {
-          await api.prepaymentSent(createdBookingId)
-        } else {
-          return
-        }
-        setPaymentSent(true)
-        // Сразу перебрасываем клиента на публичную страницу брони —
-        // там поллинг и обновление статуса при подтверждении владельцем.
-        if (createdNotifyToken) {
-          navigate(`/b/${createdNotifyToken}`)
-        }
-      } catch {
-        alert('Не удалось сообщить владельцу об оплате. Проверьте соединение и попробуйте ещё раз.')
-      }
+  const handleReceiptSubmit = async () => {
+    if (!pendingReceipt) return
+    if (!createdNotifyToken && !createdBookingId) return
+    setReceiptError(null)
+    setReceiptUploading(true)
+    try {
+      if (createdNotifyToken) await api.uploadReceiptByToken(createdNotifyToken, pendingReceipt)
+      else if (createdBookingId) await api.uploadReceipt(createdBookingId, pendingReceipt)
+      setReceiptUploaded(true)
+      if (pendingReceiptPreview) URL.revokeObjectURL(pendingReceiptPreview)
+      setPendingReceipt(null)
+      setPendingReceiptPreview(null)
+      if (createdNotifyToken) navigate(`/b/${createdNotifyToken}`)
+    } catch {
+      setReceiptError('Не удалось отправить чек. Попробуйте ещё раз.')
+    } finally {
+      setReceiptUploading(false)
     }
+  }
 
+  const clearReceipt = () => {
+    if (pendingReceiptPreview) URL.revokeObjectURL(pendingReceiptPreview)
+    setPendingReceipt(null)
+    setPendingReceiptPreview(null)
+    setReceiptError(null)
+  }
+
+  // ── Тексты ──
+  const serviceLabel = selectedServices.map((s) => s.name).join(', ')
+  const resourceLabel = selectedResource?.name || (anyResource ? 'Любой специалист' : '')
+  const minPrice = services.reduce<number | null>((min, s) => (s.price != null && s.price > 0 && (min == null || s.price < min) ? s.price : min), null)
+  const minDuration = services.reduce<number | null>((min, s) => (s.duration_minutes && (min == null || s.duration_minutes < min) ? s.duration_minutes : min), null)
+  const stepIndex = selectionSteps.indexOf(screen)
+  const stepCount = (
+    <span className="bf-stepcount">{stepIndex >= 0 ? `Шаг ${stepIndex + 1} / ${selectionSteps.length}` : ''}</span>
+  )
+  const resourceIcon = isVenue ? <DoorOpen /> : <Users />
+
+  const mapsHref = business?.address ? `https://yandex.ru/maps/?text=${encodeURIComponent(business.address)}` : null
+  const profileHref = localStorage.getItem('token') ? '/my' : '/login'
+
+  const backButton = (
+    <button type="button" className="bf-back" onClick={back} aria-label="Назад">
+      <ArrowLeft /><span>Назад</span>
+    </button>
+  )
+
+  // ── Portrait helper ──
+  const portrait = (resource: EmployeeWithPricing | null) => {
+    if (!resource) return <span className="bf-portrait is-any" aria-hidden="true"><Users size={18} /></span>
+    const cover = resourcePhotos(resource)[0]
     return (
-      <ClientShell backTo={`/business/${businessId}`} title={business?.name ?? 'Запись'}>
-       <SuccessErrorBoundary bookingId={createdBookingId} notifyToken={createdNotifyToken}>
-        <div className="bk-success bk-fade-in">
-          <div className={`bk-success-icon ${prepaymentEnabled && totalPrice > 0 ? 'is-pending' : 'is-done'}`}>
-            {prepaymentEnabled && totalPrice > 0 ? (
-              <Clock size={40} />
-            ) : (
-              <CheckCircle size={40} />
-            )}
-          </div>
-          <h2 className="ds-h1">
-            {prepaymentEnabled && totalPrice > 0
-              ? 'Запись ожидает предоплаты'
-              : 'Запись создана!'}
-          </h2>
-          <p className="ds-sub bk-success-sub">
-            {prepaymentEnabled && totalPrice > 0 ? (
-              <>
-                {mainServiceLabel}, {selectedDate && formatDateRu(selectedDate)} в{' '}
-                {selectedTime}
-                {selectedRoomOrEmployee && ` \u00B7 ${selectedRoomOrEmployee.name}`}
-                {'. Оплатите предоплату для подтверждения.'}
-              </>
-            ) : (
-              <>
-                {mainServiceLabel}, {selectedDate && formatDateRu(selectedDate)} в{' '}
-                {selectedTime}
-                {selectedRoomOrEmployee && ` \u00B7 ${selectedRoomOrEmployee.name}`}
-              </>
-            )}
-          </p>
-          <div className="ds-card bk-success-card">
-            <div>
-              <div className="bk-success-row">
-                <span className="lbl">{isVenue ? labels.resource : labels.service}</span>
-                <span className="val">
-                  {isVenue ? selectedRoom?.name : selectedService?.name}
-                </span>
-              </div>
-              {isVenue && selectedServices.length > 0 && (
-                <div className="bk-success-row">
-                  <span className="lbl">{labels.service}</span>
-                  <span className="val">
-                    {selectedServices.map((s) => s.name).join(', ')}
-                  </span>
-                </div>
-              )}
-              {!isVenue && selectedEmployee && (
-                <div className="bk-success-row">
-                  <span className="lbl">{labels.resource}</span>
-                  <span className="val">{selectedEmployee.name}</span>
-                </div>
-              )}
-              <div className="bk-success-row">
-                <span className="lbl">{labels.date} / {labels.time}</span>
-                <span className="val">
-                  {selectedDate && formatDateRu(selectedDate)}, {selectedTime}
-                </span>
-              </div>
-              {createdDates.length > 1 && (
-                <div className="bk-success-row">
-                  <span className="lbl">Повторится ещё</span>
-                  <span className="val">
-                    {createdDates.slice(1).map((d) => formatDateRu(d)).join(', ')}
-                  </span>
-                </div>
-              )}
-              {business?.address && (
-                <div className="bk-success-row">
-                  <span className="lbl">Адрес</span>
-                  <a
-                    href={`https://yandex.ru/maps/?text=${encodeURIComponent(business.address)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="ds-accent val"
-                    style={{ textDecoration: 'underline' }}
-                  >
-                    {business.address}
-                  </a>
-                </div>
-              )}
-              {totalPrice > 0 && (
-                <div className="bk-success-row total">
-                  <span className="lbl">Итого</span>
-                  <span className="val">{formatPrice(totalPrice)}</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {(!prepaymentEnabled || totalPrice <= 0) && (
-            <>
-              <NotificationSetup notifyToken={createdNotifyToken} />
-
-              {selectedDate && selectedTime && business && (
-                <button
-                  type="button"
-                  onClick={() => downloadBookingIcs({
-                    businessName: business.name,
-                    serviceName: mainServiceLabel || 'Запись',
-                    date: selectedDate,
-                    time: selectedTime,
-                    durationMinutes: totalDuration || selectedService?.duration_minutes || 60,
-                    address: business.address,
-                    description: selectedRoomOrEmployee
-                      ? `${mainServiceLabel} · ${selectedRoomOrEmployee.name}`
-                      : mainServiceLabel,
-                  })}
-                  className="ds-btn ds-btn--ghost ds-btn--block"
-                  style={{ marginTop: 12 }}
-                >
-                  <Calendar size={17} />
-                  Добавить в календарь
-                </button>
-              )}
-
-              {createdNotifyToken && (
-                <a
-                  href={`https://t.me/Sochiservice_bot?start=notify_${createdNotifyToken}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="bk-bot-link"
-                >
-                  <span className="t1">📲 Получать уведомления в Telegram</span>
-                  <span className="t2">
-                    Открыть бота, чтобы получать подтверждения и напоминания
-                  </span>
-                </a>
-              )}
-            </>
-          )}
-
-          {/* Directions on success screen */}
-          {business?.directions && (
-            <div className="ds-card bk-directions-card">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <Navigation size={15} className="ds-accent" />
-                <h3 className="ds-h3">Как добраться</h3>
-              </div>
-              <p className="ds-sub" style={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
-                {linkifyText(business.directions)}
-              </p>
-            </div>
-          )}
-
-          {/* Prepayment block */}
-          {prepaymentEnabled && totalPrice > 0 && (
-            <div className="bk-prepay">
-              <div className="bk-prepay-box">
-                <div className="bk-prepay-head">
-                  <CreditCard size={20} />
-                  <h3>
-                    Для подтверждения записи необходима предоплата
-                  </h3>
-                </div>
-                <div>
-                  <div className="bk-prepay-row">
-                    <span>Сумма</span>
-                    <span className="val">{formatPrice(prepaymentAmount)}</span>
-                  </div>
-                  {paymentPhone && (
-                    <div className="bk-prepay-row">
-                      <span>Телефон для оплаты</span>
-                      <span className="val">{paymentPhone}</span>
-                    </div>
-                  )}
-                  {paymentDetails && (
-                    <div className="bk-prepay-row">
-                      <span>Реквизиты</span>
-                      <span className="val">{paymentDetails}</span>
-                    </div>
-                  )}
-                </div>
-                {cancellationPolicyText ? (
-                  <div className="bk-cancel-policy">
-                    <p>{'\u26A0\uFE0F Условия отмены'}</p>
-                    <p>{cancellationPolicyText}</p>
-                  </div>
-                ) : cancellationPolicyPhoto ? (
-                  <div className="bk-cancel-policy">
-                    <img
-                      src={'/api/telegram-photo/' + encodeURIComponent(cancellationPolicyPhoto)}
-                      alt="Условия отмены"
-                    />
-                  </div>
-                ) : null}
-                <div className="bk-prepay-actions">
-                  {paymentSent || receiptUploaded ? (
-                    <div className="bk-prepay-done">
-                      <CheckCircle size={24} className="ico" />
-                      <p className="t1">
-                        {receiptUploaded ? 'Чек отправлен владельцу' : 'Владелец уведомлён'}
-                      </p>
-                      <p className="t2">
-                        Ожидайте подтверждения оплаты. Вам придёт уведомление.
-                      </p>
-                    </div>
-                  ) : (
-                    <>
-                      <input
-                        ref={receiptInputRef}
-                        type="file"
-                        accept="image/*,.pdf,application/pdf"
-                        style={{ display: 'none' }}
-                        onChange={(e) => {
-                          const file = e.target.files?.[0]
-                          if (!file) return
-                          setReceiptError(null)
-                          // Очистить старое превью
-                          if (pendingReceiptPreview) URL.revokeObjectURL(pendingReceiptPreview)
-                          setPendingReceipt(file)
-                          const isImage = file.type.startsWith('image/')
-                          setPendingReceiptPreview(isImage ? URL.createObjectURL(file) : null)
-                          // Сброс input value чтобы повторный выбор того же файла триггерил onChange
-                          e.target.value = ''
-                        }}
-                      />
-
-                      {/* F3: превью + 3 кнопки (Отправить / Заменить / Удалить) */}
-                      {pendingReceipt ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                          <div className="bk-receipt-preview">
-                            {pendingReceiptPreview ? (
-                              <img
-                                src={pendingReceiptPreview}
-                                alt="Превью чека"
-                              />
-                            ) : (
-                              <div className="bk-receipt-file">
-                                <div className="bk-receipt-file-ico">
-                                  <Paperclip size={20} />
-                                </div>
-                                <div style={{ minWidth: 0, flex: 1 }}>
-                                  <p className="bk-receipt-file-name">{pendingReceipt.name}</p>
-                                  <p className="bk-receipt-file-meta">
-                                    {(pendingReceipt.size / 1024).toFixed(0)} КБ · {pendingReceipt.type || 'файл'}
-                                  </p>
-                                </div>
-                              </div>
-                            )}
-                            <p className="bk-receipt-hint">
-                              Проверьте, что файл правильный — затем отправьте
-                            </p>
-                          </div>
-
-                          {receiptError && (
-                            <p className="bk-receipt-error">{receiptError}</p>
-                          )}
-
-                          <button
-                            onClick={async () => {
-                              if (!pendingReceipt) return
-                              if (!createdNotifyToken && !createdBookingId) return
-                              setReceiptError(null)
-                              setReceiptUploading(true)
-                              try {
-                                if (createdNotifyToken) {
-                                  // QR-клиент без auth — публичный endpoint по токену.
-                                  await api.uploadReceiptByToken(createdNotifyToken, pendingReceipt)
-                                } else if (createdBookingId) {
-                                  await api.uploadReceipt(createdBookingId, pendingReceipt)
-                                }
-                                setReceiptUploaded(true)
-                                if (pendingReceiptPreview) URL.revokeObjectURL(pendingReceiptPreview)
-                                setPendingReceipt(null)
-                                setPendingReceiptPreview(null)
-                                // Перебрасываем на публичную страницу брони — там поллинг
-                                // и при подтверждении владельцем статус обновится сам.
-                                if (createdNotifyToken) {
-                                  navigate(`/b/${createdNotifyToken}`)
-                                }
-                              } catch (err) {
-                                setReceiptError('Не удалось отправить чек. Попробуйте ещё раз.')
-                              } finally {
-                                setReceiptUploading(false)
-                              }
-                            }}
-                            disabled={receiptUploading}
-                            className="ds-btn ds-btn--primary ds-btn--block"
-                          >
-                            {receiptUploading ? (
-                              <>
-                                <span className="bk-spinner" />
-                                Отправка...
-                              </>
-                            ) : (
-                              <>
-                                <CheckCircle size={18} />
-                                Отправить чек
-                              </>
-                            )}
-                          </button>
-
-                          <div className="bk-receipt-actions-2">
-                            <button
-                              onClick={() => receiptInputRef.current?.click()}
-                              disabled={receiptUploading}
-                              className="ds-btn ds-btn--ghost ds-btn--sm"
-                            >
-                              <Paperclip size={15} />
-                              Заменить
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (pendingReceiptPreview) URL.revokeObjectURL(pendingReceiptPreview)
-                                setPendingReceipt(null)
-                                setPendingReceiptPreview(null)
-                                setReceiptError(null)
-                              }}
-                              disabled={receiptUploading}
-                              className="ds-btn ds-btn--ghost ds-btn--sm"
-                              style={{ color: 'var(--s-danger)', borderColor: 'var(--s-danger)' }}
-                            >
-                              Удалить
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => receiptInputRef.current?.click()}
-                          disabled={!createdBookingId}
-                          className="ds-btn ds-btn--primary ds-btn--block"
-                        >
-                          <Paperclip size={18} />
-                          Прикрепить чек
-                        </button>
-                      )}
-                      {!business?.require_receipt_for_prepayment && (
-                        <button
-                          onClick={handlePaymentSent}
-                          disabled={!createdBookingId}
-                          className="ds-btn ds-btn--block"
-                          style={{ background: 'var(--s-success)', color: '#fff' }}
-                        >
-                          {'Оплата отправлена \u2713'}
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* F-bonus: сохранить ссылку на публичную страницу брони (без TG) — в самом низу */}
-          {createdNotifyToken && (() => {
-            const publicUrl = `${window.location.origin}/b/${createdNotifyToken}`
-            const copy = async () => {
-              try { await navigator.clipboard.writeText(publicUrl) } catch {}
-            }
-            return (
-              <div className="ds-card bk-save-link">
-                <div className="bk-save-link-title">📌 Сохранить страницу брони</div>
-                <p className="bk-save-link-hint">
-                  Откройте позже, чтобы видеть статус и инструкции владельца. Без Telegram.
-                </p>
-                <div className="bk-save-link-url">
-                  {publicUrl}
-                </div>
-                <div className="bk-save-link-actions">
-                  <button
-                    onClick={copy}
-                    className="ds-btn ds-btn--primary ds-btn--sm"
-                  >
-                    Скопировать
-                  </button>
-                  <a
-                    href={publicUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="ds-btn ds-btn--ghost ds-btn--sm"
-                  >
-                    Открыть ↗
-                  </a>
-                </div>
-              </div>
-            )
-          })()}
-
-          <div className="bk-success-actions">
-            <button
-              onClick={() => navigate(`/business/${businessId}`)}
-              className="ds-btn ds-btn--ghost"
-            >
-              К бизнесу
-            </button>
-            <button
-              onClick={() => navigate('/')}
-              className="ds-btn ds-btn--primary"
-            >
-              На главную
-            </button>
-          </div>
-        </div>
-       </SuccessErrorBoundary>
-      </ClientShell>
+      <span className={`bf-portrait ${isVenue ? 'is-venue' : ''}`} aria-hidden="true">
+        {cover ? <img src={photoSrc(cover)} alt="" loading="lazy" /> : (isVenue ? <DoorOpen size={17} /> : initials(resource.name))}
+      </span>
     )
   }
 
-  // ── Main render — single long page ──
+  // ── Экраны ──
 
-  return (
-    <ClientShell backTo={`/business/${businessId}`} title={business?.name ?? 'Запись'}>
-      <div style={{ paddingTop: 12, paddingBottom: 24 }}>
-
-      {/* F1: business header — клиент видит, куда зашёл (важно при входе по QR) */}
-      {business && (
-        <div className="ds-card bk-biz-card">
-          {businessCover ? (
-            <div className="bk-biz-cover">
-              <img
-                src={`/api/telegram-photo/${encodeURIComponent(businessCover)}`}
-                alt={business.name}
-              />
-            </div>
-          ) : (
-            <div className="bk-biz-cover">
-              <Scissors size={18} />
-            </div>
-          )}
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="bk-biz-eyebrow">Запись в</div>
-            <h2 className="ds-h2" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{business.name}</h2>
-            {business.address && (
-              <p className="ds-caption" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{business.address}</p>
+  function renderHome() {
+    const choices: Array<{ key: Screen; icon: ReactNode; name: string; details: string; complete: boolean }> = []
+    const serviceChoice = {
+      key: 'services' as Screen,
+      icon: <Sparkles />,
+      name: choosePhrase('Выбрать', labels.service),
+      details: servicesDone
+        ? `${serviceLabel}${totalPrice > 0 ? ` · ${formatPrice(totalPrice)}` : ''}`
+        : services.length > 0
+          ? `${services.length} ${plural(services.length, 'вариант', 'варианта', 'вариантов')}${minPrice != null ? ` · от ${formatPrice(minPrice)}` : ''}`
+          : 'Список уточняется',
+      complete: servicesDone,
+    }
+    const resourceChoice = {
+      key: 'resource' as Screen,
+      icon: resourceIcon,
+      name: choosePhrase('Выбрать', labels.resource),
+      details: selectedResource || anyResource
+        ? resourceLabel
+        : resourceOptional ? 'Можно выбрать любого' : `${employees.length} ${plural(employees.length, 'вариант', 'варианта', 'вариантов')}`,
+      complete: !!selectedResource || anyResource,
+    }
+    if (flowOrder === 'resource_first') {
+      if (hasResources) choices.push(resourceChoice)
+      choices.push(serviceChoice)
+    } else {
+      choices.push(serviceChoice)
+      if (hasResources) choices.push(resourceChoice)
+    }
+    choices.push({
+      key: 'calendar',
+      icon: <Calendar />,
+      name: `${choosePhrase('Выбрать', labels.date)} и ${(ACCUSATIVE[labels.time.trim().toLowerCase()] || labels.time.toLowerCase())}`,
+      details: dateDone ? `${ruDate(selectedDate!)} · ${selectedTime}` : 'Удобное время для визита',
+      complete: dateDone,
+    })
+    const ready = nextNeeded() === 'review'
+    const hasAbout = !!(business?.description || business?.directions || businessPhotos.length > 1)
+    return (
+      <section className="bf-screen" aria-label="Главная страница записи">
+        <div className="bf-hero">
+          {businessCover ? <img src={photoSrc(businessCover)} alt={business?.name || ''} /> : <HeroArt />}
+          <div className="bf-hero-fade" />
+        </div>
+        <div className="bf-panel">
+          <div className="bf-logo" aria-hidden="true">
+            {businessPhotos[1] ? (
+              <img src={photoSrc(businessPhotos[1])} alt="" />
+            ) : (
+              <>
+                <div className="sym">{(business?.name || 'S').replace(/[«»"']/g, '').trim().charAt(0).toUpperCase()}</div>
+                <div className="cap">{(business?.name || '').replace(/[«»"']/g, '').toUpperCase()}</div>
+              </>
             )}
           </div>
+          <h1 className="bf-h1">{business?.name}</h1>
+          {business?.address ? (
+            <a className="bf-address" href={mapsHref!} target="_blank" rel="noopener noreferrer" style={{ display: 'block', textDecoration: 'none' }}>{business.address}</a>
+          ) : business?.description ? (
+            <div className="bf-address" style={{ display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{business.description}</div>
+          ) : null}
+          {hasAbout && (
+            <button
+              type="button"
+              className="bf-about"
+              onClick={() => setInfoModal({
+                title: business?.name || 'О нас',
+                description: [business?.description, business?.directions ? `Как добраться:\n${business.directions}` : ''].filter(Boolean).join('\n\n'),
+                photos: businessPhotos,
+              })}
+            >
+              Подробнее о месте
+            </button>
+          )}
+          <nav className="bf-choices" aria-label="Параметры записи">
+            {choices.map((c) => (
+              <button key={c.key} type="button" className={`bf-choice ${c.complete ? 'is-complete' : ''}`} onClick={() => go(c.key)}>
+                <span className="bf-choice-icon">{c.icon}</span>
+                <span className="bf-choice-body">
+                  <span className="bf-choice-name">{c.name}</span>
+                  <span className="bf-choice-details">{c.details}</span>
+                </span>
+                <ChevronRight className="bf-chevron" />
+              </button>
+            ))}
+          </nav>
         </div>
-      )}
+        {ready ? (
+          <div className="bf-bottombar">
+            <button type="button" className="bf-primary" onClick={() => go('review')}>Перейти к записи <ArrowRight /></button>
+          </div>
+        ) : (
+          <footer className="bf-home-footer">
+            <a className="bf-powered" href="https://servgo.ru" target="_blank" rel="noopener noreferrer">
+              Работает на <Logo size={16} withText={false} /><strong>ServGo</strong>
+            </a>
+          </footer>
+        )}
+      </section>
+    )
+  }
 
-      {/* F2: auto-pick toast */}
-      {skipToast && (
-        <div className="bk-toast">
-          {`✓ выбрано — `}{skipToast}
-        </div>
-      )}
-
-      {infoModal && <InfoModal data={infoModal} onClose={() => setInfoModal(null)} />}
-
-      {/* ═══════════════════════════════════════ */}
-      {/* VENUE RENTAL FLOW */}
-      {/* ═══════════════════════════════════════ */}
-
-      {isVenue && (
-        <>
-          {flowOrder === 'resource_first' && showRoomSection && (
-            <div ref={refRoom} className="bk-section">
-              <SectionHeader icon={<DoorOpen size={20} />} title={`Выберите: ${labels.resource}`} />
-              <div className="bk-option-grid bk-option-grid--2">
-                {employees.map((room) => {
-                  const isSelected = selectedRoom?.id === room.id
-                  const priceRange = getRoomPriceRange(room)
-                  const photoIds = parsePhotos(room.photos)
-                  const cover = room.primary_photo || photoIds[0]
-                  return (
-                    <div key={room.id} style={{ position: 'relative' }}>
-                      <button
-                        type="button"
-                        onClick={() => chooseRoom(room)}
-                        className={`bk-option bk-room-card ${isSelected ? 'is-selected' : ''}`}
-                        style={{ width: '100%', paddingRight: 42 }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                          <div className="bk-room-thumb">
-                            {cover ? (
-                              <img src={`/api/telegram-photo/${encodeURIComponent(cover)}`} alt={room.name} loading="lazy" />
-                            ) : (
-                              <Music size={20} />
-                            )}
-                          </div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <h3 className="bk-option-title">{room.name}</h3>
-                            {room.description && (
-                              <p className="bk-option-desc" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                                {room.description}
-                              </p>
-                            )}
-                            <div className="bk-option-meta">
-                              {room.capacity && <span className="bk-option-meta-item"><Users size={12} />до {room.capacity} чел.</span>}
-                              {priceRange && <span className="bk-option-price">{priceRange}</span>}
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); showResourceInfo(room) }}
-                        className="ds-icon-btn bordered"
-                        aria-label={`Подробнее: ${room.name}`}
-                        title="Подробнее"
-                        style={{ position: 'absolute', top: 8, right: 8, width: 30, height: 30, zIndex: 2 }}
-                      >
-                        <Info size={15} />
-                      </button>
-                    </div>
-                  )
-                })}
+  function renderServices() {
+    const total = selectedServices.reduce((sum, s) => sum + (s.price ?? 0), 0)
+    const first = selectedServices[0]
+    return (
+      <section className="bf-screen" aria-label="Выбор услуги">
+        <div className="bf-inside-nav">{stepCount}</div>
+        <div className="bf-inner">
+          <h2 className="bf-h2">{choosePhrase('Выберите', labels.service)}</h2>
+          <p className="bf-intro">{multiService ? 'Можно выбрать несколько — затем продолжите' : 'Нажмите на вариант — сразу перейдём дальше'}</p>
+          <div className="bf-stage" aria-live="polite">
+            <div className="bf-stage-kicker">{business?.name} · {labels.service}</div>
+            <div className="bf-stage-feature">
+              <span className="bf-stage-symbol"><Sparkles /></span>
+              <div className="bf-stage-main">
+                <div className="bf-stage-big">{first ? (selectedServices.length > 1 ? `${selectedServices.length} ${plural(selectedServices.length, 'услуга', 'услуги', 'услуг')}` : first.name) : 'С чего начнём?'}</div>
+                <div className="bf-stage-detail">{first ? (selectedServices.length > 1 ? serviceLabel : (first.description || 'Цена и длительность — ниже')) : 'Выберите вариант — мы покажем цену и длительность'}</div>
               </div>
             </div>
-          )}
-
-          {showServiceSection && (
-            <div ref={refVenueServices} className="bk-section bk-fade-in">
-              <SectionHeader
-                icon={<Scissors size={20} />}
-                title={`Выберите: ${labels.service}`}
-                subtitle="можно несколько"
-              />
-              <div className="bk-option-list">
-                {availableServices.length === 0 && (
-                  <div className="bk-slot-empty">
-                    <p>Для выбранного «{labels.resource.toLowerCase()}» нет доступных услуг.</p>
-                  </div>
-                )}
-                {availableServices.map((svc) => {
-                  const isSelected = selectedServices.some((item) => item.id === svc.id)
-                  return (
-                    <div key={svc.id} style={{ position: 'relative' }}>
-                      <button
-                        type="button"
-                        onClick={() => toggleVenueService(svc)}
-                        className={`bk-option ${isSelected ? 'is-selected' : ''}`}
-                        style={{ width: '100%', paddingRight: 44 }}
-                      >
-                        <div style={{ flex: 1, textAlign: 'left' }}>
-                          <h3 className="bk-option-title">{svc.name}</h3>
-                          {svc.description && (
-                            <p className="bk-option-desc" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                              {svc.description}
-                            </p>
-                          )}
-                          {formatDuration(svc.duration_minutes) && (
-                            <div className="bk-option-meta"><span className="bk-option-meta-item">{formatDuration(svc.duration_minutes)}</span></div>
-                          )}
-                        </div>
-                        <div className={`bk-check ${isSelected ? 'is-on' : ''}`}>{isSelected && <Check size={14} strokeWidth={3} />}</div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); showServiceInfo(svc) }}
-                        className="ds-icon-btn bordered"
-                        aria-label={`Подробнее: ${svc.name}`}
-                        title="Подробнее"
-                        style={{ position: 'absolute', top: 8, right: 8, width: 30, height: 30, zIndex: 2 }}
-                      >
-                        <Info size={15} />
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-              {selectedServices.length > 0 && (
-                <div className="bk-summary-row">
-                  <div className="ds-sub">
-                    {selectedServices.length} выбрано
-                    {selectedServices.reduce((sum, item) => sum + (item.duration_minutes ?? 0), 0) > 0 &&
-                      ` · ${formatDuration(selectedServices.reduce((sum, item) => sum + (item.duration_minutes ?? 0), 0))}`}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => scrollToRef(flowOrder === 'service_first' ? refRoom : refDate, 100)}
-                    className="lnk"
-                  >
-                    Далее ↓
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {flowOrder === 'service_first' && showRoomSection && (
-            <div ref={refRoom} className="bk-section bk-fade-in">
-              <SectionHeader icon={<DoorOpen size={20} />} title={`Выберите: ${labels.resource}`} />
-              {availableResources.length === 0 ? (
-                <div className="bk-slot-empty"><p>Нет {labels.resource.toLowerCase()}, совместимых со всеми выбранными услугами.</p></div>
-              ) : (
-                <div className="bk-option-grid bk-option-grid--2">
-                  {availableResources.map((room) => {
-                    const isSelected = selectedRoom?.id === room.id
-                    const priceRange = getRoomPriceRange(room)
-                    const photoIds = parsePhotos(room.photos)
-                    const cover = room.primary_photo || photoIds[0]
-                    return (
-                      <div key={room.id} style={{ position: 'relative' }}>
-                        <button
-                          type="button"
-                          onClick={() => chooseRoom(room)}
-                          className={`bk-option bk-room-card ${isSelected ? 'is-selected' : ''}`}
-                          style={{ width: '100%', paddingRight: 42 }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                            <div className="bk-room-thumb">
-                              {cover ? <img src={`/api/telegram-photo/${encodeURIComponent(cover)}`} alt={room.name} loading="lazy" /> : <Music size={20} />}
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <h3 className="bk-option-title">{room.name}</h3>
-                              {room.description && (
-                                <p className="bk-option-desc" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{room.description}</p>
-                              )}
-                              <div className="bk-option-meta">
-                                {room.capacity && <span className="bk-option-meta-item"><Users size={12} />до {room.capacity} чел.</span>}
-                                {priceRange && <span className="bk-option-price">{priceRange}</span>}
-                              </div>
-                            </div>
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); showResourceInfo(room) }}
-                          className="ds-icon-btn bordered"
-                          aria-label={`Подробнее: ${room.name}`}
-                          title="Подробнее"
-                          style={{ position: 'absolute', top: 8, right: 8, width: 30, height: 30, zIndex: 2 }}
-                        >
-                          <Info size={15} />
-                        </button>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
-          {showDateSection && (
-            <div ref={refDate} className="bk-section bk-fade-in">
-              <SectionHeader icon={<Calendar size={20} />} title={`Выберите: ${labels.date}`} />
-              <CalendarPicker
-                selected={selectedDate}
-                onSelect={(date) => {
-                  setSelectedDate(date)
-                  setSelectedTime(null)
-                  setPriceData(null)
-                  scrollToRef(refTime)
-                }}
-              />
-            </div>
-          )}
-
-          {showTimeSection && (
-            <div ref={refTime} className="bk-section bk-fade-in">
-              <SectionHeader
-                icon={<Clock size={20} />}
-                title={`Выберите: ${labels.time}`}
-                subtitle={selectedDate ? formatDateRu(selectedDate) : undefined}
-                onInfo={() => setInfoModal({
-                  title: labels.time,
-                  description: 'Здесь показаны только свободные слоты на выбранную дату. Если выбран конкретный зал или ресурс, занятость учитывается именно для него.',
-                })}
-                infoLabel={`Подробнее: ${labels.time}`}
-              />
-              {loadingSlots ? (
-                <div className="bk-slot-grid">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton" style={{ height: 48, borderRadius: 'var(--r-md)' }} />)}</div>
-              ) : slots.length === 0 ? (
-                <div className="bk-slot-empty">
-                  <Clock size={32} style={{ color: 'var(--s-muted)', margin: '0 auto 12px' }} />
-                  <p>Нет свободных слотов на эту дату</p>
-                  <button type="button" onClick={() => scrollToRef(refDate, 100)} className="lnk">Выбрать другую дату</button>
-                </div>
+            <div className="bf-stage-metrics">
+              {first ? (
+                <>
+                  {total > 0 && <span>{formatPrice(total)}</span>}
+                  {totalDuration > 0 && <span>{formatDuration(totalDuration)}</span>}
+                </>
               ) : (
                 <>
-                  <div className="bk-slot-grid">
-                    {slots.map((time) => (
-                      <button
-                        type="button"
-                        key={time}
-                        onClick={() => {
-                          setSelectedTime(time)
-                          const next = selectedRoom?.solo_price_per_hour ? refFormat : (additionalServices.length > 0 ? refAddons : refConfirm)
-                          scrollToRef(next)
-                        }}
-                        className={`bk-slot ${selectedTime === time ? 'is-selected' : ''}`}
-                      >{time}</button>
-                    ))}
-                  </div>
-                  {selectedTime && (
-                    <div className="ds-card bk-price-card">
-                      {priceLoading ? (
-                        <div className="bk-price-loading"><span className="bk-spinner" />Рассчитываем цену...</div>
-                      ) : priceData && priceData.segments.length > 0 ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          {priceData.segments.map((seg, i) => (
-                            <div key={i} className="bk-price-row">
-                              <span className="lbl">{seg.time_from}–{seg.time_to} ({formatDuration(seg.minutes)}) × {formatPrice(seg.price_per_hour, true)}</span>
-                              <span className="val">{formatPrice(seg.subtotal)}</span>
-                            </div>
-                          ))}
-                          <div className="bk-price-total"><span className="lbl">Итого</span><span className="val">{formatPrice(priceData.total)}</span></div>
-                        </div>
-                      ) : priceData && priceData.total > 0 ? (
-                        <div className="bk-price-row"><span className="lbl">Стоимость</span><span className="val">{formatPrice(priceData.total)}</span></div>
-                      ) : totalPrice > 0 ? (
-                        <div className="bk-price-row"><span className="lbl">Стоимость</span><span className="val">{formatPrice(totalPrice)}</span></div>
-                      ) : null}
-                    </div>
-                  )}
+                  {minPrice != null && <span>От {formatPrice(minPrice)}</span>}
+                  {minDuration != null && <span>от {formatDuration(minDuration)}</span>}
+                  <span>{services.length} {plural(services.length, 'вариант', 'варианта', 'вариантов')}</span>
                 </>
               )}
+              {business?.prepayment_enabled && <span>Запись по предоплате{prepaymentPercent < 100 ? ` ${prepaymentPercent}%` : ''}</span>}
             </div>
-          )}
-
-          {showFormatSection && (
-            <div ref={refFormat} className="bk-section bk-fade-in">
-              <SectionHeader icon={<Users size={20} />} title="Формат занятия" />
-              {(() => {
-                const hours = Math.max(1, totalDuration / 60)
-                const groupPrice = priceData?.total ?? 0
-                const soloPrice = (selectedRoom?.solo_price_per_hour ?? 0) * hours
-                return (
-                  <div className="bk-option-list">
-                    <button type="button" onClick={() => { setIsSoloPricing(false); scrollToRef(additionalServices.length > 0 ? refAddons : refConfirm) }} className={`bk-option ${!isSoloPricing ? 'is-selected' : ''}`}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
-                        <div className={`bk-emp-ava ${!isSoloPricing ? 'is-selected' : ''}`} style={{ borderRadius: 'var(--r-md)' }}><Users size={18} /></div>
-                        <div style={{ flex: 1 }}><h3 className="bk-option-title">Групповое занятие</h3><p className="bk-option-desc">Цена по времени суток</p></div>
-                        <span className="bk-option-price">{formatPrice(groupPrice)}</span>
-                      </div>
-                    </button>
-                    <button type="button" onClick={() => { setIsSoloPricing(true); scrollToRef(additionalServices.length > 0 ? refAddons : refConfirm) }} className={`bk-option ${isSoloPricing ? 'is-selected' : ''}`}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
-                        <div className={`bk-emp-ava ${isSoloPricing ? 'is-selected' : ''}`} style={{ borderRadius: 'var(--r-md)' }}><UserCheck size={18} /></div>
-                        <div style={{ flex: 1 }}><h3 className="bk-option-title">Индивидуальное</h3><p className="bk-option-desc">{formatPrice(selectedRoom?.solo_price_per_hour, true)} × {hours} ч</p></div>
-                        <span className="bk-option-price">{formatPrice(soloPrice)}</span>
-                      </div>
-                    </button>
-                  </div>
-                )
-              })()}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ═══════════════════════════════════════ */}
-      {/* SIMPLE (NON-VENUE) FLOW */}
-      {/* ═══════════════════════════════════════ */}
-
-      {!isVenue && (
-        <>
-          {flowOrder === 'resource_first' && showEmployeeSection && (
-            <div ref={refEmployee} className="bk-section">
-              <SectionHeader icon={<User size={20} />} title={`Выберите: ${labels.resource}`} />
-              <div className="bk-emp-grid">
-                {employees.map((emp) => {
-                  const isSelected = selectedEmployee?.id === emp.id
-                  const photoIds = parsePhotos(emp.photos)
-                  const cover = emp.primary_photo || photoIds[0]
-                  return (
-                    <div key={emp.id} style={{ position: 'relative' }}>
-                      <button type="button" onClick={() => chooseEmployee(emp)} className={`bk-option bk-emp-card ${isSelected ? 'is-selected' : ''}`} style={{ minHeight: 60, width: '100%', paddingRight: 38 }}>
-                        <div className="bk-emp-ava">{cover ? <img src={`/api/telegram-photo/${encodeURIComponent(cover)}`} alt={emp.name} loading="lazy" /> : <User size={18} />}</div>
-                        <span className="bk-emp-name">{emp.name}</span>
-                      </button>
-                      <button type="button" onClick={(e) => { e.stopPropagation(); showResourceInfo(emp) }} className="ds-icon-btn bordered" aria-label={`Подробнее: ${emp.name}`} title="Подробнее" style={{ position: 'absolute', top: 8, right: 8, width: 28, height: 28, zIndex: 2 }}><Info size={14} /></button>
-                    </div>
-                  )
-                })}
+          </div>
+          <div className="bf-list">
+            {availableServices.length === 0 && (
+              <div className="bf-empty">
+                {services.length === 0 ? 'Пока нет доступных услуг.' : `Для выбранного варианта «${labels.resource.toLowerCase()}» нет доступных услуг.`}
               </div>
-            </div>
-          )}
-
-          {showServiceSection && (
-            <div ref={refService} className="bk-section bk-fade-in">
-              <SectionHeader icon={<Scissors size={20} />} title={`Выберите: ${labels.service}`} />
-              <div className="bk-option-list">
-                {availableServices.length === 0 && <div className="bk-slot-empty"><p>Для выбранного «{labels.resource.toLowerCase()}» нет доступных услуг.</p></div>}
-                {availableServices.map((service) => {
-                  const isSelected = selectedService?.id === service.id
-                  return (
-                    <div key={service.id} style={{ position: 'relative' }}>
-                      <button type="button" onClick={() => chooseService(service)} className={`bk-option ${isSelected ? 'is-selected' : ''}`} style={{ display: 'block', width: '100%', paddingRight: 44, textAlign: 'left' }}>
-                        <h3 className="bk-option-title">{service.name}</h3>
-                        {service.description && <p className="bk-option-desc" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{service.description}</p>}
-                        <div className="bk-option-meta">
-                          {service.price != null && <span className="bk-option-price">{formatPrice(service.price, service.is_hourly_price)}</span>}
-                          {formatDuration(service.duration_minutes) && <span className="bk-option-meta-item">{formatDuration(service.duration_minutes)}</span>}
-                        </div>
-                      </button>
-                      <button type="button" onClick={(e) => { e.stopPropagation(); showServiceInfo(service) }} className="ds-icon-btn bordered" aria-label={`Подробнее: ${service.name}`} title="Подробнее" style={{ position: 'absolute', top: 8, right: 8, width: 30, height: 30, zIndex: 2 }}><Info size={15} /></button>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {flowOrder === 'service_first' && showEmployeeSection && (
-            <div ref={refEmployee} className="bk-section bk-fade-in">
-              <SectionHeader icon={<User size={20} />} title={`Выберите: ${labels.resource}`} subtitle="необязательно" />
-              {availableResources.length === 0 ? (
-                <div className="bk-slot-empty"><p>Нет специалистов, связанных с выбранной услугой. Можно продолжить без выбора специалиста.</p></div>
-              ) : (
-                <div className="bk-emp-grid">
-                  {availableResources.map((emp) => {
-                    const isSelected = selectedEmployee?.id === emp.id
-                    const photoIds = parsePhotos(emp.photos)
-                    const cover = emp.primary_photo || photoIds[0]
-                    return (
-                      <div key={emp.id} style={{ position: 'relative' }}>
-                        <button type="button" onClick={() => chooseEmployee(emp)} className={`bk-option bk-emp-card ${isSelected ? 'is-selected' : ''}`} style={{ minHeight: 60, width: '100%', paddingRight: 38 }}>
-                          <div className="bk-emp-ava">{cover ? <img src={`/api/telegram-photo/${encodeURIComponent(cover)}`} alt={emp.name} loading="lazy" /> : <User size={18} />}</div>
-                          <span className="bk-emp-name">{emp.name}</span>
-                        </button>
-                        <button type="button" onClick={(e) => { e.stopPropagation(); showResourceInfo(emp) }} className="ds-icon-btn bordered" aria-label={`Подробнее: ${emp.name}`} title="Подробнее" style={{ position: 'absolute', top: 8, right: 8, width: 28, height: 28, zIndex: 2 }}><Info size={14} /></button>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
-          {showDateSection && (
-            <div ref={refDate} className="bk-section bk-fade-in">
-              <SectionHeader icon={<Calendar size={20} />} title={`Выберите: ${labels.date}`} subtitle={selectedService?.name} />
-              <CalendarPicker selected={selectedDate} onSelect={(date) => { setSelectedDate(date); setSelectedTime(null); scrollToRef(refTime) }} />
-            </div>
-          )}
-
-          {showTimeSection && (
-            <div ref={refTime} className="bk-section bk-fade-in">
-              <SectionHeader
-                icon={<Clock size={20} />}
-                title={`Выберите: ${labels.time}`}
-                subtitle={selectedDate ? formatDateRu(selectedDate) : undefined}
-                onInfo={() => setInfoModal({ title: labels.time, description: 'Показываются только свободные слоты. Если выбран конкретный мастер, его занятость учитывается при расчёте доступного времени.' })}
-                infoLabel={`Подробнее: ${labels.time}`}
-              />
-              {loadingSlots ? (
-                <div className="bk-slot-grid">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton" style={{ height: 48, borderRadius: 'var(--r-md)' }} />)}</div>
-              ) : slots.length === 0 ? (
-                <div className="bk-slot-empty"><Clock size={32} style={{ color: 'var(--s-muted)', margin: '0 auto 12px' }} /><p>Нет свободных слотов на эту дату</p><button type="button" onClick={() => scrollToRef(refDate, 100)} className="lnk">Выбрать другую дату</button></div>
-              ) : (
-                <div className="bk-slot-grid">
-                  {slots.map((time) => <button type="button" key={time} onClick={() => { setSelectedTime(time); scrollToRef(additionalServices.length > 0 ? refAddons : refConfirm) }} className={`bk-slot ${selectedTime === time ? 'is-selected' : ''}`}>{time}</button>)}
-                </div>
-              )}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ═══════════════════════════════════════ */}
-      {/* ADDONS (shared — appears after time for any flow) */}
-      {/* ═══════════════════════════════════════ */}
-
-      {showAddonsSection && (
-        <div ref={refAddons} className="bk-section bk-fade-in">
-          <SectionHeader
-            icon={<Package size={20} />}
-            title={labels.additional}
-            subtitle="необязательно"
-          />
-          <div className="bk-option-list">
-            {additionalServices.map((svc) => {
-              const isSelected = selectedAddons.has(svc.id)
-              const hours = addonHours[svc.id] ?? 1
+            )}
+            {availableServices.map((svc) => {
+              const selected = selectedServices.some((s) => s.id === svc.id)
+              const meta = [formatDuration(svc.duration_minutes), svc.description].filter(Boolean).join(' · ')
               return (
-                <div key={svc.id}>
-                  <div style={{ position: 'relative' }}>
-                    <button
-                      type="button"
-                      onClick={() => toggleAddon(svc.id)}
-                      className={`bk-option ${isSelected ? 'is-selected' : ''}`}
-                      style={{ width: '100%', paddingRight: 44 }}
-                    >
-                      <div style={{ flex: 1, textAlign: 'left' }}>
-                        <span className="bk-option-title">{svc.name}</span>
-                        {svc.description && (
-                          <p className="bk-option-desc" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                            {svc.description}
-                          </p>
-                        )}
-                        <div className="bk-option-meta" style={{ marginTop: 2 }}>
-                          {(svc.price != null && svc.price > 0) && (
-                            <span className="bk-option-meta-item" style={{ color: 'var(--s-accent)', fontWeight: 600 }}>
-                              {formatPrice(svc.price)}{svc.is_hourly_price ? '/ч' : ''}
-                            </span>
-                          )}
-                          {(svc.duration_minutes != null && svc.duration_minutes > 0) && (
-                            <span className="bk-option-meta-item">{formatDuration(svc.duration_minutes)}</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className={`bk-check ${isSelected ? 'is-on' : ''}`}>
-                        {isSelected && <Check size={14} strokeWidth={3} />}
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); showServiceInfo(svc) }}
-                      className="ds-icon-btn bordered"
-                      aria-label={`Подробнее: ${svc.name}`}
-                      title="Подробнее"
-                      style={{ position: 'absolute', top: 8, right: 8, width: 30, height: 30, zIndex: 2 }}
-                    >
-                      <Info size={15} />
-                    </button>
-                  </div>
-
-                  {/* Hourly controls */}
-                  {isSelected && svc.is_hourly_price && (
-                    <div className="bk-addon-hours">
-                      <button
-                        onClick={() => setAddonHourCount(svc.id, hours - 1)}
-                        className="ds-icon-btn"
-                      >
-                        <Minus size={16} />
-                      </button>
-                      <span className="val">
-                        {hours} ч
-                      </span>
-                      <button
-                        onClick={() => setAddonHourCount(svc.id, hours + 1)}
-                        className="ds-icon-btn"
-                      >
-                        <Plus size={16} />
-                      </button>
-                      <span className="price">
-                        {formatPrice((svc.price ?? 0) * hours)}
-                      </span>
-                    </div>
-                  )}
+                <div key={svc.id} className="bf-option-row">
+                  <button type="button" className={`bf-option has-info ${selected ? 'selected' : ''}`} aria-pressed={selected} onClick={() => chooseService(svc)}>
+                    <span className="bf-mini-icon">{isVenue ? <Package /> : <Sparkles />}</span>
+                    <span className="bf-option-data">
+                      <span className="bf-option-title">{svc.name}</span>
+                      {meta && <span className="bf-option-meta">{meta}</span>}
+                      {svc.price != null && svc.price > 0 && <span className="bf-option-price">{formatPrice(svc.price, svc.is_hourly_price)}</span>}
+                    </span>
+                    {multiService ? <span className="bf-check" aria-hidden="true">{selected && <Check size={12} strokeWidth={3} />}</span> : <span className="bf-radio" aria-hidden="true" />}
+                  </button>
+                  <button type="button" className="bf-info-btn" onClick={() => showServiceInfo(svc)} aria-label={`Подробнее: ${svc.name}`}><Info /></button>
                 </div>
               )
             })}
           </div>
         </div>
-      )}
+        <div className="bf-bottombar">
+          <div className="bf-summary">
+            {selectedServices.length === 0
+              ? (multiService ? 'Выберите одну или несколько услуг' : 'Нажмите на услугу — перейдём дальше')
+              : `${selectedServices.length > 1 ? `${selectedServices.length} усл.` : serviceLabel}${total > 0 ? ` · ${formatPrice(total)}` : ''}`}
+          </div>
+          {backButton}
+          {multiService && (
+            <button type="button" className="bf-primary" disabled={selectedServices.length === 0} onClick={() => advanceAfter({ date: false })}>
+              Продолжить <ArrowRight />
+            </button>
+          )}
+        </div>
+      </section>
+    )
+  }
 
-      {/* ═══════════════════════════════════════ */}
-      {/* CONFIRM SECTION (shared)                */}
-      {/* ═══════════════════════════════════════ */}
-
-      {showConfirmSection && (
-        <div ref={refConfirm} className="bk-section bk-fade-in">
-          <SectionHeader
-            icon={<CheckCircle size={20} />}
-            title="Подтверждение"
-            subtitle="Проверьте данные"
-          />
-
-          {/* Summary card */}
-          <div className="ds-card bk-card">
-            <div className="bk-summary-list">
-              {isVenue && selectedRoom && (
-                <div className="bk-summary-line">
-                  <span className="lbl">{labels.resource}</span>
-                  <span className="val">{selectedRoom.name}</span>
+  function renderResource() {
+    const list = availableResources
+    const crew = list.slice(0, 3)
+    return (
+      <section className="bf-screen" aria-label={`Выбор: ${labels.resource}`}>
+        <div className="bf-inside-nav">{stepCount}</div>
+        <div className="bf-inner">
+          <h2 className="bf-h2">{choosePhrase('Выберите', labels.resource)}</h2>
+          <p className="bf-intro">{resourceOptional ? 'Можно выбрать любого — подберём подходящего' : 'Нажмите на вариант — сразу перейдём дальше'}</p>
+          <div className="bf-stage" aria-live="polite">
+            <div className="bf-stage-kicker">Ваш визит · {labels.resource}</div>
+            <div className="bf-stage-feature">
+              <div className="bf-stage-people">
+                {selectedResource ? portrait(selectedResource) : crew.map((r) => <span key={r.id} style={{ display: 'contents' }}>{portrait(r)}</span>)}
+              </div>
+              <div className="bf-stage-main">
+                <div className="bf-stage-big">{selectedResource ? selectedResource.name : isVenue ? 'Где пройдёт встреча?' : 'Кому доверить визит?'}</div>
+                <div className="bf-stage-detail">
+                  {selectedResource
+                    ? (selectedResource.specialization || selectedResource.description || getRoomPriceRange(selectedResource) || '')
+                    : `${list.length} ${plural(list.length, 'вариант', 'варианта', 'вариантов')}${resourceOptional ? ' и выбор любого' : ''}`}
                 </div>
-              )}
-              {mainServiceLabel && (
-                <div className="bk-summary-line">
-                  <span className="lbl">{labels.service}</span>
-                  <span className="val" style={{ maxWidth: '60%' }}>{mainServiceLabel}</span>
-                </div>
-              )}
-              {!isVenue && selectedEmployee && (
-                <div className="bk-summary-line">
-                  <span className="lbl">{labels.resource}</span>
-                  <span className="val">{selectedEmployee.name}</span>
-                </div>
-              )}
-              {isVenue && isSoloPricing && (
-                <div className="bk-summary-line">
-                  <span className="lbl">Формат</span>
-                  <span className="val">Индивидуальное</span>
-                </div>
-              )}
-              <div className="bk-summary-line">
-                <span className="lbl">{labels.date}</span>
-                <span className="val">
-                  {selectedDate && formatDateRu(selectedDate)}
+              </div>
+            </div>
+            {servicesDone && <div className="bf-stage-metrics"><span>{serviceLabel}{totalDuration > 0 ? ` · ${formatDuration(totalDuration)}` : ''}</span></div>}
+          </div>
+          <div className="bf-list">
+            {resourceOptional && (
+              <button type="button" className={`bf-option ${anyResource && !selectedResource ? 'selected' : ''}`} aria-pressed={anyResource && !selectedResource} onClick={() => chooseResource(null)}>
+                {portrait(null)}
+                <span className="bf-option-data">
+                  <span className="bf-option-title">Любой специалист</span>
+                  <span className="bf-option-meta">Подберём свободного на выбранное время</span>
                 </span>
+                <span className="bf-radio" aria-hidden="true" />
+              </button>
+            )}
+            {list.length === 0 && (
+              <div className="bf-empty">
+                {resourceOptional
+                  ? 'Нет специалистов, связанных с выбранной услугой. Можно продолжить с любым специалистом.'
+                  : `Нет вариантов «${labels.resource.toLowerCase()}», совместимых со всеми выбранными услугами.`}
               </div>
-              <div className="bk-summary-line">
-                <span className="lbl">{labels.time}</span>
-                <span className="val">{selectedTime}</span>
+            )}
+            {list.map((r) => {
+              const selected = selectedResource?.id === r.id
+              const meta = [r.specialization, r.capacity ? `до ${r.capacity} чел.` : '', r.area_sqm ? `${r.area_sqm} м²` : '', !r.specialization ? r.description : ''].filter(Boolean).join(' · ')
+              const price = getRoomPriceRange(r)
+              return (
+                <div key={r.id} className="bf-option-row">
+                  <button type="button" className={`bf-option has-info ${selected ? 'selected' : ''}`} aria-pressed={selected} onClick={() => chooseResource(r)}>
+                    {portrait(r)}
+                    <span className="bf-option-data">
+                      <span className="bf-option-title">{r.name}</span>
+                      {meta && <span className="bf-option-meta">{meta}</span>}
+                      {price && <span className="bf-option-price">{price}</span>}
+                    </span>
+                    <span className="bf-radio" aria-hidden="true" />
+                  </button>
+                  <button type="button" className="bf-info-btn" onClick={() => showResourceInfo(r)} aria-label={`Подробнее: ${r.name}`}><Info /></button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        <div className="bf-bottombar">
+          <div className="bf-summary">{resourceLabel || `Нажмите на вариант — перейдём дальше`}</div>
+          {backButton}
+        </div>
+      </section>
+    )
+  }
+
+  function renderCalendar() {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const atCurrentMonth = month.getFullYear() === today.getFullYear() && month.getMonth() === today.getMonth()
+    const offset = (new Date(month.getFullYear(), month.getMonth(), 1).getDay() + 6) % 7
+    const count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
+    const monthTitle = month.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })
+    const todayKey = dateKey(today)
+    return (
+      <section className="bf-screen" aria-label="Выбор даты и времени">
+        <div className="bf-inside-nav">{stepCount}</div>
+        <div className="bf-inner">
+          <h2 className="bf-h2">{labels.date} и {labels.time.toLowerCase()}</h2>
+          <div className="bf-stage" aria-live="polite" style={{ minHeight: 48 }}>
+            <div className="bf-stage-kicker">Детали визита</div>
+            <div className="bf-stage-feature">
+              <span className="bf-stage-symbol"><Clock /></span>
+              <div className="bf-stage-main">
+                <div className="bf-stage-big">{selectedDate ? `${ruDate(selectedDate)}${selectedTime ? ` · ${selectedTime}` : ''}` : 'Выберите удобный день'}</div>
+                <div className="bf-stage-detail">{serviceLabel}{resourceLabel ? ` · ${resourceLabel}` : ''}{totalDuration > 0 ? ` · ${formatDuration(totalDuration)}` : ''}</div>
               </div>
-              {totalDuration > 0 && (
-                <div className="bk-summary-line">
-                  <span className="lbl">Длительность</span>
-                  <span className="val">{formatDuration(totalDuration)}</span>
-                </div>
-              )}
-
-              {/* Price breakdown for venue */}
-              {isVenue && !isSoloPricing && priceData && priceData.segments.length > 0 && (
-                <div className="bk-summary-block">
-                  <div className="bk-summary-block-title">Расчёт стоимости:</div>
-                  {priceData.segments.map((seg, i) => (
-                    <div key={i} className="bk-summary-line">
-                      <span className="lbl">
-                        {seg.time_from}{'\u2013'}{seg.time_to} ({formatDuration(seg.minutes)}) {'\u00D7'} {formatPrice(seg.price_per_hour, true)}
-                      </span>
-                      <span className="val">{formatPrice(seg.subtotal)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {isVenue && !isSoloPricing && (!priceData || !priceData.has_time_price || (priceData.segments.length === 0 && priceData.total === 0)) && selectedServices.length > 0 && (
-                <div className="bk-summary-block">
-                  {selectedServices.map((svc: Service) => (
-                    <div key={svc.id} className="bk-summary-line">
-                      <span className="lbl">{svc.name}</span>
-                      <span className="val">{formatPrice(svc.price ?? 0)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {isVenue && isSoloPricing && selectedRoom?.solo_price_per_hour && (
-                <div className="bk-summary-block">
-                  <div className="bk-summary-line">
-                    <span className="lbl">{formatPrice(selectedRoom.solo_price_per_hour, true)} {'\u00D7'} {Math.max(1, totalDuration / 60)} ч</span>
-                    <span className="val">{formatPrice(selectedRoom.solo_price_per_hour * Math.max(1, totalDuration / 60))}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Addons */}
-              {(() => {
-                const activeAddons = additionalServices.filter((s) => selectedAddons.has(s.id))
-                if (activeAddons.length === 0) return null
+            </div>
+          </div>
+          <div className="bf-calendar">
+            <div className="bf-monthbar">
+              <div className="bf-monthtitle">{monthTitle}</div>
+              <div className="bf-monthnav">
+                <button type="button" disabled={atCurrentMonth} onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} aria-label="Предыдущий месяц"><ChevronLeft /></button>
+                <button type="button" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} aria-label="Следующий месяц"><ChevronRight /></button>
+              </div>
+            </div>
+            <div className="bf-cal-grid">
+              {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((d) => <div key={d} className="bf-dayname">{d}</div>)}
+              {Array.from({ length: offset }).map((_, i) => <span key={`e${i}`} />)}
+              {Array.from({ length: count }).map((_, i) => {
+                const d = new Date(month.getFullYear(), month.getMonth(), i + 1)
+                const key = dateKey(d)
+                const disabled = d < today
+                const selected = key === selectedDate
                 return (
-                  <div className="bk-summary-block">
-                    {activeAddons.map((addon) => {
-                      const h = addonHours[addon.id] ?? 1
-                      const price = addon.is_hourly_price
-                        ? (addon.price ?? 0) * h
-                        : (addon.price ?? 0)
-                      return (
-                        <div key={addon.id} className="bk-summary-line">
-                          <span className="lbl">
-                            + {addon.name}
-                            {addon.is_hourly_price && ` (${h} ч)`}
-                          </span>
-                          <span className="val">{formatPrice(price)}</span>
-                        </div>
-                      )
-                    })}
+                  <button
+                    key={key}
+                    type="button"
+                    className={`bf-day ${key === todayKey ? 'today' : ''} ${selected ? 'selected' : ''}`}
+                    disabled={disabled}
+                    aria-pressed={selected}
+                    aria-label={ruDate(key)}
+                    onClick={() => {
+                      setSelectedDate(key)
+                      setSelectedTime(null)
+                      setPriceData(null)
+                    }}
+                  >
+                    {i + 1}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          <div className="bf-times">
+            <div className="bf-times-heading">{labels.time}</div>
+            <p className="bf-times-sub">{selectedDate ? ruDateLong(selectedDate) : 'Сначала выберите дату в календаре'}</p>
+            <div className="bf-time-grid">
+              {!selectedDate ? (
+                <div className="bf-placeholder">Нажмите на удобный день, чтобы увидеть свободное время</div>
+              ) : loadingSlots ? (
+                Array.from({ length: 8 }).map((_, i) => <div key={i} className="bf-time-skel" />)
+              ) : slots.length === 0 ? (
+                <div className="bf-placeholder">На этот день свободного времени нет — выберите другую дату</div>
+              ) : (
+                slots.map((t) => (
+                  <button key={t} type="button" className={`bf-time ${selectedTime === t ? 'selected' : ''}`} aria-pressed={selectedTime === t} onClick={() => chooseTime(t)}>{t}</button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="bf-bottombar">
+          <div className="bf-summary">{dateDone ? `${ruDate(selectedDate!)} · ${selectedTime}` : 'Показано только свободное время'}</div>
+          {backButton}
+          <button type="button" className="bf-primary" disabled={!dateDone} onClick={() => advanceAfter({ date: true })}>Продолжить <ArrowRight /></button>
+        </div>
+      </section>
+    )
+  }
+
+  function renderExtras() {
+    const hours = Math.max(1, totalDuration / 60)
+    const groupPrice = priceData?.total ?? selectedServices.reduce((sum, s) => sum + (s.price ?? 0), 0)
+    const soloPrice = (selectedResource?.solo_price_per_hour ?? 0) * hours
+    return (
+      <section className="bf-screen" aria-label={labels.additional}>
+        <div className="bf-inside-nav">{stepCount}</div>
+        <div className="bf-inner">
+          <h2 className="bf-h2">{hasFormatChoice && additionalServices.length === 0 ? 'Формат занятия' : labels.additional}</h2>
+          <p className="bf-intro">{additionalServices.length > 0 ? 'Необязательно — добавьте, если нужно' : 'Выберите формат'}</p>
+          <div className="bf-stage" style={{ minHeight: 40 }}>
+            <div className="bf-stage-kicker">Ваш визит</div>
+            <div className="bf-stage-feature">
+              <span className="bf-stage-symbol"><Package /></span>
+              <div className="bf-stage-main">
+                <div className="bf-stage-big">{priceLoading ? 'Считаем стоимость…' : totalPrice > 0 ? formatPrice(totalPrice) : serviceLabel}</div>
+                <div className="bf-stage-detail">{serviceLabel} · {selectedDate && ruDate(selectedDate)} · {selectedTime}</div>
+              </div>
+            </div>
+          </div>
+          {hasFormatChoice && (
+            <div className="bf-list" style={{ marginBottom: 8 }}>
+              <button type="button" className={`bf-option ${!isSoloPricing ? 'selected' : ''}`} aria-pressed={!isSoloPricing} onClick={() => setIsSoloPricing(false)}>
+                <span className="bf-mini-icon"><Users /></span>
+                <span className="bf-option-data"><span className="bf-option-title">Групповое занятие</span><span className="bf-option-meta">Цена по времени суток</span><span className="bf-option-price">{formatPrice(groupPrice)}</span></span>
+                <span className="bf-radio" aria-hidden="true" />
+              </button>
+              <button type="button" className={`bf-option ${isSoloPricing ? 'selected' : ''}`} aria-pressed={isSoloPricing} onClick={() => setIsSoloPricing(true)}>
+                <span className="bf-mini-icon"><UserCheck /></span>
+                <span className="bf-option-data"><span className="bf-option-title">Индивидуальное</span><span className="bf-option-meta">{formatPrice(selectedResource?.solo_price_per_hour, true)} × {hours} ч</span><span className="bf-option-price">{formatPrice(soloPrice)}</span></span>
+                <span className="bf-radio" aria-hidden="true" />
+              </button>
+            </div>
+          )}
+          {additionalServices.length > 0 && (
+            <div className="bf-list">
+              {additionalServices.map((svc) => {
+                const selected = selectedAddons.has(svc.id)
+                const h = addonHours[svc.id] ?? 1
+                return (
+                  <div key={svc.id}>
+                    <div className="bf-option-row">
+                      <button type="button" className={`bf-option has-info ${selected ? 'selected' : ''}`} aria-pressed={selected} onClick={() => toggleAddon(svc.id)}>
+                        <span className="bf-mini-icon"><Plus /></span>
+                        <span className="bf-option-data">
+                          <span className="bf-option-title">{svc.name}</span>
+                          {(svc.description || formatDuration(svc.duration_minutes)) && <span className="bf-option-meta">{[formatDuration(svc.duration_minutes), svc.description].filter(Boolean).join(' · ')}</span>}
+                          {svc.price != null && svc.price > 0 && <span className="bf-option-price">{formatPrice(svc.price)}{svc.is_hourly_price ? '/ч' : ''}</span>}
+                        </span>
+                        <span className="bf-check" aria-hidden="true">{selected && <Check size={12} strokeWidth={3} />}</span>
+                      </button>
+                      <button type="button" className="bf-info-btn" onClick={() => showServiceInfo(svc)} aria-label={`Подробнее: ${svc.name}`}><Info /></button>
+                    </div>
+                    {selected && svc.is_hourly_price && (
+                      <div className="bf-repeat" style={{ paddingLeft: 46 }}>
+                        <span className="bf-stepper">
+                          <button type="button" onClick={() => setAddonHourCount(svc.id, h - 1)} aria-label="Меньше часов"><Minus size={14} /></button>
+                          <span>{h} ч</span>
+                          <button type="button" onClick={() => setAddonHourCount(svc.id, h + 1)} aria-label="Больше часов"><Plus size={14} /></button>
+                        </span>
+                        <strong style={{ fontWeight: 550 }}>{formatPrice((svc.price ?? 0) * h)}</strong>
+                      </div>
+                    )}
                   </div>
                 )
-              })()}
-
-              {totalPrice > 0 && (
-                <div className="bk-summary-total">
-                  <span className="lbl">Итого</span>
-                  <span className="val">{formatPrice(totalPrice)}</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Address & directions */}
-          {(business?.address || business?.directions) && (
-            <div className="ds-card bk-card">
-              {business?.address && (
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: business?.directions ? 8 : 0 }}>
-                  <MapPin size={16} className="ds-accent" style={{ marginTop: 2, flexShrink: 0 }} />
-                  <a
-                    href={`https://yandex.ru/maps/?text=${encodeURIComponent(business.address)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="ds-accent"
-                    style={{ fontSize: 13, textDecoration: 'underline' }}
-                  >
-                    {business.address}
-                  </a>
-                </div>
-              )}
-              {business?.directions && (
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  <Navigation size={16} style={{ color: 'var(--s-muted)', marginTop: 2, flexShrink: 0 }} />
-                  <p className="ds-sub" style={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
-                    {linkifyText(business.directions)}
-                  </p>
-                </div>
-              )}
+              })}
             </div>
           )}
+        </div>
+        <div className="bf-bottombar">
+          <div className="bf-summary">{selectedAddons.size > 0 ? `Добавлено: ${selectedAddons.size}` : 'Можно пропустить'}{totalPrice > 0 ? ` · итого ${formatPrice(totalPrice)}` : ''}</div>
+          {backButton}
+          <button type="button" className="bf-primary" onClick={() => { setExtrasSeen(true); historyRef.current.push(screen); setScreen('review') }}>Продолжить <ArrowRight /></button>
+        </div>
+      </section>
+    )
+  }
 
-          {/* Business description */}
-          {business?.description && (
-            <div className="ds-card bk-card">
-              <p className="ds-sub" style={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
-                {linkifyText(business.description)}
-              </p>
-            </div>
-          )}
-
-          {/* Contact info */}
-          <div style={{ marginBottom: 24 }}>
-            <div className="ds-field">
-              <label className="ds-label">
-                Ваше имя <span style={{ color: 'var(--s-danger)' }}>*</span>
-              </label>
-              <input
-                ref={nameInputRef}
-                type="text"
-                value={clientName}
-                onChange={(e) => {
-                  setClientName(e.target.value)
-                  if (fieldErrors.name) setFieldErrors((p) => ({ ...p, name: false }))
-                }}
-                placeholder="Введите имя"
-                className={`ds-input ${fieldErrors.name ? 'bk-input-error' : ''}`}
-              />
-              {fieldErrors.name && (
-                <p className="ds-error" style={{ marginTop: 4, marginBottom: 0 }}>Укажите ваше имя</p>
-              )}
-            </div>
-            <div className="ds-field">
-              <label className="ds-label">
-                Телефон <span style={{ color: 'var(--s-danger)' }}>*</span>
-              </label>
-              <input
-                ref={phoneInputRef}
-                type="tel"
-                value={clientPhone}
-                onChange={(e) => {
-                  setClientPhone(e.target.value)
-                  if (fieldErrors.phone) setFieldErrors((p) => ({ ...p, phone: false }))
-                }}
-                placeholder="+7 (___) ___-__-__"
-                className={`ds-input ${fieldErrors.phone ? 'bk-input-error' : ''}`}
-              />
-              {fieldErrors.phone && (
-                <p className="ds-error" style={{ marginTop: 4, marginBottom: 0 }}>Укажите телефон для связи</p>
-              )}
-            </div>
-            <div className="ds-field">
-              <label className="ds-label">
-                Email <span style={{ fontWeight: 400 }}>(необязательно)</span>
-              </label>
-              <input
-                ref={emailInputRef}
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                value={clientEmail}
-                onChange={(e) => {
-                  setClientEmail(e.target.value)
-                  if (fieldErrors.email) setFieldErrors((p) => ({ ...p, email: false }))
-                }}
-                placeholder="name@example.com"
-                className={`ds-input ${fieldErrors.email ? 'bk-input-error' : ''}`}
-              />
-              <p className="ds-hint" style={{ marginTop: 4 }}>
-                Если укажете email, ServGo сможет присылать подтверждения и напоминания ещё и по почте.
-              </p>
-              {fieldErrors.email && (
-                <p className="ds-error" style={{ marginTop: 4, marginBottom: 0 }}>Проверьте адрес email</p>
-              )}
-            </div>
-            <div className="ds-field" style={{ marginBottom: 0 }}>
-              <label className="ds-label">
-                Комментарий{' '}
-                <span style={{ fontWeight: 400 }}>(необязательно)</span>
-              </label>
-              <textarea
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                placeholder="Пожелания к записи..."
-                rows={3}
-                className="ds-input"
-              />
-              {(business?.business_type === 'psychologist' || business?.business_type === 'medical') && (
-                <p className="ds-hint" style={{ marginTop: 6 }}>
-                  Не указывайте здесь диагнозы, сведения о здоровье или интимной жизни. Такие данные требуют отдельного правового основания и режима защиты.
-                </p>
-              )}
-            </div>
-
-            <div className="ds-field" style={{ marginBottom: 0, marginTop: 13 }}>
-              <button
-                type="button"
-                onClick={() => setRepeatEnabled((v) => !v)}
-                className={`bk-option ${repeatEnabled ? 'is-selected' : ''}`}
-                style={{ width: '100%' }}
-              >
-                <div style={{ flex: 1, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Repeat size={16} />
-                  <span className="bk-option-title">Повторять каждую неделю</span>
+  function renderReview() {
+    const rows: Array<{ label: string; value: string; target: Screen }> = []
+    if (flowOrder === 'resource_first' && hasResources) rows.push({ label: labels.resource, value: resourceLabel || 'Не выбран', target: 'resource' })
+    rows.push({ label: labels.service, value: serviceLabel || 'Не выбрана', target: 'services' })
+    if (flowOrder === 'service_first' && hasResources) rows.push({ label: labels.resource, value: resourceLabel || 'Не выбран', target: 'resource' })
+    rows.push({
+      label: `${labels.date} и ${labels.time.toLowerCase()}`,
+      value: dateDone ? `${ruDate(selectedDate!)} в ${selectedTime}${totalDuration > 0 ? ` · ${formatDuration(totalDuration)}` : ''}` : 'Не выбраны',
+      target: 'calendar',
+    })
+    const activeAddons = additionalServices.filter((s) => selectedAddons.has(s.id))
+    if (hasExtrasStep && (activeAddons.length > 0 || isSoloPricing)) {
+      rows.push({
+        label: labels.additional,
+        value: [isSoloPricing ? 'Индивидуальное занятие' : '', ...activeAddons.map((a) => (a.is_hourly_price ? `${a.name} (${addonHours[a.id] ?? 1} ч)` : a.name))].filter(Boolean).join(', '),
+        target: 'extras',
+      })
+    }
+    const segments = isVenue && !isSoloPricing && priceData && priceData.segments.length > 0 ? priceData.segments : []
+    const isMedical = business?.business_type === 'psychologist' || business?.business_type === 'medical'
+    const missing: string[] = []
+    if (!clientName.trim()) missing.push('имя')
+    if (!clientPhone.trim()) missing.push('телефон')
+    return (
+      <section className="bf-screen" aria-label="Проверка записи">
+        <div className="bf-inside-nav">{stepCount}</div>
+        <div className="bf-inner">
+          <h2 className="bf-h2">Проверьте запись</h2>
+          <p className="bf-intro">Убедитесь, что всё верно</p>
+          <div className="bf-review">
+            {rows.map((r) => (
+              <div key={r.label} className="bf-review-row">
+                <div>
+                  <div className="bf-review-label">{r.label}</div>
+                  <div className="bf-review-value">{r.value}</div>
                 </div>
-                <div className={`bk-check ${repeatEnabled ? 'is-on' : ''}`}>
-                  {repeatEnabled && <Check size={14} strokeWidth={3} />}
-                </div>
-              </button>
-              {repeatEnabled && (
-                <div className="bk-addon-hours" style={{ marginTop: 8 }}>
-                  <button
-                    type="button"
-                    onClick={() => setRepeatWeeks((w) => Math.max(2, w - 1))}
-                    className="ds-icon-btn"
-                  >
-                    <Minus size={16} />
-                  </button>
-                  <span className="val">{repeatWeeks} нед</span>
-                  <button
-                    type="button"
-                    onClick={() => setRepeatWeeks((w) => Math.min(8, w + 1))}
-                    className="ds-icon-btn"
-                  >
-                    <Plus size={16} />
-                  </button>
-                </div>
-              )}
-              {repeatEnabled && (
-                <p className="ds-hint">
-                  Ещё {repeatWeeks - 1} {repeatWeeks - 1 === 1 ? 'такая же запись' : 'таких же записи'} каждую неделю после первой.
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Prepayment info */}
-          {business?.prepayment_enabled && totalPrice > 0 && (
-            <div className="bk-info-box is-amber">
-              <h3>
-                <CreditCard size={16} />
-                Предоплата
-              </h3>
-              <div>
-                <p>
-                  {'Для подтверждения бронирования необходимо внести предоплату '}
-                  <span style={{ fontWeight: 700 }}>
-                    {(business.prepayment_percent ?? 100) === 100
-                      ? formatPrice(totalPrice)
-                      : `${business.prepayment_percent}% = ${formatPrice(Math.ceil(totalPrice * (business.prepayment_percent ?? 100) / 100))}`}
-                  </span>
-                </p>
-                {(cleanPaymentDetails(business.payment_details) || business.payment_phone) && (
-                  <p>
-                    {'Реквизиты: '}
-                    <span style={{ fontWeight: 600 }}>{cleanPaymentDetails(business.payment_details) || business.payment_phone}</span>
-                  </p>
-                )}
-                {business.payment_phone && cleanPaymentDetails(business.payment_details) && (
-                  <p>
-                    {'Телефон: '}
-                    <span style={{ fontWeight: 600 }}>{business.payment_phone}</span>
-                  </p>
-                )}
+                <button type="button" className="bf-review-edit" onClick={() => go(r.target)}>Изменить</button>
               </div>
-              <p className="bk-info-hint">
-                После записи оплатите по указанным реквизитам и прикрепите чек прямо в ServGo. Владелец получит его через свой канал уведомлений.
-              </p>
+            ))}
+            {segments.length > 0 && (
+              <div className="bf-breakdown">
+                {segments.map((seg, i) => (
+                  <div key={i}><span>{seg.time_from}–{seg.time_to} × {formatPrice(seg.price_per_hour, true)}</span><span>{formatPrice(seg.subtotal)}</span></div>
+                ))}
+              </div>
+            )}
+            {totalPrice > 0 && (
+              <div className="bf-total"><span>Стоимость</span><strong>{priceLoading ? '…' : formatPrice(totalPrice)}</strong></div>
+            )}
+          </div>
+
+          <div className="bf-fields">
+            <h3>Контактные данные</h3>
+            <div className="bf-pair">
+              <label className="bf-field-label">Ваше имя
+                <input
+                  ref={nameInputRef}
+                  className={`bf-input ${fieldErrors.name ? 'is-error' : ''}`}
+                  autoComplete="name"
+                  placeholder="Как к вам обращаться?"
+                  value={clientName}
+                  onChange={(e) => { setClientName(e.target.value); if (fieldErrors.name) setFieldErrors((p) => ({ ...p, name: false })) }}
+                />
+                {fieldErrors.name && <div className="bf-field-error">Укажите ваше имя</div>}
+              </label>
+              <label className="bf-field-label">Телефон
+                <input
+                  ref={phoneInputRef}
+                  className={`bf-input ${fieldErrors.phone ? 'is-error' : ''}`}
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="+7 (___) ___-__-__"
+                  value={clientPhone}
+                  onChange={(e) => { setClientPhone(e.target.value); if (fieldErrors.phone) setFieldErrors((p) => ({ ...p, phone: false })) }}
+                />
+                {fieldErrors.phone && <div className="bf-field-error">Укажите телефон для связи</div>}
+              </label>
+            </div>
+            {!moreOpen && !clientEmail && !comment ? (
+              <button type="button" className="bf-more" onClick={() => setMoreOpen(true)}>+ Email и комментарий (необязательно)</button>
+            ) : (
+              <>
+                <label className="bf-field-label">Email (необязательно)
+                  <input
+                    ref={emailInputRef}
+                    className={`bf-input ${fieldErrors.email ? 'is-error' : ''}`}
+                    type="email"
+                    inputMode="email"
+                    autoComplete="email"
+                    placeholder="name@example.com"
+                    value={clientEmail}
+                    onChange={(e) => { setClientEmail(e.target.value); if (fieldErrors.email) setFieldErrors((p) => ({ ...p, email: false })) }}
+                  />
+                  {fieldErrors.email ? <div className="bf-field-error">Проверьте адрес email</div> : <div className="bf-policy">Пришлём подтверждение и напоминания ещё и на почту.</div>}
+                </label>
+                <label className="bf-field-label">Комментарий (необязательно)
+                  <textarea className="bf-input" rows={2} placeholder="Пожелания к записи…" value={comment} onChange={(e) => setComment(e.target.value)} />
+                  {isMedical && <div className="bf-policy">Не указывайте здесь диагнозы, сведения о здоровье или интимной жизни.</div>}
+                </label>
+              </>
+            )}
+            <div className="bf-repeat">
+              <span>Повторять каждую неделю</span>
+              <button type="button" className={`bf-switch ${repeatEnabled ? 'on' : ''}`} role="switch" aria-checked={repeatEnabled} aria-label="Повторять каждую неделю" onClick={() => setRepeatEnabled((v) => !v)} />
+            </div>
+            {repeatEnabled && (
+              <div className="bf-repeat" style={{ paddingTop: 2 }}>
+                <span className="bf-policy" style={{ margin: 0 }}>Ещё {repeatWeeks - 1} {repeatWeeks - 1 === 1 ? 'такая же запись' : 'таких же записи'} каждую неделю</span>
+                <span className="bf-stepper">
+                  <button type="button" onClick={() => setRepeatWeeks((w) => Math.max(2, w - 1))} aria-label="Меньше недель"><Minus size={14} /></button>
+                  <span>{repeatWeeks} нед</span>
+                  <button type="button" onClick={() => setRepeatWeeks((w) => Math.min(8, w + 1))} aria-label="Больше недель"><Plus size={14} /></button>
+                </span>
+              </div>
+            )}
+          </div>
+
+          {prepaymentNeeded && (
+            <div className="bf-note">
+              <strong>Предоплата {prepaymentPercent < 100 ? `${prepaymentPercent}% · ` : ''}{formatPrice(prepaymentAmount)}</strong>
+              После оформления переведите предоплату по реквизитам бизнеса и прикрепите чек — владелец проверит поступление и подтвердит запись.
             </div>
           )}
-
-          {/* Cancellation policy */}
-          {business?.cancellation_policy_text ? (
-            <div className="bk-info-box is-danger">
-              <h3>
-                {'\u26A0\uFE0F Условия отмены'}
-              </h3>
-              <p style={{ whiteSpace: 'pre-line' }}>
-                {business.cancellation_policy_text}
-              </p>
+          {(business?.cancellation_policy_text || business?.cancellation_policy_photo) && (
+            <div className="bf-note is-warn">
+              <strong>Условия отмены</strong>
+              {business.cancellation_policy_text ? (
+                <span style={{ whiteSpace: 'pre-line' }}>{business.cancellation_policy_text}</span>
+              ) : (
+                <img src={photoSrc(business.cancellation_policy_photo!)} alt="Условия отмены" />
+              )}
             </div>
-          ) : business?.cancellation_policy_photo ? (
-            <div className="bk-info-box is-danger">
-              <h3>
-                {'\u26A0\uFE0F Условия отмены'}
-              </h3>
-              <img
-                src={`/api/telegram-photo/${encodeURIComponent(business.cancellation_policy_photo)}`}
-                alt="Условия отмены"
-              />
-            </div>
-          ) : null}
-
+          )}
           {business?.legal_documents_enabled && (
-            <div className="ds-card" style={{ padding: 14, marginBottom: 14 }}>
-              <h3 className="ds-h3" style={{ marginBottom: 10 }}>Юридические документы</h3>
-
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', marginBottom: 12 }}>
-                <input
-                  type="checkbox"
-                  checked={personalDataConsent}
-                  onChange={(e) => {
-                    setPersonalDataConsent(e.target.checked)
-                    setBookingError(null)
-                  }}
-                  style={{ width: 20, height: 20, marginTop: 1, flexShrink: 0 }}
-                />
-                <span className="ds-sub" style={{ lineHeight: 1.5 }}>
-                  Даю отдельное согласие на обработку персональных данных.{' '}
-                  <Link
-                    to={`/legal/consent/${business.id}`}
-                    target="_blank"
-                    className="ds-accent"
-                    style={{ textDecoration: 'underline' }}
-                  >
-                    Открыть согласие
-                  </Link>
-                </span>
+            <div style={{ marginTop: 8 }}>
+              <label className="bf-legal">
+                <input type="checkbox" checked={personalDataConsent} onChange={(e) => { setPersonalDataConsent(e.target.checked); setBookingError(null) }} />
+                <span>Даю отдельное согласие на обработку персональных данных. <Link to={`/legal/consent/${business.id}`} target="_blank">Открыть согласие</Link></span>
               </label>
-
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={bookingTermsAccepted}
-                  onChange={(e) => {
-                    setBookingTermsAccepted(e.target.checked)
-                    setBookingError(null)
-                  }}
-                  style={{ width: 20, height: 20, marginTop: 1, flexShrink: 0 }}
-                />
-                <span className="ds-sub" style={{ lineHeight: 1.5 }}>
-                  Принимаю{' '}
-                  <Link
-                    to={`/legal/terms/${business.id}`}
-                    target="_blank"
-                    className="ds-accent"
-                    style={{ textDecoration: 'underline' }}
-                  >
-                    условия записи
-                  </Link>
-                  {' '}и ознакомлен(а) с{' '}
-                  <Link
-                    to={`/legal/privacy/${business.id}`}
-                    target="_blank"
-                    className="ds-accent"
-                    style={{ textDecoration: 'underline' }}
-                  >
-                    политикой обработки персональных данных
-                  </Link>.
-                </span>
+              <label className="bf-legal">
+                <input type="checkbox" checked={bookingTermsAccepted} onChange={(e) => { setBookingTermsAccepted(e.target.checked); setBookingError(null) }} />
+                <span>Принимаю <Link to={`/legal/terms/${business.id}`} target="_blank">условия записи</Link> и ознакомлен(а) с <Link to={`/legal/privacy/${business.id}`} target="_blank">политикой обработки персональных данных</Link>.</span>
               </label>
             </div>
           )}
-
-          {bookingError && (
-            <div className="bk-error-box">
-              <p>{bookingError}</p>
-            </div>
-          )}
-
-          {missingFields.length > 0 && !bookingError && (
-            <p className="bk-missing-hint">
-              Чтобы записаться, осталось указать: <span style={{ fontWeight: 600, color: 'var(--s-text)' }}>{missingFields.join(' и ')}</span>
-            </p>
-          )}
-          <button
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="ds-btn ds-btn--primary ds-btn--block"
-            style={{ padding: '15px', fontSize: 16 }}
-          >
-            {submitting ? 'Записываем...' : 'Записаться'}
+          {bookingError && <p className="bf-error" role="alert">{bookingError}</p>}
+        </div>
+        <div className="bf-bottombar">
+          <div className="bf-summary">{missing.length > 0 ? `Осталось указать: ${missing.join(' и ')}` : `${serviceLabel}${dateDone ? ` · ${ruDate(selectedDate!)} · ${selectedTime}` : ''}`}</div>
+          {backButton}
+          <button type="button" className="bf-primary" onClick={handleSubmit} disabled={submitting}>
+            {submitting ? <><span className="bf-spinner" />Оформляем…</> : <>Оформить запись <ArrowRight /></>}
           </button>
         </div>
-      )}
+      </section>
+    )
+  }
 
-      {/* Floating "Далее" — appears once user makes a selection and points to the next required step */}
-      {nextRef && (
-        <button
-          type="button"
-          onClick={() => scrollToRef(nextRef, 0)}
-          style={{ bottom: 'max(5rem, calc(4rem + env(safe-area-inset-bottom)))' }}
-          className="bk-fab-next bk-fade-in"
-        >
-          Далее
-          <ChevronDown size={16} strokeWidth={2.5} />
-        </button>
-      )}
+  function renderPrepay() {
+    const paymentPhone = business?.payment_phone
+    const paymentDetails = cleanPaymentDetails(business?.payment_details)
+    const done = paymentSent || receiptUploaded
+    return (
+      <section className="bf-screen" aria-label="Предоплата записи">
+        <div className="bf-inside-nav">{stepCount}</div>
+        <div className="bf-inner">
+          <h2 className="bf-h2">Предоплата</h2>
+          <p className="bf-intro">Запись создана. Чтобы закрепить время за вами, внесите предоплату.</p>
+          <div className="bf-pay-hero">
+            <span className="bf-pay-hero-icon" aria-hidden="true"><CreditCard /></span>
+            <div>
+              <span className="bf-pay-caption">Предоплата{prepaymentPercent < 100 ? ` ${prepaymentPercent}%` : ''}</span>
+              <div className="bf-pay-big">{formatPrice(prepaymentAmount)}</div>
+            </div>
+          </div>
+          <div className="bf-receipt">
+            <div><span>Стоимость</span><strong>{formatPrice(totalPrice)}</strong></div>
+            {prepaymentAmount < totalPrice && <div><span>Останется оплатить при визите</span><strong>{formatPrice(Math.max(0, totalPrice - prepaymentAmount))}</strong></div>}
+            <div><span>{labels.date}</span><strong>{selectedDate && ruDate(selectedDate)}, {selectedTime}</strong></div>
+          </div>
+          <div className="bf-method">
+            <div className="bf-method-title">Оплата переводом</div>
+            <p>Переведите сумму напрямую бизнесу по реквизитам ниже и прикрепите подтверждение оплаты.</p>
+            {paymentPhone && <span className="bf-method-chip">Телефон для перевода: {paymentPhone}</span>}
+            {paymentDetails && <div><span className="bf-method-chip">{paymentDetails}</span></div>}
+          </div>
+          {(business?.cancellation_policy_text || business?.cancellation_policy_photo) && (
+            <div className="bf-note is-warn">
+              <strong>Условия отмены</strong>
+              {business.cancellation_policy_text ? <span style={{ whiteSpace: 'pre-line' }}>{business.cancellation_policy_text}</span> : <img src={photoSrc(business.cancellation_policy_photo!)} alt="Условия отмены" />}
+            </div>
+          )}
+          <div className="bf-upload">
+            <input
+              ref={receiptInputRef}
+              type="file"
+              accept="image/*,.pdf,application/pdf"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (!file) return
+                setReceiptError(null)
+                if (pendingReceiptPreview) URL.revokeObjectURL(pendingReceiptPreview)
+                setPendingReceipt(file)
+                setPendingReceiptPreview(file.type.startsWith('image/') ? URL.createObjectURL(file) : null)
+                // Сброс value, чтобы повторный выбор того же файла снова вызвал onChange
+                e.target.value = ''
+              }}
+            />
+            {done ? (
+              <div className="bf-flow-status is-ok"><span className="bf-status-dot" />{receiptUploaded ? 'Чек отправлен владельцу' : 'Владелец уведомлён об оплате'}</div>
+            ) : (
+              <>
+                <button type="button" className="bf-upload-btn" onClick={() => receiptInputRef.current?.click()} disabled={!createdBookingId && !createdNotifyToken}>
+                  <span className="bf-upload-glyph"><Paperclip /></span>
+                  <span>{pendingReceipt ? 'Заменить чек' : 'Прикрепить чек'}</span>
+                  <span className="bf-upload-hint">Фото или PDF</span>
+                </button>
+                {pendingReceipt && (
+                  <div className="bf-chosen">
+                    {pendingReceiptPreview ? <img src={pendingReceiptPreview} alt="Превью чека" /> : <Check size={16} />}
+                    <span className="name">{pendingReceipt.name} · {(pendingReceipt.size / 1024).toFixed(0)} КБ</span>
+                    <button type="button" onClick={clearReceipt} aria-label="Удалить чек" disabled={receiptUploading}>×</button>
+                  </div>
+                )}
+              </>
+            )}
+            {receiptError && <p className="bf-error" role="alert">{receiptError}</p>}
+            {paymentError && <p className="bf-error" role="alert">{paymentError}</p>}
+            <p className="bf-policy">Оплата поступает напрямую бизнесу, ServGo её не принимает. После отправки подтверждения владелец проверит поступление — статус записи обновится после проверки.</p>
+          </div>
+        </div>
+        <div className="bf-bottombar">
+          {done ? (
+            createdNotifyToken
+              ? <Link to={`/b/${createdNotifyToken}`} className="bf-primary">Статус записи <ArrowRight /></Link>
+              : <button type="button" className="bf-primary" onClick={() => navigate('/')}>На главную <ArrowRight /></button>
+          ) : (
+            <>
+              <button type="button" className="bf-primary" disabled={!pendingReceipt || receiptUploading} onClick={handleReceiptSubmit}>
+                {receiptUploading ? <><span className="bf-spinner" />Отправляем…</> : <>Отправить чек <Send /></>}
+              </button>
+              {!business?.require_receipt_for_prepayment && (
+                <button type="button" className="bf-text-alt" onClick={handlePaymentSent} disabled={!createdBookingId && !createdNotifyToken}>Я уже оплатил(а) · без чека</button>
+              )}
+            </>
+          )}
+        </div>
+      </section>
+    )
+  }
+
+  function renderDone() {
+    const publicUrl = createdNotifyToken ? `${window.location.origin}/b/${createdNotifyToken}` : null
+    return (
+      <section className="bf-screen" aria-label="Запись создана">
+        <SuccessErrorBoundary bookingId={createdBookingId} notifyToken={createdNotifyToken}>
+          <div className="bf-inner bf-result">
+            <div className="bf-orb"><Check /></div>
+            <h2 className="bf-h2">Запись создана</h2>
+            <p className="bf-intro">
+              {serviceLabel}, {selectedDate && ruDate(selectedDate)} в {selectedTime}{resourceLabel ? ` · ${resourceLabel}` : ''}
+            </p>
+            <div className="bf-review" style={{ marginTop: 12 }}>
+              {createdDates.length > 1 && (
+                <div className="bf-review-row"><div><div className="bf-review-label">Повторится ещё</div><div className="bf-review-value">{createdDates.slice(1).map((d) => ruDate(d)).join(', ')}</div></div></div>
+              )}
+              {business?.address && (
+                <div className="bf-review-row"><div><div className="bf-review-label">Адрес</div><a className="bf-review-value" href={mapsHref!} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--bf-blue)' }}>{business.address}</a></div></div>
+              )}
+              {business?.directions && (
+                <div className="bf-review-row"><div><div className="bf-review-label">Как добраться</div><div className="bf-review-value" style={{ whiteSpace: 'pre-line', fontSize: 12 }}>{linkifyText(business.directions)}</div></div></div>
+              )}
+              {totalPrice > 0 && <div className="bf-total"><span>Итого</span><strong>{formatPrice(totalPrice)}</strong></div>}
+            </div>
+            <NotificationSetup notifyToken={createdNotifyToken} />
+            <div className="bf-result-actions">
+              {selectedDate && selectedTime && business && (
+                <button
+                  type="button"
+                  className="bf-link-btn"
+                  onClick={() => downloadBookingIcs({
+                    businessName: business.name,
+                    serviceName: serviceLabel || 'Запись',
+                    date: selectedDate,
+                    time: selectedTime,
+                    durationMinutes: totalDuration || 60,
+                    address: business.address,
+                    description: resourceLabel ? `${serviceLabel} · ${resourceLabel}` : serviceLabel,
+                  })}
+                >
+                  <Calendar /> Добавить в календарь
+                </button>
+              )}
+              {createdNotifyToken && (
+                <a className="bf-link-btn" href={`https://t.me/Sochiservice_bot?start=notify_${createdNotifyToken}`} target="_blank" rel="noopener noreferrer">
+                  <Bell /> Уведомления в Telegram
+                </a>
+              )}
+              {publicUrl && (
+                <div className="bf-note">
+                  <strong>Сохраните страницу брони</strong>
+                  Откройте позже, чтобы видеть статус и инструкции владельца. Без Telegram.
+                  <div className="bf-save-url">{publicUrl}</div>
+                  <div style={{ display: 'flex', gap: 12, marginTop: 6 }}>
+                    <button type="button" className="bf-review-edit" onClick={async () => { try { await navigator.clipboard.writeText(publicUrl); setToast('Ссылка скопирована') } catch { /* noop */ } }}>Скопировать</button>
+                    <a className="bf-review-edit" href={publicUrl} target="_blank" rel="noopener noreferrer">Открыть ↗</a>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </SuccessErrorBoundary>
+        <div className="bf-bottombar">
+          <button type="button" className="bf-primary" onClick={() => navigate('/')}>На главную <ArrowRight /></button>
+        </div>
+      </section>
+    )
+  }
+
+  let content: ReactNode
+  if (loadError) {
+    content = (
+      <div className="bf-fallback">
+        <h2 className="bf-h2">Не удалось открыть запись</h2>
+        <p className="bf-intro">Проверьте ссылку или попробуйте позже.</p>
+        <Link to="/" className="bf-text-alt">На главную</Link>
       </div>
-    </ClientShell>
+    )
+  } else if (!business) {
+    content = <div className="bf-loading"><span className="bf-spinner" style={{ borderColor: '#d7e3f2', borderTopColor: '#346fda' }} /></div>
+  } else {
+    content = ({
+      home: renderHome,
+      services: renderServices,
+      resource: renderResource,
+      calendar: renderCalendar,
+      extras: renderExtras,
+      review: renderReview,
+      prepay: renderPrepay,
+      done: renderDone,
+    } as Record<Screen, () => ReactNode>)[screen]()
+  }
+
+  return createPortal(
+    <div className="bf-root">
+      <main className="bf-device" aria-label="Онлайн-запись ServGo">
+        <header className="bf-topbar">
+          <Link to="/" className="bf-brand" aria-label="ServGo"><Logo size={28} /></Link>
+          <div className="bf-spacer" />
+          <Link to={profileHref} className="bf-user" title="Личный кабинет" aria-label="Личный кабинет"><User /></Link>
+        </header>
+        <div key={screen} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{content}</div>
+      </main>
+      {toast && <div className="bf-toast" role="status">{toast}</div>}
+      {infoModal && <InfoSheet data={infoModal} onClose={() => setInfoModal(null)} />}
+    </div>,
+    document.body
   )
 }
 
-// Глобальный ErrorBoundary на всю страницу: если main render крашит, клиент
+// Глобальный ErrorBoundary на всю страницу: если main render падает, клиент
 // видит сообщение + ссылку на главную, а не белый экран.
 class PageErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null }
@@ -2364,30 +1648,20 @@ class PageErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
     try {
       console.error('BookingPage crashed:', error)
       console.error('Component stack:', info?.componentStack)
-    } catch {}
+    } catch { /* noop */ }
   }
   render() {
     if (this.state.error) {
       return (
-        <div className="bk-fallback">
-          <div className="bk-fallback-icon is-error">⚠️</div>
-          <h2 className="ds-h1">Не удалось открыть форму записи</h2>
-          <p className="ds-sub bk-fallback-sub">
-            Произошла ошибка. Попробуйте обновить страницу или вернуться на главную.
-          </p>
-          <p className="bk-fallback-mono">
-            {String(this.state.error?.message || this.state.error)}
-          </p>
-          <div className="bk-fallback-actions">
-            <button
-              onClick={() => window.location.reload()}
-              className="ds-btn ds-btn--primary"
-            >
-              Обновить
-            </button>
-            <Link to="/" className="ds-btn ds-btn--ghost">
-              На главную
-            </Link>
+        <div className="bf-root">
+          <div className="bf-device">
+            <div className="bf-fallback">
+              <h2 className="bf-h2">Не удалось открыть форму записи</h2>
+              <p className="bf-intro">Произошла ошибка. Попробуйте обновить страницу или вернуться на главную.</p>
+              <p className="mono">{String(this.state.error?.message || this.state.error)}</p>
+              <button type="button" className="bf-primary" style={{ flex: 'none', width: '100%' }} onClick={() => window.location.reload()}>Обновить</button>
+              <Link to="/" className="bf-text-alt">На главную</Link>
+            </div>
           </div>
         </div>
       )
