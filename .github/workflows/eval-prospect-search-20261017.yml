@@ -57,7 +57,7 @@ jobs:
               return out
           sftp=s.open_sftp(); sftp.put('ops/prospect-search-eval/eval_prospect_search.py','/tmp/eval_prospect_search.py'); sftp.close()
           run('C=ai-growth-os-worker-1; docker cp /tmp/eval_prospect_search.py $C:/tmp/eval_prospect_search.py; rm -f /tmp/eval_prospect_search.py /tmp/eval_prospect_search.log; '
-              'nohup sh -c "docker exec -e PYTHONUNBUFFERED=1 $C python /tmp/eval_prospect_search.py > /tmp/eval_prospect_search.log 2>&1; '
+              'nohup sh -c "docker exec -e PYTHONUNBUFFERED=1 -e EVAL_DEBUG=1 $C python /tmp/eval_prospect_search.py > /tmp/eval_prospect_search.log 2>&1; '
               'echo EVAL_EXIT=\\$? >> /tmp/eval_prospect_search.log; docker exec $C rm -f /tmp/eval_prospect_search.py" > /dev/null 2>&1 &')
           shown=0; deadline=time.time()+1200; text=''
           while time.time()<deadline:
