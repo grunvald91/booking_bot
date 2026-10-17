@@ -1,0 +1,15 @@
+# Рискованные пути. Владелец автоматически назначается ревьюером.
+# Не включай "Require review from Code Owners": автор PR не может одобрить свой же PR,
+# и работа заблокируется. Здесь CODEOWNERS нужен как карта рисков и автоназначение.
+*                       @grunvald91
+/.github/               @grunvald91
+/migrations/            @grunvald91
+/database/              @grunvald91
+/migrate_*.py           @grunvald91
+/apply_migration.py     @grunvald91
+/deploy*.py             @grunvald91
+/upload_to_server.py    @grunvald91
+/deployment_settings.py @grunvald91
+/notification_rules.py  @grunvald91
+/requirements.txt       @grunvald91
+/web/nginx.conf         @grunvald91
