@@ -138,7 +138,7 @@ html.tg-webapp .bf-root { top: var(--tg-safe-top, 0px); }
 .bf-monthnav svg { width: 17px; height: 17px; }
 .bf-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); text-align: center; }
 .bf-dayname { font-size: 9.5px; color: #a6b2c0; line-height: 16px; padding: 1px 0; }
-.bf-day { position: relative; width: clamp(28px, 5.2dvh, 34px); height: clamp(28px, 5.2dvh, 34px); margin: auto; border: 0; border-radius: 50%; background: none; color: #28394d; display: grid; place-items: center; font-size: 12px; font-weight: 450; isolation: isolate; }
+.bf-day { position: relative; width: clamp(28px, 5.2vh, 34px); width: clamp(28px, 5.2dvh, 34px); height: clamp(28px, 5.2vh, 34px); height: clamp(28px, 5.2dvh, 34px); margin: auto; border: 0; border-radius: 50%; background: none; color: #28394d; display: grid; place-items: center; font-size: 12px; font-weight: 450; isolation: isolate; }
 .bf-day:disabled { color: #c9d4df; cursor: default; }
 .bf-day.today:not(.selected):not(:disabled) { color: #276de0; }
 .bf-day.today:not(.selected):not(:disabled)::after { content: ""; position: absolute; bottom: 0; left: calc(50% - 2px); width: 4px; height: 4px; border-radius: 50%; background: #4288e2; }
@@ -147,7 +147,7 @@ html.tg-webapp .bf-root { top: var(--tg-safe-top, 0px); }
 .bf-times { flex: 0 0 auto; margin-top: 6px; }
 .bf-times-heading { font-size: 13px; font-weight: 500; }
 .bf-times-sub { font-size: 10px; color: #9aa8b8; margin: 1px 0 4px; }
-.bf-time-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px 6px; max-height: clamp(66px, 20dvh, 150px); overflow-y: auto; overscroll-behavior: contain; align-content: start; }
+.bf-time-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px 6px; align-content: start; }
 .bf-time { position: relative; min-height: 31px; padding: 5px 2px; border: 0; background: transparent; font-size: 12px; font-weight: 450; color: #54677e; }
 .bf-time::before { content: ""; position: absolute; bottom: 0; left: 5%; right: 5%; height: 1.5px; background: linear-gradient(90deg, transparent, #89b6e38c, transparent); opacity: 0.6; }
 .bf-time.selected { font-weight: 600; color: #2662c0; background: radial-gradient(ellipse at 50% 55%, #d9eafb, #eef7ff99 60%, transparent 75%); }
@@ -224,7 +224,7 @@ textarea.bf-input { height: auto; min-height: 40px; resize: vertical; }
 
 /* ── Итог ── */
 .bf-result { align-items: stretch; }
-.bf-orb { width: 75px; height: 75px; margin: clamp(6px, 3dvh, 22px) auto 9px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; color: #387bd4; background: radial-gradient(circle, #d6e9fe, #eaf4ff99 58%, transparent 79%); }
+.bf-orb { width: 75px; height: 75px; margin: clamp(6px, 3vh, 22px) auto 9px; margin: clamp(6px, 3dvh, 22px) auto 9px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; color: #387bd4; background: radial-gradient(circle, #d6e9fe, #eaf4ff99 58%, transparent 79%); }
 .bf-orb svg { width: 34px; height: 34px; }
 .bf-result .bf-h2 { text-align: center; }
 .bf-result .bf-intro { text-align: center; font-size: 12.5px; line-height: 1.5; margin-top: 6px; }
@@ -251,7 +251,7 @@ textarea.bf-input { height: auto; min-height: 40px; resize: vertical; }
 /* ── Тост и модалки ── */
 .bf-toast { position: fixed; z-index: 120; left: 50%; top: calc(54px + var(--tg-safe-top, 0px)); transform: translateX(-50%); width: min(400px, calc(100% - 35px)); padding: 12px 16px; border-radius: 12px; background: #20354e; color: #fff; font-size: 12.5px; text-align: center; box-shadow: 0 18px 40px #071c3030; animation: bfAppear 0.2s ease-out; }
 .bf-sheet-ov { position: fixed; inset: 0; z-index: 130; display: flex; align-items: flex-end; justify-content: center; background: rgba(14, 32, 52, 0.38); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
-.bf-sheet { width: 100%; max-width: 460px; max-height: 82dvh; overflow-y: auto; background: #fff; color: var(--bf-ink); border-radius: 24px 24px 0 0; padding: 12px 18px calc(18px + env(safe-area-inset-bottom)); box-shadow: 0 -12px 42px rgba(13, 41, 75, 0.09); }
+.bf-sheet { width: 100%; max-width: 460px; max-height: 82vh; max-height: 82dvh; overflow-y: auto; background: #fff; color: var(--bf-ink); border-radius: 24px 24px 0 0; padding: 12px 18px calc(18px + env(safe-area-inset-bottom)); box-shadow: 0 -12px 42px rgba(13, 41, 75, 0.09); }
 .bf-sheet-grip { width: 40px; height: 4px; border-radius: 10px; background: #aab8c7; opacity: 0.45; margin: 0 auto 14px; }
 .bf-sheet-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
 .bf-sheet-head h3 { flex: 1; font-size: 18px; font-weight: 520; letter-spacing: -0.045em; }
@@ -280,7 +280,7 @@ textarea.bf-input { height: auto; min-height: 40px; resize: vertical; }
 }
 @media (min-width: 700px) {
   .bf-root { padding: 24px 0; }
-  .bf-device { height: min(825px, calc(100dvh - 48px)); border-radius: 21px; box-shadow: 0 18px 70px #18385816; }
+  .bf-device { height: min(825px, calc(100vh - 48px)); height: min(825px, calc(100dvh - 48px)); border-radius: 21px; box-shadow: 0 18px 70px #18385816; }
   .bf-toast { top: 40px; }
 }
 @media (max-width: 360px) {
@@ -291,4 +291,11 @@ textarea.bf-input { height: auto; min-height: 40px; resize: vertical; }
 }
 @media (prefers-reduced-motion: reduce) {
   .bf-root *, .bf-root *::before, .bf-root *::after { animation: none !important; transition: none !important; }
+}
+
+/* Ошибка отправки — в нижней панели, рядом с кнопкой, всегда видна. */
+.bf-error--bar { order: -2; flex-basis: 100%; margin: 0; }
+/* iOS Safari зумит поля с font-size < 16px при фокусе. */
+@media (hover: none) and (pointer: coarse) {
+  .bf-input { font-size: 16px; }
 }

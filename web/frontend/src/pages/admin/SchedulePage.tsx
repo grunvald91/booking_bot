@@ -260,7 +260,7 @@ function BookingDetailSheet({
                   <span>Предоплата</span>
                   <strong>{money(prepay)}</strong>
                 </div>
-                <div className="sched-progress"><span style={{ width: `${Math.round(Math.min(1, price > 0 ? prepay / price : 1) * 100)}%` }} /></div>
+                {!awaitingPayment && <div className="sched-progress"><span style={{ width: `${Math.round(Math.min(1, price > 0 ? prepay / price : 1) * 100)}%` }} /></div>}
                 <small>
                   {booking.status === 'prepayment_sent'
                     ? 'Клиент сообщил об оплате — проверьте поступление и подтвердите запись.'
@@ -295,10 +295,10 @@ function BookingDetailSheet({
           <>
             <div className="ds-eyebrow" style={{ margin: '2px 0 0' }}>Управление записью</div>
             <div className="sched-actions">
-              {(booking.status === 'pending' || awaitingPayment) && (
+              {(booking.status === 'pending' || booking.status === 'prepayment_sent') && (
                 <button className="primary" onClick={() => onStatusChange(booking.id, 'confirmed')}
                   disabled={updating || !!booking.price_requires_confirmation || (booking.is_rental && booking.prepayment_amount == null)}>
-                  {awaitingPayment ? 'Оплата получена · подтвердить' : 'Подтвердить запись'}
+                  {booking.status === 'prepayment_sent' ? 'Оплата получена · подтвердить' : 'Подтвердить запись'}
                 </button>
               )}
               <button onClick={() => onReschedule(booking)} disabled={updating}><CalendarClock size={14} />Перенести</button>
@@ -606,7 +606,7 @@ export function SchedulePage() {
       el.removeEventListener('touchend', onEnd)
       el.removeEventListener('wheel', onWheel)
     }
-  }, [loading])
+  }, [])
 
   const employees = useMemo(
     () => allEmployees.filter((e) => e.is_active !== false && (!e.role || e.role === 'master' || e.role === 'master_and_admin')),
@@ -675,6 +675,7 @@ export function SchedulePage() {
 
   useEffect(() => {
     if (!businessId) return
+    setSelectedEmployeeId(null)
     Promise.all([api.getServices(businessId), api.getEmployees(businessId)])
       .then(([svc, emp]) => { setServices(svc); setAllEmployees(emp) })
       .catch(() => {})
@@ -789,10 +790,12 @@ export function SchedulePage() {
     return () => clearInterval(t)
   }, [])
 
-  // Прокрутить к текущему времени при открытии
+  // Прокрутить к текущему времени один раз при открытии (не на каждом опросе раз в 15 с).
+  const didAutoScroll = useRef(false)
   useEffect(() => {
     const el = scrollRef.current
-    if (!el || loading) return
+    if (!el || loading || didAutoScroll.current) return
+    didAutoScroll.current = true
     const target = (Math.max(DAY_START_H * 60, nowMin - 60) - DAY_START_H * 60) * pxPerMin
     if (el.scrollTop === 0) el.scrollTop = Math.max(0, target)
   }, [loading]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -884,11 +887,17 @@ export function SchedulePage() {
       if (holdTimer) { clearTimeout(holdTimer); holdTimer = undefined }
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+    }
+    // Прерванный жест (браузер забрал его под прокрутку) — не перенос.
+    const onCancel = () => {
+      const wasDragging = dragging
+      cleanup()
+      if (wasDragging) { suppressClickUntil.current = Date.now() + 400; setDrag(null) }
     }
     window.addEventListener('pointermove', onMove, { passive: false })
     window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', onUp)
+    window.addEventListener('pointercancel', onCancel)
     if (e.pointerType === 'touch') holdTimer = window.setTimeout(() => begin(startX, startY), 260)
   }
 

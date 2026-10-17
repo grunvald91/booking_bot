@@ -35,6 +35,7 @@ import { getTelegramUser } from '../../utils/telegram'
 import { downloadBookingIcs } from '../../utils/calendar'
 import { NotificationSetup } from '../../components/NotificationSetup'
 import { Logo } from '../../components/Logo'
+import { ApiError } from '../../api/client'
 import './booking-flow.css'
 
 // ── Helpers ──
@@ -284,6 +285,7 @@ function BookingPageInner() {
   // Navigation
   const [screen, setScreen] = useState<Screen>('home')
   const historyRef = useRef<Screen[]>([])
+  const submittingRef = useRef(false)
 
   // Selections
   const [selectedServices, setSelectedServices] = useState<Service[]>([])
@@ -424,21 +426,35 @@ function BookingPageInner() {
   const totalDuration = useMemo(() => {
     if (selectedServices.length === 0) return 0
     if (selectedServices.length === 1 && !isVenue) return selectedServices[0].duration_minutes ?? 60
-    return selectedServices.reduce((sum, s) => sum + (s.duration_minutes ?? 0), 0)
+    return selectedServices.reduce((sum, s) => sum + (s.duration_minutes ?? (isVenue ? 0 : 30)), 0)
   }, [isVenue, selectedServices])
 
-  // Load slots
+  // Load slots. slotsKey привязывает список к запросу, чтобы ответ для
+  // прошлого дня не подставился в новый.
+  const slotsRequestKey = selectedDate && selectedServices[0]
+    ? `${selectedDate}|${selectedServices[0].id}|${selectedResource?.id ?? ''}|${totalDuration}`
+    : ''
+  const [slotsKey, setSlotsKey] = useState('')
   useEffect(() => {
     if (!selectedDate || !businessId) return
     const serviceId = selectedServices[0]?.id ?? 0
     if (!serviceId) return
+    const key = `${selectedDate}|${serviceId}|${selectedResource?.id ?? ''}|${totalDuration}`
+    let stale = false
     setLoadingSlots(true)
     api
       .getSlots(Number(businessId), serviceId, selectedDate, selectedResource?.id, totalDuration)
-      .then(setSlots)
-      .catch(() => setSlots([]))
-      .finally(() => setLoadingSlots(false))
+      .then((list) => {
+        if (stale) return
+        setSlots(list)
+        setSlotsKey(key)
+        setSelectedTime((t) => (t && !list.includes(t) ? null : t))
+      })
+      .catch(() => { if (!stale) { setSlots([]); setSlotsKey(key) } })
+      .finally(() => { if (!stale) setLoadingSlots(false) })
+    return () => { stale = true }
   }, [businessId, selectedDate, selectedServices, selectedResource, totalDuration])
+  const slotsReady = !loadingSlots && slotsKey === slotsRequestKey
 
   // Auto-pick when a step has exactly one option.
   useEffect(() => {
@@ -463,10 +479,10 @@ function BookingPageInner() {
 
   // Единственный слот времени
   useEffect(() => {
-    if (!selectedDate || selectedTime || loadingSlots || slots.length !== 1) return
+    if (!selectedDate || selectedTime || !slotsReady || slots.length !== 1) return
     setSelectedTime(slots[0])
     setToast(`Свободно только ${slots[0]} — время выбрано`)
-  }, [selectedDate, slots, selectedTime, loadingSlots])
+  }, [selectedDate, slots, selectedTime, slotsReady])
 
   // Calculate price for venue
   useEffect(() => {
@@ -548,15 +564,29 @@ function BookingPageInner() {
     if (target === 'calendar' && (!servicesDone || !resourceDone)) target = nextNeeded()
     if ((target === 'extras' || target === 'review') && (!servicesDone || !resourceDone || !dateDone)) target = nextNeeded()
     if (target === screen) return
-    if (record) historyRef.current.push(screen)
+    if (record) {
+      historyRef.current.push(screen)
+      // Отдельная запись в истории на каждый шаг: системный «назад»
+      // (Android, свайп iOS, Telegram) возвращает на прошлый шаг, а не уходит со страницы.
+      window.history.pushState({ ...(window.history.state ?? {}), bfStep: historyRef.current.length }, '')
+    }
     setScreen(target)
   }
 
   function back() {
-    const prev = historyRef.current.pop()
-    if (prev) setScreen(prev)
-    else setScreen('home')
+    if (historyRef.current.length > 0) window.history.back()
+    else if (screen !== 'home') setScreen('home')
+    else navigate(`/business/${businessId}`)
   }
+
+  useEffect(() => {
+    const onPop = () => {
+      const prev = historyRef.current.pop()
+      if (prev) setScreen(prev)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
   const resetDownstream = () => {
     setSelectedDate(null)
@@ -699,6 +729,8 @@ function BookingPageInner() {
       return
     }
 
+    if (submittingRef.current) return
+    submittingRef.current = true
     setSubmitting(true)
     setBookingError(null)
     try {
@@ -765,7 +797,9 @@ function BookingPageInner() {
       setBookingError(null)
       // После создания брони назад в выбор не возвращаемся.
       historyRef.current = []
-      setScreen(prepaymentNeeded ? 'prepay' : 'done')
+      // Экран предоплаты — только если сервер действительно ждёт предоплату.
+      const needsPrepay = firstResult?.status ? firstResult.status === 'pending_prepayment' : prepaymentNeeded
+      setScreen(needsPrepay ? 'prepay' : 'done')
     } catch (err: unknown) {
       console.error('Booking creation error:', err)
       const msg = err instanceof Error ? err.message : ''
@@ -776,12 +810,18 @@ function BookingPageInner() {
         } catch {
           setBookingError('Не удалось создать серию записей. Попробуйте другое время.')
         }
-      } else if (msg.includes('409') || msg.includes('already taken') || msg.includes('Занято')) {
+      } else if ((err instanceof ApiError && err.status === 409) || msg.includes('already taken') || msg.includes('Занято')) {
         setBookingError('Это время уже занято. Выберите другое время.')
+        setSelectedTime(null)
+        setSlotsKey('')
+        historyRef.current.push(screen)
+        window.history.pushState({ ...(window.history.state ?? {}), bfStep: historyRef.current.length }, '')
+        setScreen('calendar')
       } else {
         setBookingError('Не удалось создать запись. Попробуйте ещё раз.')
       }
     } finally {
+      submittingRef.current = false
       setSubmitting(false)
     }
   }
@@ -1163,6 +1203,7 @@ function BookingPageInner() {
                     onClick={() => {
                       setSelectedDate(key)
                       setSelectedTime(null)
+                      setSlots([])
                       setPriceData(null)
                     }}
                   >
@@ -1300,6 +1341,8 @@ function BookingPageInner() {
     const missing: string[] = []
     if (!clientName.trim()) missing.push('имя')
     if (!clientPhone.trim()) missing.push('телефон')
+    if (business?.legal_documents_enabled && !personalDataConsent) missing.push('согласие на обработку данных')
+    if (business?.legal_documents_enabled && !bookingTermsAccepted) missing.push('принятие условий')
     return (
       <section className="bf-screen" aria-label="Проверка записи">
         <div className="bf-inside-nav">{stepCount}</div>
@@ -1423,10 +1466,10 @@ function BookingPageInner() {
               </label>
             </div>
           )}
-          {bookingError && <p className="bf-error" role="alert">{bookingError}</p>}
         </div>
         <div className="bf-bottombar">
-          <div className="bf-summary">{missing.length > 0 ? `Осталось указать: ${missing.join(' и ')}` : `${serviceLabel}${dateDone ? ` · ${ruDate(selectedDate!)} · ${selectedTime}` : ''}`}</div>
+          {bookingError && <p className="bf-error bf-error--bar" role="alert">{bookingError}</p>}
+          <div className="bf-summary">{missing.length > 0 ? `Осталось: ${missing.join(', ')}` : `${serviceLabel}${dateDone ? ` · ${ruDate(selectedDate!)} · ${selectedTime}` : ''}`}</div>
           {backButton}
           <button type="button" className="bf-primary" onClick={handleSubmit} disabled={submitting}>
             {submitting ? <><span className="bf-spinner" />Оформляем…</> : <>Оформить запись <ArrowRight /></>}

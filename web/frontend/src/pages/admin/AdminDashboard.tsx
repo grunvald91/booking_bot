@@ -191,6 +191,7 @@ export function AdminDashboard() {
                   />
                   <button
                     onClick={() => handlePhotoDelete(i)}
+                    aria-label={`Удалить фото ${i + 1}`}
                     style={{
                       position: 'absolute', top: 4, right: 4, width: 20, height: 20,
                       background: '#fff', color: '#ac5f5f', borderRadius: '50%', border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,.13)',
