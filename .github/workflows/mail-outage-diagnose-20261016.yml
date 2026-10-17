@@ -19,7 +19,7 @@ concurrency:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     env:
       SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
     steps:
@@ -46,29 +46,41 @@ jobs:
                   if n==2: raise
                   time.sleep(3)
           cmd=r'''set +e
-          sec(){ echo; echo "===== $1 ====="; }
-          sec R12_RELAY
-          timeout 50 ssh -i /root/.ssh/servgo_89_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/booking-bot-relay89/known_hosts -o ConnectTimeout=8 root@89.125.90.101 '
-            echo "--- who brings up tg-relay"
-            ip -d link show tg-relay 2>&1 | head -3
-            grep -rlE "tg-relay" /etc/systemd /lib/systemd/system /etc/wireguard /etc/network /etc/netplan 2>/dev/null | head
-            systemctl list-units --all --no-pager --no-legend 2>/dev/null | grep -iE "tg-relay|wg|wireguard|networkd" | head
-            networkctl list 2>/dev/null | head -10
-            for u in $(grep -rlE "tg-relay" /etc/systemd/system 2>/dev/null | xargs -r -n1 basename | grep -E "\.service$"); do echo "# $u"; systemctl cat "$u" 2>/dev/null | grep -E "^(Description|After|Before|Wants|Requires|ExecStart|Type|RemainAfterExit|WantedBy)=" | sed -E "s/(PrivateKey|PresharedKey)[^ ]*/\1=<redacted>/g"; echo "active=$(systemctl is-active $u) enabled=$(systemctl is-enabled $u)"; done
-            echo "--- nginx drop-ins"; ls /etc/systemd/system/nginx.service.d/; systemctl cat nginx | grep -E "^(After|Wants|Requires|ExecStartPre|Restart)="
-            echo "--- telemt units"
-            systemctl list-units --all --no-pager --no-legend "telemt*" 2>/dev/null
-            systemctl cat telemt 2>/dev/null | grep -E "^(Description|ExecStart|Restart|RestartSec|After|User|WorkingDirectory)="
-            echo "--- telemt journal"
-            journalctl -u telemt --no-pager -n 40 -o short-iso 2>&1 | grep -viE "secret|ad_tag" | tail -40
-            echo "--- telemt restarts"; systemctl show telemt -p NRestarts -p ExecMainStatus -p ActiveEnterTimestamp
-            CONF=$(systemctl cat telemt 2>/dev/null | sed -n "s/^ExecStart=.* \(\/[^ ]*\.toml\).*/\1/p" | head -1); echo "config=$CONF"
-            [ -n "$CONF" ] && grep -nEi "^\[|listen|port|tls_domain|mask_host|mask_port|public" "$CONF" | grep -viE "secret|key" | head -30
-            echo "--- ports in use near telemt"; ss -lntp 2>/dev/null | grep -E ":(443|944[0-9]|909[0-9]|947[0-9]) " | awk "{print \$4, \$6}"
-          ' 2>&1 | tail -140
-          sec R12_END
+          AUDIT='
+          sec(){ echo; echo "== $1"; }
+          sec HOST; hostname; uptime; last -x reboot 2>/dev/null | head -3
+          sec MEM; free -m; swapon --show 2>/dev/null
+          sec DISK; df -hT -x tmpfs -x devtmpfs -x overlay -x squashfs; df -ih / | tail -1
+          sec TOP_DIRS; du -xhd1 / 2>/dev/null | sort -h | tail -12
+          sec VAR; du -xhd2 /var 2>/dev/null | sort -h | tail -12
+          sec OPT; du -xhd1 /opt 2>/dev/null | sort -h | tail -12
+          sec ROOT_HOME; du -xhd1 /root /home 2>/dev/null | sort -h | tail -10
+          sec TMP; du -xsh /tmp /var/tmp 2>/dev/null; find /tmp /var/tmp -xdev -type f -mtime +7 2>/dev/null | wc -l
+          sec JOURNAL; journalctl --disk-usage 2>/dev/null
+          sec LOGS; du -sh /var/log 2>/dev/null; find /var/log -type f \( -name "*.gz" -o -name "*.[0-9]" -o -name "*.old" \) -printf "%s\n" 2>/dev/null | awk "{s+=\$1}END{printf \"rotated logs: %.0f MB\n\", s/1048576}"; find /var/log -type f -size +50M -printf "%s %p\n" 2>/dev/null | sort -n | tail -6
+          sec APT; du -sh /var/cache/apt 2>/dev/null; apt list --upgradable 2>/dev/null | grep -c upgradable; apt list --upgradable 2>/dev/null | grep -ci security; [ -f /var/run/reboot-required ] && echo REBOOT_REQUIRED || echo no-reboot-required
+          sec KERNELS; dpkg -l "linux-image-*" 2>/dev/null | awk "/^ii/{print \$2}" | tr "\n" " "; echo; uname -r
+          sec CACHES; du -sh /root/.cache /root/.npm /root/.cache/pip /home/*/.cache 2>/dev/null
+          sec DOCKER; docker system df 2>/dev/null; docker images -f dangling=true -q 2>/dev/null | wc -l; docker ps -a --filter status=exited --format "{{.Names}} {{.Status}}" 2>/dev/null | head
+          sec CRASH; ls -la /var/crash 2>/dev/null | tail -5; find / -xdev -name "core" -o -name "core.[0-9]*" -type f 2>/dev/null | head -5
+          sec FAILED; systemctl --failed --no-legend --plain
+          sec OOM_7D; journalctl -k --since "-7 days" --no-pager 2>/dev/null | grep -ciE "out of memory|oom-kill"
+          sec TOP_MEM; ps -eo pid,comm,%mem,%cpu,etime --sort=-%mem | head -8
+          sec TOP_CPU; ps -eo pid,comm,%cpu,etime --sort=-%cpu | head -6
+          sec ZOMBIES; ps -eo stat | grep -c "^Z"
+          sec SSH_BRUTE_24H; journalctl -u ssh -u sshd --since "-24 hours" --no-pager 2>/dev/null | grep -c "Failed password"; fail2ban-client status sshd 2>/dev/null | grep -E "Currently|Total" 
+          sec BACKUPS_OLD; find /opt /etc /root -xdev \( -name "*.bak*" -o -name "*.orig" -o -name "*backup*" -o -name "*.tgz" -o -name "*.tar.gz" \) -mtime +7 -printf "%TF %s %p\n" 2>/dev/null | sort | awk "{printf \"%s %6.1fMB %s\n\", \$1, \$2/1048576, \$3}" | tail -25
+          '
+          echo "############ SERVER 155 ############"
+          bash -c "$AUDIT" 2>&1
+          echo "--- 155 app specifics"
+          du -sh /opt/booking_bot/web/frontend/dist /opt/booking_bot/web/frontend/dist.bak_* /opt/servgo-releases /opt/servgo-releases/* 2>/dev/null
+          ls /opt/booking_bot/web/frontend/dist/assets | wc -l
+          echo "############ SERVER 89 ############"
+          timeout 90 ssh -i /root/.ssh/servgo_89_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/booking-bot-relay89/known_hosts -o ConnectTimeout=8 root@89.125.90.101 "bash -s" <<< "$AUDIT" 2>&1
+          echo AUDIT_END
           '''
-          _,o,e=s.exec_command(cmd,timeout=120)
+          _,o,e=s.exec_command(cmd,timeout=300)
           print(o.read().decode('utf-8','replace'))
           err=e.read().decode('utf-8','replace')
           if err.strip(): print('--- stderr ---'); print(err[-2500:])
