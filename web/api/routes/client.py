@@ -240,6 +240,7 @@ def _booking_to_out(b: Booking, can_cancel: bool = False, can_reschedule: bool =
         can_cancel=can_cancel,
         can_reschedule=can_reschedule,
         notify_token=b.notify_token,
+        prepayment_amount=b.prepayment_amount,
     )
 
 
@@ -550,6 +551,13 @@ async def calculate_price(
     db: AsyncSession = Depends(get_db),
 ):
     """Calculate price based on venue time pricing rules."""
+    return await compute_venue_time_price(db, employee_id, time, duration, date)
+
+
+async def compute_venue_time_price(
+    db: AsyncSession, employee_id: int, time: str, duration: int, date: Optional[str] = None,
+) -> CalculatePriceOut:
+    """Venue time-based price; shared by the price preview and booking creation."""
     # Fetch pricing rules for employee
     query = select(VenueTimePricing).where(VenueTimePricing.employee_id == employee_id)
     result = await db.execute(query)
@@ -627,6 +635,29 @@ async def calculate_price(
         current = seg_end
 
     return CalculatePriceOut(has_time_price=True, total=total, segments=segments)
+
+
+async def _visit_base_price(
+    db: AsyncSession, business: Business, main_services: list, employee: Optional[Employee],
+    *, is_solo: bool, start: str, duration: int, occ_date: date,
+) -> int:
+    """Price of the visit without add-ons — the same rules the booking page shows.
+
+    Venues: solo hourly price when chosen, otherwise time-based pricing of the
+    resource, otherwise the services' fixed prices.
+    """
+    from bot.utils.business_types import is_venue_rental_type
+
+    services_total = sum((service.price or 0) for service in main_services)
+    if employee is None or not is_venue_rental_type(business.business_type or ""):
+        return services_total
+    solo_rate = getattr(employee, "solo_price_per_hour", None)
+    if is_solo and solo_rate:
+        return int(solo_rate * max(1, duration / 60))
+    quote = await compute_venue_time_price(db, employee.id, start, duration, occ_date.isoformat())
+    if quote.has_time_price and quote.total > 0:
+        return quote.total
+    return services_total
 
 
 # ---------- POST /bookings ----------
@@ -713,6 +744,7 @@ async def create_booking_visit(
     if any(service.is_additional for service in main_services):
         raise HTTPException(status_code=400, detail="Additional service cannot be a main booking service")
 
+    selected_employee: Optional[Employee] = None
     if body.employee_id:
         emp_result = await db.execute(
             select(Employee).where(
@@ -777,18 +809,26 @@ async def create_booking_visit(
             booking_notes += "\n"
         booking_notes += "Доп. услуги: " + ", ".join(addon_notes_parts)
 
-    visit_prepayment_amount = None
+    visit_duration = sum((service.duration_minutes or 30) for service in main_services)
+
+    # Предоплата считается от той же цены, что видит клиент (для площадок —
+    # почасовые тарифы и solo-цена), отдельно для каждой даты серии.
+    prepayment_by_date: dict[date, int] = {}
     if getattr(business, "prepayment_enabled", False):
-        visit_total_price = sum((service.price or 0) for service in main_services) + addon_total_price
         prepayment_percent = business.prepayment_percent or 100
-        visit_prepayment_amount = int(visit_total_price * prepayment_percent / 100)
+        for occ_date in occurrence_dates:
+            base_price = await _visit_base_price(
+                db, business, main_services, selected_employee,
+                is_solo=bool(body.is_solo_booking), start=body.time,
+                duration=visit_duration, occ_date=occ_date,
+            )
+            prepayment_by_date[occ_date] = int((base_price + addon_total_price) * prepayment_percent / 100)
 
     # One lock per resource/day window for the whole recurring series. The
     # second concurrent request waits here, then re-checks availability after
     # the first request commits.
     await lock_resource_days(db, body.employee_id, occurrence_dates)
 
-    visit_duration = sum((service.duration_minutes or 30) for service in main_services)
     for occ_date in occurrence_dates:
         try:
             await ensure_resource_available(
@@ -808,7 +848,7 @@ async def create_booking_visit(
 
     initial_status = (
         "pending_prepayment"
-        if getattr(business, "prepayment_enabled", False) and (visit_prepayment_amount or 0) > 0
+        if getattr(business, "prepayment_enabled", False) and any(v > 0 for v in prepayment_by_date.values())
         else "pending"
     )
 
@@ -827,7 +867,7 @@ async def create_booking_visit(
                 notes=booking_notes or None,
                 notify_token=str(uuid.uuid4()),
                 prepayment_amount=(
-                    visit_prepayment_amount
+                    prepayment_by_date.get(occ_date)
                     if initial_status == "pending_prepayment"
                     else None
                 ),

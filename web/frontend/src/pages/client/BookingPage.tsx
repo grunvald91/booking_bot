@@ -328,6 +328,7 @@ function BookingPageInner() {
   const [bookingError, setBookingError] = useState<string | null>(null)
   const [createdBookingId, setCreatedBookingId] = useState<number | null>(null)
   const [createdNotifyToken, setCreatedNotifyToken] = useState<string | null>(null)
+  const [createdPrepayment, setCreatedPrepayment] = useState<number | null>(null)
   const [paymentSent, setPaymentSent] = useState(false)
   const [receiptUploading, setReceiptUploading] = useState(false)
   const [receiptUploaded, setReceiptUploaded] = useState(false)
@@ -425,9 +426,9 @@ function BookingPageInner() {
   // Total duration
   const totalDuration = useMemo(() => {
     if (selectedServices.length === 0) return 0
-    if (selectedServices.length === 1 && !isVenue) return selectedServices[0].duration_minutes ?? 60
-    return selectedServices.reduce((sum, s) => sum + (s.duration_minutes ?? (isVenue ? 0 : 30)), 0)
-  }, [isVenue, selectedServices])
+    // Как на сервере (visit_duration): услуга без длительности — 30 мин.
+    return selectedServices.reduce((sum, s) => sum + (s.duration_minutes ?? 30), 0)
+  }, [selectedServices])
 
   // Load slots. slotsKey привязывает список к запросу, чтобы ответ для
   // прошлого дня не подставился в новый.
@@ -530,7 +531,9 @@ function BookingPageInner() {
   // Шаг предоплаты учитываем в счётчике заранее, чтобы «Шаг N / M» не прыгал после выбора услуги.
   const prepaymentStep = !!business?.prepayment_enabled && (totalPrice > 0 || (selectedServices.length === 0 && services.some((s) => (s.price ?? 0) > 0)))
   const prepaymentPercent = business?.prepayment_percent ?? 100
-  const prepaymentAmount = totalPrice > 0 ? Math.ceil(totalPrice * prepaymentPercent / 100) : 0
+  // Оценка до создания записи (округление как на сервере); после создания — сумма с сервера.
+  const estimatedPrepayment = totalPrice > 0 ? Math.floor(totalPrice * prepaymentPercent / 100) : 0
+  const prepaymentAmount = createdPrepayment ?? estimatedPrepayment
 
   // ── Шаги ──
   const selectionSteps = useMemo<Screen[]>(() => {
@@ -768,6 +771,7 @@ function BookingPageInner() {
       if (firstResult) {
         setCreatedBookingId(firstResult.id)
         setCreatedNotifyToken(firstResult.notify_token ?? null)
+        setCreatedPrepayment(typeof firstResult.prepayment_amount === 'number' ? firstResult.prepayment_amount : null)
         if (Array.isArray(result) && repeatEnabled) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const uniqueDates = Array.from(new Set(result.map((b: any) => b.date).filter(Boolean))) as string[]
