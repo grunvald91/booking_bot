@@ -46,39 +46,37 @@ jobs:
                   if n==2: raise
                   time.sleep(3)
           cmd=r'''set +e
-          AUDIT='
           sec(){ echo; echo "== $1"; }
-          sec HOST; hostname; uptime; last -x reboot 2>/dev/null | head -3
-          sec MEM; free -m; swapon --show 2>/dev/null
-          sec DISK; df -hT -x tmpfs -x devtmpfs -x overlay -x squashfs; df -ih / | tail -1
-          sec TOP_DIRS; du -xhd1 / 2>/dev/null | sort -h | tail -12
-          sec VAR; du -xhd2 /var 2>/dev/null | sort -h | tail -12
-          sec OPT; du -xhd1 /opt 2>/dev/null | sort -h | tail -12
-          sec ROOT_HOME; du -xhd1 /root /home 2>/dev/null | sort -h | tail -10
-          sec TMP; du -xsh /tmp /var/tmp 2>/dev/null; find /tmp /var/tmp -xdev -type f -mtime +7 2>/dev/null | wc -l
-          sec JOURNAL; journalctl --disk-usage 2>/dev/null
-          sec LOGS; du -sh /var/log 2>/dev/null; find /var/log -type f \( -name "*.gz" -o -name "*.[0-9]" -o -name "*.old" \) -printf "%s\n" 2>/dev/null | awk "{s+=\$1}END{printf \"rotated logs: %.0f MB\n\", s/1048576}"; find /var/log -type f -size +50M -printf "%s %p\n" 2>/dev/null | sort -n | tail -6
-          sec APT; du -sh /var/cache/apt 2>/dev/null; apt list --upgradable 2>/dev/null | grep -c upgradable; apt list --upgradable 2>/dev/null | grep -ci security; [ -f /var/run/reboot-required ] && echo REBOOT_REQUIRED || echo no-reboot-required
-          sec KERNELS; dpkg -l "linux-image-*" 2>/dev/null | awk "/^ii/{print \$2}" | tr "\n" " "; echo; uname -r
-          sec CACHES; du -sh /root/.cache /root/.npm /root/.cache/pip /home/*/.cache 2>/dev/null
-          sec DOCKER; docker system df 2>/dev/null; docker images -f dangling=true -q 2>/dev/null | wc -l; docker ps -a --filter status=exited --format "{{.Names}} {{.Status}}" 2>/dev/null | head
-          sec CRASH; ls -la /var/crash 2>/dev/null | tail -5; find / -xdev -name "core" -o -name "core.[0-9]*" -type f 2>/dev/null | head -5
-          sec FAILED; systemctl --failed --no-legend --plain
-          sec OOM_7D; journalctl -k --since "-7 days" --no-pager 2>/dev/null | grep -ciE "out of memory|oom-kill"
-          sec TOP_MEM; ps -eo pid,comm,%mem,%cpu,etime --sort=-%mem | head -8
-          sec TOP_CPU; ps -eo pid,comm,%cpu,etime --sort=-%cpu | head -6
-          sec ZOMBIES; ps -eo stat | grep -c "^Z"
-          sec SSH_BRUTE_24H; journalctl -u ssh -u sshd --since "-24 hours" --no-pager 2>/dev/null | grep -c "Failed password"; fail2ban-client status sshd 2>/dev/null | grep -E "Currently|Total" 
-          sec BACKUPS_OLD; find /opt /etc /root -xdev \( -name "*.bak*" -o -name "*.orig" -o -name "*backup*" -o -name "*.tgz" -o -name "*.tar.gz" \) -mtime +7 -printf "%TF %s %p\n" 2>/dev/null | sort | awk "{printf \"%s %6.1fMB %s\n\", \$1, \$2/1048576, \$3}" | tail -25
-          '
-          echo "############ SERVER 155 ############"
-          bash -c "$AUDIT" 2>&1
-          echo "--- 155 app specifics"
-          du -sh /opt/booking_bot/web/frontend/dist /opt/booking_bot/web/frontend/dist.bak_* /opt/servgo-releases /opt/servgo-releases/* 2>/dev/null
-          ls /opt/booking_bot/web/frontend/dist/assets | wc -l
-          echo "############ SERVER 89 ############"
-          timeout 90 ssh -i /root/.ssh/servgo_89_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/booking-bot-relay89/known_hosts -o ConnectTimeout=8 root@89.125.90.101 "bash -s" <<< "$AUDIT" 2>&1
-          echo AUDIT_END
+          sec MEM155; free -m; cat /proc/pressure/memory 2>/dev/null
+          sec SERVICES_BY_MEM_PLUS_SWAP
+          for d in /sys/fs/cgroup/system.slice/*.service /sys/fs/cgroup/system.slice/docker-*.scope; do
+            [ -f "$d/memory.current" ] || continue
+            m=$(cat $d/memory.current); sw=$(cat $d/memory.swap.current 2>/dev/null || echo 0)
+            echo "$(( (m+sw)/1048576 )) MB  ram=$((m/1048576)) swap=$((sw/1048576))  $(basename $d)"
+          done | sort -rn | head -30
+          sec USER_SLICE; for d in /sys/fs/cgroup/user.slice /sys/fs/cgroup/init.scope; do echo "$(( $(cat $d/memory.current)/1048576 ))MB $d"; done
+          sec PROCESSES_RSS_SWAP
+          for p in /proc/[0-9]*; do n=$(tr '\0' ' ' < $p/cmdline 2>/dev/null | cut -c1-110); r=$(awk '/VmRSS/{print $2}' $p/status 2>/dev/null); w=$(awk '/VmSwap/{print $2}' $p/status 2>/dev/null); [ -n "$r" ] && echo "$(( (r+${w:-0})/1024 )) MB rss=$((r/1024)) swap=$((${w:-0}/1024)) pid=$(basename $p) $n"; done | sort -rn | head -30 | sed -E 's/(token|password|secret|key)=[^ ]+/\1=***/Ig'
+          sec DOCKER_STATS; docker stats --no-stream --format "{{.Name}} {{.MemUsage}} {{.CPUPerc}}" 2>/dev/null
+          sec DOCKER_PS; docker ps --format "{{.Names}} | {{.Image}} | {{.Status}}" 2>/dev/null
+          sec ENABLED_APP_SERVICES; systemctl list-units --type=service --state=running --no-legend --plain | awk '{print $1}' | grep -vE '^(systemd|dbus|cron|ssh|rsyslog|polkit|udisks|ModemManager|multipathd|networkd|getty|serial|user@|unattended|snapd|packagekit|irqbalance|qemu|chrony|atd|fwupd)' | tr '\n' ' '
+          sec ZRAM; zramctl 2>/dev/null; cat /proc/sys/vm/swappiness
+          sec LAST_ACTIVITY_PER_BOT
+          for u in $(systemctl list-units --type=service --state=running --no-legend --plain | awk '{print $1}' | grep -Ei 'bot|concierge|sushef|form|sync|flight|dating|mlm|cityservice|wb-|id-bot|grunvald|elitles|smena'); do echo "$u since $(systemctl show -p ActiveEnterTimestamp --value $u) last-log: $(journalctl -u $u -n1 --no-pager -o short-iso 2>/dev/null | tail -1 | cut -c1-25)"; done
+          sec SSH155; sshd -T 2>/dev/null | grep -E '^(passwordauthentication|permitrootlogin|maxauthtries|port|pubkeyauthentication|logingracetime) '
+          sec F2B155; ls /etc/fail2ban/jail.d/ 2>/dev/null; grep -hvE '^\s*(#|$)' /etc/fail2ban/jail.local /etc/fail2ban/jail.d/*.conf /etc/fail2ban/jail.d/*.local 2>/dev/null | head -40; fail2ban-client status 2>/dev/null; fail2ban-client get sshd bantime 2>/dev/null; fail2ban-client get sshd maxretry 2>/dev/null; fail2ban-client get sshd findtime 2>/dev/null
+          sec SSH155_TOP_ATTACKERS; journalctl -u ssh --since "-24 hours" --no-pager 2>/dev/null | grep -oE "Failed password for .* from [0-9.]+" | awk '{print $NF}' | sort | uniq -c | sort -rn | head -8
+          sec SERVER89
+          timeout 60 ssh -i /root/.ssh/servgo_89_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/booking-bot-relay89/known_hosts -o ConnectTimeout=8 root@89.125.90.101 '
+            sshd -T 2>/dev/null | grep -E "^(passwordauthentication|permitrootlogin|maxauthtries|port|pubkeyauthentication) "
+            echo "authorized keys: $(grep -c . /root/.ssh/authorized_keys 2>/dev/null)"
+            which fail2ban-client || echo "fail2ban: not installed"
+            apt-cache policy fail2ban 2>/dev/null | sed -n 1,3p
+            journalctl -u ssh --since "-24 hours" --no-pager 2>/dev/null | grep -oE "Failed password for .* from [0-9.]+" | awk "{print \$NF}" | sort | uniq -c | sort -rn | head -5
+            journalctl -u ssh --since "-7 days" --no-pager 2>/dev/null | grep -E "Accepted (password|publickey)" | awk "{print \$6, \$7, \$9, \$11}" | sort | uniq -c | sort -rn | head -8
+            ufw status 2>/dev/null | head -3; nft list ruleset 2>/dev/null | grep -c . 
+          ' 2>&1 | tail -40
+          sec SSH155_ACCEPTED_7D; journalctl -u ssh --since "-7 days" --no-pager 2>/dev/null | grep -E "Accepted (password|publickey)" | awk '{print $6, $7, $9, $11}' | sort | uniq -c | sort -rn | head -10
           '''
           _,o,e=s.exec_command(cmd,timeout=300)
           print(o.read().decode('utf-8','replace'))
