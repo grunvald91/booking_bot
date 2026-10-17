@@ -47,21 +47,17 @@ jobs:
                   time.sleep(3)
           cmd=r'''set +e
           sec(){ echo; echo "===== $1 ====="; }
-          sec R10_RELAY_NGINX
+          sec R11_RELAY_TELEMT
           timeout 40 ssh -i /root/.ssh/servgo_89_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/booking-bot-relay89/known_hosts -o ConnectTimeout=8 root@89.125.90.101 '
-            echo "--- status"; systemctl status nginx --no-pager 2>&1 | head -12
-            echo "--- journal"; journalctl -u nginx --no-pager -n 25 -o short-iso 2>&1 | tail -25
-            echo "--- nginx -t"; nginx -t 2>&1 | tail -6
-            echo "--- listeners"; ss -lntp 2>/dev/null | grep -E ":(80|443)\b"
-            echo "--- sites"; ls -la --time-style=+%F_%T /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null
-            echo "--- tg vhost"; grep -RnE "server_name|listen|proxy_pass|ssl_certificate " /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null | head -30
-            echo "--- certs"; for c in /etc/letsencrypt/live/*/fullchain.pem; do echo "$c $(openssl x509 -in $c -noout -enddate 2>/dev/null)"; done
-            echo "--- certbot"; systemctl list-timers --no-pager 2>/dev/null | grep -i certbot; ls -la --time-style=+%F_%T /var/log/letsencrypt/ 2>/dev/null | tail -3
-            echo "--- disk"; df -h / | tail -1; df -ih / | tail -1
-            echo "--- recent pkg changes"; grep -hE " (upgrade|install) " /var/log/dpkg.log 2>/dev/null | tail -8
-            echo "--- other web/proxy units"; systemctl list-units --type=service --no-pager --no-legend 2>/dev/null | grep -Ei "nginx|caddy|xray|v2ray|mtproto|proxy|haproxy" 
-          ' 2>&1 | tail -110
-          sec R10_END
+            echo "--- telemt unit"; systemctl cat telemt 2>/dev/null | grep -E "^(ExecStart|WorkingDirectory|Restart|After|Requires)="
+            echo "--- telemt status"; systemctl status telemt --no-pager 2>&1 | sed -n 1,8p
+            echo "--- telemt journal"; journalctl -u telemt --no-pager -n 30 -o short-iso 2>&1 | grep -viE "secret|key=|token" | tail -30
+            echo "--- telemt listen config"; for f in $(systemctl cat telemt 2>/dev/null | grep -oE "(-c|--config)[ =][^ ]+" | sed -E "s/^(-c|--config)[ =]//") /etc/telemt/*.toml /etc/telemt.toml /opt/telemt/*.toml; do [ -f "$f" ] && { echo "# $f"; grep -nEi "listen|port|sni|mask|tls_domain|5443|4453|upstream|fallback" "$f" | grep -viE "secret|key" | head -25; }; done
+            echo "--- all listeners"; ss -lntp 2>/dev/null | grep -vE "127.0.0.53" | awk "{print \$4, \$6}" | head -40
+            echo "--- nginx last start error"; journalctl --no-pager -o short-iso --since "2026-10-09 20:00" --until "2026-10-09 21:00" 2>/dev/null | grep -iE "nginx|telemt|bind|address already" | tail -20
+            echo "--- nginx error.log"; tail -n 15 /var/log/nginx/error.log 2>/dev/null; zcat -f /var/log/nginx/error.log.1 2>/dev/null | tail -5
+          ' 2>&1 | tail -120
+          sec R11_END
           '''
           _,o,e=s.exec_command(cmd,timeout=120)
           print(o.read().decode('utf-8','replace'))
