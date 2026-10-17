@@ -66,6 +66,8 @@ self.addEventListener('push', (event) => {
 
   const title = payload.title || 'ServGo'
   const options = {
+    requireInteraction: payload.event_kind === 'prepayment_submitted',
+    renotify: payload.event_kind === 'prepayment_submitted',
     body: payload.body || 'У вас есть обновление по записи',
     icon: '/favicon.svg',
     tag: payload.tag || 'servgo',
@@ -75,7 +77,14 @@ self.addEventListener('push', (event) => {
     },
   }
 
-  event.waitUntil(self.registration.showNotification(title, options))
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(title, options),
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+      if (payload.event_kind === 'prepayment_submitted') {
+        clients.forEach(client => client.postMessage({ type: 'servgo-prepayment-update' }))
+      }
+    }),
+  ]))
 })
 
 self.addEventListener('notificationclick', (event) => {

@@ -8,6 +8,8 @@ import {
   Camera,
   Trash2,
   Plus,
+  ExternalLink,
+  Sparkles,
 } from 'lucide-react'
 import { api, type AdminBooking, type DashboardData } from '../../api/client'
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
@@ -140,6 +142,15 @@ export function AdminDashboard() {
         </div>
       </div>
 
+      <a href="https://growth.servgo.ru" target="_blank" rel="noopener noreferrer"
+        className="ds-card" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px', margin: '4px 0 14px', textDecoration: 'none', color: 'var(--s-text)' }}>
+        <Sparkles size={22} style={{ color: 'var(--s-accent)', flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p className="ds-text" style={{ fontWeight: 700, margin: '0 0 4px' }}>AI Growth OS</p>
+          <p className="ds-sub" style={{ margin: 0 }}>Открыть инструменты продвижения бизнеса</p>
+        </div>
+        <ExternalLink size={18} aria-label="Откроется в новой вкладке" style={{ flexShrink: 0, color: 'var(--s-accent)' }} />
+      </a>
       {/* Статистика */}
       <div className="ds-stats-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
         {loading

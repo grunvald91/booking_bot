@@ -4,6 +4,8 @@ Web Push subscription endpoints for ServGo PWA.
 A subscription may be attached either to the authenticated user or, immediately
 after a guest booking, to the booking owner resolved by the booking notify_token.
 """
+
+from datetime_utils import utc_now
 from datetime import datetime
 from typing import Optional
 
@@ -84,7 +86,7 @@ async def subscribe(
         subscription.auth = body.keys.auth
         subscription.is_active = True
         subscription.failure_count = 0
-        subscription.updated_at = datetime.utcnow()
+        subscription.updated_at = utc_now()
     else:
         subscription = PushSubscription(
             user_id=owner.id,
@@ -147,6 +149,6 @@ async def unsubscribe(
     subscription = result.scalar_one_or_none()
     if subscription:
         subscription.is_active = False
-        subscription.updated_at = datetime.utcnow()
+        subscription.updated_at = utc_now()
         await db.commit()
     return {"ok": True}

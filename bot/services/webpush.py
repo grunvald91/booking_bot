@@ -1,4 +1,6 @@
 """Web Push transport for ServGo client and staff reminders."""
+
+from datetime_utils import utc_now
 import json
 import logging
 import os
@@ -58,14 +60,14 @@ async def send_webpush_to_subscriptions(
                 ttl=ttl,
                 timeout=10,
             )
-            subscription.last_success_at = datetime.utcnow()
+            subscription.last_success_at = utc_now()
             subscription.failure_count = 0
-            subscription.updated_at = datetime.utcnow()
+            subscription.updated_at = utc_now()
             sent += 1
         except WebPushException as exc:
             status = _status_from_exception(exc)
             subscription.failure_count = (subscription.failure_count or 0) + 1
-            subscription.updated_at = datetime.utcnow()
+            subscription.updated_at = utc_now()
             if status in (404, 410):
                 subscription.is_active = False
             logger.warning(
@@ -76,7 +78,7 @@ async def send_webpush_to_subscriptions(
             )
         except Exception as exc:
             subscription.failure_count = (subscription.failure_count or 0) + 1
-            subscription.updated_at = datetime.utcnow()
+            subscription.updated_at = utc_now()
             logger.warning("Web Push failed for subscription %s: %s", subscription.id, exc)
 
     await session.flush()
@@ -336,9 +338,10 @@ async def send_staff_event_webpush(
     payload = {
         "title": title,
         "body": body,
-        "url": "/admin/schedule",
+        "url": "/admin/prepayments" if event_kind == "prepayment_submitted" else "/admin/schedule",
         "booking_id": first.id,
         "tag": f"servgo-staff-event-{event_kind}-{first.id}",
+        "event_kind": event_kind,
     }
     sent = await send_webpush_to_subscriptions(subscriptions, payload, session)
     return sent, len(subscriptions)

@@ -1,300 +1,326 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { Bot, Send, Check, X, Loader2 } from 'lucide-react'
-import { api } from '../../api/client'
+import { Fragment, useState, useRef, useEffect, useCallback } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { Bot, Send, Check, X, Loader2, RotateCw } from 'lucide-react'
+import { api, type Business, type SalesPendingAction, type SalesConfirmation, type SalesSlotOffer } from '../../api/client'
 import { ClientShell } from '../../components/ClientShell'
 
 interface ChatMessage {
   id: string
   role: 'user' | 'ai'
   text: string
-  pending_action?: {
-    action_id: string
-    description: string
-    tool_name: string
+  booking_url?: string | null
+  status?: 'sending' | 'failed'
+}
+
+function errorText(error: unknown) {
+  if (error instanceof Error) {
+    try {
+      const detail = JSON.parse(error.message).detail
+      if (typeof detail === 'string') return detail
+    } catch { /* Non-JSON network failure. */ }
   }
-  actionHandled?: boolean
+  return 'Не удалось связаться с сервисом. Попробуйте ещё раз.'
 }
 
-function formatMessage(text: string) {
-  // Bold **text**
-  const parts = text.split(/(\*\*[^*]+\*\*)/g)
-  return parts.map((part, i) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return (
-        <strong key={i} style={{ fontWeight: 600 }}>
-          {part.slice(2, -2)}
-        </strong>
-      )
-    }
-    // Split by newlines
-    const lines = part.split('\n')
-    return lines.map((line, j) => (
-      <span key={`${i}-${j}`}>
-        {j > 0 && <br />}
-        {line}
-      </span>
-    ))
+// Render a deliberately small, safe Markdown subset. HTML stays literal text.
+function RichMessage({ text }: { text: string }) {
+  return <>{text.split('\n').map((line, i) => {
+    const bullet = /^\s*[-*] /.test(line)
+    const content = bullet ? line.replace(/^\s*[-*] /, '') : line
+    return <Fragment key={i}>
+      {i > 0 && '\n'}
+      {bullet && '• '}
+      {content.split(/(\*\*[^*\n]+\*\*|\*[^*\n]+\*)/g).map((part, j) =>
+        part.startsWith('**') && part.endsWith('**')
+          ? <strong key={j}>{part.slice(2, -2)}</strong>
+          : part.startsWith('*') && part.endsWith('*') && part.length > 2
+            ? <em key={j}>{part.slice(1, -1)}</em>
+            : <Fragment key={j}>{part}</Fragment>)}
+    </Fragment>
+  })}</>
+}
+
+function SlotPicker({ offer, busy, onChoose }: {
+  offer: SalesSlotOffer
+  busy: boolean
+  onChoose: (employeeId: number, time: string) => void
+}) {
+  const [selected, setSelected] = useState('')
+  const [expanded, setExpanded] = useState(false)
+  const [expired, setExpired] = useState(() => new Date(`${offer.expires_at}Z`).getTime() <= Date.now())
+  useEffect(() => {
+    const timer = window.setTimeout(() => setExpired(true),
+      Math.max(0, new Date(`${offer.expires_at}Z`).getTime() - Date.now()))
+    return () => window.clearTimeout(timer)
+  }, [offer.expires_at])
+  const slots = expanded ? offer.slots : offer.slots.slice(0, 24)
+  const choice = offer.slots.find(slot => `${slot.employee_id}:${slot.time}` === selected)
+  const dateLabel = new Date(`${offer.date}T00:00:00`).toLocaleDateString('ru-RU', {
+    day: 'numeric', month: 'long', weekday: 'long',
   })
+  return <div className="ds-card" style={{ padding: 16, margin: '12px 0', display: 'grid', gap: 12 }}>
+    <div>
+      <p className="ds-text" style={{ fontWeight: 700, marginBottom: 4 }}>Свободное время · {dateLabel}</p>
+      <p className="ds-sub">Выберите удобное время и подтвердите выбор. Окончательная запись — на следующем шаге.</p>
+    </div>
+    <div role="group" aria-label="Свободное время" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      {slots.map(slot => {
+        const key = `${slot.employee_id}:${slot.time}`
+        return <button type="button" key={key} aria-pressed={selected === key} disabled={busy || expired}
+          className="ds-btn ds-btn--sm"
+          style={{ background: selected === key ? 'var(--s-accent-soft)' : 'var(--s-surface-2)',
+            border: selected === key ? '2px solid var(--s-accent)' : '1px solid var(--s-line)',
+            textAlign: 'center', minWidth: 94, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setSelected(key)}>
+          {slot.time} · {slot.employee_name}
+        </button>
+      })}
+    </div>
+    {!expanded && offer.slots.length > 24 && <button type="button" className="ds-chip"
+      onClick={() => setExpanded(true)}>Показать ещё {offer.slots.length - 24}</button>}
+    {expired && <p className="ds-sub" role="status">Эти варианты устарели. Попросите проверить время ещё раз.</p>}
+    <button type="button" className="ds-btn ds-btn--primary" style={{ justifyContent: 'center' }}
+      disabled={!choice || busy || expired}
+      onClick={() => { if (choice) onChoose(choice.employee_id, choice.time) }}>
+      {busy ? 'Проверяю время…' : 'Выбрать это время'}
+    </button>
+  </div>
 }
 
-const WELCOME_MESSAGE: ChatMessage = {
-  id: 'welcome',
-  role: 'ai',
-  text: 'Привет! Я AI-помощник. Помогу записаться, проверить свободное время или управлять записями. Что вам нужно?',
+function ConfirmationCard({ action, busy, onConfirm, onReject }: {
+  action: SalesPendingAction
+  busy: boolean
+  onConfirm: (details: SalesConfirmation) => void
+  onReject: () => void
+}) {
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [consent, setConsent] = useState(false)
+  const [terms, setTerms] = useState(false)
+  const [expired, setExpired] = useState(() => new Date(`${action.expires_at}Z`).getTime() <= Date.now())
+  useEffect(() => {
+    const timer = window.setTimeout(() => setExpired(true), Math.max(0, new Date(`${action.expires_at}Z`).getTime() - Date.now()))
+    return () => window.clearTimeout(timer)
+  }, [action.expires_at])
+  const validContact = !action.requires_contact || (name.trim().length >= 2 && /^\+?[0-9\s()-]+$/.test(phone) && phone.replace(/\D/g, '').length >= 10 && phone.replace(/\D/g, '').length <= 15)
+  const canConfirm = !busy && !expired && validContact && (!action.requires_legal_consent || (consent && terms))
+  return (
+    <div className="ds-card" style={{ padding: 14, margin: '12px 0' }}>
+      <p className="ds-text" style={{ fontWeight: 600 }}>{action.description}</p>
+      {action.cancellation_policy && <p className="ds-sub" style={{ marginTop: 8 }}>{action.cancellation_policy}</p>}
+      {action.requires_contact && (
+        <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+          <label className="ds-sub">Ваше имя
+            <input className="ds-input" autoComplete="name" maxLength={120} value={name} onChange={e => setName(e.target.value)} />
+          </label>
+          <label className="ds-sub">Телефон для записи
+            <input className="ds-input" type="tel" autoComplete="tel" maxLength={30} value={phone} onChange={e => setPhone(e.target.value)} />
+          </label>
+        </div>
+      )}
+      {action.requires_legal_consent && (
+        <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
+          <label className="ds-sub">
+            <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />{' '}
+            Даю <Link to={`/legal/consent/${action.business_id}`} target="_blank">согласие на обработку данных</Link>
+          </label>
+          <label className="ds-sub">
+            <input type="checkbox" checked={terms} onChange={e => setTerms(e.target.checked)} />{' '}
+            Принимаю <Link to={`/legal/terms/${action.business_id}`} target="_blank">условия записи</Link>
+          </label>
+        </div>
+      )}
+      {expired && <p className="ds-sub">Подтверждение истекло. Попросите проверить время снова.</p>}
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <button className="ds-btn ds-btn--primary ds-btn--sm" disabled={!canConfirm} onClick={() => onConfirm({
+          client_name: action.requires_contact ? name.trim() : undefined,
+          client_phone: action.requires_contact ? phone.trim() : undefined,
+          personal_data_consent: consent, booking_terms_accepted: terms,
+        })}>{busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Подтвердить</button>
+        <button className="ds-btn ds-btn--ghost ds-btn--sm" disabled={busy} onClick={onReject}><X size={14} /> Отмена</button>
+      </div>
+    </div>
+  )
 }
 
-export function ChatPage() {
-  const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE])
+function SalesThread({ business }: { business: Business }) {
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [pending, setPending] = useState<SalesPendingAction | null>(null)
+  const [offer, setOffer] = useState<SalesSlotOffer | null>(null)
+  const [mode, setMode] = useState<'ai' | 'human'>('ai')
   const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [confirmingId, setConfirmingId] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [ready, setReady] = useState(false)
+  const [error, setError] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const operation = useRef(false)
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [])
+  const loadHistory = useCallback(async () => {
+    const history = await api.aiHistory(business.id)
+    const restored: ChatMessage[] = history.messages.length ? history.messages : [{
+      id: 'welcome', role: 'ai', text: `Здравствуйте! Помогу подобрать услугу в «${business.name}» и найти удобное время. Что вас интересует?`,
+    }]
+    if (history.booking_url && restored.length) restored[restored.length - 1].booking_url = history.booking_url
+    setMessages(restored)
+    setPending(history.pending_action || null)
+    setOffer(history.available_slots || null)
+    setMode(history.mode)
+  }, [business.id, business.name])
 
   useEffect(() => {
-    scrollToBottom()
-  }, [messages, loading, scrollToBottom])
+    let active = true
+    api.aiHistory(business.id).then(history => {
+      if (!active) return
+      const restored: ChatMessage[] = history.messages.length ? history.messages : [{
+        id: 'welcome', role: 'ai', text: `Здравствуйте! Помогу подобрать услугу в «${business.name}» и найти удобное время. Что вас интересует?`,
+      }]
+      if (history.booking_url && restored.length) restored[restored.length - 1].booking_url = history.booking_url
+      setMessages(restored)
+      setPending(history.pending_action || null)
+      setOffer(history.available_slots || null)
+      setMode(history.mode)
+      setReady(true)
+    }).catch(err => { if (active) setError(errorText(err)) })
+    return () => { active = false }
+  }, [business.id, business.name])
 
-  const sendMessage = async () => {
-    const text = input.trim()
-    if (!text || loading) return
+  useEffect(() => {
+    if (mode !== 'human') return
+    const timer = window.setInterval(() => {
+      if (!operation.current) loadHistory().catch(err => setError(errorText(err)))
+    }, 8000)
+    return () => window.clearInterval(timer)
+  }, [mode, loadHistory])
 
-    const userMsg: ChatMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      text,
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, pending, busy])
+
+  const send = async (text = input.trim(), retryId?: string) => {
+    if (!text || operation.current || !ready) return
+    operation.current = true
+    const id = retryId || crypto.randomUUID()
+    setBusy(true)
+    setError('')
+    if (retryId) {
+      setMessages(previous => previous.map(item => item.id === id ? { ...item, status: 'sending' } : item))
+    } else {
+      setInput('')
+      setMessages(previous => [...previous, { id, role: 'user', text, status: 'sending' } as ChatMessage])
     }
-    setMessages((prev) => [...prev, userMsg])
-    setInput('')
-    setLoading(true)
-
     try {
-      const res = await api.aiChat(text)
-      const aiMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'ai',
-        text: res.reply,
-        pending_action: res.pending_action,
-      }
-      setMessages((prev) => [...prev, aiMsg])
+      const result = await api.aiChat(text, business.id)
+      setMessages(previous => [...previous.map(item => item.id === id ? { ...item, status: undefined } : item),
+        { id: crypto.randomUUID(), role: 'ai', text: result.reply, booking_url: result.booking_url } as ChatMessage])
+      setPending(result.pending_action || null)
+      setOffer(result.available_slots || null)
+      setMode(result.mode)
     } catch (err) {
-      const errMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'ai',
-        text: 'Произошла ошибка. Попробуйте ещё раз.',
-      }
-      setMessages((prev) => [...prev, errMsg])
-    } finally {
-      setLoading(false)
-    }
+      setMessages(previous => previous.map(item => item.id === id ? { ...item, status: 'failed' } : item))
+      setError(errorText(err))
+    } finally { operation.current = false; setBusy(false) }
   }
 
-  const handleConfirm = async (actionId: string, msgId: string) => {
-    setConfirmingId(actionId)
+  const selectSlot = async (employeeId: number, time: string) => {
+    if (operation.current || !ready) return
+    operation.current = true
+    setBusy(true)
+    setError('')
     try {
-      const res = await api.aiConfirm(actionId)
-      // Mark action as handled
-      setMessages((prev) =>
-        prev.map((m) => (m.id === msgId ? { ...m, actionHandled: true } : m))
-      )
-      // Add result message
-      const resultMsg: ChatMessage = {
-        id: Date.now().toString(),
-        role: 'ai',
-        text: res.reply,
-      }
-      setMessages((prev) => [...prev, resultMsg])
-    } catch {
-      const errMsg: ChatMessage = {
-        id: Date.now().toString(),
-        role: 'ai',
-        text: 'Не удалось выполнить действие. Попробуйте ещё раз.',
-      }
-      setMessages((prev) => [...prev, errMsg])
-    } finally {
-      setConfirmingId(null)
-    }
+      await api.aiSelectSlot(business.id, employeeId, time)
+      await loadHistory()
+    } catch (err) {
+      setError(errorText(err))
+    } finally { operation.current = false; setBusy(false) }
   }
 
-  const handleReject = async (actionId: string, msgId: string) => {
-    setConfirmingId(actionId)
+  const handleAction = async (confirm: boolean, details: SalesConfirmation = {}) => {
+    if (!pending || operation.current) return
+    operation.current = true
+    setBusy(true)
+    setError('')
     try {
-      await api.aiReject(actionId)
-      setMessages((prev) =>
-        prev.map((m) => (m.id === msgId ? { ...m, actionHandled: true } : m))
-      )
-      const cancelMsg: ChatMessage = {
-        id: Date.now().toString(),
-        role: 'ai',
-        text: 'Действие отменено.',
-      }
-      setMessages((prev) => [...prev, cancelMsg])
-    } catch {
-      // ignore
-    } finally {
-      setConfirmingId(null)
-    }
+      if (confirm) await api.aiConfirm(pending.action_id, details)
+      else await api.aiReject(pending.action_id)
+      await loadHistory()
+    } catch (err) { setError(errorText(err)) }
+    finally { operation.current = false; setBusy(false) }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      sendMessage()
-    }
+  const requestOperator = async () => {
+    if (operation.current || !ready) return
+    operation.current = true; setBusy(true); setError('')
+    try { await api.aiHandoff(business.id); await loadHistory() }
+    catch (err) { setError(errorText(err)) }
+    finally { operation.current = false; setBusy(false) }
   }
 
   return (
-    <ClientShell title="AI-помощник">
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        {/* Messages area — scrolls independently within the shell's content area */}
-        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12, padding: '14px 0' }}>
-          {messages.map((msg) => (
-            <div key={msg.id}>
-              {msg.role === 'ai' ? (
-                <div style={{ display: 'flex', gap: 8, maxWidth: '85%' }}>
-                  <div
-                    style={{
-                      width: 28, height: 28, borderRadius: '50%', flexShrink: 0, marginTop: 4,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      background: 'var(--s-accent-soft)',
-                    }}
-                  >
-                    <Bot size={16} style={{ color: 'var(--s-accent)' }} />
-                  </div>
-                  <div>
-                    <div
-                      className="ds-text"
-                      style={{
-                        background: 'var(--s-surface-2)', color: 'var(--s-text)',
-                        borderRadius: 16, borderTopLeftRadius: 4,
-                        padding: '10px 14px',
-                      }}
-                    >
-                      {formatMessage(msg.text)}
-                    </div>
-                    {/* Pending action card */}
-                    {msg.pending_action && !msg.actionHandled && (
-                      <div
-                        style={{
-                          marginTop: 8, borderRadius: 16,
-                          padding: '12px 14px',
-                          background: 'color-mix(in srgb, var(--s-warning) 12%, var(--s-surface))',
-                          border: '1px solid color-mix(in srgb, var(--s-warning) 35%, transparent)',
-                        }}
-                      >
-                        <p className="ds-text" style={{ fontWeight: 600, marginBottom: 10, color: 'var(--s-text)' }}>
-                          {msg.pending_action.description}
-                        </p>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <button
-                            onClick={() => handleConfirm(msg.pending_action!.action_id, msg.id)}
-                            disabled={confirmingId === msg.pending_action.action_id}
-                            className="ds-btn ds-btn--primary ds-btn--sm"
-                          >
-                            {confirmingId === msg.pending_action.action_id ? (
-                              <Loader2 size={14} className="animate-spin" />
-                            ) : (
-                              <Check size={14} />
-                            )}
-                            Подтвердить
-                          </button>
-                          <button
-                            onClick={() => handleReject(msg.pending_action!.action_id, msg.id)}
-                            disabled={confirmingId === msg.pending_action.action_id}
-                            className="ds-btn ds-btn--ghost ds-btn--sm"
-                          >
-                            <X size={14} />
-                            Отмена
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    {msg.pending_action && msg.actionHandled && (
-                      <div
-                        style={{
-                          marginTop: 8, borderRadius: 16, padding: '10px 14px',
-                          background: 'var(--s-surface-2)', border: '1px solid var(--s-line)',
-                        }}
-                      >
-                        <p className="ds-caption" style={{ textDecoration: 'line-through' }}>
-                          {msg.pending_action.description}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <div
-                    className="ds-text"
-                    style={{
-                      background: 'var(--s-accent)', color: 'var(--s-accent-ink)',
-                      borderRadius: 16, borderTopRightRadius: 4,
-                      padding: '10px 14px', maxWidth: '85%',
-                    }}
-                  >
-                    {formatMessage(msg.text)}
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-
-          {/* Loading indicator */}
-          {loading && (
-            <div style={{ display: 'flex', gap: 8, maxWidth: '85%' }}>
-              <div
-                style={{
-                  width: 28, height: 28, borderRadius: '50%', flexShrink: 0, marginTop: 4,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'var(--s-accent-soft)',
-                }}
-              >
-                <Bot size={16} style={{ color: 'var(--s-accent)' }} />
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      {mode === 'human' && <p className="ds-sub" role="status">Диалог передан оператору. Ответ появится здесь.</p>}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 0' }} aria-live="polite">
+        {messages.map(message => <div key={message.id} style={{ display: 'flex', gap: 8, marginBottom: 12, justifyContent: message.role === 'user' ? 'flex-end' : 'flex-start' }}>
+          {message.role === 'ai' && <Bot size={20} style={{ flexShrink: 0, color: 'var(--s-accent)', marginTop: 10 }} />}
+          <div className="ds-text" style={{ maxWidth: '85%', whiteSpace: 'pre-wrap', padding: '12px 14px', borderRadius: 16, background: message.role === 'user' ? 'var(--s-accent-soft)' : 'var(--s-surface-2)' }}>
+            {message.role === 'ai' ? <RichMessage text={message.text} /> : message.text}
+            {message.status === 'sending' && <p className="ds-sub" role="status">Отправляется…</p>}
+            {message.status === 'failed' && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+                gap: 7, marginTop: 6 }}>
+                <span className="ds-caption" style={{ color: 'var(--s-danger)' }}>Не отправлено</span>
+                <button type="button" aria-label="Отправить сообщение повторно"
+                  title="Повторить отправку" disabled={busy}
+                  onClick={() => void send(message.text, message.id)}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 32, height: 32, flexShrink: 0, padding: 0,
+                    borderRadius: '50%', border: '1px solid var(--s-line)',
+                    background: 'var(--s-surface-2)', color: 'var(--s-accent)',
+                    cursor: busy ? 'not-allowed' : 'pointer',
+                    opacity: busy ? 0.5 : 1 }}>
+                  <RotateCw size={16} strokeWidth={2} aria-hidden="true" />
+                </button>
               </div>
-              <div style={{ background: 'var(--s-surface-2)', borderRadius: 16, borderTopLeftRadius: 4, padding: '12px 14px' }}>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <div className="animate-bounce" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--s-muted-2)', animationDelay: '0ms' }} />
-                  <div className="animate-bounce" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--s-muted-2)', animationDelay: '150ms' }} />
-                  <div className="animate-bounce" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--s-muted-2)', animationDelay: '300ms' }} />
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Input area — pinned to the bottom of the visible area */}
-        <div style={{ flexShrink: 0, paddingTop: 10 }}>
-          <div className="ds-search" style={{ borderRadius: 999, paddingRight: 6 }}>
-            <input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Напишите сообщение..."
-              disabled={loading}
-            />
-            <button
-              onClick={sendMessage}
-              disabled={!input.trim() || loading}
-              className="ds-icon-btn"
-              style={{
-                width: 34, height: 34, borderRadius: '50%',
-                background: 'var(--s-accent)', color: 'var(--s-accent-ink)',
-                opacity: !input.trim() || loading ? 0.4 : 1,
-              }}
-            >
-              <Send size={16} />
-            </button>
+            )}
+            {message.booking_url && <div style={{ marginTop: 8 }}><Link className="ds-accent" to={message.booking_url}>Открыть запись</Link></div>}
           </div>
-        </div>
+        </div>)}
+        {offer && mode === 'ai' && !pending && <SlotPicker key={offer.expires_at + offer.service_id} offer={offer}
+          busy={busy} onChoose={(employeeId, time) => void selectSlot(employeeId, time)} />}
+        {pending && <ConfirmationCard key={pending.action_id} action={pending} busy={busy} onConfirm={details => handleAction(true, details)} onReject={() => handleAction(false)} />}
+        {busy && <p className="ds-sub" role="status">Обрабатываю…</p>}
+        <div ref={messagesEndRef} />
+      </div>
+      {error && <p className="ds-sub" role="alert" style={{ color: 'var(--s-danger)', marginBottom: 8 }}>{error}</p>}
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+        <Link className="ds-accent" to={`/book/${business.id}`}>Обычная запись</Link>
+        {mode === 'ai' && <button className="ds-chip" disabled={busy || !ready} onClick={requestOperator}>Позвать оператора</button>}
+      </div>
+      <div className="ds-search" style={{ borderRadius: 999, paddingRight: 6 }}>
+        <input aria-label="Сообщение" value={input} maxLength={4000} onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
+          placeholder={mode === 'human' ? 'Сообщение оператору…' : 'Напишите сообщение…'} disabled={busy || !ready} />
+        <button className="ds-icon-btn" aria-label="Отправить" disabled={!input.trim() || busy || !ready} onClick={() => send()}><Send size={18} /></button>
+      </div>
+    </div>
+  )
+}
+
+export function ChatPage() {
+  const [params, setParams] = useSearchParams()
+  const [businesses, setBusinesses] = useState<Business[]>([])
+  const [error, setError] = useState('')
+  const selectedId = Number(params.get('business_id'))
+  const business = businesses.find(b => b.id === selectedId)
+  useEffect(() => { api.getBusinesses().then(setBusinesses).catch(err => setError(errorText(err))) }, [])
+  return (
+    <ClientShell title="Подобрать услугу">
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 8 }}>
+        <label className="ds-sub">Компания
+          <select className="ds-input" value={business?.id || ''} onChange={e => setParams({ business_id: e.target.value })}>
+            <option value="">Выберите компанию</option>
+            {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </label>
+        {error && <p role="alert" className="ds-sub">{error}</p>}
+        {business ? <SalesThread key={business.id} business={business} /> : <p className="ds-sub">Выберите компанию — помогу подобрать услугу, сравнить варианты и найти удобное время.</p>}
       </div>
     </ClientShell>
   )
