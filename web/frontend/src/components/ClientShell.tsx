@@ -71,7 +71,7 @@ export function ClientShell({
 
   return createPortal(
     <div className="ds-screen" data-theme={theme}>
-      <header className="ds-shell-header" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', flexShrink: 0 }}>
+      <header className="ds-shell-header" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 13px 5px 16px', flexShrink: 0 }}>
         {backTo ? (
           <button className="ds-icon-btn" onClick={() => navigate(backTo)} aria-label="Назад">
             <ArrowLeft size={18} />
@@ -85,11 +85,11 @@ export function ClientShell({
         </div>
         {headerExtra}
         <button className="ds-icon-btn bordered" onClick={toggleTheme} aria-label="Тема">
-          {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
         </button>
       </header>
 
-      <div className="ds-shell-content" style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '0 14px 16px' }}>
+      <div className="ds-shell-content" style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '0 16px 16px' }}>
         {children}
       </div>
 

@@ -110,6 +110,7 @@ export interface BusinessDetail extends Business {
   legal_documents_enabled?: boolean;
   booking_labels?: Record<string, string>;
   booking_flow_order?: 'service_first' | 'resource_first';
+  allow_multiple_services?: boolean;
 }
 
 export interface Booking {
@@ -325,6 +326,7 @@ export interface BusinessAdminDetail {
   legal_documents_enabled?: boolean;
   booking_labels?: Record<string, string>;
   booking_flow_order?: 'service_first' | 'resource_first';
+  allow_multiple_services?: boolean;
   owner_reminders_enabled: boolean;
   owner_reminder_minutes: number[];
   master_reminders_enabled: boolean;
@@ -356,6 +358,7 @@ export interface BusinessUpdateData {
   legal_documents_enabled?: boolean;
   booking_labels?: Record<string, string>;
   booking_flow_order?: 'service_first' | 'resource_first';
+  allow_multiple_services?: boolean;
   owner_reminders_enabled?: boolean;
   owner_reminder_minutes?: number[];
   master_reminders_enabled?: boolean;
