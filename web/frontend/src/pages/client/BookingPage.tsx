@@ -1328,6 +1328,22 @@ function BookingPageInner() {
             )}
           </div>
 
+          {prepaymentNeeded && (
+            <div className="bf-note">
+              <strong>Предоплата {prepaymentPercent < 100 ? `${prepaymentPercent}% · ` : ''}{formatPrice(prepaymentAmount)}</strong>
+              После оформления переведите предоплату по реквизитам бизнеса и прикрепите чек — владелец проверит поступление и подтвердит запись.
+            </div>
+          )}
+          {(business?.cancellation_policy_text || business?.cancellation_policy_photo) && (
+            <div className="bf-note is-warn">
+              <strong>Условия отмены</strong>
+              {business.cancellation_policy_text ? (
+                <span style={{ whiteSpace: 'pre-line' }}>{business.cancellation_policy_text}</span>
+              ) : (
+                <img src={photoSrc(business.cancellation_policy_photo!)} alt="Условия отмены" />
+              )}
+            </div>
+          )}
           <div className="bf-fields">
             <h3>Контактные данные</h3>
             <div className="bf-pair">
@@ -1395,22 +1411,6 @@ function BookingPageInner() {
             )}
           </div>
 
-          {prepaymentNeeded && (
-            <div className="bf-note">
-              <strong>Предоплата {prepaymentPercent < 100 ? `${prepaymentPercent}% · ` : ''}{formatPrice(prepaymentAmount)}</strong>
-              После оформления переведите предоплату по реквизитам бизнеса и прикрепите чек — владелец проверит поступление и подтвердит запись.
-            </div>
-          )}
-          {(business?.cancellation_policy_text || business?.cancellation_policy_photo) && (
-            <div className="bf-note is-warn">
-              <strong>Условия отмены</strong>
-              {business.cancellation_policy_text ? (
-                <span style={{ whiteSpace: 'pre-line' }}>{business.cancellation_policy_text}</span>
-              ) : (
-                <img src={photoSrc(business.cancellation_policy_photo!)} alt="Условия отмены" />
-              )}
-            </div>
-          )}
           {business?.legal_documents_enabled && (
             <div style={{ marginTop: 8 }}>
               <label className="bf-legal">
@@ -1553,8 +1553,8 @@ function BookingPageInner() {
               )}
               {totalPrice > 0 && <div className="bf-total"><span>Итого</span><strong>{formatPrice(totalPrice)}</strong></div>}
             </div>
-            <NotificationSetup notifyToken={createdNotifyToken} />
             <div className="bf-result-actions">
+              <NotificationSetup notifyToken={createdNotifyToken} />
               {selectedDate && selectedTime && business && (
                 <button
                   type="button"

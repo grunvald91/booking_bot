@@ -157,7 +157,7 @@ html.tg-webapp .bf-root { top: var(--tg-safe-top, 0px); }
 .bf-placeholder { grid-column: 1 / -1; font-size: 11px; color: #97a4b1; text-align: center; padding: 10px 0 3px; }
 
 /* ── Проверка ── */
-.bf-review { flex: 0 0 auto; margin-top: auto; }
+.bf-review { flex: 0 0 auto; margin-top: 10px; }
 .bf-review-row { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; padding: 9px 0; }
 .bf-review-label { font-size: 10px; color: #8999a9; margin-bottom: 2px; }
 .bf-review-value { font-size: 13px; font-weight: 450; line-height: 1.35; letter-spacing: -0.025em; }
@@ -166,7 +166,7 @@ html.tg-webapp .bf-root { top: var(--tg-safe-top, 0px); }
 .bf-breakdown > div { display: flex; justify-content: space-between; gap: 10px; }
 .bf-total { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 12px; }
 .bf-total strong { font-size: 19px; font-weight: 550; letter-spacing: -0.04em; }
-.bf-fields { margin-top: 12px; }
+.bf-fields { margin-top: auto; padding-top: 12px; }
 .bf-fields h3 { font-size: 13px; font-weight: 580; margin: 0 0 6px; color: #4a617c; }
 .bf-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .bf-field-label { display: block; font-size: 10px; color: #879bb1; margin-top: 4px; }
@@ -232,7 +232,7 @@ textarea.bf-input { height: auto; min-height: 40px; resize: vertical; }
 .bf-flow-status.is-ok { color: #2f7a62; }
 .bf-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #d8a847; box-shadow: 0 0 0 4px #fcf4e1; }
 .bf-flow-status.is-ok .bf-status-dot { background: #3aa483; box-shadow: 0 0 0 4px #e3f5ee; }
-.bf-result-actions { display: grid; gap: 6px; margin-top: 10px; }
+.bf-result-actions { display: grid; gap: 6px; margin-top: auto; padding-top: 10px; }
 .bf-link-btn { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; border: 0; border-radius: 11px; background: #f3f8ff; color: #2f63b4; font-size: 12.5px; font-weight: 500; text-decoration: none; }
 .bf-link-btn svg { width: 16px; height: 16px; }
 .bf-save-url { font-size: 10.5px; color: #6f8aa8; overflow-wrap: anywhere; margin-top: 4px; }
@@ -249,7 +249,7 @@ textarea.bf-input { height: auto; min-height: 40px; resize: vertical; }
 @keyframes bfSpin { to { transform: rotate(360deg); } }
 
 /* ── Тост и модалки ── */
-.bf-toast { position: fixed; z-index: 120; left: 50%; bottom: 84px; transform: translateX(-50%); width: min(400px, calc(100% - 35px)); padding: 12px 16px; border-radius: 12px; background: #20354e; color: #fff; font-size: 12.5px; text-align: center; box-shadow: 0 18px 40px #071c3030; animation: bfAppear 0.2s ease-out; }
+.bf-toast { position: fixed; z-index: 120; left: 50%; top: calc(54px + var(--tg-safe-top, 0px)); transform: translateX(-50%); width: min(400px, calc(100% - 35px)); padding: 12px 16px; border-radius: 12px; background: #20354e; color: #fff; font-size: 12.5px; text-align: center; box-shadow: 0 18px 40px #071c3030; animation: bfAppear 0.2s ease-out; }
 .bf-sheet-ov { position: fixed; inset: 0; z-index: 130; display: flex; align-items: flex-end; justify-content: center; background: rgba(14, 32, 52, 0.38); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
 .bf-sheet { width: 100%; max-width: 460px; max-height: 82dvh; overflow-y: auto; background: #fff; color: var(--bf-ink); border-radius: 24px 24px 0 0; padding: 12px 18px calc(18px + env(safe-area-inset-bottom)); box-shadow: 0 -12px 42px rgba(13, 41, 75, 0.09); }
 .bf-sheet-grip { width: 40px; height: 4px; border-radius: 10px; background: #aab8c7; opacity: 0.45; margin: 0 auto 14px; }
@@ -281,7 +281,7 @@ textarea.bf-input { height: auto; min-height: 40px; resize: vertical; }
 @media (min-width: 700px) {
   .bf-root { padding: 24px 0; }
   .bf-device { height: min(825px, calc(100dvh - 48px)); border-radius: 21px; box-shadow: 0 18px 70px #18385816; }
-  .bf-toast { bottom: 40px; }
+  .bf-toast { top: 40px; }
 }
 @media (max-width: 360px) {
   .bf-topbar, .bf-inside-nav { padding-left: 16px; padding-right: 16px; }
