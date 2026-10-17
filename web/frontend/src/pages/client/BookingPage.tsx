@@ -36,6 +36,8 @@ import { downloadBookingIcs } from '../../utils/calendar'
 import { NotificationSetup } from '../../components/NotificationSetup'
 import { Logo } from '../../components/Logo'
 import { ApiError } from '../../api/client'
+import { HeroArt } from './AirFrame'
+import { photoSrc } from './airPhotos'
 import './booking-flow.css'
 
 // ── Helpers ──
@@ -80,11 +82,6 @@ function parsePhotos(raw?: string | null): string[] {
     if (typeof raw === 'string' && raw.length > 0) return [raw]
   }
   return []
-}
-
-function photoSrc(photo: string): string {
-  if (/^https?:\/\//i.test(photo) || photo.startsWith('/')) return photo
-  return `/api/telegram-photo/${encodeURIComponent(photo)}`
 }
 
 function resourcePhotos(resource: EmployeeWithPricing): string[] {
@@ -232,33 +229,6 @@ function InfoSheet({ data, onClose }: { data: InfoModalData; onClose: () => void
         )}
       </div>
     </div>
-  )
-}
-
-// ── Иллюстрация обложки, если у бизнеса нет фото ──
-
-function HeroArt() {
-  return (
-    <svg viewBox="0 0 900 485" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      <defs>
-        <linearGradient id="bfSky" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#eef5fd" />
-          <stop offset="0.55" stopColor="#dce9f7" />
-          <stop offset="1" stopColor="#c3d8ef" />
-        </linearGradient>
-        <radialGradient id="bfGlow" cx="0.72" cy="0.3" r="0.6">
-          <stop offset="0" stopColor="#ffffff" stopOpacity="0.95" />
-          <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
-        </radialGradient>
-      </defs>
-      <rect width="900" height="485" fill="url(#bfSky)" />
-      <rect width="900" height="485" fill="url(#bfGlow)" />
-      <circle cx="640" cy="120" r="150" fill="none" stroke="#f8fdff" strokeOpacity="0.7" strokeWidth="18" />
-      <path d="M330 485V210a120 120 0 0 1 240 0v275" fill="#ffffff" fillOpacity="0.45" stroke="#fafcff" strokeOpacity="0.8" strokeWidth="22" />
-      <rect x="360" y="370" width="180" height="46" rx="23" fill="#5f88b0" />
-      <rect x="378" y="404" width="144" height="16" rx="8" fill="#4a7399" />
-      <ellipse cx="450" cy="470" rx="320" ry="40" fill="#ffffff" fillOpacity="0.5" />
-    </svg>
   )
 }
 

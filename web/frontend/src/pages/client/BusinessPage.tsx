@@ -1,41 +1,18 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import {
-  MapPin,
-  Phone,
-  Clock,
-  Navigation,
-  DoorOpen,
-  Users as UsersIcon,
-  X,
-} from 'lucide-react'
+import { MapPin, Phone, Clock, Navigation, DoorOpen, X, ChevronRight, ArrowRight, Sparkles } from 'lucide-react'
 import { api, type BusinessDetail, type EmployeeWithPricing } from '../../api/client'
-import { ClientShell } from '../../components/ClientShell'
+import { AirFrame, HeroArt } from './AirFrame'
+import { parsePhotoList, photoSrc } from './airPhotos'
 
-function parsePhotos(raw?: string): string[] {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) return parsed.filter((v): v is string => typeof v === 'string')
-  } catch {
-    // Treat as single file_id string
-    if (typeof raw === 'string' && raw.length > 0) return [raw]
-  }
-  return []
-}
-
-function linkifyText(text: string): React.ReactNode {
+function linkifyText(text: string): ReactNode {
   const urlPattern = /(https?:\/\/[^\s]+|(?:vk\.com|t\.me)\/[^\s]+)/gi
   const parts = text.split(urlPattern)
   if (parts.length === 1) return text
   return parts.map((part, i) => {
     if (/^(https?:\/\/|vk\.com\/|t\.me\/)/i.test(part)) {
       const href = part.startsWith('http') ? part : `https://${part}`
-      return (
-        <a key={i} href={href} target="_blank" rel="noopener noreferrer" className="ds-accent" style={{ textDecoration: 'underline' }}>
-          {part}
-        </a>
-      )
+      return <a key={i} href={href} target="_blank" rel="noopener noreferrer">{part}</a>
     }
     return part
   })
@@ -44,7 +21,55 @@ function linkifyText(text: string): React.ReactNode {
 function formatWorkingHours(start?: string, end?: string) {
   if (!start || !end) return null
   const fmt = (t: string) => t.substring(0, 5)
-  return `${fmt(start)} — ${fmt(end)}`
+  return `${fmt(start)}–${fmt(end)}`
+}
+
+function resourcePhotos(emp: EmployeeWithPricing): string[] {
+  const extra = (emp as { photo_url?: string }).photo_url
+  return Array.from(new Set([emp.primary_photo, ...parsePhotoList(emp.photos), extra].filter((p): p is string => !!p && p.trim().length > 0)))
+}
+
+function formatPrice(n: number) {
+  return `${n.toLocaleString('ru-RU')} ₽`
+}
+
+function ResourceSheet({ emp, isVenue, businessId, onClose }: { emp: EmployeeWithPricing; isVenue: boolean; businessId: number; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  const photos = resourcePhotos(emp)
+  const details = [
+    emp.capacity != null ? `До ${emp.capacity} чел.` : null,
+    emp.area_sqm != null ? `${emp.area_sqm} м²` : null,
+  ].filter(Boolean)
+  return (
+    <div className="bf-sheet-ov" role="presentation" onClick={onClose}>
+      <div className="bf-sheet" role="dialog" aria-modal="true" aria-label={emp.name} onClick={(e) => e.stopPropagation()}>
+        <div className="bf-sheet-grip" />
+        <div className="bf-sheet-head">
+          <h3>{emp.name}</h3>
+          <button type="button" className="bf-sheet-close" onClick={onClose} aria-label="Закрыть"><X size={17} /></button>
+        </div>
+        {photos.length > 0 && (
+          <div className="bf-gallery" aria-label={`Фотографии: ${emp.name}`}>
+            {photos.map((photo, i) => (
+              <a key={`${photo}-${i}`} href={photoSrc(photo)} target="_blank" rel="noopener noreferrer" aria-label={`Открыть фото ${i + 1} из ${photos.length}`}>
+                <img src={photoSrc(photo)} alt={`${emp.name} — фото ${i + 1}`} loading={i === 0 ? 'eager' : 'lazy'} />
+              </a>
+            ))}
+          </div>
+        )}
+        {emp.specialization && <div className="bf-sheet-sub">{emp.specialization}</div>}
+        {emp.description?.trim() && <p>{linkifyText(emp.description)}</p>}
+        {details.length > 0 && <div className="details">{details.map((d) => <div key={d}>{d}</div>)}</div>}
+        <Link to={`/book/${businessId}?employee=${emp.id}`} className="bf-primary bf-sheet-cta">
+          {isVenue ? 'Забронировать' : 'Записаться'} <ArrowRight />
+        </Link>
+      </div>
+    </div>
+  )
 }
 
 export function BusinessPage() {
@@ -53,6 +78,7 @@ export function BusinessPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [selectedEmp, setSelectedEmp] = useState<EmployeeWithPricing | null>(null)
+  const [aboutOpen, setAboutOpen] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -63,287 +89,166 @@ export function BusinessPage() {
       .finally(() => setLoading(false))
   }, [id])
 
-  useEffect(() => {
-    if (!selectedEmp) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSelectedEmp(null)
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [selectedEmp])
-
   if (loading) {
     return (
-      <ClientShell backTo="/" title="Загрузка…">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
-          <div className="skeleton" style={{ height: 20, width: '60%', borderRadius: 8 }} />
-          <div className="skeleton" style={{ height: 14, width: '40%', borderRadius: 8 }} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="skeleton" style={{ height: 72, borderRadius: 14 }} />
-            ))}
+      <AirFrame label="Загрузка" backTo="/">
+        <section className="bf-screen" aria-busy="true">
+          <div className="bf-page-hero bf-skel" />
+          <div className="bf-inner bf-page">
+            <span className="bf-skel" style={{ width: '58%', height: 20, marginTop: 14 }} />
+            <span className="bf-skel" style={{ width: '40%', height: 12, marginTop: 8 }} />
+            {[1, 2, 3].map((i) => <span key={i} className="bf-skel" style={{ height: 48, marginTop: 12 }} />)}
           </div>
-        </div>
-      </ClientShell>
+        </section>
+      </AirFrame>
     )
   }
 
   if (error || !business) {
     return (
-      <ClientShell backTo="/" title="Бизнес не найден">
-        <div style={{ textAlign: 'center', padding: '48px 0' }}>
-          <div style={{
-            width: 64, height: 64, borderRadius: 20, background: 'var(--s-surface)',
-            border: '1px solid var(--s-line)', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', margin: '0 auto 16px',
-          }}>
-            <MapPin size={28} style={{ color: 'var(--s-muted)' }} />
+      <AirFrame label="Место не найдено" backTo="/">
+        <section className="bf-screen">
+          <div className="bf-fallback">
+            <span className="bf-stage-symbol"><MapPin /></span>
+            <h2 className="bf-h2">Место не найдено</h2>
+            <p className="bf-intro">Возможно, ссылка устарела или запись временно закрыта.</p>
+            <Link to="/" className="bf-primary" style={{ flex: 'none', width: '100%' }}>На главную</Link>
           </div>
-          <p className="ds-sub" style={{ fontSize: 15 }}>Бизнес не найден</p>
-          <Link to="/" className="ds-accent" style={{ marginTop: 12, display: 'inline-block', fontSize: 13, fontWeight: 650 }}>
-            На главную
-          </Link>
-        </div>
-      </ClientShell>
+        </section>
+      </AirFrame>
     )
   }
 
-  const workingHours =
-    business.working_hours ||
-    formatWorkingHours(business.working_hours_start, business.working_hours_end)
+  const isVenue = business.business_type === 'venue_rental'
+  const photos = parsePhotoList(business.photos)
+  const cover = photos[0] || business.photo_url
+  const workingHours = business.working_hours || formatWorkingHours(business.working_hours_start, business.working_hours_end)
+  const services = (business.services || []).filter((s) => !s.is_additional)
+  const employees = business.employees || []
+  const plainName = business.name.replace(/[«»"']/g, '').trim()
+  const description = business.description?.trim() || ''
+  const longDescription = description.length > 180
 
   return (
-    <ClientShell backTo="/" title={business.name}>
-      {/* Info block: description, address, phone, hours, directions */}
-      <div style={{ marginTop: 12, marginBottom: 20 }}>
-        {business.description && (
-          <p className="ds-sub" style={{ whiteSpace: 'pre-line', lineHeight: 1.5 }}>
-            {linkifyText(business.description)}
-          </p>
-        )}
-
-        {/* Info pills */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-          {business.address && (
-            <a
-              href={`https://yandex.ru/maps/?text=${encodeURIComponent(business.address)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ds-chip"
-              style={{ color: 'var(--s-accent)' }}
-            >
-              <MapPin size={13} />
-              {business.address}
-            </a>
-          )}
-          {business.phone && (
-            <a href={`tel:${business.phone}`} className="ds-chip" style={{ color: 'var(--s-accent)' }}>
-              <Phone size={13} />
-              {business.phone}
-            </a>
-          )}
-          {workingHours && (
-            <span className="ds-chip">
-              <Clock size={13} />
-              {workingHours}
-            </span>
-          )}
-        </div>
-
-        {/* Directions */}
-        {business.directions && (
-          <div className="ds-card" style={{ padding: 14, marginTop: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 7 }}>
-              <Navigation size={15} className="ds-accent" />
-              <h3 className="ds-h3">Как добраться</h3>
-            </div>
-            <p className="ds-sub" style={{ whiteSpace: 'pre-line', lineHeight: 1.5 }}>
-              {linkifyText(business.directions)}
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* Employees / Rooms */}
-      {business.employees && business.employees.length > 0 && (
-        <section style={{ marginBottom: 24 }}>
-          <h2 className="ds-h2" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            {business.business_type === 'venue_rental' ? (
-              <DoorOpen size={18} className="ds-accent" />
-            ) : (
-              <UsersIcon size={18} className="ds-accent" />
-            )}
-            {business.business_type === 'venue_rental' ? 'Залы' : 'Специалисты'}
-          </h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
-            {business.employees.map((emp) => {
-              const photoIds = parsePhotos(emp.photos)
-              const cover = photoIds[0]
-              return (
-                <button
-                  key={emp.id}
-                  type="button"
-                  onClick={() => setSelectedEmp(emp)}
-                  className="ds-card"
-                  style={{
-                    padding: 12, textAlign: 'center', cursor: 'pointer',
-                    border: '1px solid var(--s-line)', font: 'inherit', color: 'inherit',
-                  }}
-                >
-                  <div style={{
-                    width: 60, height: 60, borderRadius: '50%', background: 'var(--s-surface-2)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    margin: '0 auto 8px', overflow: 'hidden',
-                  }}>
-                    {cover ? (
-                      <img
-                        src={`/api/telegram-photo/${encodeURIComponent(cover)}`}
-                        alt={emp.name}
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        loading="lazy"
-                      />
-                    ) : business.business_type === 'venue_rental' ? (
-                      <DoorOpen size={22} style={{ color: 'var(--s-muted)' }} />
-                    ) : (
-                      <UsersIcon size={22} style={{ color: 'var(--s-muted)' }} />
-                    )}
-                  </div>
-                  <h3 className="ds-h3" style={{ fontSize: 13, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {emp.name}
-                  </h3>
-                  {emp.specialization && (
-                    <p className="ds-caption" style={{ marginTop: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {emp.specialization}
-                    </p>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-        </section>
+    <AirFrame
+      label={business.name}
+      backTo="/"
+      overlay={selectedEmp && (
+        <ResourceSheet emp={selectedEmp} isVenue={isVenue} businessId={business.id} onClose={() => setSelectedEmp(null)} />
       )}
-
-      {/* Employee / Room detail sheet */}
-      {selectedEmp && (
-        <div className="ds-sheet-ov" onClick={() => setSelectedEmp(null)}>
-          <div className="ds-sheet" style={{ padding: 0 }} onClick={(e) => e.stopPropagation()}>
-            {(() => {
-              const photoIds = parsePhotos(selectedEmp.photos)
-              return (
+    >
+      <section className="bf-screen" aria-label={business.name}>
+        <div className="bf-inner bf-page bf-page--flush">
+          <div className="bf-page-hero">
+            {cover ? <img src={photoSrc(cover)} alt={business.name} /> : <HeroArt />}
+            <div className="bf-hero-fade" />
+          </div>
+          <div className="bf-panel bf-panel--page">
+            <div className="bf-logo" aria-hidden="true">
+              {photos[1] ? (
+                <img src={photoSrc(photos[1])} alt="" />
+              ) : (
                 <>
-                  {photoIds.length > 0 ? (
-                    <div style={{ position: 'relative' }}>
-                      <div className="ds-sheet-grip" style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 1, background: 'rgba(255,255,255,0.7)' }} />
-                      <div style={{ display: 'flex', overflowX: 'auto', scrollSnapType: 'x mandatory', borderRadius: 'var(--r-xl) var(--r-xl) 0 0' }}>
-                        {photoIds.map((fid, idx) => (
-                          <img
-                            key={idx}
-                            src={`/api/telegram-photo/${encodeURIComponent(fid)}`}
-                            alt={`${selectedEmp.name} ${idx + 1}`}
-                            style={{ width: '100%', height: 256, objectFit: 'cover', scrollSnapAlign: 'start', flexShrink: 0 }}
-                          />
-                        ))}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedEmp(null)}
-                        aria-label="Закрыть"
-                        className="ds-icon-btn"
-                        style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(4,9,16,0.45)', color: '#fff' }}
-                      >
-                        <X size={18} />
-                      </button>
-                      {photoIds.length > 1 && (
-                        <div style={{ position: 'absolute', bottom: 8, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 6, pointerEvents: 'none' }}>
-                          {photoIds.map((_, idx) => (
-                            <span key={idx} style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.8)' }} />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div style={{
-                      position: 'relative', height: 128, background: 'var(--s-surface-2)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      borderRadius: 'var(--r-xl) var(--r-xl) 0 0',
-                    }}>
-                      <div className="ds-sheet-grip" style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)' }} />
-                      {business.business_type === 'venue_rental' ? (
-                        <DoorOpen size={44} style={{ color: 'var(--s-muted)' }} />
-                      ) : (
-                        <UsersIcon size={44} style={{ color: 'var(--s-muted)' }} />
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setSelectedEmp(null)}
-                        aria-label="Закрыть"
-                        className="ds-icon-btn bordered"
-                        style={{ position: 'absolute', top: 12, right: 12 }}
-                      >
-                        <X size={18} />
-                      </button>
-                    </div>
-                  )}
-
-                  <div style={{ padding: '16px 18px calc(20px + env(safe-area-inset-bottom, 0px))' }}>
-                    <h2 className="ds-h1">{selectedEmp.name}</h2>
-                    {selectedEmp.specialization && (
-                      <p className="ds-sub" style={{ marginTop: 4 }}>{selectedEmp.specialization}</p>
-                    )}
-
-                    {(selectedEmp.capacity != null || selectedEmp.area_sqm != null) && (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                        {selectedEmp.capacity != null && (
-                          <span className="ds-chip" style={{ color: 'var(--s-accent)' }}>
-                            <UsersIcon size={12} />
-                            до {selectedEmp.capacity} чел.
-                          </span>
-                        )}
-                        {selectedEmp.area_sqm != null && (
-                          <span className="ds-chip" style={{ color: 'var(--s-accent)' }}>
-                            <MapPin size={12} />
-                            {selectedEmp.area_sqm} м²
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    {selectedEmp.description && (
-                      <p className="ds-sub" style={{ marginTop: 14, whiteSpace: 'pre-line', lineHeight: 1.5 }}>
-                        {linkifyText(selectedEmp.description)}
-                      </p>
-                    )}
-
-                    <Link
-                      to={`/book/${business.id}?employee=${selectedEmp.id}`}
-                      onClick={() => setSelectedEmp(null)}
-                      className="ds-btn ds-btn--primary ds-btn--block"
-                      style={{ marginTop: 18 }}
-                    >
-                      Записаться
-                    </Link>
-                  </div>
+                  <div className="sym">{plainName.charAt(0).toUpperCase()}</div>
+                  <div className="cap">{plainName.toUpperCase()}</div>
                 </>
-              )
-            })()}
+              )}
+            </div>
+            <h1 className="bf-h1">{business.name}</h1>
+
+            {description && (
+              <p className={`bf-desc${longDescription && !aboutOpen ? ' is-clamped' : ''}`}>{linkifyText(description)}</p>
+            )}
+            {longDescription && (
+              <button type="button" className="bf-about" onClick={() => setAboutOpen((v) => !v)} aria-expanded={aboutOpen}>
+                {aboutOpen ? 'Свернуть' : 'Читать полностью'}
+              </button>
+            )}
+
+            <div className="bf-facts">
+              {business.address && (
+                <a className="bf-fact" href={`https://yandex.ru/maps/?text=${encodeURIComponent(business.address)}`} target="_blank" rel="noopener noreferrer">
+                  <span className="bf-choice-icon"><MapPin /></span>
+                  <span className="bf-choice-body"><span className="bf-choice-name">{business.address}</span><span className="bf-choice-details">Открыть на карте</span></span>
+                  <ChevronRight className="bf-chevron" />
+                </a>
+              )}
+              {workingHours && (
+                <div className="bf-fact">
+                  <span className="bf-choice-icon"><Clock /></span>
+                  <span className="bf-choice-body"><span className="bf-choice-name">{workingHours}</span><span className="bf-choice-details">Часы работы</span></span>
+                </div>
+              )}
+              {business.phone && (
+                <a className="bf-fact" href={`tel:${business.phone}`}>
+                  <span className="bf-choice-icon"><Phone /></span>
+                  <span className="bf-choice-body"><span className="bf-choice-name">{business.phone}</span><span className="bf-choice-details">Позвонить</span></span>
+                  <ChevronRight className="bf-chevron" />
+                </a>
+              )}
+              {business.directions && (
+                <div className="bf-fact bf-fact--text">
+                  <span className="bf-choice-icon"><Navigation /></span>
+                  <span className="bf-choice-body"><span className="bf-choice-details">Как добраться</span><span className="bf-fact-text">{linkifyText(business.directions)}</span></span>
+                </div>
+              )}
+            </div>
+
+            {services.length > 0 && (
+              <section className="bf-block" aria-label="Услуги">
+                <div className="bf-kicker">{isVenue ? 'Форматы аренды' : 'Услуги'} · {services.length}</div>
+                <div className="bf-list">
+                  {services.slice(0, 6).map((s) => (
+                    <Link key={s.id} to={`/book/${business.id}?service=${s.id}`} className="bf-option bf-option--link">
+                      <span className="bf-option-data">
+                        <span className="bf-option-title">{s.name}</span>
+                        <span className="bf-option-meta">
+                          {[s.duration_minutes ? `${s.duration_minutes} мин` : null, s.price ? formatPrice(s.price) + (s.is_hourly_price ? '/ч' : '') : null].filter(Boolean).join(' · ') || 'Цена уточняется'}
+                        </span>
+                      </span>
+                      <ChevronRight className="bf-chevron" />
+                    </Link>
+                  ))}
+                </div>
+                {services.length > 6 && (
+                  <Link to={`/book/${business.id}`} className="bf-about" style={{ display: 'inline-block', textDecoration: 'none' }}>Все услуги — {services.length}</Link>
+                )}
+              </section>
+            )}
+
+            {employees.length > 0 && (
+              <section className="bf-block" aria-label={isVenue ? 'Залы' : 'Специалисты'}>
+                <div className="bf-kicker">{isVenue ? 'Залы' : 'Специалисты'} · {employees.length}</div>
+                <div className="bf-list">
+                  {employees.map((emp) => {
+                    const p = resourcePhotos(emp)[0]
+                    return (
+                      <button key={emp.id} type="button" className="bf-option" onClick={() => setSelectedEmp(emp)}>
+                        <span className={`bf-portrait${isVenue ? ' is-venue' : ''}`} aria-hidden="true">
+                          {p ? <img src={photoSrc(p)} alt="" loading="lazy" /> : isVenue ? <DoorOpen size={18} /> : emp.name.charAt(0).toUpperCase()}
+                        </span>
+                        <span className="bf-option-data">
+                          <span className="bf-option-title">{emp.name}</span>
+                          {(emp.specialization || emp.capacity != null) && (
+                            <span className="bf-option-meta">
+                              {emp.specialization || ''}{emp.capacity != null ? `${emp.specialization ? ' · ' : ''}до ${emp.capacity} чел.` : ''}
+                            </span>
+                          )}
+                        </span>
+                        <ChevronRight className="bf-chevron" />
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
           </div>
         </div>
-      )}
-
-      {/* Book button — sticky внизу скролл-контейнера, всегда на виду */}
-      <div
-        style={{
-          position: 'sticky', bottom: 0, marginTop: 24, paddingTop: 12, paddingBottom: 4,
-          background: 'linear-gradient(to top, var(--s-bg) 60%, transparent)',
-        }}
-      >
-        <Link to={`/book/${business.id}`} className="ds-btn ds-btn--primary ds-btn--block">
-          Записаться
-        </Link>
-        <Link to={`/chat?business_id=${business.id}`} className="ds-btn ds-btn--ghost ds-btn--block" style={{ marginTop: 8 }}>
-          Помочь выбрать услугу
-        </Link>
-      </div>
-    </ClientShell>
+        <div className="bf-bottombar">
+          <Link to={`/chat?business_id=${business.id}`} className="bf-secondary"><Sparkles />Помочь выбрать</Link>
+          <Link to={`/book/${business.id}`} className="bf-primary">{isVenue ? 'Забронировать' : 'Записаться'} <ArrowRight /></Link>
+        </div>
+      </section>
+    </AirFrame>
   )
 }
