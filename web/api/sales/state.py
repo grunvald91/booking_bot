@@ -46,6 +46,7 @@ def public_pending(conversation):
     return {"action_id": conversation.action_id, "tool_name": "create_booking",
             **{k: action[k] for k in ("description", "requires_contact", "requires_legal_consent",
                                     "business_id", "cancellation_policy")},
+            "summary": action.get("summary"),
             "expires_at": action["expires_at"]}
 
 
@@ -57,7 +58,9 @@ def public_slot_offer(conversation):
         return None
     if datetime.fromisoformat(offer["expires_at"]) <= utc_now():
         return None
-    return {key: offer[key] for key in ("date", "service_id", "duration_hours", "slots", "expires_at")}
+    return {"date": offer["date"], "service_id": offer["service_id"],
+            "service_name": offer.get("service_name"), "duration_minutes": offer.get("duration_minutes"),
+            "solo": bool(offer.get("solo")), "slots": offer["slots"], "expires_at": offer["expires_at"]}
 
 
 def visible_history(conversation):

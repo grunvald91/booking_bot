@@ -11,7 +11,7 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from urllib.parse import parse_qsl
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
@@ -164,7 +164,7 @@ async def ai_select_slot(body: SelectSlotIn, identity=Depends(get_sales_identity
     tools = ServGoTools(db, business, identity.user)
     prepared = await tools.prepare_booking(BookingArgs(
         service_id=offer["service_id"], employee_id=body.employee_id,
-        date=offer["date"], time=body.time, duration_hours=offer["duration_hours"]))
+        date=offer["date"], time=body.time, solo=offer["solo"]))
     conversation.action_id = str(uuid.uuid4())
     conversation.action = {**prepared, "status": "pending",
         "expires_at": (utc_now() + timedelta(minutes=20)).isoformat()}
@@ -172,7 +172,7 @@ async def ai_select_slot(body: SelectSlotIn, identity=Depends(get_sales_identity
     conversation.facts = {k: v for k, v in conversation.facts.items() if k != "_slot_offer"}
     reply = "Отличный выбор! Проверьте детали и подтвердите запись в карточке ниже 😊"
     conversation.messages = trim_history([*conversation.messages,
-        {"role": "user", "content": f"Выбираю {offer['date']} в {body.time}, {slot['employee_name']}."},
+        {"role": "user", "content": f"Выбираю {date.fromisoformat(offer['date']).strftime('%d.%m')} в {body.time}, {slot['employee_name']}."},
         {"role": "assistant", "content": reply}])
     conversation.updated_at = utc_now()
     result = response(conversation, reply)
@@ -242,12 +242,9 @@ async def ai_confirm(body: AIConfirmIn, identity=Depends(get_sales_identity), db
     # Reuse ServGo's existing mandatory post-commit events; notification errors
     # cannot make the caller retry an already committed reservation.
     from ..routes.client import notify_created_visit
-    from ..rental import notify_rental_request
     bookings = (await db.execute(select(Booking).where(Booking.id.in_(ids)))).scalars().all()
-    if business.business_type == "venue_rental":
-        await notify_rental_request(bookings[0], db)
-    else:
-        await notify_created_visit(bookings, db, business, identity.user.email if identity.user else None)
+    # Площадки и услуги — одна запись и одни уведомления, как со страницы записи.
+    await notify_created_visit(bookings, db, business, identity.user.email if identity.user else None)
     return result
 
 

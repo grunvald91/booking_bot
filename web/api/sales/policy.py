@@ -48,7 +48,6 @@ class PolicyUpdate(BaseModel):
 
 
 def policy_document(business):
-    rental = business.business_type == "venue_rental"
     return {
         "business_id": business.id, "business_name": business.name,
         "revision": (business.sales_agent_settings or {}).get("revision", 0),
@@ -65,7 +64,6 @@ def policy_document(business):
             "receipt_required": business.require_receipt_for_prepayment,
             "legal_consent_required": business.legal_documents_enabled,
             "cancellation_policy": business.cancellation_policy_text,
-            "rental_deposit_policy": "Назначает оператор аренды, максимум 20%. При положительной предоплате срок оплаты — 10 минут; при 0 ₽ таймера нет" if rental else None,
         },
         "always_forbidden": ["Менять цены и расписание", "Подтверждать получение денег",
             "Читать данные другого бизнеса или клиента", "Создавать запись без подтверждения клиента"],
@@ -74,8 +72,8 @@ def policy_document(business):
             {"rule": "Фиксированная цена и фиксированные дополнительные услуги", "status": "supported"},
             {"rule": "Предоплата обычной записи и отдельные юридические согласия", "status": "supported"},
             {"rule": "Общий срок оплаты 10 минут для услуг и аренды, только при требуемой предоплате", "status": "supported"},
-            {"rule": "Аренда 1–12 часов по текущему rental API; цена до 5 часов и депозит — оператор", "status": "supported"},
-            {"rule": "Сложные/почасовые/групповые тарифы, абонементы и аренда с юридическими согласиями", "status": "form_or_operator"},
+            {"rule": "Аренда залов по правилам страницы записи: пакеты длительности, почасовые тарифы по времени суток, индивидуальный тариф, предоплата бизнеса", "status": "supported"},
+            {"rule": "Сложные/групповые тарифы услуг и абонементы", "status": "form_or_operator"},
             {"rule": "Ночной график работы", "status": "form_or_operator"},
             {"rule": "Изменение/отмена записи, проверка платежа и загрузка чека", "status": "booking_page_or_operator"},
         ],

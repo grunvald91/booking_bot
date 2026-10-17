@@ -11,9 +11,7 @@ from sqlalchemy import select
 
 from database.models import Business, Service, Employee, EmployeeService, EmployeeDayOff, Booking, VenueTimePricing
 from database.booking_safety import lock_resource_days
-from .. import rental
 from ..routes import client
-from ..rental_logic import price_quote
 from ..schemas import CreateBookingIn
 from .policy import policy_for, SalesPolicy
 from .schedule import resource_works
@@ -34,7 +32,7 @@ class ServiceArgs(ToolArgs):
 
 class PriceArgs(ServiceArgs):
     employee_id: int | None = Field(default=None, gt=0)
-    duration_hours: int | None = Field(default=None, ge=1, le=12)
+    solo: bool = False
     additional_service_ids: list[int] = Field(default_factory=list, max_length=8)
     date: Date | None = None
     time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
@@ -43,7 +41,7 @@ class PriceArgs(ServiceArgs):
 class AvailabilityArgs(ServiceArgs):
     date: Date
     employee_id: int | None = Field(default=None, gt=0)
-    duration_hours: int | None = Field(default=None, ge=1, le=12)
+    solo: bool = False
 
 
 class BookingArgs(AvailabilityArgs):
@@ -65,9 +63,10 @@ ARG_MODELS = {
 DESCRIPTIONS = {
     "get_services": "Каталог услуг выбранной компании. Начни с него, не придумывай услуги.",
     "get_service_details": "Описание, длительность, инструкции и ограничения реальной услуги.",
-    "get_prices": "Реальная цена услуги/аренды и необходимость согласования менеджером. Для аренды укажи ресурс и часы.",
-    "get_specialists": "Активные специалисты/ресурсы, которые оказывают выбранную услугу.",
-    "check_availability": "Реальные свободные окна по услуге, дате и ресурсу. Для аренды нужны duration_hours.",
+    "get_prices": "Реальная цена по правилам страницы записи. Для площадки цена зависит от зала, даты и времени "
+                  "(почасовые тарифы) и формата solo=true (индивидуальный тариф зала).",
+    "get_specialists": "Активные специалисты/залы для услуги; для залов — вместимость, почасовые тарифы и индивидуальный тариф.",
+    "check_availability": "Реальные свободные окна по услуге, дате и ресурсу. Длительность задаёт выбранная услуга (пакет).",
     "create_booking": "Подготовь карточку записи после выбора услуги, специалиста и времени. Не создаёт запись до подтверждения клиентом.",
     "handoff_to_human": "Передай диалог оператору по просьбе клиента или когда требуется человек. ИИ замолчит до возврата оператором.",
     "get_my_bookings": "Покажи записи авторизованного клиента в выбранной компании и ссылки для управления ими.",
@@ -139,60 +138,66 @@ class ServGoTools:
             raise HTTPException(422, "Выбрана неверная дополнительная услуга")
         return services
 
+    def is_venue(self) -> bool:
+        return self.business.business_type == "venue_rental"
+
     async def quote(self, args: PriceArgs) -> dict:
+        """Цена по правилам страницы записи (create_booking_visit), без отдельного движка аренды."""
         service = await self.service(args.service_id)
         employee = await self.employee(args.employee_id, service) if args.employee_id else None
         addons = await self.addons(args.additional_service_ids)
+        duration = service.duration_minutes or 30
         result = {"service_id": service.id, "currency": "RUB", "amount": service.price,
-                  "duration_minutes": service.duration_minutes, "price_requires_confirmation": False,
+                  "duration_minutes": duration, "price_requires_confirmation": False,
                   "booking_supported": True, "booking_url": f"/book/{self.business.id}"}
-        if self.business.business_type == "venue_rental":
-            if employee and employee.solo_price_per_hour and args.duration_hours:
-                total, needs_quote, _ = price_quote(employee.solo_price_per_hour, args.duration_hours,
-                                                   [s.price or 0 for s in addons])
-                needs_quote = needs_quote or any(s.price is None for s in addons)
-                result.update(amount=None if needs_quote else total,
-                              duration_minutes=args.duration_hours * 60,
-                              price_requires_confirmation=needs_quote)
+        if args.solo and not (self.is_venue() and employee and employee.solo_price_per_hour):
+            raise HTTPException(422, "Индивидуальный тариф доступен только для зала, где он задан")
+        addon_total = 0
+        if any(s.price is None or s.pricing_type not in (None, "fixed") or s.tariff_description for s in addons):
+            result.update(price_requires_confirmation=True, booking_supported=False)
+        else:
+            # Почасовые доп. услуги — 1 час, как по умолчанию на странице записи и на сервере.
+            addon_total = sum(s.price for s in addons)
+        if self.is_venue():
+            if employee is None:
+                result.update(amount=None, price_depends_on_resource=True)
+            elif args.date and args.time:
+                base = await client._visit_base_price(self.db, self.business, [service], employee,
+                    is_solo=args.solo, start=args.time, duration=duration, occ_date=args.date)
+                result["amount"] = base + addon_total
             else:
+                has_rules = (await self.db.execute(select(VenueTimePricing.id)
+                    .where(VenueTimePricing.employee_id == employee.id).limit(1))).first()
+                if args.solo:
+                    result["amount"] = int(employee.solo_price_per_hour * max(1, duration / 60)) + addon_total
+                elif has_rules:
+                    result.update(amount=None, price_depends_on_time=True)
+                else:
+                    result["amount"] = (service.price or 0) + addon_total
+        else:
+            if (service.pricing_type not in (None, "fixed") or service.tariff_description
+                    or service.price is None or service.is_hourly_price or duration <= 0):
                 result.update(amount=None, price_requires_confirmation=True, booking_supported=False)
-                if employee and args.time and args.date:
-                    quote = await client.calculate_price(self.business.id, employee.id, args.time,
-                        service.duration_minutes, args.date.isoformat(), self.db)
-                    if quote.has_time_price:
-                        result["estimated_amount"] = quote.total
-            # Rental API owns both quote and booking rules. A different rental
-            # tariff must go through its existing form/operator, never fixed-price booking.
-            if not employee or not employee.solo_price_per_hour or not args.duration_hours:
-                result["booking_supported"] = False
-        elif (service.pricing_type not in (None, "fixed") or service.tariff_description
-              or service.price is None or service.is_hourly_price or service.duration_minutes <= 0):
-            result.update(amount=None, price_requires_confirmation=True, booking_supported=False)
-        elif addons:
-            if any(s.price is None or s.is_hourly_price or s.pricing_type not in (None, "fixed") or s.tariff_description for s in addons):
-                result.update(amount=None, price_requires_confirmation=True, booking_supported=False)
-            else:
-                result["amount"] = service.price + sum(s.price for s in addons)
-        if employee and self.business.business_type != "venue_rental":
-            rules = (await self.db.execute(select(VenueTimePricing.id)
-                .where(VenueTimePricing.employee_id == employee.id).limit(1))).first()
-            if rules:
-                result.update(price_requires_confirmation=True, booking_supported=False)
+            elif result["booking_supported"]:
+                result["amount"] = service.price + addon_total
+            if employee:
+                rules = (await self.db.execute(select(VenueTimePricing.id)
+                    .where(VenueTimePricing.employee_id == employee.id).limit(1))).first()
+                if rules:
+                    result.update(price_requires_confirmation=True, booking_supported=False)
         if (self.business.working_hours_start and self.business.working_hours_end
             and self.business.working_hours_end <= self.business.working_hours_start):
             # Existing SlotOut carries only HH:MM, so next-day starts cannot be
             # safely confirmed against the requested calendar date by this adapter.
             result["booking_supported"] = False
-        result["prepayment_percent"] = (
-            None if self.business.business_type == "venue_rental"
-            else (self.business.prepayment_percent or 100) if self.business.prepayment_enabled else 0)
+        if result["price_requires_confirmation"]:
+            result["amount"] = None
+        result["prepayment_percent"] = (self.business.prepayment_percent or 100) if self.business.prepayment_enabled else 0
         result["receipt_required"] = bool(self.business.require_receipt_for_prepayment)
         result["payment_confirmation"] = "operator"
+        # Округление как в create_booking_visit.
         result["prepayment_amount"] = (
-            int(result["amount"] * result["prepayment_percent"] / 100)
-            if result["amount"] is not None and result["prepayment_percent"] is not None else None)
-        if self.business.business_type == "venue_rental":
-            result["deposit_policy"] = "Депозит назначает оператор аренды после согласования цены, максимум 20%"
+            int(result["amount"] * result["prepayment_percent"] / 100) if result["amount"] is not None else None)
         return result
 
     async def availability(self, args: AvailabilityArgs) -> dict:
@@ -207,24 +212,21 @@ class ServGoTools:
             raise HTTPException(422, "Сначала выберите основную услугу")
         employees = ([await self.employee(args.employee_id, service)] if args.employee_id
                      else await self.specialists(service))
+        if args.solo:
+            employees = [e for e in employees if self.is_venue() and e.solo_price_per_hour]
+        duration = service.duration_minutes or 30
         slots = []
         for employee in employees:
-            duration = args.duration_hours * 60 if args.duration_hours and self.business.business_type == "venue_rental" else service.duration_minutes
             if not await resource_works(self.db, employee, args.date, duration):
                 continue
-            if self.business.business_type == "venue_rental":
-                if not employee.solo_price_per_hour or not args.duration_hours:
-                    continue
-                found = await rental.rental_slots(self.business.id, args.date, employee.id,
-                                                 args.duration_hours, self.db)
-                times = found["slots"]
-            else:
-                found = await client.get_slots(self.business.id, args.date, service.id, employee.id,
-                    service.duration_minutes, False, None, self.db)
-                times = [s.time for s in found if s.available]
-            slots.extend({"time": t, "employee_id": employee.id, "employee_name": employee.name} for t in times)
-        return {"date": args.date.isoformat(), "service_id": service.id, "slots": slots,
-                "duration_hours_required": self.business.business_type == "venue_rental" and not args.duration_hours}
+            # Те же окна, что на странице записи: длительность — из услуги.
+            found = await client.get_slots(self.business.id, args.date, service.id, employee.id,
+                duration, False, None, self.db)
+            slots.extend({"time": s.time, "employee_id": employee.id, "employee_name": employee.name}
+                         for s in found if s.available)
+        slots.sort(key=lambda s: (s["time"], s["employee_id"]))
+        return {"date": args.date.isoformat(), "service_id": service.id, "service_name": service.name,
+                "duration_minutes": duration, "solo": args.solo, "slots": slots}
 
     async def prepare_booking(self, args: BookingArgs) -> dict:
         await self.require_tool("create_booking")
@@ -233,31 +235,36 @@ class ServGoTools:
         quote = await self.quote(PriceArgs.model_validate(args.model_dump()))
         if not quote["booking_supported"]:
             raise HTTPException(422, "Этот тариф оформляется через обычную форму записи или оператора")
-        if self.business.business_type == "venue_rental":
-            main = (await self.db.execute(select(Service.id).where(
-                Service.business_id == self.business.id, Service.is_active.is_(True),
-                Service.is_additional.is_(False)).order_by(Service.id).limit(1))).scalar_one_or_none()
-            if main != service.id:
-                raise HTTPException(422, "Для этого тарифа используйте форму записи")
         slots = await self.availability(AvailabilityArgs.model_validate({
             k: v for k, v in args.model_dump().items() if k in AvailabilityArgs.model_fields}))
         if not any(s["time"] == args.time and s["employee_id"] == args.employee_id for s in slots["slots"]):
             raise HTTPException(409, "Это время уже недоступно. Выберите другое окно")
+        addons = await self.addons(args.additional_service_ids)
+        addon_names = [s.name for s in addons]
         amount = f"{quote['amount']} ₽" if quote["amount"] is not None else "цену подтверждает менеджер"
-        addon_names = [s.name for s in await self.addons(args.additional_service_ids)]
         description = (f"{self.business.name}: {service.name}, {employee.name}, "
                        f"{args.date.isoformat()} в {args.time}, {quote['duration_minutes']} мин, {amount}")
+        if args.solo:
+            description += ", индивидуальный формат"
         if addon_names:
             description += ". Доп. услуги: " + ", ".join(addon_names)
-        if quote["prepayment_percent"]:
-            description += f". Предоплата: {quote['prepayment_percent']}%"
+        if quote["prepayment_amount"]:
+            description += f". Предоплата: {quote['prepayment_amount']} ₽ ({quote['prepayment_percent']}%)"
             description += ". Сообщите об отправке предоплаты в течение 10 минут после создания брони"
-        if quote.get("deposit_policy"):
-            description += ". " + quote["deposit_policy"]
-        if quote["receipt_required"]:
+        if quote["receipt_required"] and quote["prepayment_amount"]:
             description += ". Для проверки предоплаты требуется чек на странице записи"
-        return {"description": description, "args": args.model_dump(mode="json"), "quote": quote,
-                "requires_contact": not self.user or (self.business.business_type == "venue_rental" and not self.user.phone),
+        # Структурированная карточка для компактного подтверждения в чате.
+        summary = {"business_name": self.business.name, "service_name": service.name,
+                   "resource_name": employee.name, "resource_label": "Зал" if self.is_venue() else "Специалист",
+                   "date": args.date.isoformat(), "time": args.time,
+                   "duration_minutes": quote["duration_minutes"], "solo": args.solo,
+                   "addons": addon_names, "amount": quote["amount"],
+                   "prepayment_amount": quote["prepayment_amount"] or None,
+                   "prepayment_percent": quote["prepayment_percent"] or None,
+                   "receipt_required": bool(quote["receipt_required"] and quote["prepayment_amount"])}
+        return {"description": description, "summary": summary,
+                "args": args.model_dump(mode="json"), "quote": quote,
+                "requires_contact": not self.user,
                 "requires_legal_consent": bool(self.business.legal_documents_enabled),
                 "business_id": self.business.id, "cancellation_policy": self.business.cancellation_policy_text}
 
@@ -305,9 +312,20 @@ class ServGoTools:
         if name == "get_prices":
             return await self.quote(args)
         if name == "get_specialists":
+            employees = await self.specialists(await self.service(args.service_id))
+            rules = {}
+            if self.is_venue() and employees and self.policy.show_prices:
+                rows = (await self.db.execute(select(VenueTimePricing).where(
+                    VenueTimePricing.employee_id.in_([e.id for e in employees])))).scalars().all()
+                for r in rows:
+                    rules.setdefault(r.employee_id, []).append({
+                        "from": r.time_from.strftime("%H:%M"), "to": r.time_to.strftime("%H:%M"),
+                        "price_per_hour": r.price_per_hour, "days": r.day_type})
             return {"specialists": [{"id": e.id, "name": e.name, "specialization": e.specialization,
-                "description": e.description, "instructions": e.ai_instruction,
-                "capacity": e.capacity} for e in await self.specialists(await self.service(args.service_id))]}
+                "description": e.description, "instructions": e.ai_instruction, "capacity": e.capacity,
+                **({"time_pricing": rules.get(e.id, []),
+                    "solo_price_per_hour": e.solo_price_per_hour if self.policy.show_prices else None}
+                   if self.is_venue() else {})} for e in employees]}
         if name == "check_availability":
             return await self.availability(args)
         if name == "get_my_bookings":
@@ -341,18 +359,11 @@ class ServGoTools:
         if fresh["requires_legal_consent"] and not (
             confirmation.personal_data_consent and confirmation.booking_terms_accepted):
             raise HTTPException(422, "Отдельно подтвердите согласие на обработку данных и условия записи")
-        if self.business.business_type == "venue_rental":
-            # RentalRequest has no legal-consent fields yet; do not bypass the business policy.
-            if fresh["requires_legal_consent"]:
-                raise HTTPException(422, "Для аренды с юридическими условиями используйте форму записи")
-            result = await rental.create_rental_request(self.business.id, rental.RentalRequest(
-                date=args.date, time=args.time, employee_id=args.employee_id,
-                duration_hours=args.duration_hours, client_name=name, client_phone=phone,
-                additional_service_ids=args.additional_service_ids), self.db, user=self.user, commit=False)
-            return [result["id"]], f"/rental/b/{result['tracking_token']}"
+        # Площадки и обычные услуги — одна и та же запись, как со страницы записи.
         body = CreateBookingIn(business_id=self.business.id, service_id=args.service_id,
             employee_id=args.employee_id, date=args.date, time=args.time,
             additional_service_ids=args.additional_service_ids, client_name=name, client_phone=phone,
+            is_solo_booking=args.solo,
             personal_data_consent=confirmation.personal_data_consent,
             booking_terms_accepted=confirmation.booking_terms_accepted)
         # Guest creation in the existing CRUD helper commits. Flush our guest here instead
