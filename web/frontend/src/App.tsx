@@ -1,23 +1,32 @@
-import { useState, useEffect } from 'react'
+import { lazy, Suspense, useState, useEffect } from 'react'
 import { Routes, Route, Navigate, useSearchParams } from 'react-router-dom'
-import { api } from './api/client'
+import { api, ApiError } from './api/client'
+import { clearLogin, saveLogin } from './authUtils'
 import { Layout } from './components/Layout'
 import { HomePage } from './pages/client/HomePage'
 import { BusinessPage } from './pages/client/BusinessPage'
-import { BookingPage } from './pages/client/BookingPage'
 import { BookingStatusPage } from './pages/client/BookingStatusPage'
 import { MyBookingsPage } from './pages/client/MyBookingsPage'
 import { SubscriptionsPage } from './pages/client/SubscriptionsPage'
 import { LoginPage } from './pages/client/LoginPage'
+import { OwnerMailPage } from './pages/client/OwnerMailPage'
+import { AccountPage } from './pages/client/AccountPage'
+import { PrepaymentsPage } from './pages/admin/PrepaymentsPage'
+import { AdminPaymentAttention } from './components/AdminPaymentAttention'
 import { AdminDashboard } from './pages/admin/AdminDashboard'
-import { SchedulePage } from './pages/admin/SchedulePage'
 import { ServicesPage } from './pages/admin/ServicesPage'
 import { EmployeesPage } from './pages/admin/EmployeesPage'
 import { AnalyticsPage } from './pages/admin/AnalyticsPage'
-import { SettingsPage } from './pages/admin/SettingsPage'
 import { SubscriptionsAdminPage } from './pages/admin/SubscriptionsAdminPage'
 import { ChatPage } from './pages/client/ChatPage'
+import { SalesInboxPage } from './pages/admin/SalesInboxPage'
+import { SalesSettingsPage } from './pages/admin/SalesSettingsPage'
+import { RentalBookingStatusPage } from './pages/client/RentalBookingStatusPage'
 import { LegalPage } from './pages/client/LegalPage'
+
+const BookingPage = lazy(() => import('./pages/client/BookingPage').then(module => ({ default: module.BookingPage })))
+const SchedulePage = lazy(() => import('./pages/admin/SchedulePage').then(module => ({ default: module.SchedulePage })))
+const SettingsPage = lazy(() => import('./pages/admin/SettingsPage').then(module => ({ default: module.SettingsPage })))
 
 /** Redirect /book?business_id=X → /book/X, or /book → / */
 function BookRedirect() {
@@ -48,43 +57,60 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
-  const [tgAuthDone, setTgAuthDone] = useState(false)
+  const [authReady, setAuthReady] = useState(false)
 
   useEffect(() => {
-    const initData = window.Telegram?.WebApp?.initData
-    const explicitLogout = sessionStorage.getItem('servgoExplicitLogout') === '1'
-
-    if (initData && !explicitLogout) {
-      // Always refresh role from server — owner status may have changed,
-      // and stale userRole='client' in localStorage hides admin UI.
-      api.telegramAuth(initData)
-        .then((res) => {
-          localStorage.setItem('token', res.token)
-          localStorage.setItem('userRole', res.role || 'client')
-          localStorage.setItem('userName', res.user.full_name || 'Пользователь')
-          setTgAuthDone(true)
-        })
-        .catch((err) => {
-          console.warn('Telegram auto-login failed:', err)
-          setTgAuthDone(true)
-        })
-    } else {
-      setTgAuthDone(true)
+    let active = true
+    async function restoreAuth() {
+      try {
+        if (sessionStorage.getItem('servgoExplicitLogout') === '1') return
+        const initData = window.Telegram?.WebApp?.initData
+        if (initData) {
+          try {
+            saveLogin(await api.telegramAuth(initData))
+            return
+          } catch (error) {
+            console.warn('Telegram auto-login failed:', error)
+          }
+        }
+        if (localStorage.getItem('token')) {
+          try {
+            await api.getMe()
+            return
+          } catch (error) {
+            // Preserve the session during temporary network/server outages.
+            if (!(error instanceof ApiError) || error.status !== 401) return
+            clearLogin()
+          }
+        }
+        // Existing browser cookie from an authenticated Telegram session.
+        // Never use it after the user explicitly logged out.
+        try {
+          saveLogin(await api.sharedSession())
+        } catch {
+          // Not every visitor has a shared Telegram session.
+        }
+      } finally {
+        if (active) setAuthReady(true)
+      }
     }
+    void restoreAuth()
+    return () => { active = false }
   }, [])
 
-  if (!tgAuthDone) {
-    return null // Wait for Telegram auth to complete before rendering routes
+  if (!authReady) {
+    return <div role="status" style={{ padding: 24 }}>Проверяем вход…</div>
   }
 
   return (
-    <Routes>
+    <><AdminPaymentAttention /><Suspense fallback={<div role="status" className="flex min-h-[30vh] items-center justify-center">Загрузка…</div>}><Routes>
       <Route element={<Layout />}>
         {/* Client routes */}
         <Route path="/" element={<HomePage />} />
         <Route path="/business/:id" element={<BusinessPage />} />
         <Route path="/book/:businessId" element={<BookingPage />} />
         <Route path="/b/:token" element={<BookingStatusPage />} />
+        <Route path="/rental/b/:token" element={<RentalBookingStatusPage />} />
         <Route
           path="/my"
           element={
@@ -97,6 +123,9 @@ function App() {
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/legal/:docType/:businessId" element={<LegalPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/mail" element={<OwnerMailPage />} />
+        <Route path="/account" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
+        <Route path="/admin/prepayments" element={<AdminRoute><PrepaymentsPage /></AdminRoute>} />
 
         {/* Legacy redirects */}
         <Route path="/book" element={<BookRedirect />} />
@@ -105,6 +134,8 @@ function App() {
         <Route path="/calendar" element={<LegacyAdminRedirect to="/admin/schedule" />} />
 
         {/* Admin routes */}
+        <Route path="/admin/sales" element={<AdminRoute><SalesInboxPage /></AdminRoute>} />
+        <Route path="/admin/sales/settings" element={<AdminRoute><SalesSettingsPage /></AdminRoute>} />
         <Route
           path="/admin"
           element={
@@ -162,7 +193,7 @@ function App() {
           }
         />
       </Route>
-    </Routes>
+    </Routes></Suspense></>
   )
 }
 

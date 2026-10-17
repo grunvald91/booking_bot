@@ -1,6 +1,8 @@
 """
 Subscription routes: browse, buy, manage client subscriptions.
 """
+
+from datetime_utils import utc_now
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -164,7 +166,7 @@ async def my_subscriptions(
     client_subs = result.scalars().all()
 
     out = []
-    now = datetime.utcnow()
+    now = utc_now()
     for cs in client_subs:
         sub = cs.subscription
         total_sessions = sum(ss.quantity for ss in sub.services) if sub else 0

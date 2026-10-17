@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import {
   Building2,
   Camera,
@@ -31,7 +32,7 @@ function parsePhotos(raw?: string | null): string[] {
 
 async function fetchQrBlob(url: string): Promise<string> {
   const token = localStorage.getItem('token')
-  const tgInitData = (window as any).Telegram?.WebApp?.initData || ''
+  const tgInitData = window.Telegram?.WebApp?.initData || ''
   const res = await fetch(url, {
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -459,9 +460,11 @@ export function SettingsPage() {
   // Owners
   const handleAddOwner = async () => {
     if (!businessId || !ownerField.trim()) return
-    const data: { telegram_id?: number; username?: string } = {}
+    const data: { telegram_id?: number; username?: string; email?: string } = {}
     const trimmed = ownerField.trim()
-    if (/^\d+$/.test(trimmed)) {
+    if (trimmed.includes('@') && !trimmed.startsWith('@')) {
+      data.email = trimmed
+    } else if (/^\d+$/.test(trimmed)) {
       data.telegram_id = Number(trimmed)
     } else {
       data.username = trimmed.replace(/^@/, '')
@@ -509,6 +512,7 @@ export function SettingsPage() {
       title="Настройки"
       headerExtra={<BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />}
     >
+      <section className="ds-card" style={{ padding: 14, marginBottom: 12 }}><h2 className="ds-h3">Вход без Telegram</h2><p>Привяжите подтверждённую почту к своему аккаунту.</p><Link to="/account" className="ds-btn ds-btn--primary">Настроить вход по email</Link></section>
       {/* Success toast */}
       {toast && (
         <div
@@ -536,15 +540,27 @@ export function SettingsPage() {
         </div>
       )}
 
-      <div className="ds-form-narrow" style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 4 }}>
-        <section className="ds-card" style={{ padding: 14 }}>
+      <div className="ds-context">
+        <div className="ds-context-eyebrow">Ваш бизнес</div>
+        <div className="ds-context-headline">{form.name || businesses.find((b) => b.id === businessId)?.name || 'Профиль'}</div>
+        <div className="ds-context-strip">
+          {form.working_hours_start && form.working_hours_end && (
+            <div><strong>{String(form.working_hours_start).slice(0, 5)}–{String(form.working_hours_end).slice(0, 5)}</strong><span>график работы</span></div>
+          )}
+          {form.booking_interval_minutes ? <div><strong>{form.booking_interval_minutes} мин</strong><span>шаг записи</span></div> : null}
+          {form.prepayment_enabled && <div><strong>{form.prepayment_percent ?? 100}%</strong><span>предоплата</span></div>}
+        </div>
+      </div>
+
+      <div className="ds-form-narrow" style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingTop: 0 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ marginBottom: 6 }}>
             Уведомления о записях
           </h2>
           <p className="ds-sub" style={{ marginBottom: 10, lineHeight: 1.5 }}>
             Новая подтверждённая запись всегда отправляется клиенту и причастным сотрудникам. Ниже настраиваются только дополнительные напоминания перед визитом.
           </p>
-          <NotificationSetup />
+          <NotificationSetup staff />
 
           {([
             {
@@ -583,7 +599,7 @@ export function SettingsPage() {
                         <button
                           key={minutes}
                           type="button"
-                          className={selected ? 'ds-btn ds-btn--primary' : 'ds-btn'}
+                          className={selected ? 'ds-btn ds-btn--on choice-accent selected' : 'ds-btn'}
                           onClick={() => toggleReminderOffset(group.minutesField, minutes)}
                           style={{ minHeight: 34, padding: '6px 10px' }}
                         >
@@ -597,7 +613,7 @@ export function SettingsPage() {
                         <button
                           key={minutes}
                           type="button"
-                          className="ds-btn ds-btn--primary"
+                          className="ds-btn ds-btn--on choice-accent selected"
                           onClick={() => toggleReminderOffset(group.minutesField, minutes)}
                           style={{ minHeight: 34, padding: '6px 10px' }}
                         >
@@ -639,7 +655,7 @@ export function SettingsPage() {
         </section>
 
         {/* === 1. Business Profile === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <Building2 size={18} style={{ color: 'var(--s-accent)' }} />
             Профиль бизнеса
@@ -764,7 +780,7 @@ export function SettingsPage() {
         </section>
 
         {/* === 2. Booking flow === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <DoorOpen size={18} style={{ color: 'var(--s-accent)' }} />
             Сценарий записи
@@ -811,7 +827,7 @@ export function SettingsPage() {
                     key={value}
                     type="button"
                     onClick={() => updateField('booking_flow_order', value)}
-                    className={selected ? 'ds-btn ds-btn--primary' : 'ds-btn'}
+                    className={selected ? 'ds-btn ds-btn--on choice-accent selected' : 'ds-btn'}
                     aria-pressed={selected}
                     style={{ minHeight: 42 }}
                   >
@@ -833,7 +849,7 @@ export function SettingsPage() {
         </section>
 
         {/* === 3. Photos === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <Camera size={18} style={{ color: 'var(--s-accent)' }} />
             Фотографии
@@ -935,7 +951,7 @@ export function SettingsPage() {
         </section>
 
         {/* === 2.5. Employee / Room Photos === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             {isVenueRental ? <DoorOpen size={18} style={{ color: 'var(--s-accent)' }} /> : <UserIcon size={18} style={{ color: 'var(--s-accent)' }} />}
             {isVenueRental ? 'Фото залов' : 'Фото сотрудников'}
@@ -1133,7 +1149,7 @@ export function SettingsPage() {
         </section>
 
         {/* === Legal documents === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <ShieldCheck size={18} style={{ color: 'var(--s-accent)' }} />
             Юридические документы и персональные данные
@@ -1187,7 +1203,7 @@ export function SettingsPage() {
         </section>
 
         {/* === 3. Prepayment Settings === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <CreditCard size={18} style={{ color: 'var(--s-accent)' }} />
             Предоплата
@@ -1290,7 +1306,7 @@ export function SettingsPage() {
         </section>
 
         {/* === 4. Co-Owners === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Users size={18} style={{ color: 'var(--s-accent)' }} />
@@ -1347,7 +1363,7 @@ export function SettingsPage() {
                   {owner.user_phone && (
                     <p className="ds-caption" style={{ marginTop: 2 }}>{owner.user_phone}</p>
                   )}
-                  {owner.telegram_id && (
+                  {owner.telegram_id && owner.telegram_id > 0 && (
                     <p className="ds-caption">ID: {owner.telegram_id}</p>
                   )}
                 </div>
@@ -1366,7 +1382,7 @@ export function SettingsPage() {
         </section>
 
         {/* === 5. QR Codes === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <QrCode size={18} style={{ color: 'var(--s-accent)' }} />
             QR-коды
@@ -1467,15 +1483,15 @@ export function SettingsPage() {
             </div>
 
             <div className="ds-field">
-              <label className="ds-label">Telegram ID или @username</label>
+              <label className="ds-label">Email, Telegram ID или @username</label>
               <input
                 type="text"
                 value={ownerField}
                 onChange={(e) => setOwnerField(e.target.value)}
-                placeholder="123456789 или @username"
+                placeholder="owner@example.com или @username"
                 className="ds-input"
               />
-              <p className="ds-hint">Введите числовой Telegram ID или имя пользователя</p>
+              <p className="ds-hint">Для доступа без Telegram пользователь должен сначала зарегистрировать и подтвердить email. Совладелец получает права управления бизнесом.</p>
             </div>
 
             <div className="ds-dialog-actions" style={{ marginTop: 16 }}>

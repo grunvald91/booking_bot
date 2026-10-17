@@ -15,7 +15,20 @@ interface Props {
  */
 export function BusinessSelector({ businesses, selectedId, onSelect }: Props) {
   const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number; width: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+
+  // Меню позиционируется от экрана, а не от кнопки: на узком телефоне
+  // оно не выходит за левый край.
+  const toggle = () => {
+    if (!open && ref.current) {
+      const r = ref.current.getBoundingClientRect();
+      const width = Math.min(300, window.innerWidth - 24);
+      const right = Math.min(Math.max(12, window.innerWidth - r.right), window.innerWidth - width - 12);
+      setMenuPos({ top: r.bottom + 6, right, width });
+    }
+    setOpen((v) => !v);
+  };
 
   useEffect(() => {
     const onClickOutside = (e: MouseEvent) => {
@@ -32,29 +45,29 @@ export function BusinessSelector({ businesses, selectedId, onSelect }: Props) {
   return (
     <div ref={ref} style={{ position: 'relative', flexShrink: 0, maxWidth: '42%' }}>
       <button
-        onClick={() => setOpen((v) => !v)}
-        className="ds-chip"
+        onClick={toggle}
+        className="ds-biz-select"
         style={{ maxWidth: '100%', overflow: 'hidden' }}
+        aria-label="Выбрать бизнес"
+        aria-expanded={open}
       >
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {current?.name ?? 'Бизнес'}
-        </span>
+        <span>{current?.name ?? 'Бизнес'}</span>
         <ChevronDown
-          size={14}
+          size={13}
           style={{ flexShrink: 0, transition: 'transform 0.15s ease', transform: open ? 'rotate(180deg)' : 'none' }}
         />
       </button>
 
-      {open && (
+      {open && menuPos && (
         <div
-          className="ds-card"
           style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            right: 0,
+            background: 'var(--s-surface)',
+            borderRadius: 15,
+            position: 'fixed',
+            top: menuPos.top,
+            right: menuPos.right,
             zIndex: 95,
-            minWidth: 200,
-            maxWidth: 'min(80vw, 280px)',
+            width: menuPos.width,
             padding: 6,
             boxShadow: 'var(--sh-pop)',
             maxHeight: '60vh',
@@ -77,13 +90,13 @@ export function BusinessSelector({ businesses, selectedId, onSelect }: Props) {
                   gap: 8,
                   width: '100%',
                   textAlign: 'left',
-                  padding: '9px 10px',
-                  borderRadius: 9,
+                  padding: '11px 10px',
+                  borderRadius: 11,
                   border: 'none',
                   background: active ? 'var(--s-accent-soft)' : 'transparent',
                   color: active ? 'var(--s-accent)' : 'var(--s-text)',
-                  fontSize: 14,
-                  fontWeight: active ? 700 : 500,
+                  fontSize: 13,
+                  fontWeight: active ? 500 : 400,
                   fontFamily: 'inherit',
                   cursor: 'pointer',
                 }}

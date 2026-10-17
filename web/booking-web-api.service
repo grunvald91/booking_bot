@@ -6,8 +6,9 @@ After=network.target postgresql.service
 Type=exec
 User=root
 WorkingDirectory=/opt/booking_bot
-Environment=DATABASE_URL=postgresql+asyncpg://bot_user:Booking2025@localhost/booking_bot
-Environment=JWT_SECRET=booking-bot-jwt-secret-2026
+# Секреты — только на сервере (EnvironmentFile или drop-in), не в репозитории.
+Environment=DATABASE_URL=postgresql+asyncpg://bot_user:CHANGE_ME@localhost/booking_bot
+Environment=JWT_SECRET=CHANGE_ME
 ExecStart=/opt/booking_bot/venv/bin/uvicorn web.api.main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5

@@ -63,6 +63,23 @@ const emptyForm: EmployeeForm = {
   solo_price_per_hour: '',
 }
 
+function employeeCover(emp: Employee): string | null {
+  if (emp.primary_photo) return emp.primary_photo
+  try {
+    const parsed = emp.photos ? JSON.parse(emp.photos) : []
+    if (Array.isArray(parsed) && typeof parsed[0] === 'string') return parsed[0]
+  } catch { /* noop */ }
+  return emp.photo_url || null
+}
+
+function photoUrl(photo: string) {
+  return /^https?:\/\//i.test(photo) || photo.startsWith('/') ? photo : `/api/telegram-photo/${encodeURIComponent(photo)}`
+}
+
+function employeeInitials(name: string) {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('')
+}
+
 export function EmployeesPage() {
   const { businesses, selectedId: businessId, selectBusiness } = useAdminBusiness()
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -337,19 +354,39 @@ export function EmployeesPage() {
 
   return (
     <AdminShell
-      title="Мастера"
+      title={isVenueRental ? "Залы" : "Мастера"}
       headerExtra={
         <BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />
       }
     >
-      {/* Add button row */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12, marginTop: 4 }}>
-        <button className="ds-btn ds-btn--primary ds-btn--sm" onClick={openCreate}>
-          <Plus size={15} />
-          Добавить
-        </button>
-      </div>
+      {/* Команда: кто на дежурстве сегодня */}
+      {!loading && employees.length > 0 && (() => {
+        const onDuty = employees.filter((e) => e.on_duty_date === today)
+        const lead = onDuty[0] ?? employees[0]
+        return (
+          <div className="ds-context">
+            <div className="ds-context-eyebrow">{isVenueRental ? 'Помещения' : 'Команда'}</div>
+            <div className="ds-context-headline">{isVenueRental ? 'Залы и ресурсы' : 'Мастера'} · {employees.filter((e) => e.is_active !== false).length} активных</div>
+            <div className="ds-crew">
+              {employees.slice(0, 3).map((e) => {
+                const photo = employeeCover(e)
+                return (
+                  <span key={e.id} className="ds-crew-pic">
+                    {photo ? <img src={photoUrl(photo)} alt="" /> : employeeInitials(e.name)}
+                  </span>
+                )
+              })}
+              <div>
+                <strong>{onDuty.length > 0 ? `${onDuty.length} на дежурстве` : 'Сегодня никто не дежурит'}</strong>
+                <span>{lead.name}{lead.specialization ? ` · ${lead.specialization}` : ''}</span>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
+      {/* Список — прокручивается в середине экрана */}
+      <div className="ds-list-scroll">
       {/* Loading skeletons */}
       {loading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -360,30 +397,31 @@ export function EmployeesPage() {
         </div>
       ) : (
         /* Employees list */
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           {employees.map((emp) => {
             const badge = roleBadgeVariant[emp.role || 'master'] || roleBadgeVariant.master
             const isOnDuty = emp.on_duty_date === today
             return (
               <div
                 key={emp.id}
-                className="ds-card"
-                style={{ padding: '10px 12px', opacity: emp.is_active === false ? 0.6 : 1 }}
+                style={{ padding: '10px 3px 11px', borderBottom: '1px solid var(--s-line)', opacity: emp.is_active === false ? 0.6 : 1 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   {/* Avatar */}
                   <div style={{
-                    width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
-                    background: 'var(--s-surface-2)', border: '1px solid var(--s-line)',
+                    width: 44, height: 44, borderRadius: isVenueRental ? 13 : '50%', flexShrink: 0, overflow: 'hidden',
+                    background: 'radial-gradient(circle at 45% 26%, #fff, #d5e8fa)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: 'var(--s-muted)',
+                    color: '#4f76a4', fontSize: 12, fontWeight: 500,
                   }}>
-                    <User size={18} />
+                    {employeeCover(emp)
+                      ? <img src={photoUrl(employeeCover(emp)!)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      : (employeeInitials(emp.name) || <User size={18} />)}
                   </div>
 
                   {/* Name + spec */}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="ds-h3" style={{ fontSize: 14, fontWeight: 650, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <div className="ds-h3" style={{ fontSize: 13.5, fontWeight: 550, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {emp.name}
                     </div>
                     <div className="ds-sub" style={{ fontSize: 12, marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -425,7 +463,7 @@ export function EmployeesPage() {
                 </div>
 
                 {/* Info badges row */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 8, marginLeft: 50 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 5, marginTop: 9, marginLeft: 54 }}>
                   {/* Role badge */}
                   <span className={`ds-badge ${badge.variant}`}>{badge.label}</span>
 
@@ -483,6 +521,15 @@ export function EmployeesPage() {
           })}
         </div>
       )}
+      </div>
+
+      {/* Управление — внизу, у большого пальца */}
+      <div className="ds-bottom-controls">
+        <button className="ds-btn ds-btn--primary ds-btn--block" onClick={openCreate}>
+          <Plus size={15} />
+          {isVenueRental ? 'Добавить зал' : 'Добавить мастера'}
+        </button>
+      </div>
 
       {/* Create / Edit sheet */}
       {isModalOpen && (
