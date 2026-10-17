@@ -47,17 +47,21 @@ jobs:
                   time.sleep(3)
           cmd=r'''set +e
           sec(){ echo; echo "===== $1 ====="; }
-          sec R9_RELAY_SOCKS_GENERIC
-          for u in https://example.com https://www.google.com https://api.telegram.org https://telegram.org/js/telegram-widget.js?22; do printf '%s -> ' "$u"; curl -s -o /dev/null -m 10 -w '%{http_code}\n' --socks5-hostname 127.0.0.1:1089 "$u"; done
-          sec R9_RELAY_HOST_EGRESS
-          timeout 25 ssh -i /root/.ssh/servgo_89_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/booking-bot-relay89/known_hosts -o ConnectTimeout=8 root@89.125.90.101 'for u in https://example.com https://telegram.org/js/telegram-widget.js?22 https://oauth.telegram.org/ https://api.telegram.org; do printf "%s -> " "$u"; curl -s -o /dev/null -m 8 -w "%{http_code}\n" "$u"; done; uptime; df -h / | tail -1; systemctl --failed --no-legend | head -5' 2>&1 | tail -12
-          sec R9_TG_SERVGO
-          getent hosts tg.servgo.ru
-          for u in https://tg.servgo.ru/js/telegram-widget.js?22 https://tg.servgo.ru/js/telegram-web-app.js; do printf '%s -> ' "$u"; curl -s -o /dev/null -m 10 -w '%{http_code}\n' "$u"; done
-          sec R9_BOT_HEALTH
-          journalctl -u booking-bot --since '-3 hours' --no-pager -o short-iso | grep -iE 'error|timeout|proxy|socks|connect|network' | sed -E 's/bot[0-9]+:[A-Za-z0-9_-]+/bot<token>/g' | tail -10
-          journalctl -u booking-bot --since '-30 min' --no-pager -o short-iso | tail -3 | sed -E 's/bot[0-9]+:[A-Za-z0-9_-]+/bot<token>/g' | cut -c1-200
-          sec R9_END
+          sec R10_RELAY_NGINX
+          timeout 40 ssh -i /root/.ssh/servgo_89_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/booking-bot-relay89/known_hosts -o ConnectTimeout=8 root@89.125.90.101 '
+            echo "--- status"; systemctl status nginx --no-pager 2>&1 | head -12
+            echo "--- journal"; journalctl -u nginx --no-pager -n 25 -o short-iso 2>&1 | tail -25
+            echo "--- nginx -t"; nginx -t 2>&1 | tail -6
+            echo "--- listeners"; ss -lntp 2>/dev/null | grep -E ":(80|443)\b"
+            echo "--- sites"; ls -la --time-style=+%F_%T /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null
+            echo "--- tg vhost"; grep -RnE "server_name|listen|proxy_pass|ssl_certificate " /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null | head -30
+            echo "--- certs"; for c in /etc/letsencrypt/live/*/fullchain.pem; do echo "$c $(openssl x509 -in $c -noout -enddate 2>/dev/null)"; done
+            echo "--- certbot"; systemctl list-timers --no-pager 2>/dev/null | grep -i certbot; ls -la --time-style=+%F_%T /var/log/letsencrypt/ 2>/dev/null | tail -3
+            echo "--- disk"; df -h / | tail -1; df -ih / | tail -1
+            echo "--- recent pkg changes"; grep -hE " (upgrade|install) " /var/log/dpkg.log 2>/dev/null | tail -8
+            echo "--- other web/proxy units"; systemctl list-units --type=service --no-pager --no-legend 2>/dev/null | grep -Ei "nginx|caddy|xray|v2ray|mtproto|proxy|haproxy" 
+          ' 2>&1 | tail -110
+          sec R10_END
           '''
           _,o,e=s.exec_command(cmd,timeout=120)
           print(o.read().decode('utf-8','replace'))
