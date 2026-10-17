@@ -1,0 +1,224 @@
+name: Owner-approved fixes deploy 2026-10-17 (server 155 + relay 89)
+
+# Owner approved on 2026-10-17. Three independent scoped steps:
+# 1) mailbox page: web/api/routes/owner_mail_ui.html (static, no restart, backup kept)
+# 2) phone login: web/api/routes/auth.py duplicate-phone fix (restarts booking-web-api, auto-rollback)
+# 3) relay 89: start nginx that failed at boot on 09.10 (WireGuard address not up yet) and make it
+#    wait for WireGuard after reboots. Restores tg.servgo.ru.
+on:
+  push:
+    branches: [ccr-005ea961-gr0x8f]
+    paths:
+      - '.github/workflows/approved-fixes-deploy-20261017.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: approved-fixes-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            ops/mail-ui-20261017
+            ops/auth-phone-dup-20261017
+      - name: Verify release files
+        run: |
+          echo "18f0dd8feda2a50b75002adc8b2e6b5920142e9f4558ac6cdb5df85ef78e8ae9  ops/mail-ui-20261017/owner_mail_ui.html" | sha256sum -c
+          python3 -m py_compile ops/auth-phone-dup-20261017/fix_auth_phone_dup.py
+      - run: python -m pip install --disable-pip-version-check -q 'paramiko==3.5.1'
+      - name: 1) Mailbox page
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64,hashlib,os,time,shlex,paramiko
+          H='155.212.162.47'; F='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class P(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  a=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if a!=F: raise paramiko.SSHException('host key mismatch')
+                  c.get_host_keys().add(h,k.get_name(),k)
+          s=None
+          for n in range(3):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(P())
+              try:
+                  c.connect(H,username='root',password=os.environ['SERVER_PASSWORD'],look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  s=c; break
+              except Exception:
+                  c.close()
+                  if n==2: raise
+                  time.sleep(3)
+          def run(cmd,timeout=150):
+              _,o,e=s.exec_command(cmd,timeout=timeout)
+              out=o.read().decode('utf-8','replace'); err=e.read().decode('utf-8','replace')
+              print(out)
+              rc=o.channel.recv_exit_status()
+              if rc:
+                  print(err[-2500:]); raise SystemExit(rc)
+          D='/opt/servgo-releases/20261017-mail-ui'
+          run(f'mkdir -p {D}/backup && chmod 700 {D}')
+          sftp=s.open_sftp(); sftp.put('ops/mail-ui-20261017/owner_mail_ui.html', f'{D}/owner_mail_ui.html'); sftp.close()
+          run(r'''set -Eeuo pipefail
+          D=/opt/servgo-releases/20261017-mail-ui
+          T=/opt/booking_bot/web/api/routes/owner_mail_ui.html
+          OLD=6c4d1bd8c742e3710c7812a641400e74b836204677792ba4e8da6e21d77a76f2
+          NEW=18f0dd8feda2a50b75002adc8b2e6b5920142e9f4558ac6cdb5df85ef78e8ae9
+          echo "$NEW  $D/owner_mail_ui.html" | sha256sum -c --quiet
+          cur=$(sha256sum $T | cut -d' ' -f1)
+          if [ "$cur" = "$NEW" ]; then echo ALREADY_DEPLOYED; else
+            [ "$cur" = "$OLD" ] || { echo "ABORT: live mailbox page changed since review ($cur)"; exit 3; }
+            [ -f $D/backup/owner_mail_ui.html ] || cp -a $T $D/backup/
+            install -m 644 $D/owner_mail_ui.html $T
+            echo FILE_INSTALLED
+          fi
+          [ "$(sha256sum $T | cut -d' ' -f1)" = "$NEW" ]
+          c=$(curl -sk -o /dev/null -m 8 -w '%{http_code}' --resolve mail.servgo.ru:443:127.0.0.1 https://mail.servgo.ru/api/mailbox-dashboard || true)
+          echo "mailbox page without session -> $c (303 expected)"
+          [ "$c" = 303 ]
+          echo MAIL_UI_DEPLOY=success
+          ''', 60)
+          s.close()
+          PY
+      - name: 2) Phone login duplicate fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64,hashlib,os,time,shlex,paramiko
+          H='155.212.162.47'; F='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class P(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  a=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if a!=F: raise paramiko.SSHException('host key mismatch')
+                  c.get_host_keys().add(h,k.get_name(),k)
+          s=None
+          for n in range(3):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(P())
+              try:
+                  c.connect(H,username='root',password=os.environ['SERVER_PASSWORD'],look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  s=c; break
+              except Exception:
+                  c.close()
+                  if n==2: raise
+                  time.sleep(3)
+          def run(cmd,timeout=150):
+              _,o,e=s.exec_command(cmd,timeout=timeout)
+              out=o.read().decode('utf-8','replace'); err=e.read().decode('utf-8','replace')
+              print(out)
+              rc=o.channel.recv_exit_status()
+              if rc:
+                  print(err[-2500:]); raise SystemExit(rc)
+          D='/opt/servgo-releases/20261017-auth-phone-dup'
+          run(f'mkdir -p {D}/backup && chmod 700 {D}')
+          sftp=s.open_sftp(); sftp.put('ops/auth-phone-dup-20261017/fix_auth_phone_dup.py', f'{D}/fix_auth_phone_dup.py'); sftp.close()
+          run(r'''set -Eeuo pipefail
+          D=/opt/servgo-releases/20261017-auth-phone-dup
+          A=/opt/booking_bot/web/api/routes/auth.py
+          PYV=/opt/booking_bot/venv/bin/python
+          OLD=144288c2c455f1cbf09f74e9bbf160f593db78893e37eb62d1b34ebd3f5e99b2
+          cur=$(sha256sum $A | cut -d' ' -f1)
+          if grep -q '_user_by_phone' $A; then echo ALREADY_PATCHED; else
+            [ "$cur" = "$OLD" ] || { echo "ABORT: auth.py changed since review ($cur)"; exit 3; }
+            [ -f $D/backup/auth.py ] || cp -a $A $D/backup/auth.py
+            cp $A $D/auth.py.new
+            $PYV $D/fix_auth_phone_dup.py $D/auth.py.new $OLD
+            $PYV -m py_compile $D/auth.py.new
+            install -m 644 $D/auth.py.new $A
+            echo PATCH_INSTALLED
+          fi
+          rollback(){
+            echo "CHECK FAILED: $1 -> rolling back"
+            install -m 644 $D/backup/auth.py $A
+            systemctl restart booking-web-api; sleep 4
+            echo "rollback: booking-web-api=$(systemctl is-active booking-web-api)"
+            journalctl -u booking-web-api -n 30 --no-pager | sed -E 's/[A-Za-z0-9._%+-]+@/***@/g; s/\+?[0-9]{10,}/<num>/g'
+            exit 1
+          }
+          systemctl restart booking-web-api
+          ok=''
+          for i in $(seq 1 20); do sleep 1; code=$(curl -s -o /dev/null -m 4 -w '%{http_code}' http://127.0.0.1:8000/auth/session || true); [ "$code" = 401 ] && { ok=1; break; }; done
+          [ -n "$ok" ] || rollback "api did not come up (last=$code)"
+          echo "booking-web-api=$(systemctl is-active booking-web-api)"
+          c=$(curl -s -o /dev/null -m 8 -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8000/auth/phone || true)
+          [ "$c" = 422 ] || rollback "/auth/phone validation returned $c"
+          echo 'check /auth/phone route: ok'
+          c=$(curl -s -o /dev/null -m 8 -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8000/auth/verify || true)
+          [ "$c" = 422 ] || rollback "/auth/verify validation returned $c"
+          echo 'check /auth/verify route: ok'
+          c=$(curl -sk -o /dev/null -m 8 -w '%{http_code}' --resolve servgo.ru:443:127.0.0.1 https://servgo.ru/login || true)
+          [ "$c" = 200 ] || rollback "servgo.ru/login returned $c"
+          echo 'check servgo.ru/login: ok'
+          curl -sk -m 8 --resolve mail.servgo.ru:443:127.0.0.1 https://mail.servgo.ru/ | grep -q 'type="password"' || rollback 'mail login form missing'
+          echo 'check mail.servgo.ru login form: ok'
+          journalctl -u booking-web-api --since '-1 min' --no-pager | grep -qE 'Traceback|ImportError|NameError' && rollback 'errors in API log after restart'
+          echo "booking-bot=$(systemctl is-active booking-bot)"
+          echo 'AUTH_PHONE_FIX_DEPLOY=success'
+          ''')
+          s.close()
+          PY
+      - name: 3) Relay 89 nginx (tg.servgo.ru)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64,hashlib,os,time,shlex,paramiko
+          H='155.212.162.47'; F='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class P(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  a=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if a!=F: raise paramiko.SSHException('host key mismatch')
+                  c.get_host_keys().add(h,k.get_name(),k)
+          s=None
+          for n in range(3):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(P())
+              try:
+                  c.connect(H,username='root',password=os.environ['SERVER_PASSWORD'],look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  s=c; break
+              except Exception:
+                  c.close()
+                  if n==2: raise
+                  time.sleep(3)
+          def run(cmd,timeout=150):
+              _,o,e=s.exec_command(cmd,timeout=timeout)
+              out=o.read().decode('utf-8','replace'); err=e.read().decode('utf-8','replace')
+              print(out)
+              rc=o.channel.recv_exit_status()
+              if rc:
+                  print(err[-2500:]); raise SystemExit(rc)
+          relay=r'''set -Eeuo pipefail
+          WG_IF=$(ip -o -4 addr show | awk '/ 10\.66\.77\.1\//{print $2; exit}')
+          [ -n "$WG_IF" ] || { echo "ABORT: 10.66.77.1 is not up; nginx would fail again"; exit 3; }
+          echo "wireguard interface: $WG_IF"
+          nginx -t 2>&1 | tail -2
+          if systemctl list-unit-files "wg-quick@$WG_IF.service" --no-legend | grep -q wg-quick; then
+            install -d /etc/systemd/system/nginx.service.d
+            printf '[Unit]\nAfter=wg-quick@%s.service\nWants=wg-quick@%s.service\n' "$WG_IF" "$WG_IF" > /etc/systemd/system/nginx.service.d/wait-wireguard.conf
+            systemctl daemon-reload
+            echo "boot order: nginx now waits for wg-quick@$WG_IF"
+          else
+            echo "WARN: wg-quick@$WG_IF unit not found; boot ordering not added"
+          fi
+          systemctl reset-failed nginx || true
+          systemctl start nginx
+          sleep 2
+          echo "nginx=$(systemctl is-active nginx)"
+          [ "$(systemctl is-active nginx)" = active ]
+          ss -lntp | grep nginx | awk '{print $4}' | sort -u | tr '\n' ' '; echo
+          for u in 'https://tg.servgo.ru/js/telegram-widget.js?22' https://tg.servgo.ru/js/telegram-web-app.js; do printf '%s (local) -> ' "$u"; curl -s -o /dev/null -m 10 -w '%{http_code}\n' --resolve tg.servgo.ru:443:127.0.0.1 "$u" || true; done
+          echo "telemt=$(systemctl is-active telemt) xray=$(systemctl is-active xray) mtproxy=$(systemctl is-active mtproxy)"
+          echo RELAY_NGINX=success
+          '''
+          relay='\n'.join(l.strip() for l in relay.splitlines())
+          run('timeout 60 ssh -i /root/.ssh/servgo_89_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/booking-bot-relay89/known_hosts -o ConnectTimeout=8 root@89.125.90.101 ' + shlex.quote(relay), 90)
+          run("for u in 'https://tg.servgo.ru/js/telegram-widget.js?22' https://tg.servgo.ru/js/telegram-web-app.js; do printf '%s (from 155) -> ' \"$u\"; curl -s -o /dev/null -m 10 -w '%{http_code}\\n' \"$u\" || true; done", 40)
+          s.close()
+          PY
+      - name: Public checks
+        run: |
+          for u in 'https://tg.servgo.ru/js/telegram-widget.js?22' https://tg.servgo.ru/js/telegram-web-app.js https://servgo.ru/login https://mail.servgo.ru/; do printf '%s -> ' "$u"; curl -s -o /dev/null -m 10 -w '%{http_code}\n' "$u" || true; done
