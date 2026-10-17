@@ -15,7 +15,20 @@ interface Props {
  */
 export function BusinessSelector({ businesses, selectedId, onSelect }: Props) {
   const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number; width: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+
+  // Меню позиционируется от экрана, а не от кнопки: на узком телефоне
+  // оно не выходит за левый край.
+  const toggle = () => {
+    if (!open && ref.current) {
+      const r = ref.current.getBoundingClientRect();
+      const width = Math.min(300, window.innerWidth - 24);
+      const right = Math.min(Math.max(12, window.innerWidth - r.right), window.innerWidth - width - 12);
+      setMenuPos({ top: r.bottom + 6, right, width });
+    }
+    setOpen((v) => !v);
+  };
 
   useEffect(() => {
     const onClickOutside = (e: MouseEvent) => {
@@ -32,7 +45,7 @@ export function BusinessSelector({ businesses, selectedId, onSelect }: Props) {
   return (
     <div ref={ref} style={{ position: 'relative', flexShrink: 0, maxWidth: '42%' }}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         className="ds-biz-select"
         style={{ maxWidth: '100%', overflow: 'hidden' }}
         aria-label="Выбрать бизнес"
@@ -45,17 +58,16 @@ export function BusinessSelector({ businesses, selectedId, onSelect }: Props) {
         />
       </button>
 
-      {open && (
+      {open && menuPos && (
         <div
           style={{
             background: 'var(--s-surface)',
             borderRadius: 15,
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            right: 0,
+            position: 'fixed',
+            top: menuPos.top,
+            right: menuPos.right,
             zIndex: 95,
-            minWidth: 200,
-            maxWidth: 'min(80vw, 280px)',
+            width: menuPos.width,
             padding: 6,
             boxShadow: 'var(--sh-pop)',
             maxHeight: '60vh',

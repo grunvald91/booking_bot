@@ -2,13 +2,13 @@ import { OwnerMailEntry } from './OwnerMailEntry'
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Clock, Scissors, Users, Settings, Moon, Sun, LogOut, MessageCircle } from 'lucide-react'
+import { Wallet, LayoutDashboard, Clock, Scissors, Users, Settings, Moon, Sun, LogOut, MessageCircle } from 'lucide-react'
 import { useTheme } from '../hooks/useTheme'
 
 const NAV = [
   { to: '/admin', label: 'Панель', Icon: LayoutDashboard },
   { to: '/admin/schedule', label: 'Расписание', Icon: Clock },
-  { to: '/admin/prepayments', label: 'Предоплаты', Icon: Clock },
+  { to: '/admin/prepayments', label: 'Оплаты', Icon: Wallet },
   { to: '/admin/services', label: 'Услуги', Icon: Scissors },
   { to: '/admin/employees', label: 'Мастера', Icon: Users },
   { to: '/admin/sales', label: 'Диалоги', Icon: MessageCircle },
