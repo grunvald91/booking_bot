@@ -109,6 +109,11 @@ jobs:
                       with sftp.open(root+rel,'rb') as f:extras['_live/'+rel]=f.read()
                   except FileNotFoundError:pass
               scan('web/frontend/src')
+              for entry in sftp.listdir_attr(root.rstrip('/')):
+                  name=entry.filename
+                  if (stat.S_ISREG(entry.st_mode) and name.endswith('.py') and name not in tracked_set
+                          and allowed(name) and not name.startswith('.') and entry.st_size<=2_000_000):
+                      with sftp.open(root+name,'rb') as f:extras[name]=f.read()
               manifest_extra={'dist_assets_count':len(dist_assets),'live_entry':live,'dist_markers':markers}
               manifest={'tracked_checked':len(tracked),'matching':same,'missing_on_server':missing,
                         'too_large':too_large,'extra_server_source':list(extras),'frontend_dist':manifest_extra,
