@@ -430,42 +430,8 @@ export function ServicesPage() {
         </div>
       </div>
 
-      {/* Add button */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2, marginBottom: 8 }}>
-        <button onClick={openCreate} className="ds-btn ds-btn--primary ds-btn--sm">
-          <Plus size={15} />
-          Добавить услугу
-        </button>
-      </div>
-
-      {/* Режим выбора услуг клиентом */}
-      <div className="ds-toggle-row" style={{ padding: '8px 2px' }}>
-        <div>
-          <div className="t1">Несколько услуг в одной записи</div>
-          <div className="t2">
-            {isVenue
-              ? 'Для аренды залов клиент всегда может выбрать несколько услуг'
-              : 'Клиент сможет выбрать несколько услуг и продолжить одним нажатием'}
-          </div>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={isVenue || !!allowMultiple}
-          aria-label="Разрешить несколько услуг при записи"
-          className={`ds-toggle ${isVenue || allowMultiple ? 'on' : ''}`}
-          disabled={isVenue || allowMultiple === null || savingMultiple}
-          onClick={toggleAllowMultiple}
-        />
-      </div>
-      {businessId && (
-        <div style={{ margin: '0 0 12px' }}>
-          <a href={`/book/${businessId}`} target="_blank" rel="noopener noreferrer" className="ds-accent" style={{ fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
-            Как увидит клиент <ChevronRight size={14} />
-          </a>
-        </div>
-      )}
-
+      {/* Список — прокручивается в середине экрана */}
+      <div className="ds-list-scroll">
       {/* Main services section */}
       {mainServices.length > 0 && (
         <div style={{ marginBottom: 16 }}>
@@ -501,6 +467,45 @@ export function ServicesPage() {
           <p className="ds-sub">Нет услуг. Нажмите «Добавить услугу» чтобы создать первую.</p>
         </div>
       )}
+      </div>
+
+      {/* Управление — внизу, у большого пальца */}
+      <div className="ds-bottom-controls">
+      {/* Режим выбора услуг клиентом */}
+      <div className="ds-toggle-row" style={{ padding: '8px 2px' }}>
+        <div>
+          <div className="t1">Несколько услуг в одной записи</div>
+          <div className="t2">
+            {isVenue
+              ? 'Для аренды залов клиент всегда может выбрать несколько услуг'
+              : 'Клиент сможет выбрать несколько услуг и продолжить одним нажатием'}
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={isVenue || !!allowMultiple}
+          aria-label="Разрешить несколько услуг при записи"
+          className={`ds-toggle ${isVenue || allowMultiple ? 'on' : ''}`}
+          disabled={isVenue || allowMultiple === null || savingMultiple}
+          onClick={toggleAllowMultiple}
+        />
+      </div>
+      {businessId && (
+        <div style={{ margin: '0 0 4px' }}>
+          <a href={`/book/${businessId}`} target="_blank" rel="noopener noreferrer" className="ds-accent" style={{ fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
+            Как увидит клиент <ChevronRight size={14} />
+          </a>
+        </div>
+      )}
+      {/* Add button */}
+      <div style={{ marginTop: 6 }}>
+        <button onClick={openCreate} className="ds-btn ds-btn--primary ds-btn--block">
+          <Plus size={15} />
+          Добавить услугу
+        </button>
+      </div>
+      </div>
 
       {/* Create / Edit sheet */}
       {isCreating && (

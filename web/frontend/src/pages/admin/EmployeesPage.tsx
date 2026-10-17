@@ -385,14 +385,8 @@ export function EmployeesPage() {
         )
       })()}
 
-      {/* Add button row */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8, marginTop: 2 }}>
-        <button className="ds-btn ds-btn--primary ds-btn--sm" onClick={openCreate}>
-          <Plus size={15} />
-          Добавить
-        </button>
-      </div>
-
+      {/* Список — прокручивается в середине экрана */}
+      <div className="ds-list-scroll">
       {/* Loading skeletons */}
       {loading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -527,6 +521,15 @@ export function EmployeesPage() {
           })}
         </div>
       )}
+      </div>
+
+      {/* Управление — внизу, у большого пальца */}
+      <div className="ds-bottom-controls">
+        <button className="ds-btn ds-btn--primary ds-btn--block" onClick={openCreate}>
+          <Plus size={15} />
+          {isVenueRental ? 'Добавить зал' : 'Добавить мастера'}
+        </button>
+      </div>
 
       {/* Create / Edit sheet */}
       {isModalOpen && (

@@ -57,7 +57,8 @@ export function AdminShell({
       </header>
 
       <div className="ds-shell-content" style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '0 16px 16px' }}>
-        {children}
+        {/* Мобильная раскладка «информация сверху — управление снизу» (см. .ds-page) */}
+        <div className="ds-page">{children}</div>
       </div>
 
       <nav className="ds-bottomnav">
