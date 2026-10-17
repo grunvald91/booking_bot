@@ -1,0 +1,120 @@
+name: Deploy ServGo Air frontend (scoped)
+
+# Разовая выкладка только frontend (главная и страница бизнеса в дизайне Air).
+# Backend и сервисы не трогает. Собирает web/frontend, заливает в соседнюю
+# папку и подменяет dist переименованием; старые assets сохраняются для уже
+# открытых вкладок. Временный файл: удалить до мержа PR #38.
+
+on:
+  push:
+    branches:
+      - ccr-545c5158-rcd05z
+    paths:
+      - '.github/workflows/servgo-air-frontend-deploy.yml'
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard — secret present
+        run: |
+          if [ -z "$SERVER_PASSWORD" ]; then
+            echo "::error::SERVER_SSH_PASSWORD is not configured"; exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: web/frontend
+        run: |
+          npm ci --legacy-peer-deps
+          npm run build
+          grep -R -q 'bf-tabbar' dist/assets
+
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+
+      - name: Upload and swap dist
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, pathlib, posixpath, shlex, sys, time
+          import paramiko
+
+          FRONT = '/opt/booking_bot/web/frontend'
+
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self, client, hostname, key):
+                  actual = base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  if actual != 'uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU':
+                      raise paramiko.SSHException('Host key mismatch')
+                  client.get_host_keys().add(hostname, key.get_name(), key)
+
+          ssh = None
+          for attempt in range(3):
+              conn = paramiko.SSHClient(); conn.set_missing_host_key_policy(Pinned())
+              try:
+                  conn.connect('155.212.162.47', port=22, username='root', password=os.environ['SERVER_PASSWORD'],
+                               look_for_keys=False, allow_agent=False, timeout=12, banner_timeout=25, auth_timeout=15)
+                  ssh = conn; break
+              except (paramiko.SSHException, OSError, EOFError):
+                  conn.close()
+                  if attempt == 2: raise
+                  time.sleep(3)
+          sftp = ssh.open_sftp()
+
+          def run(cmd, check=True):
+              _, out, err = ssh.exec_command(cmd, timeout=180)
+              code = out.channel.recv_exit_status()
+              o = out.read().decode(errors='replace'); e = err.read().decode(errors='replace')
+              if o.strip(): print(o.rstrip())
+              if e.strip(): print(e.rstrip(), file=sys.stderr)
+              if check and code != 0:
+                  raise RuntimeError(f'command failed ({code})')
+              return code, o
+
+          def put_tree(local, remote):
+              for path in sorted(pathlib.Path(local).rglob('*')):
+                  target = posixpath.join(remote, path.relative_to(local).as_posix())
+                  if path.is_dir():
+                      run(f'mkdir -p {shlex.quote(target)}')
+                  else:
+                      sftp.put(str(path), target)
+
+          try:
+              stamp = time.strftime('%Y%m%d-%H%M%S')
+              new_dir = f'{FRONT}/dist.new-{stamp}'
+              prev_dir = f'{FRONT}/dist.prev-{stamp}'
+              run(f'test -d {FRONT}/dist && rm -rf {new_dir} && mkdir -p {new_dir}')
+              try:
+                  put_tree('web/frontend/dist', new_dir)
+                  run(f"grep -R -q 'bf-tabbar' {new_dir}/assets")
+                  run(f'cp -an {FRONT}/dist/assets/. {new_dir}/assets/ 2>/dev/null || true')
+                  run(f'mv {FRONT}/dist {prev_dir} && mv {new_dir} {FRONT}/dist')
+              except Exception:
+                  run(f'rm -rf {new_dir}', check=False)
+                  raise
+              run(f'ls -d {FRONT}/dist.prev-* 2>/dev/null | sort | head -n -2 | xargs -r rm -rf', check=False)
+              run("printf 'site HTTP '; curl -s -o /dev/null -w '%{http_code}\\n' --max-time 5 -H 'Host: servgo.ru' http://127.0.0.1/", check=False)
+              run("printf 'booking-web-api: '; systemctl is-active booking-web-api", check=False)
+              print('frontend live; previous build kept at', prev_dir)
+              print('Rollback: mv', f'{FRONT}/dist', f'{FRONT}/dist.bad-{stamp}', '&& mv', prev_dir, f'{FRONT}/dist')
+          finally:
+              sftp.close(); ssh.close()
+          PY
