@@ -47,40 +47,13 @@ jobs:
                   time.sleep(3)
           cmd=r'''set +e
           sec(){ echo; echo "===== $1 ====="; }
-          mask(){ sed -E 's/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+)/***@\1/g; s/\+?[0-9]{10,}/<num>/g; s/(token|hash|code)=[^ &"]+/\1=***/g'; }
-          sec RUN6_API_UPTIME
-          systemctl show -p ActiveEnterTimestamp booking-web-api booking-bot
-          sec RUN6_API_FILES_CHANGED_SINCE_PREV_RESTART
-          find /opt/booking_bot/web/api /opt/booking_bot/bot /opt/booking_bot/*.py -name '*.py' -newermt '2026-10-16 11:06:30' -printf '%TF_%TT %p\n' 2>/dev/null | grep -v __pycache__ | sort | tail -30
-          sec RUN6_AUTH_REQUESTS_16OCT_BEFORE
-          journalctl -u booking-web-api --since '2026-10-16 00:00' --until '2026-10-17 03:11' --no-pager -o cat 2>/dev/null | grep -oE '"(GET|POST) /auth/[^ ?]*[^"]*" [0-9]{3}' | sort | uniq -c | sort -rn | head -15
-          sec RUN6_AUTH_REQUESTS_AFTER_RESTART
-          journalctl -u booking-web-api --since '2026-10-17 03:11' --no-pager -o short-iso 2>/dev/null | grep -E '/auth/' | mask | tail -30
-          sec RUN6_API_ERRORS_AFTER_RESTART
-          journalctl -u booking-web-api --since '2026-10-17 03:11' --no-pager -o short-iso 2>/dev/null | grep -vE '" [234][0-9][0-9] ' | grep -E 'Traceback|Error|Exception|error|WARNING|File "' | mask | tail -40
-          sec RUN6_AUTH_ERRORS_LAST_3_DAYS
-          journalctl -u booking-web-api --since '-3 days' --no-pager -o short-iso 2>/dev/null | grep -iE 'auth|telegram|phone|sms|code' | grep -iE 'error|fail|exception|traceback|refused|timeout|denied' | mask | tail -30
-          sec RUN6_LOCAL_PROBES
-          printf 'session -> '; curl -s -o /dev/null -m 8 -w '%{http_code}\n' http://127.0.0.1:8000/auth/session
-          printf 'phone empty -> '; curl -s -m 8 -w ' %{http_code}\n' -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8000/auth/phone | cut -c1-300
-          printf 'telegram empty -> '; curl -s -m 8 -w ' %{http_code}\n' -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8000/auth/telegram | cut -c1-300
-          printf 'capabilities -> '; curl -s -m 8 -w ' %{http_code}\n' http://127.0.0.1:8000/auth/email/capabilities | cut -c1-300
-          sec RUN6_SERVGO_LOGIN_HEADERS
-          curl -skI -m 8 --resolve servgo.ru:443:127.0.0.1 https://servgo.ru/login | grep -iE '^(HTTP|content-security|x-frame|cache-control)'
-          sec RUN6_FRONTEND_TELEGRAM
-          D=/opt/booking_bot/web/frontend/dist; J=$D/assets/$(grep -oE 'index-[A-Za-z0-9_-]+\.js' $D/index.html | head -1); echo "$J"
-          grep -oE '.{120}telegram-widget.{220}' "$J" | head -3
-          grep -oE '.{80}data-telegram-login.{120}' "$J" | head -2
-          grep -oE '.{100}/auth/phone.{200}' "$J" | head -2
-          grep -oE '.{60}/auth/telegram[^-].{160}' "$J" | head -2
-          sec RUN6_LOGIN_CHUNKS
-          ls -l --time-style=+%F_%T $D/assets | grep -iE 'login|auth' | tail -5
-          sec RUN6_SERVER_TELEGRAM_REACH
-          curl -s -o /dev/null -m 8 -w 'telegram.org widget from server -> %{http_code}\n' https://telegram.org/js/telegram-widget.js
-          curl -s -o /dev/null -m 8 -w 'api.telegram.org from server -> %{http_code}\n' https://api.telegram.org/
-          sec RUN6_AUTH_PY_DELIVERY
-          grep -nE 'def (send|request|deliver)|api.telegram.org|gateway|sendMessage|sms|TELEGRAM_[A-Z_]+|BOT_USERNAME' /opt/booking_bot/web/api/routes/auth.py | sed -E 's/(=\s*)["'"'"'][^"'"'"']{20,}["'"'"']/\1<redacted>/' | head -25
-          sec RUN6_END
+          sec RUN7_AUTH_PY_META
+          ls -l --time-style=+%F_%T /opt/booking_bot/web/api/routes/auth.py; sha256sum /opt/booking_bot/web/api/routes/auth.py
+          grep -rn 'scalar_one_or_none' /opt/booking_bot/web/api/routes/auth.py | grep -n 'phone' | head
+          grep -n 'User.phone' -r /opt/booking_bot/web/api/routes/*.py | head -20
+          sec RUN7_AUTH_PY_B64
+          base64 -w0 /opt/booking_bot/web/api/routes/auth.py; echo
+          sec RUN7_END
           '''
           _,o,e=s.exec_command(cmd,timeout=120)
           print(o.read().decode('utf-8','replace'))
