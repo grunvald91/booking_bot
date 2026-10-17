@@ -47,17 +47,26 @@ jobs:
                   time.sleep(3)
           cmd=r'''set +e
           sec(){ echo; echo "===== $1 ====="; }
-          sec R11_RELAY_TELEMT
-          timeout 40 ssh -i /root/.ssh/servgo_89_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/booking-bot-relay89/known_hosts -o ConnectTimeout=8 root@89.125.90.101 '
-            echo "--- telemt unit"; systemctl cat telemt 2>/dev/null | grep -E "^(ExecStart|WorkingDirectory|Restart|After|Requires)="
-            echo "--- telemt status"; systemctl status telemt --no-pager 2>&1 | sed -n 1,8p
-            echo "--- telemt journal"; journalctl -u telemt --no-pager -n 30 -o short-iso 2>&1 | grep -viE "secret|key=|token" | tail -30
-            echo "--- telemt listen config"; for f in $(systemctl cat telemt 2>/dev/null | grep -oE "(-c|--config)[ =][^ ]+" | sed -E "s/^(-c|--config)[ =]//") /etc/telemt/*.toml /etc/telemt.toml /opt/telemt/*.toml; do [ -f "$f" ] && { echo "# $f"; grep -nEi "listen|port|sni|mask|tls_domain|5443|4453|upstream|fallback" "$f" | grep -viE "secret|key" | head -25; }; done
-            echo "--- all listeners"; ss -lntp 2>/dev/null | grep -vE "127.0.0.53" | awk "{print \$4, \$6}" | head -40
-            echo "--- nginx last start error"; journalctl --no-pager -o short-iso --since "2026-10-09 20:00" --until "2026-10-09 21:00" 2>/dev/null | grep -iE "nginx|telemt|bind|address already" | tail -20
-            echo "--- nginx error.log"; tail -n 15 /var/log/nginx/error.log 2>/dev/null; zcat -f /var/log/nginx/error.log.1 2>/dev/null | tail -5
-          ' 2>&1 | tail -120
-          sec R11_END
+          sec R12_RELAY
+          timeout 50 ssh -i /root/.ssh/servgo_89_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/booking-bot-relay89/known_hosts -o ConnectTimeout=8 root@89.125.90.101 '
+            echo "--- who brings up tg-relay"
+            ip -d link show tg-relay 2>&1 | head -3
+            grep -rlE "tg-relay" /etc/systemd /lib/systemd/system /etc/wireguard /etc/network /etc/netplan 2>/dev/null | head
+            systemctl list-units --all --no-pager --no-legend 2>/dev/null | grep -iE "tg-relay|wg|wireguard|networkd" | head
+            networkctl list 2>/dev/null | head -10
+            for u in $(grep -rlE "tg-relay" /etc/systemd/system 2>/dev/null | xargs -r -n1 basename | grep -E "\.service$"); do echo "# $u"; systemctl cat "$u" 2>/dev/null | grep -E "^(Description|After|Before|Wants|Requires|ExecStart|Type|RemainAfterExit|WantedBy)=" | sed -E "s/(PrivateKey|PresharedKey)[^ ]*/\1=<redacted>/g"; echo "active=$(systemctl is-active $u) enabled=$(systemctl is-enabled $u)"; done
+            echo "--- nginx drop-ins"; ls /etc/systemd/system/nginx.service.d/; systemctl cat nginx | grep -E "^(After|Wants|Requires|ExecStartPre|Restart)="
+            echo "--- telemt units"
+            systemctl list-units --all --no-pager --no-legend "telemt*" 2>/dev/null
+            systemctl cat telemt 2>/dev/null | grep -E "^(Description|ExecStart|Restart|RestartSec|After|User|WorkingDirectory)="
+            echo "--- telemt journal"
+            journalctl -u telemt --no-pager -n 40 -o short-iso 2>&1 | grep -viE "secret|ad_tag" | tail -40
+            echo "--- telemt restarts"; systemctl show telemt -p NRestarts -p ExecMainStatus -p ActiveEnterTimestamp
+            CONF=$(systemctl cat telemt 2>/dev/null | sed -n "s/^ExecStart=.* \(\/[^ ]*\.toml\).*/\1/p" | head -1); echo "config=$CONF"
+            [ -n "$CONF" ] && grep -nEi "^\[|listen|port|tls_domain|mask_host|mask_port|public" "$CONF" | grep -viE "secret|key" | head -30
+            echo "--- ports in use near telemt"; ss -lntp 2>/dev/null | grep -E ":(443|944[0-9]|909[0-9]|947[0-9]) " | awk "{print \$4, \$6}"
+          ' 2>&1 | tail -140
+          sec R12_END
           '''
           _,o,e=s.exec_command(cmd,timeout=120)
           print(o.read().decode('utf-8','replace'))
