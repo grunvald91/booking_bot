@@ -1,0 +1,65 @@
+name: Eval prospect search quality (kimi-k3 vs grok, verified on the live web)
+
+# Owner asked on 2026-10-17 to check whether Kimi K3 finds real prospects well.
+# Runs ops/prospect-search-eval/eval_prospect_search.py inside the AI Growth OS worker container,
+# which already holds the ClaudeHub key (never printed). Changes nothing on the server except a
+# temporary copy of the script, removed afterwards. Costs a few LLM calls.
+on:
+  push:
+    branches: [ccr-005ea961-gr0x8f]
+    paths:
+      - '.github/workflows/eval-prospect-search-20261017.yml'
+      - 'ops/prospect-search-eval/eval_prospect_search.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval-prospect-search
+  cancel-in-progress: false
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: ops/prospect-search-eval
+      - run: python -m pip install --disable-pip-version-check -q 'paramiko==3.5.1'
+      - name: Run eval in the Growth container
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64,hashlib,os,time,paramiko
+          H='155.212.162.47'; F='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class P(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  a=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if a!=F: raise paramiko.SSHException('host key mismatch')
+                  c.get_host_keys().add(h,k.get_name(),k)
+          s=None
+          for n in range(3):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(P())
+              try:
+                  c.connect(H,username='root',password=os.environ['SERVER_PASSWORD'],look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  s=c; break
+              except Exception:
+                  c.close()
+                  if n==2: raise
+                  time.sleep(3)
+          sftp=s.open_sftp(); sftp.put('ops/prospect-search-eval/eval_prospect_search.py','/tmp/eval_prospect_search.py'); sftp.close()
+          cmd=('set -e; C=ai-growth-os-worker-1; docker cp /tmp/eval_prospect_search.py $C:/tmp/eval_prospect_search.py; '
+               'docker exec -e PYTHONUNBUFFERED=1 $C python /tmp/eval_prospect_search.py 2>&1 | sed -E "s/(Bearer|sk-)[A-Za-z0-9._-]+/\\1***/g"; '
+               'docker exec $C rm -f /tmp/eval_prospect_search.py; rm -f /tmp/eval_prospect_search.py')
+          _,o,e=s.exec_command(cmd,timeout=1350)
+          for line in iter(o.readline, ''):
+              print(line, end='')
+          rc=o.channel.recv_exit_status()
+          err=e.read().decode('utf-8','replace')
+          if rc:
+              print(err[-2000:]); raise SystemExit(rc)
+          s.close()
+          PY
