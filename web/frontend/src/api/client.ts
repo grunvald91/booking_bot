@@ -204,6 +204,7 @@ export interface Booking {
   notify_token?: string;
   business_address?: string;
   duration_minutes?: number;
+  prepayment_amount?: number | null;
 }
 
 

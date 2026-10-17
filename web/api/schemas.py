@@ -209,6 +209,7 @@ class BookingOut(BaseModel):
     can_cancel: bool = False
     can_reschedule: bool = False
     notify_token: Optional[str] = None
+    prepayment_amount: Optional[int] = None
 
 
 class PublicServiceItem(BaseModel):
