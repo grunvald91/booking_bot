@@ -1,10 +1,11 @@
 name: Deploy one client booking path (scoped, guarded)
 
 # Разовая выкладка: старая /book (webapp в booking-bot) → servgo.ru, закрытие
-# старого создания записей, проверка «нескольких услуг» в API.
+# старого создания записей, проверка «нескольких услуг» в API, согласованные
+# YAML/CSS лендингов ниш (без них лендинги отдают 500 после рестарта бота).
 #   1. сверяет хэши файлов на сервере с ожидаемыми (837d30c) — иначе ничего не трогает;
 #   2. бэкап; 3. заливка; 4. py_compile; 5. рестарт booking-web-api и booking-bot;
-#   6. проверки (API, бот активен, /book → 302 на servgo.ru, лендинг ниши 200);
+#   6. проверки (API, бот активен, /book → 302 на servgo.ru, все лендинги ниш 200);
 #   при ошибке — откат файлов из бэкапа и повторный рестарт.
 # Журналы сервисов в публичный лог не выводятся. Временный файл: удалить до мержа PR #38.
 
@@ -43,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           # 837d30c = состояние сервера после прогона 3 (webapp не менялся с be2d6bc)
-          for f in web/api/routes/client.py webapp/server.py webapp/templates/landing.html webapp/templates/login.html; do
+          for f in web/api/routes/client.py webapp/server.py webapp/templates/landing.html webapp/templates/login.html webapp/templates/niche.html webapp/static/css/niche.css webapp/niches/_shared.yaml webapp/niches/banya.yaml webapp/niches/barbershop.yaml webapp/niches/beauty.yaml webapp/niches/hall-rental.yaml webapp/niches/psy.yaml webapp/niches/shinomontazh.yaml; do
             echo "$f $(git show 837d30c:"$f" | sha256sum | cut -d' ' -f1)"
           done > expected.txt
           cat expected.txt
@@ -59,7 +60,10 @@ jobs:
           import paramiko
 
           ROOT = '/opt/booking_bot'
-          FILES = ['web/api/routes/client.py', 'webapp/server.py', 'webapp/templates/landing.html', 'webapp/templates/login.html']
+          FILES = ['web/api/routes/client.py', 'webapp/server.py', 'webapp/templates/landing.html', 'webapp/templates/login.html',
+                   'webapp/templates/niche.html', 'webapp/static/css/niche.css'] + [f'webapp/niches/{n}.yaml' for n in
+                   ('_shared', 'banya', 'barbershop', 'beauty', 'hall-rental', 'psy', 'shinomontazh')]
+          NICHES = ['banya', 'barbershop', 'beauty', 'hall-rental', 'psy', 'shinomontazh']
           PY_FILES = [f for f in FILES if f.endswith('.py')]
           expected = dict(line.split() for line in pathlib.Path('expected.txt').read_text().splitlines())
 
@@ -98,8 +102,7 @@ jobs:
                   "curl -fsS -o /dev/null --max-time 4 http://127.0.0.1:8000/businesses",
                   "systemctl is-active --quiet booking-bot",
                   "curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 4 'http://127.0.0.1:8080/book?business_id=1' | grep -q '^302 https://servgo.ru/book?business_id=1$'",
-                  "curl -fsS -o /dev/null --max-time 4 http://127.0.0.1:8080/beauty",
-              )
+              ) + tuple(f"curl -fsS -o /dev/null --max-time 4 http://127.0.0.1:8080/{n}" for n in NICHES)
               for _ in range(25):
                   if all(run(c, check=False)[0] == 0 for c in checks):
                       return True
