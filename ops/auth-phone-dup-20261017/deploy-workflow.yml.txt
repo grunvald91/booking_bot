@@ -1,0 +1,105 @@
+name: Auth phone duplicate fix deploy (server 155)
+
+# Scoped production fix for servgo.ru phone login: duplicate User.phone rows made
+# scalar_one_or_none() raise, so /auth/phone and /auth/verify failed. Patches
+# web/api/routes/auth.py only, restarts booking-web-api, auto-rolls back on failure.
+on:
+  push:
+    branches: [ccr-005ea961-gr0x8f]
+    paths:
+      - '.github/workflows/auth-phone-dup-deploy-20261017.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auth-phone-dup-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: ops/auth-phone-dup-20261017
+      - run: python3 -m py_compile ops/auth-phone-dup-20261017/fix_auth_phone_dup.py
+      - run: python -m pip install --disable-pip-version-check -q 'paramiko==3.5.1'
+      - name: Patch, verify, roll back on failure
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64,hashlib,os,time,paramiko
+          H='155.212.162.47'; F='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class P(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  a=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if a!=F: raise paramiko.SSHException('host key mismatch')
+                  c.get_host_keys().add(h,k.get_name(),k)
+          s=None
+          for n in range(3):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(P())
+              try:
+                  c.connect(H,username='root',password=os.environ['SERVER_PASSWORD'],look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  s=c; break
+              except Exception:
+                  c.close()
+                  if n==2: raise
+                  time.sleep(3)
+          D='/opt/servgo-releases/20261017-auth-phone-dup'
+          _,o,_=s.exec_command(f'mkdir -p {D}/backup && chmod 700 {D}'); o.channel.recv_exit_status()
+          sftp=s.open_sftp(); sftp.put('ops/auth-phone-dup-20261017/fix_auth_phone_dup.py', f'{D}/fix_auth_phone_dup.py'); sftp.close()
+          cmd=r'''set -Eeuo pipefail
+          D=/opt/servgo-releases/20261017-auth-phone-dup
+          A=/opt/booking_bot/web/api/routes/auth.py
+          PYV=/opt/booking_bot/venv/bin/python
+          OLD=144288c2c455f1cbf09f74e9bbf160f593db78893e37eb62d1b34ebd3f5e99b2
+          cur=$(sha256sum $A | cut -d' ' -f1)
+          if grep -q '_user_by_phone' $A; then echo ALREADY_PATCHED; else
+            [ "$cur" = "$OLD" ] || { echo "ABORT: auth.py changed since review ($cur)"; exit 3; }
+            [ -f $D/backup/auth.py ] || cp -a $A $D/backup/auth.py
+            cp $A $D/auth.py.new
+            $PYV $D/fix_auth_phone_dup.py $D/auth.py.new $OLD
+            $PYV -m py_compile $D/auth.py.new
+            install -m 644 $D/auth.py.new $A
+            echo PATCH_INSTALLED
+          fi
+          rollback(){
+            echo "CHECK FAILED: $1 -> rolling back"
+            install -m 644 $D/backup/auth.py $A
+            systemctl restart booking-web-api; sleep 4
+            echo "rollback: booking-web-api=$(systemctl is-active booking-web-api)"
+            journalctl -u booking-web-api -n 30 --no-pager | sed -E 's/[A-Za-z0-9._%+-]+@/***@/g; s/\+?[0-9]{10,}/<num>/g'
+            exit 1
+          }
+          systemctl restart booking-web-api
+          ok=''
+          for i in $(seq 1 20); do sleep 1; code=$(curl -s -o /dev/null -m 4 -w '%{http_code}' http://127.0.0.1:8000/auth/session || true); [ "$code" = 401 ] && { ok=1; break; }; done
+          [ -n "$ok" ] || rollback "api did not come up (last=$code)"
+          echo "booking-web-api=$(systemctl is-active booking-web-api)"
+          c=$(curl -s -o /dev/null -m 8 -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8000/auth/phone || true)
+          [ "$c" = 422 ] || rollback "/auth/phone validation returned $c"
+          echo 'check /auth/phone route: ok'
+          c=$(curl -s -o /dev/null -m 8 -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8000/auth/verify || true)
+          [ "$c" = 422 ] || rollback "/auth/verify validation returned $c"
+          echo 'check /auth/verify route: ok'
+          c=$(curl -sk -o /dev/null -m 8 -w '%{http_code}' --resolve servgo.ru:443:127.0.0.1 https://servgo.ru/login || true)
+          [ "$c" = 200 ] || rollback "servgo.ru/login returned $c"
+          echo 'check servgo.ru/login: ok'
+          curl -sk -m 8 --resolve mail.servgo.ru:443:127.0.0.1 https://mail.servgo.ru/ | grep -q 'type="password"' || rollback 'mail login form missing'
+          echo 'check mail.servgo.ru login form: ok'
+          journalctl -u booking-web-api --since '-1 min' --no-pager | grep -qE 'Traceback|ImportError|NameError' && rollback 'errors in API log after restart'
+          echo "booking-bot=$(systemctl is-active booking-bot)"
+          echo 'AUTH_PHONE_FIX_DEPLOY=success'
+          '''
+          _,o,e=s.exec_command(cmd,timeout=150)
+          out=o.read().decode('utf-8','replace'); err=e.read().decode('utf-8','replace')
+          print(out)
+          rc=o.channel.recv_exit_status()
+          if rc:
+              print(err[-2500:]); raise SystemExit(rc)
+          s.close()
+          PY
