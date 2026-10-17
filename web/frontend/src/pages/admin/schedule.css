@@ -59,6 +59,7 @@
   left: calc(var(--lane) * 100% / var(--lanes) + 1px); width: calc(100% / var(--lanes) - 2px);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 2px 1px;
   color: #fff; border-radius: 5px;
+  background: var(--master);
   background: linear-gradient(175deg, color-mix(in srgb, var(--master) 82%, white), var(--master));
   box-shadow: 0 1px 4px rgba(29, 72, 114, 0.11);
   transition: filter 0.18s ease, opacity 0.18s ease;
@@ -71,6 +72,9 @@
 /* Ожидает подтверждения / предоплаты — штриховка поверх цвета мастера */
 .sched-block.is-awaiting { background:
   repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.28) 0 4px, transparent 4px 8px),
+  var(--master);
+  background:
+  repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.28) 0 4px, transparent 4px 8px),
   linear-gradient(175deg, color-mix(in srgb, var(--master) 70%, white), color-mix(in srgb, var(--master) 85%, white)); }
 .sched-block.is-done { opacity: 0.55; }
 .sched-block.is-dragging { opacity: 0.3; }
@@ -79,8 +83,8 @@
 .sched-hit:focus-visible { outline: 2px solid var(--s-accent); outline-offset: -2px; border-radius: 5px; }
 .sched-hit:active + .sched-block, .sched-hit:hover { background: rgba(255, 255, 255, 0.08); }
 
-.sched-drop { position: absolute; left: 1px; right: 1px; z-index: 5; pointer-events: none; border-radius: 8px; display: grid; place-items: center; font-size: 10px; color: var(--s-text); background: color-mix(in srgb, var(--master) 23%, var(--s-surface)); outline: 2px dashed var(--master); outline-offset: -2px; }
-.sched-ghost { position: fixed; z-index: 95; pointer-events: none; min-width: 130px; max-width: 180px; padding: 9px 12px; border-radius: 13px; color: #fff; font-size: 11px; line-height: 1.35; opacity: 0.94; transform: translate(12px, 12px); background: linear-gradient(115deg, var(--master), color-mix(in srgb, var(--master) 78%, #192638)); box-shadow: 0 8px 25px rgba(20, 46, 72, 0.4); }
+.sched-drop { position: absolute; left: 1px; right: 1px; z-index: 5; pointer-events: none; border-radius: 8px; display: grid; place-items: center; font-size: 10px; color: var(--s-text); background: var(--s-surface-2); background: color-mix(in srgb, var(--master) 23%, var(--s-surface)); outline: 2px dashed var(--master); outline-offset: -2px; }
+.sched-ghost { position: fixed; z-index: 95; pointer-events: none; min-width: 130px; max-width: 180px; padding: 9px 12px; border-radius: 13px; color: #fff; font-size: 11px; line-height: 1.35; opacity: 0.94; transform: translate(12px, 12px); background: var(--master); background: linear-gradient(115deg, var(--master), color-mix(in srgb, var(--master) 78%, #192638)); box-shadow: 0 8px 25px rgba(20, 46, 72, 0.4); }
 .sched-ghost strong { display: block; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sched-ghost small { display: block; color: #fff; }
 

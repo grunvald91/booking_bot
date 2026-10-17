@@ -11,7 +11,9 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@300;350;400;450;500;550;600;700&display=swap" />
+    <!-- Не блокируем первую отрисовку, если Google Fonts медленный или недоступен. -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@300;350;400;450;500;550;600;700&display=swap" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@300;350;400;450;500;550;600;700&display=swap" /></noscript>
     <title>ServGo</title>
     <script src="https://telegram.org/js/telegram-web-app.js" async></script>
   </head>

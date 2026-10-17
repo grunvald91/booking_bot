@@ -130,14 +130,18 @@ export function ServicesPage() {
   // Настройка записи: можно ли выбрать несколько услуг в одной записи
   useEffect(() => {
     if (!businessId) return
+    let ignore = false
     setAllowMultiple(null)
     api
       .getBusinessDetail(businessId)
       .then((biz) => {
+        if (ignore) return
         setAllowMultiple(!!biz.allow_multiple_services)
         setIsVenue(biz.business_type === 'venue_rental')
       })
-      .catch(() => setAllowMultiple(false))
+      // При ошибке значение неизвестно — переключатель остаётся недоступным.
+      .catch(() => {})
+    return () => { ignore = true }
   }, [businessId])
 
   const toggleAllowMultiple = async () => {
