@@ -637,6 +637,14 @@ async def compute_venue_time_price(
     return CalculatePriceOut(has_time_price=True, total=total, segments=segments)
 
 
+def business_allows_multiple_services(business: Business) -> bool:
+    """Несколько услуг в одной записи: настройка бизнеса; площадкам — всегда
+    (пакеты длительности), как на странице записи."""
+    from bot.utils.business_types import is_venue_rental_type
+
+    return bool(getattr(business, "allow_multiple_services", False)) or is_venue_rental_type(business.business_type or "")
+
+
 async def _visit_base_price(
     db: AsyncSession, business: Business, main_services: list, employee: Optional[Employee],
     *, is_solo: bool, start: str, duration: int, occ_date: date,
@@ -728,6 +736,11 @@ async def create_booking_visit(
         raise HTTPException(status_code=400, detail="No service specified")
     if len(svc_ids) != len(set(svc_ids)):
         raise HTTPException(status_code=400, detail="Duplicate services are not allowed")
+    if len(svc_ids) > 1 and not business_allows_multiple_services(business):
+        raise HTTPException(
+            status_code=422,
+            detail="В этом бизнесе в одну запись можно выбрать только одну услугу.",
+        )
 
     services_result = await db.execute(
         select(Service).where(
