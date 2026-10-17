@@ -536,8 +536,20 @@ export function SettingsPage() {
         </div>
       )}
 
-      <div className="ds-form-narrow" style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 4 }}>
-        <section className="ds-card" style={{ padding: 14 }}>
+      <div className="ds-context">
+        <div className="ds-context-eyebrow">Ваш бизнес</div>
+        <div className="ds-context-headline">{form.name || businesses.find((b) => b.id === businessId)?.name || 'Профиль'}</div>
+        <div className="ds-context-strip">
+          {form.working_hours_start && form.working_hours_end && (
+            <div><strong>{String(form.working_hours_start).slice(0, 5)}–{String(form.working_hours_end).slice(0, 5)}</strong><span>график работы</span></div>
+          )}
+          {form.booking_interval_minutes ? <div><strong>{form.booking_interval_minutes} мин</strong><span>шаг записи</span></div> : null}
+          {form.prepayment_enabled && <div><strong>{form.prepayment_percent ?? 100}%</strong><span>предоплата</span></div>}
+        </div>
+      </div>
+
+      <div className="ds-form-narrow" style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingTop: 0 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ marginBottom: 6 }}>
             Уведомления о записях
           </h2>
@@ -583,7 +595,7 @@ export function SettingsPage() {
                         <button
                           key={minutes}
                           type="button"
-                          className={selected ? 'ds-btn ds-btn--primary' : 'ds-btn'}
+                          className={selected ? 'ds-btn ds-btn--on choice-accent selected' : 'ds-btn'}
                           onClick={() => toggleReminderOffset(group.minutesField, minutes)}
                           style={{ minHeight: 34, padding: '6px 10px' }}
                         >
@@ -597,7 +609,7 @@ export function SettingsPage() {
                         <button
                           key={minutes}
                           type="button"
-                          className="ds-btn ds-btn--primary"
+                          className="ds-btn ds-btn--on choice-accent selected"
                           onClick={() => toggleReminderOffset(group.minutesField, minutes)}
                           style={{ minHeight: 34, padding: '6px 10px' }}
                         >
@@ -639,7 +651,7 @@ export function SettingsPage() {
         </section>
 
         {/* === 1. Business Profile === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <Building2 size={18} style={{ color: 'var(--s-accent)' }} />
             Профиль бизнеса
@@ -764,7 +776,7 @@ export function SettingsPage() {
         </section>
 
         {/* === 2. Booking flow === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <DoorOpen size={18} style={{ color: 'var(--s-accent)' }} />
             Сценарий записи
@@ -811,7 +823,7 @@ export function SettingsPage() {
                     key={value}
                     type="button"
                     onClick={() => updateField('booking_flow_order', value)}
-                    className={selected ? 'ds-btn ds-btn--primary' : 'ds-btn'}
+                    className={selected ? 'ds-btn ds-btn--on choice-accent selected' : 'ds-btn'}
                     aria-pressed={selected}
                     style={{ minHeight: 42 }}
                   >
@@ -833,7 +845,7 @@ export function SettingsPage() {
         </section>
 
         {/* === 3. Photos === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <Camera size={18} style={{ color: 'var(--s-accent)' }} />
             Фотографии
@@ -935,7 +947,7 @@ export function SettingsPage() {
         </section>
 
         {/* === 2.5. Employee / Room Photos === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             {isVenueRental ? <DoorOpen size={18} style={{ color: 'var(--s-accent)' }} /> : <UserIcon size={18} style={{ color: 'var(--s-accent)' }} />}
             {isVenueRental ? 'Фото залов' : 'Фото сотрудников'}
@@ -1133,7 +1145,7 @@ export function SettingsPage() {
         </section>
 
         {/* === Legal documents === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <ShieldCheck size={18} style={{ color: 'var(--s-accent)' }} />
             Юридические документы и персональные данные
@@ -1187,7 +1199,7 @@ export function SettingsPage() {
         </section>
 
         {/* === 3. Prepayment Settings === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <CreditCard size={18} style={{ color: 'var(--s-accent)' }} />
             Предоплата
@@ -1290,7 +1302,7 @@ export function SettingsPage() {
         </section>
 
         {/* === 4. Co-Owners === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Users size={18} style={{ color: 'var(--s-accent)' }} />
@@ -1366,7 +1378,7 @@ export function SettingsPage() {
         </section>
 
         {/* === 5. QR Codes === */}
-        <section className="ds-card" style={{ padding: 14 }}>
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
           <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <QrCode size={18} style={{ color: 'var(--s-accent)' }} />
             QR-коды
