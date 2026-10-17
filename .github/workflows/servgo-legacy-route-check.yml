@@ -1,0 +1,63 @@
+name: ServGo legacy booking route check (read-only)
+
+# Разовая проверка только на чтение: куда nginx направляет /book и какой
+# WEBAPP_URL бот использует в ссылках/QR. Ничего не меняет. Удалить после запуска.
+
+on:
+  push:
+    branches:
+      - ccr-545c5158-rcd05z
+    paths:
+      - '.github/workflows/servgo-legacy-route-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Public pages
+        run: |
+          for u in "https://servgo.ru/book?business_id=1" "https://promo.servgo.ru/book?business_id=1" "https://promo.servgo.ru/book"; do
+            body=$(curl -sL --max-time 10 "$u" || true)
+            title=$(printf '%s' "$body" | grep -o '<title>[^<]*</title>' | head -1)
+            react=$(printf '%s' "$body" | grep -c 'id="root"' || true)
+            legacy=$(printf '%s' "$body" | grep -c 'booking.js' || true)
+            echo "$u -> $title react_root=$react legacy_booking_js=$legacy"
+          done
+
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+
+      - name: Server routing (config lines only, no secrets)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, paramiko
+
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self, client, hostname, key):
+                  actual = base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  if actual != 'uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU':
+                      raise paramiko.SSHException('Host key mismatch')
+                  client.get_host_keys().add(hostname, key.get_name(), key)
+
+          ssh = paramiko.SSHClient(); ssh.set_missing_host_key_policy(Pinned())
+          ssh.connect('155.212.162.47', port=22, username='root', password=os.environ['SERVER_PASSWORD'],
+                      look_for_keys=False, allow_agent=False, timeout=12, banner_timeout=25, auth_timeout=15)
+          cmds = [
+              # Только адрес WebApp — публичный URL, не секрет.
+              "grep -hE '^WEBAPP_URL=' /opt/booking_bot/.env 2>/dev/null | sed 's/[\"\\r]//g'",
+              "systemctl show -p Environment --value booking-bot | tr ' ' '\\n' | grep -E '^WEBAPP_URL=' || true",
+              # nginx: имена серверов, location, root и proxy_pass — без прочего содержимого.
+              "for f in /etc/nginx/sites-enabled/*; do echo \"== $f\"; grep -nE '^\\s*(server_name|location|root|proxy_pass|try_files|return)\\b' \"$f\"; done",
+          ]
+          for c in cmds:
+              _, out, err = ssh.exec_command(c, timeout=30)
+              print(out.read().decode(errors='replace').rstrip())
+          ssh.close()
+          PY
