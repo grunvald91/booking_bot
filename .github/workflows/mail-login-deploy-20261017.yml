@@ -29,7 +29,7 @@ jobs:
       - name: Verify release files
         run: |
           cd ops/mail-login-20261017
-          echo "d9efb207af50defb62b2ab7001afdc42f320a7411f59acc34888bb2d42d93c3f  owner_mail.py" | sha256sum -c
+          echo "d5010cc02bdbcd9f8d8445a5802749209f92e76e93b768bf958a98eee9437d5f  owner_mail.py" | sha256sum -c
           echo "440b739946fc24a063d2771af62e0d625888f53a85fb45496656477e1b9b8b4e  mail_campaign_ui.py" | sha256sum -c
           python3 -m py_compile owner_mail.py mail_campaign_ui.py
       - run: python -m pip install --disable-pip-version-check -q 'paramiko==3.5.1'
@@ -66,7 +66,7 @@ jobs:
           PYV=/opt/booking_bot/venv/bin/python
           OLD_OM=4766b3f0e7a646ddb9996dda0a854655517ec74414d9160af0f2195526a1651f
           OLD_UI=66c9493d710e04de1a5c2bd02723d0278981bdbfe5f1b754328fffa081d966b2
-          NEW_OM=d9efb207af50defb62b2ab7001afdc42f320a7411f59acc34888bb2d42d93c3f
+          NEW_OM=d5010cc02bdbcd9f8d8445a5802749209f92e76e93b768bf958a98eee9437d5f
           NEW_UI=440b739946fc24a063d2771af62e0d625888f53a85fb45496656477e1b9b8b4e
           cur_om=$(sha256sum $R/owner_mail.py | cut -d' ' -f1); cur_ui=$(sha256sum $R/mail_campaign_ui.py | cut -d' ' -f1)
           echo "$NEW_OM  $D/new/owner_mail.py" | sha256sum -c --quiet
