@@ -7,7 +7,8 @@ import {
   ChevronRight,
   User,
 } from 'lucide-react'
-import { api, type Booking, type SlotAvailability } from '../../api/client'
+import { api, ApiError, type Booking, type SlotAvailability } from '../../api/client'
+import { clearLogin } from '../../authUtils'
 import { hapticSelection, hapticSuccess, hapticError } from '../../utils/telegram'
 import { ClientShell } from '../../components/ClientShell'
 import { NotificationSetup } from '../../components/NotificationSetup'
@@ -396,18 +397,36 @@ export function MyBookingsPage() {
   const navigate = useNavigate()
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [authExpired, setAuthExpired] = useState(false)
+  const [reload, setReload] = useState(0)
   const [cancellingId, setCancellingId] = useState<number | null>(null)
   const [reschedulingId, setReschedulingId] = useState<number | null>(null)
   const [rescheduleLoading, setRescheduleLoading] = useState(false)
   const [cancelModalBooking, setCancelModalBooking] = useState<Booking | null>(null)
 
   useEffect(() => {
-    api
-      .getMyBookings()
-      .then(setBookings)
-      .catch(() => setBookings([]))
-      .finally(() => setLoading(false))
-  }, [])
+    let active = true
+    api.getMyBookings()
+      .then(result => {
+        if (active) {
+          setBookings(result)
+          setLoadError('')
+        }
+      })
+      .catch(error => {
+        if (!active) return
+        // Never present a failed request as an empty booking history.
+        const expired = error instanceof ApiError && error.status === 401
+        setAuthExpired(expired)
+        setLoadError(expired
+          ? 'Срок действия входа истёк. Войдите в прежний аккаунт, чтобы увидеть свои записи.'
+          : 'Не удалось загрузить записи. Попробуйте ещё раз.')
+        if (expired) clearLogin()
+      })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [reload])
 
   // Group bookings by date category
   const groupedBookings = useMemo(() => {
@@ -485,6 +504,21 @@ export function MyBookingsPage() {
           {[1, 2, 3].map((i) => (
             <div key={i} className="skeleton" style={{ height: 84, borderRadius: 'var(--r-lg)' }} />
           ))}
+        </div>
+      </ClientShell>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <ClientShell title="Мои записи">
+        <div role="alert" className="ds-card" style={{ marginTop: 24, padding: 20 }}>
+          <h2 className="ds-h2">Записи временно недоступны</h2>
+          <p className="ds-sub" style={{ margin: '12px 0' }}>{loadError}</p>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {authExpired && <button className="ds-btn ds-btn--primary" onClick={() => navigate('/login')}>Войти снова</button>}
+            {!authExpired && <button className="ds-btn ds-btn--primary" onClick={() => { setLoading(true); setReload(value => value + 1) }}>Повторить загрузку</button>}
+          </div>
         </div>
       </ClientShell>
     )

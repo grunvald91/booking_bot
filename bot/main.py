@@ -11,7 +11,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import BOT_TOKEN, WEBAPP_HOST, WEBAPP_PORT, WEBAPP_URL
 from bot.telegram_transport import create_bot
-from bot.handlers import common, client, admin, master, admin_management, administrator, subscription_admin, subscription_client, inline_mode
+from bot.handlers import common, client, admin, master, admin_management, administrator, subscription_admin, subscription_client, inline_mode, account_link
 from database import init_db
 from bot.services.scheduler import ReminderScheduler
 
@@ -65,6 +65,7 @@ async def main():
     dp = Dispatcher(storage=storage)
 
     # Регистрация роутеров (порядок важен!)
+    dp.include_router(account_link.router)
     dp.include_router(common.router)
     dp.include_router(admin_management.router)
     dp.include_router(administrator.router)  # Администратор бизнеса (новая роль)
@@ -92,7 +93,9 @@ async def main():
     @dp.update.outer_middleware()
     async def log_all_updates(handler, event: Update, data):
         if event.message:
-            logger.info(f"[DEBUG] Message: text='{event.message.text}', from={event.message.from_user.id}")
+            text = event.message.text or ""
+            safe_text = "/start account_[redacted]" if text.startswith("/start account_") else text
+            logger.info("[DEBUG] Message: text='%s', from=%s", safe_text, event.message.from_user.id)
         elif event.callback_query:
             logger.info(f"[DEBUG] Callback: data='{event.callback_query.data}', from={event.callback_query.from_user.id}")
         else:
