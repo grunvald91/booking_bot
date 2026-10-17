@@ -1,0 +1,128 @@
+name: Mail login deploy (server 155)
+
+# Scoped production change for mail.servgo.ru: login + password (checked by AI Growth OS),
+# 30-day session per device. Files: web/api/routes/owner_mail.py, mail_campaign_ui.py.
+# Restarts booking-web-api only. Aborts if the live files drifted; auto-rolls back on any failed check.
+on:
+  push:
+    branches: [ccr-005ea961-gr0x8f]
+    paths:
+      - '.github/workflows/mail-login-deploy-20261017.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mail-login-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: ops/mail-login-20261017
+      - name: Verify release files
+        run: |
+          cd ops/mail-login-20261017
+          echo "d9efb207af50defb62b2ab7001afdc42f320a7411f59acc34888bb2d42d93c3f  owner_mail.py" | sha256sum -c
+          echo "440b739946fc24a063d2771af62e0d625888f53a85fb45496656477e1b9b8b4e  mail_campaign_ui.py" | sha256sum -c
+          python3 -m py_compile owner_mail.py mail_campaign_ui.py
+      - run: python -m pip install --disable-pip-version-check -q 'paramiko==3.5.1'
+      - name: Deploy, verify, roll back on failure
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64,hashlib,os,time,paramiko
+          H='155.212.162.47'; F='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class P(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  a=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if a!=F: raise paramiko.SSHException('host key mismatch')
+                  c.get_host_keys().add(h,k.get_name(),k)
+          s=None
+          for n in range(3):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(P())
+              try:
+                  c.connect(H,username='root',password=os.environ['SERVER_PASSWORD'],look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  s=c; break
+              except Exception:
+                  c.close()
+                  if n==2: raise
+                  time.sleep(3)
+          D='/opt/servgo-releases/20261017-mail-login'
+          _,o,_=s.exec_command(f'mkdir -p {D}/new {D}/backup && chmod 700 {D}'); o.channel.recv_exit_status()
+          sftp=s.open_sftp()
+          for f in ('owner_mail.py','mail_campaign_ui.py'):
+              sftp.put('ops/mail-login-20261017/'+f, f'{D}/new/{f}')
+          sftp.close()
+          cmd=r'''set -Eeuo pipefail
+          D=/opt/servgo-releases/20261017-mail-login
+          R=/opt/booking_bot/web/api/routes
+          PYV=/opt/booking_bot/venv/bin/python
+          OLD_OM=4766b3f0e7a646ddb9996dda0a854655517ec74414d9160af0f2195526a1651f
+          OLD_UI=66c9493d710e04de1a5c2bd02723d0278981bdbfe5f1b754328fffa081d966b2
+          NEW_OM=d9efb207af50defb62b2ab7001afdc42f320a7411f59acc34888bb2d42d93c3f
+          NEW_UI=440b739946fc24a063d2771af62e0d625888f53a85fb45496656477e1b9b8b4e
+          cur_om=$(sha256sum $R/owner_mail.py | cut -d' ' -f1); cur_ui=$(sha256sum $R/mail_campaign_ui.py | cut -d' ' -f1)
+          echo "$NEW_OM  $D/new/owner_mail.py" | sha256sum -c --quiet
+          echo "$NEW_UI  $D/new/mail_campaign_ui.py" | sha256sum -c --quiet
+          if [ "$cur_om" = "$NEW_OM" ] && [ "$cur_ui" = "$NEW_UI" ]; then echo 'ALREADY_DEPLOYED'; else
+            if [ "$cur_om" != "$OLD_OM" ] || [ "$cur_ui" != "$OLD_UI" ]; then echo "ABORT: live files changed since review ($cur_om $cur_ui)"; exit 3; fi
+            [ -f $D/backup/owner_mail.py ] || cp -a $R/owner_mail.py $R/mail_campaign_ui.py $D/backup/
+            $PYV -m py_compile $D/new/owner_mail.py $D/new/mail_campaign_ui.py
+            install -m 644 $D/new/owner_mail.py $R/owner_mail.py
+            install -m 644 $D/new/mail_campaign_ui.py $R/mail_campaign_ui.py
+            echo 'FILES_INSTALLED'
+          fi
+          rollback(){
+            echo "CHECK FAILED: $1 -> rolling back"
+            install -m 644 $D/backup/owner_mail.py $R/owner_mail.py
+            install -m 644 $D/backup/mail_campaign_ui.py $R/mail_campaign_ui.py
+            systemctl restart booking-web-api; sleep 4
+            echo "rollback: booking-web-api=$(systemctl is-active booking-web-api)"
+            journalctl -u booking-web-api -n 30 --no-pager | sed -E 's/[A-Za-z0-9._%+-]+@/***@/g'
+            exit 1
+          }
+          systemctl restart booking-web-api
+          ok=''
+          for i in $(seq 1 20); do sleep 1; code=$(curl -s -o /dev/null -m 4 -w '%{http_code}' http://127.0.0.1:8000/owner-mail/app || true); [ "$code" = 200 ] && { ok=1; break; }; done
+          [ -n "$ok" ] || rollback "api did not come up (last=$code)"
+          echo "booking-web-api=$(systemctl is-active booking-web-api)"
+          M='--resolve mail.servgo.ru:443:127.0.0.1'
+          page=$(curl -sk -m 8 $M https://mail.servgo.ru/ || true)
+          echo "$page" | grep -q 'type="password"' || rollback 'login form not shown'
+          echo 'check login form: ok'
+          c=$(curl -sk $M -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"artur","password":"x"}' https://mail.servgo.ru/api/login || true)
+          [ "$c" = 403 ] || rollback "login without Origin returned $c"
+          echo 'check foreign origin rejected: ok'
+          c=$(curl -sk $M -o /dev/null -w '%{http_code}' -X POST -H 'Origin: https://mail.servgo.ru' -H 'Content-Type: application/json' -d '{"username":"artur","password":"deploy-check-wrong-password"}' https://mail.servgo.ru/api/login || true)
+          [ "$c" = 401 ] || rollback "wrong password returned $c"
+          echo 'check wrong password rejected via Growth: ok'
+          c=$(curl -sk $M -o /dev/null -w '%{http_code}' https://mail.servgo.ru/api/campaigns || true)
+          [ "$c" = 401 ] || rollback "campaign API without session returned $c"
+          echo 'check API closed without session: ok'
+          c=$(curl -sk $M -o /dev/null -w '%{http_code}' https://mail.servgo.ru/api/campaigns-dashboard || true)
+          [ "$c" = 303 ] || rollback "dashboard without session returned $c"
+          echo 'check dashboard redirects to login: ok'
+          c=$(curl -sk --resolve servgo.ru:443:127.0.0.1 -o /dev/null -w '%{http_code}' https://servgo.ru/api/auth/session || true)
+          [ "$c" = 401 ] || [ "$c" = 200 ] || rollback "servgo.ru API returned $c"
+          echo "check servgo.ru API alive: ok ($c)"
+          echo "booking-bot=$(systemctl is-active booking-bot) servgo-mail-worker=$(systemctl is-active servgo-mail-worker) postfix=$(systemctl is-active postfix) dovecot=$(systemctl is-active dovecot)"
+          echo 'MAIL_LOGIN_DEPLOY=success'
+          '''
+          _,o,e=s.exec_command(cmd,timeout=150)
+          out=o.read().decode('utf-8','replace'); err=e.read().decode('utf-8','replace')
+          print(out)
+          rc=o.channel.recv_exit_status()
+          if rc:
+              print(err[-2500:]); raise SystemExit(rc)
+          s.close()
+          PY
+      - name: Public check
+        run: |
+          curl -s https://mail.servgo.ru/ | grep -q 'type="password"' && echo 'public login form: ok'
