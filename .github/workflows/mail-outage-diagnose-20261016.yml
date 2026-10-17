@@ -47,38 +47,17 @@ jobs:
                   time.sleep(3)
           cmd=r'''set +e
           sec(){ echo; echo "===== $1 ====="; }
-          mask(){ sed -E 's/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+)/***@\1/g; s/\+?[0-9]{10,}/<num>/g'; }
-          sec R8_RELAY_UNITS
-          for u in booking-bot-relay89 booking-bot; do printf '%s=%s since %s\n' $u "$(systemctl is-active $u)" "$(systemctl show -p ActiveEnterTimestamp --value $u)"; done
-          systemctl cat booking-bot-relay89 2>/dev/null | grep -E '^(ExecStart|Restart)' | sed -E 's/-i [^ ]+/-i <key>/'
-          journalctl -u booking-bot-relay89 --since '-3 days' --no-pager -o short-iso | tail -15
-          ss -lntp | grep -E 'ssh' | head
-          sec R8_RELAY_HOST_REACH
-          timeout 6 bash -c '</dev/tcp/89.125.90.101/22' && echo 'tcp 89.125.90.101:22 ok' || echo 'tcp 89.125.90.101:22 FAIL'
-          ping -c 2 -W 2 89.125.90.101 2>&1 | tail -2
-          for port in $(ss -lntp | grep -E '"ssh"' | grep -oE '127\.0\.0\.1:[0-9]+' | cut -d: -f2 | sort -u); do
-            printf 'socks %s -> telegram widget: ' $port; curl -s -o /dev/null -m 10 -w '%{http_code}\n' --socks5-hostname 127.0.0.1:$port https://telegram.org/js/telegram-widget.js?22
-            printf 'socks %s -> oauth.telegram.org: ' $port; curl -s -o /dev/null -m 10 -w '%{http_code}\n' --socks5-hostname 127.0.0.1:$port https://oauth.telegram.org/
-          done
-          sec R8_NGINX_TELEGRAM_PROXY
-          grep -RnE 'telegram|socks|tg-widget|tgwidget' /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null | head -20
-          ls -la --time-style=+%F_%T /etc/nginx/sites-enabled/ | tail -15
-          sec R8_WIDGET_SRC_IN_BUNDLES
-          for j in /opt/booking_bot/web/frontend/dist/assets/index-*.js /opt/booking_bot/web/frontend/dist.bak_20261016/assets/index-*.js; do
-            printf '%s %s: ' "$(stat -c %y "$j" | cut -c1-16)" "$j"; grep -oE 'a\.src=`[^`]*`|src=`https://[^`]*telegram[^`]*`|"https://[^"]*telegram-widget[^"]*"|[a-z0-9/._-]*telegram-widget[^`"]*' "$j" | sort -u | head -3 | tr '\n' ' '; echo; done
-          grep -oE 'index-[A-Za-z0-9_-]+\.js' /opt/booking_bot/web/frontend/dist/index.html /opt/booking_bot/web/frontend/dist.bak_20261016/index.html
-          ls -la --time-style=+%F_%T /opt/servgo-releases/20261016/mail-entry/ 2>/dev/null | head
-          find / -xdev -name 'telegram-widget*.js' -not -path '*/node_modules/*' 2>/dev/null | head
-          sec R8_MAILBOX_UI_FETCHES
-          grep -oE "fetch\([^)]{0,80}\)|'/api/[a-z/_-]+'|\"/api/[a-z/_-]+\"|Подключение к почтовому сервису[^<]{0,40}" /opt/booking_bot/web/api/routes/owner_mail_ui.html | sort | uniq -c | head -25
-          sec R8_MAILBOX_API_LOG_TODAY
-          journalctl -u booking-web-api --since '2026-10-17 06:00' --no-pager -o short-iso | grep -E 'owner-mail' | grep -vE 'GET /owner-mail/app' | mask | tail -30
-          journalctl -u booking-web-api --since '2026-10-17 06:00' --no-pager -o short-iso | grep -iE 'imap|Traceback|Error' | mask | tail -15
-          sec R8_DOVECOT_AUTH_TODAY
-          journalctl -u dovecot --since '2026-10-17 00:00' --no-pager -o short-iso | grep -E 'Login|auth failed|Aborted login|imap\(' | mask | tail -15
-          sec R8_IMAP_ENV_KEYS
-          P=$(systemctl show -p MainPID --value booking-web-api); tr '\0' '\n' </proc/$P/environ | grep -E '^SERVGO_MAIL_IMAP_(USER|PASSWORD)=' | sed -E 's/=.+/=<set>/; s/=$/=<EMPTY>/'
-          sec R8_END
+          sec R9_RELAY_SOCKS_GENERIC
+          for u in https://example.com https://www.google.com https://api.telegram.org https://telegram.org/js/telegram-widget.js?22; do printf '%s -> ' "$u"; curl -s -o /dev/null -m 10 -w '%{http_code}\n' --socks5-hostname 127.0.0.1:1089 "$u"; done
+          sec R9_RELAY_HOST_EGRESS
+          timeout 25 ssh -i /root/.ssh/servgo_89_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/booking-bot-relay89/known_hosts -o ConnectTimeout=8 root@89.125.90.101 'for u in https://example.com https://telegram.org/js/telegram-widget.js?22 https://oauth.telegram.org/ https://api.telegram.org; do printf "%s -> " "$u"; curl -s -o /dev/null -m 8 -w "%{http_code}\n" "$u"; done; uptime; df -h / | tail -1; systemctl --failed --no-legend | head -5' 2>&1 | tail -12
+          sec R9_TG_SERVGO
+          getent hosts tg.servgo.ru
+          for u in https://tg.servgo.ru/js/telegram-widget.js?22 https://tg.servgo.ru/js/telegram-web-app.js; do printf '%s -> ' "$u"; curl -s -o /dev/null -m 10 -w '%{http_code}\n' "$u"; done
+          sec R9_BOT_HEALTH
+          journalctl -u booking-bot --since '-3 hours' --no-pager -o short-iso | grep -iE 'error|timeout|proxy|socks|connect|network' | sed -E 's/bot[0-9]+:[A-Za-z0-9_-]+/bot<token>/g' | tail -10
+          journalctl -u booking-bot --since '-30 min' --no-pager -o short-iso | tail -3 | sed -E 's/bot[0-9]+:[A-Za-z0-9_-]+/bot<token>/g' | cut -c1-200
+          sec R9_END
           '''
           _,o,e=s.exec_command(cmd,timeout=120)
           print(o.read().decode('utf-8','replace'))
