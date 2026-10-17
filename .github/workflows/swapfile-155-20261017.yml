@@ -1,0 +1,77 @@
+name: Add 2 GB swap file on server 155
+
+# Owner approved on 2026-10-17. RAM 1.8 GB, zram swap 900 MB was 100% full. Adds /swapfile (2 GB)
+# on disk as a second-tier swap (priority 10, zram stays first at 100) and makes it persistent.
+# Idempotent. Undo: swapoff /swapfile; remove the /swapfile line from /etc/fstab; rm /swapfile.
+on:
+  push:
+    branches: [ccr-005ea961-gr0x8f]
+    paths:
+      - '.github/workflows/swapfile-155-20261017.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swapfile-155
+  cancel-in-progress: false
+
+jobs:
+  swap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - run: python -m pip install --disable-pip-version-check -q 'paramiko==3.5.1'
+      - name: Create and enable swap file
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64,hashlib,os,time,paramiko
+          H='155.212.162.47'; F='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class P(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,c,h,k):
+                  a=base64.b64encode(hashlib.sha256(k.asbytes()).digest()).decode().rstrip('=')
+                  if a!=F: raise paramiko.SSHException('host key mismatch')
+                  c.get_host_keys().add(h,k.get_name(),k)
+          s=None
+          for n in range(3):
+              c=paramiko.SSHClient(); c.set_missing_host_key_policy(P())
+              try:
+                  c.connect(H,username='root',password=os.environ['SERVER_PASSWORD'],look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  s=c; break
+              except Exception:
+                  c.close()
+                  if n==2: raise
+                  time.sleep(3)
+          cmd = r'''set -Eeuo pipefail
+          echo "before:"; free -m | sed -n 1,3p; swapon --show
+          avail=$(df --output=avail -B1M / | tail -1)
+          [ "$avail" -gt 6000 ] || { echo "ABORT: only ${avail} MB free on /"; exit 3; }
+          if swapon --show=NAME --noheadings | grep -qx /swapfile; then
+            echo "swapfile already active"
+          else
+            if [ ! -f /swapfile ]; then
+              fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+              chmod 600 /swapfile
+              mkswap /swapfile >/dev/null
+            fi
+            swapon --priority 10 /swapfile
+            echo "swapfile enabled"
+          fi
+          grep -qE '^/swapfile[[:space:]]' /etc/fstab || { cp -a /etc/fstab /etc/fstab.bak-20261017-swap; echo '/swapfile none swap sw,pri=10 0 0' >> /etc/fstab; echo "added to /etc/fstab"; }
+          findmnt --verify --tab-file /etc/fstab >/dev/null 2>&1 && echo "fstab verify: ok" || echo "fstab verify: warnings (see findmnt --verify)"
+          echo "after:"; free -m | sed -n 1,3p; swapon --show
+          echo "disk: $(df -h / | awk 'NR==2{print $4" free ("$5" used)"}')"
+          for u in booking-bot booking-web-api nginx postfix docker; do printf '%s=%s ' $u "$(systemctl is-active $u)"; done; echo
+          echo SWAP_DONE
+          '''
+          cmd='\n'.join(l.strip() for l in cmd.splitlines())
+          _,o,e=s.exec_command(cmd,timeout=240)
+          print(o.read().decode('utf-8','replace'))
+          rc=o.channel.recv_exit_status()
+          if rc:
+              print(e.read().decode('utf-8','replace')[-2000:]); raise SystemExit(rc)
+          s.close()
+          PY
