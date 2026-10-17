@@ -50,16 +50,24 @@ jobs:
                   c.close()
                   if n==2: raise
                   time.sleep(3)
+          s.get_transport().set_keepalive(15)
+          def run(cmd, timeout=60):
+              _,o,e=s.exec_command(cmd,timeout=timeout)
+              out=o.read().decode('utf-8','replace'); o.channel.recv_exit_status()
+              return out
           sftp=s.open_sftp(); sftp.put('ops/prospect-search-eval/eval_prospect_search.py','/tmp/eval_prospect_search.py'); sftp.close()
-          cmd=('set -e; C=ai-growth-os-worker-1; docker cp /tmp/eval_prospect_search.py $C:/tmp/eval_prospect_search.py; '
-               'docker exec -e PYTHONUNBUFFERED=1 $C python /tmp/eval_prospect_search.py 2>&1 | sed -E "s/(Bearer|sk-)[A-Za-z0-9._-]+/\\1***/g"; '
-               'docker exec $C rm -f /tmp/eval_prospect_search.py; rm -f /tmp/eval_prospect_search.py')
-          _,o,e=s.exec_command(cmd,timeout=1350)
-          for line in iter(o.readline, ''):
-              print(line, end='')
-          rc=o.channel.recv_exit_status()
-          err=e.read().decode('utf-8','replace')
-          if rc:
-              print(err[-2000:]); raise SystemExit(rc)
+          run('C=ai-growth-os-worker-1; docker cp /tmp/eval_prospect_search.py $C:/tmp/eval_prospect_search.py; rm -f /tmp/eval_prospect_search.py /tmp/eval_prospect_search.log; '
+              'nohup sh -c "docker exec -e PYTHONUNBUFFERED=1 $C python /tmp/eval_prospect_search.py > /tmp/eval_prospect_search.log 2>&1; '
+              'echo EVAL_EXIT=\\$? >> /tmp/eval_prospect_search.log; docker exec $C rm -f /tmp/eval_prospect_search.py" > /dev/null 2>&1 &')
+          shown=0; deadline=time.time()+1200; text=''
+          while time.time()<deadline:
+              time.sleep(20)
+              text=run('sed -E "s/(Bearer|sk-)[A-Za-z0-9._-]+/\\1***/g" /tmp/eval_prospect_search.log 2>/dev/null')
+              print(text[shown:], end='', flush=True); shown=len(text)
+              if 'EVAL_EXIT=' in text: break
+          else:
+              print('\nTIMEOUT waiting for eval')
+          run('rm -f /tmp/eval_prospect_search.log')
+          if 'EVAL_EXIT=0' not in text: raise SystemExit(1)
           s.close()
           PY
