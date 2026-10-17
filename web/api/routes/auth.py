@@ -1,6 +1,7 @@
 """
 Authentication routes.
-Verification code is sent via Telegram bot. Fallback: server log.
+Legacy phone login sends a code through the linked Telegram account.
+Standalone email authentication is provided by email_auth.py.
 """
 import os
 import json
@@ -14,7 +15,7 @@ from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
@@ -158,6 +159,17 @@ async def _token_for_telegram_user(
     )
 
 
+async def _user_by_phone(db: AsyncSession, phone: str) -> Optional[User]:
+    """Several users may share a phone; prefer a real Telegram account, then the oldest."""
+    result = await db.execute(
+        select(User)
+        .where(User.phone == phone)
+        .order_by(case((User.telegram_id > 0, 0), else_=1), User.id)
+        .limit(1)
+    )
+    return result.scalars().first()
+
+
 # ---------- POST /auth/phone ----------
 
 async def _send_code_via_telegram(phone: str, code: str, db: AsyncSession) -> bool:
@@ -166,8 +178,7 @@ async def _send_code_via_telegram(phone: str, code: str, db: AsyncSession) -> bo
         logger.error("BOT_TOKEN is not configured; Telegram OTP delivery is unavailable")
         return False
     try:
-        result = await db.execute(select(User).where(User.phone == phone))
-        user = result.scalar_one_or_none()
+        user = await _user_by_phone(db, phone)
         if not user or not user.telegram_id or user.telegram_id < 0:
             return False
         text = f"🔐 Ваш код для входа на SochiService: <b>{code}</b>\n\nКод действителен 5 минут."
@@ -191,13 +202,12 @@ async def request_code(body: LoginPhoneIn, db: AsyncSession = Depends(get_db)):
     phone = _normalize_phone(body.phone)
     code = f"{random.randint(100000, 999999)}"
     _pending_codes[phone] = (code, time_module.time())
-    logger.warning("AUTH CODE for %s: %s", phone, code)
-
     sent = await _send_code_via_telegram(phone, code, db)
     if sent:
         return {"ok": True, "message": "Код отправлен в Telegram"}
     else:
-        return {"ok": True, "message": "Код отправлен (проверьте Telegram)", "fallback": True}
+        _pending_codes.pop(phone, None)
+        raise HTTPException(503, "Код не доставлен в Telegram. Используйте вход по email")
 
 
 # ---------- POST /auth/verify ----------
@@ -227,8 +237,7 @@ async def verify_code(
     _pending_codes.pop(phone, None)
 
     # Find user by phone
-    result = await db.execute(select(User).where(User.phone == phone))
-    user = result.scalar_one_or_none()
+    user = await _user_by_phone(db, phone)
 
     if not user:
         user = User(
@@ -381,6 +390,20 @@ async def telegram_auth(
     if shared_auth:
         await _set_shared_auth_cookie(response, shared_auth)
     return token_out
+
+
+# ---------- POST /auth/logout ----------
+
+@router.post("/logout")
+async def logout(response: Response):
+    """End the browser's shared Telegram session as well as its local JWT."""
+    cookie_options = auth_cookie_kwargs()
+    response.delete_cookie(
+        auth_cookie_name(),
+        path=cookie_options.get("path", "/"),
+        domain=cookie_options.get("domain"),
+    )
+    return {"ok": True}
 
 
 # ---------- GET /auth/me ----------

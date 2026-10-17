@@ -5634,7 +5634,6 @@ async def confirm_prepayment_by_owner(callback: CallbackQuery, state: FSMContext
                 selectinload(Booking.employee),
             )
             .where(Booking.id == booking_id)
-            .with_for_update()
         )
         booking = result.scalar_one_or_none()
         if not booking:
@@ -5655,18 +5654,14 @@ async def confirm_prepayment_by_owner(callback: CallbackQuery, state: FSMContext
             await callback.answer("Статус бронирования уже изменён", show_alert=True)
             return
 
-        related_bookings = await contiguous_visit_bookings(
-            session,
-            booking,
-            statuses=("prepayment_sent", "pending_prepayment"),
-        )
-
-        from datetime import datetime
-        confirmed_at = datetime.utcnow()
-        for item in related_bookings:
-            item.status = "confirmed"
-            item.prepayment_confirmed_at = confirmed_at
-
+        from database.prepayment import review_payment, PaymentWindowError
+        reviewer = next(owner for owner in owners if owner.telegram_id == callback.from_user.id)
+        try:
+            expected = int(callback.data.split(":")[2]) if len(callback.data.split(":")) > 2 else None
+            related_bookings = await review_payment(session, booking, reviewer.id, "confirm", expected_version=expected)
+        except PaymentWindowError as exc:
+            await callback.answer(exc.detail, show_alert=True)
+            return
         await session.commit()
 
         try:
@@ -5762,7 +5757,6 @@ async def reject_prepayment_by_owner(callback: CallbackQuery, state: FSMContext)
                     selectinload(Booking.employee),
                 )
                 .where(Booking.id == booking_id)
-                .with_for_update()
             )
         ).scalar_one_or_none()
 
@@ -5784,14 +5778,14 @@ async def reject_prepayment_by_owner(callback: CallbackQuery, state: FSMContext)
             await callback.answer("Статус бронирования уже изменён", show_alert=True)
             return
 
-        related_bookings = await contiguous_visit_bookings(
-            session,
-            booking,
-            statuses=("prepayment_sent", "pending_prepayment"),
-        )
-        for item in related_bookings:
-            item.status = "pending_prepayment"
-            item.prepayment_confirmed_at = None
+        from database.prepayment import review_payment, PaymentWindowError
+        reviewer = next(owner for owner in owners if owner.telegram_id == callback.from_user.id)
+        try:
+            expected = int(callback.data.split(":")[2]) if len(callback.data.split(":")) > 2 else None
+            related_bookings = await review_payment(session, booking, reviewer.id, "reject", expected_version=expected)
+        except PaymentWindowError as exc:
+            await callback.answer(exc.detail, show_alert=True)
+            return
         await session.commit()
 
         try:
@@ -5825,7 +5819,8 @@ async def reject_prepayment_by_owner(callback: CallbackQuery, state: FSMContext)
             client_text = (
                 f"❌ <b>Предоплата не подтверждена</b>\n\n"
                 f"Владелец {booking.business.name} не получил вашу предоплату.\n\n"
-                "Проверьте реквизиты и отправьте подтверждение ещё раз."
+                "У вас ещё 10 минут, чтобы проверить перевод и отправить верный чек. "
+                "Если деньги уже списаны, не переводите их повторно — свяжитесь с бизнесом."
             )
             try:
                 await callback.bot.send_message(

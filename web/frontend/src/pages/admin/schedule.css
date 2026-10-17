@@ -184,3 +184,13 @@
 @media (prefers-reduced-motion: reduce) {
   .sched-block, .sched-group-item { transition: none; }
 }
+
+.sched-detail-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--s-accent);
+  text-decoration: none;
+}

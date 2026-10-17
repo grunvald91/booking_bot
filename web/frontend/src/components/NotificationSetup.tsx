@@ -4,19 +4,12 @@ import { enableServGoPush, supportsWebPush } from '../utils/pwa'
 
 type State = 'checking' | 'idle' | 'enabled' | 'denied' | 'unsupported' | 'error'
 
-export function NotificationSetup({ notifyToken }: { notifyToken?: string | null }) {
-  const [state, setState] = useState<State>('checking')
+export function NotificationSetup({ notifyToken, staff = false }: { notifyToken?: string | null; staff?: boolean }) {
+  const [state, setState] = useState<State>(() => !supportsWebPush() ? 'unsupported' : Notification.permission === 'denied' ? 'denied' : 'checking')
   const [message, setMessage] = useState('')
 
   useEffect(() => {
-    if (!supportsWebPush()) {
-      setState('unsupported')
-      return
-    }
-    if (Notification.permission === 'denied') {
-      setState('denied')
-      return
-    }
+    if (!supportsWebPush() || Notification.permission === 'denied') return
 
     navigator.serviceWorker.ready
       .then((registration) => registration.pushManager.getSubscription())
@@ -60,7 +53,7 @@ export function NotificationSetup({ notifyToken }: { notifyToken?: string | null
           <CheckCircle2 size={20} className="ds-accent" />
           <div>
             <p className="ds-text" style={{ fontWeight: 700 }}>Напоминания ServGo включены</p>
-            <p className="ds-sub" style={{ marginTop: 2 }}>Будем присылать системные уведомления о предстоящих визитах.</p>
+            <p className="ds-sub" style={{ marginTop: 2 }}>{staff ? 'Будем присылать уведомления о новых записях и предоплатах на проверке.' : 'Будем присылать системные уведомления о предстоящих визитах.'}</p>
           </div>
         </div>
       </div>
@@ -73,12 +66,12 @@ export function NotificationSetup({ notifyToken }: { notifyToken?: string | null
         <Bell size={20} className="ds-accent" style={{ flexShrink: 0, marginTop: 1 }} />
         <div style={{ flex: 1 }}>
           <p className="ds-text" style={{ fontWeight: 700 }}>
-            {state === 'denied' ? 'Уведомления запрещены' : 'Не пропустите запись'}
+            {state === 'denied' ? 'Уведомления запрещены' : staff ? 'Не пропустите предоплату' : 'Не пропустите запись'}
           </p>
           <p className="ds-sub" style={{ marginTop: 4 }}>
             {state === 'denied'
               ? 'Разрешите уведомления для ServGo в настройках браузера или телефона.'
-              : 'Включите системные напоминания ServGo. Они не зависят от Telegram.'}
+              : staff ? 'Включите уведомления о записях и отправленных предоплатах. Они не зависят от Telegram.' : 'Включите системные напоминания ServGo. Они не зависят от Telegram.'}
           </p>
           {message && <p className="ds-sub" style={{ marginTop: 6, color: 'var(--s-danger)' }}>{message}</p>}
           {state !== 'denied' && (

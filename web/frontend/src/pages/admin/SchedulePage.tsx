@@ -235,6 +235,9 @@ function BookingDetailSheet({
             </div>
           </div>
         </div>
+        {['pending_prepayment', 'prepayment_sent'].includes(booking.status) && (
+          <Link to="/admin/prepayments" className="sched-detail-link">Проверить предоплату и открыть чек</Link>
+        )}
         <div className="sched-detail-grid">
           <div><small>Специалист</small><strong>{booking.employee_name || '—'}</strong></div>
           <div><small>Дата</small><strong>{dateLabel}</strong></div>
@@ -299,7 +302,7 @@ function BookingDetailSheet({
                 </button>
               )}
               <button onClick={() => onReschedule(booking)} disabled={updating}><CalendarClock size={14} />Перенести</button>
-              <button onClick={() => onStatusChange(booking.id, 'completed')} disabled={updating}>Завершить</button>
+              <button onClick={() => onStatusChange(booking.id, 'completed')} disabled={updating || awaitingPayment}>Завершить</button>
               <button className="danger" onClick={() => onStatusChange(booking.id, 'cancelled')} disabled={updating}>Отменить</button>
             </div>
           </>
