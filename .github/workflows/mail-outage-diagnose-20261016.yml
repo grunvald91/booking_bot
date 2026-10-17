@@ -47,13 +47,17 @@ jobs:
                   time.sleep(3)
           cmd=r'''set +e
           sec(){ echo; echo "===== $1 ====="; }
-          mask(){ sed -E 's/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+)/***@\1/g; s/(ticket|token)=[^ &"]+/\1=***/g'; }
-          sec RUN4_MAIL_FLOW_16OCT
-          zcat -f /var/log/nginx/access.log.1 /var/log/nginx/access.log 2>/dev/null | grep '16/Oct/2026' | grep -E '"(GET|POST) /(mail|login|admin)[ ?/]|owner-mail|/claim|/api/auth' | awk '{print $1,$4,$6,$7,$9,$12,$13,$14}' | mask | tail -80
-          sec RUN4_CLIENT_195
-          zcat -f /var/log/nginx/access.log.1 2>/dev/null | grep -E '^195\.178\.110\.18 ' | awk '{print $4,$6,$7,$9,$11,$12,$13}' | mask | tail -25
-          sec RUN4_MAILHOST_USER_AGENTS
-          zcat -f /var/log/nginx/access.log.1 2>/dev/null | grep '16/Oct/2026' | grep -E '"GET /(api/)?(owner-mail|mailbox-dashboard|campaigns)|"GET / HTTP' | awk -F'"' '{print $1,$2,$3,$6}' | grep -vE 'bot|crawl|spider' | mask | tail -30
+          sec RUN5_WEBAPI_UNIT
+          systemctl cat booking-web-api 2>/dev/null | grep -E '^(User|WorkingDirectory|ExecStart)='
+          sec RUN5_GROWTH_PROBE_NO_CREDENTIALS
+          curl -s -o /dev/null -m 8 -w 'growth svg without login -> %{http_code}\n' http://127.0.0.1:8091/studio/assets/servgo.svg
+          sec RUN5_OWNER_MAIL_PY_B64
+          base64 -w0 /opt/booking_bot/web/api/routes/owner_mail.py; echo
+          sec RUN5_MAIL_CAMPAIGN_UI_PY_B64
+          base64 -w0 /opt/booking_bot/web/api/routes/mail_campaign_ui.py; echo
+          sec RUN5_DASHBOARD_NAV
+          grep -nE '<nav|servgo.ru/admin|/claim' /opt/booking_bot/web/api/routes/mail_campaign_dashboard.html /opt/booking_bot/web/api/routes/owner_mail_ui.html | cut -c1-300 | head -10
+          sec RUN5_END
           '''
           _,o,e=s.exec_command(cmd,timeout=120)
           print(o.read().decode('utf-8','replace'))
