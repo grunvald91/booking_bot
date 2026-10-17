@@ -340,6 +340,9 @@ export function BusinessPage() {
         <Link to={`/book/${business.id}`} className="ds-btn ds-btn--primary ds-btn--block">
           Записаться
         </Link>
+        <Link to={`/chat?business_id=${business.id}`} className="ds-btn ds-btn--ghost ds-btn--block" style={{ marginTop: 8 }}>
+          Помочь выбрать услугу
+        </Link>
       </div>
     </ClientShell>
   )

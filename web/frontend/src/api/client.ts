@@ -1,5 +1,75 @@
 // === Type definitions ===
 
+export interface SalesPendingAction {
+  action_id: string;
+  description: string;
+  tool_name: string;
+  requires_contact: boolean;
+  requires_legal_consent: boolean;
+  business_id: number;
+  cancellation_policy?: string;
+  expires_at: string;
+}
+
+export interface SalesSlotOffer {
+  date: string;
+  service_id: number;
+  duration_hours: number | null;
+  slots: { employee_id: number; employee_name: string; time: string }[];
+  expires_at: string;
+}
+
+export interface SalesChatResult {
+  reply: string;
+  pending_action?: SalesPendingAction | null;
+  available_slots?: SalesSlotOffer | null;
+  mode: 'ai' | 'human';
+  booking_url?: string | null;
+}
+
+export interface SalesHistory {
+  messages: { id: string; role: 'user' | 'ai'; text: string }[];
+  mode: 'ai' | 'human';
+  pending_action?: SalesPendingAction | null;
+  available_slots?: SalesSlotOffer | null;
+  booking_url?: string | null;
+}
+
+export interface SalesConfirmation {
+  client_name?: string;
+  client_phone?: string;
+  personal_data_consent?: boolean;
+  booking_terms_accepted?: boolean;
+}
+
+export interface SalesInboxThread {
+  id: string;
+  reason?: string;
+  messages: SalesHistory['messages'];
+  updated_at: string;
+}
+
+export interface SalesPolicy {
+  enabled: boolean;
+  booking_mode: 'client_confirmation' | 'operator_only';
+  show_prices: boolean;
+  recommend_specialists: boolean;
+  check_availability: boolean;
+  view_client_bookings: boolean;
+  instructions: string;
+  prohibited_topics: string;
+}
+
+export interface SalesSettings {
+  business_id: number;
+  business_name: string;
+  revision: number;
+  policy: SalesPolicy;
+  always_forbidden: string[];
+  coverage: { rule: string; status: string }[];
+  business_rules: Record<string, string | number | boolean | null>;
+}
+
 export interface Business {
   id: number;
   name: string;
@@ -165,6 +235,8 @@ export interface PublicBooking {
   prepayment_amount: number;
   paid_amount: number;
   prepayment_confirmed: boolean;
+  prepayment_expires_at?: string | null;
+  price_requires_confirmation?: boolean;
   payment_phone?: string | null;
   payment_details?: string | null;
   require_receipt_for_prepayment: boolean;
@@ -219,6 +291,7 @@ export interface CreateBookingData {
 }
 
 export interface AdminBooking {
+  version: number;
   id: number;
   client_name: string;
   client_phone?: string;
@@ -421,6 +494,25 @@ export interface AuthResponse {
 
 const API = '/api';
 
+export class ApiError extends Error {
+  readonly status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+    this.name = 'ApiError'
+  }
+}
+
+export interface TelegramLoginPayload {
+  id: number
+  auth_date: number
+  hash: string
+  first_name?: string
+  last_name?: string
+  username?: string
+  photo_url?: string
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = localStorage.getItem('token');
   const tgInitData = window.Telegram?.WebApp?.initData || '';
@@ -435,12 +527,43 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    throw new ApiError(res.status, text || `HTTP ${res.status}`);
   }
   return res.json();
 }
 
 export const api = {
+  emailCapabilities: () => request<{ available: boolean }>('/auth/email/capabilities'),
+  emailAccount: () => request<{ email: string | null; available: boolean; telegram: { id: number; username: string | null } | null; telegram_link_available: boolean }>('/auth/email/account'),
+  startTelegramLink: (password: string) => request<{ challenge_id: string; url: string; expires_at: string }>('/auth/telegram-link/start', { method: 'POST', body: JSON.stringify({ password }) }),
+  telegramLinkStatus: (id: string) => request<{ state: string; telegram: { id: number; name: string; username: string | null } | null; business_count: number }>(`/auth/telegram-link/${id}`),
+  completeTelegramLink: (challenge_id: string, password: string) => request<AuthResponse>('/auth/telegram-link/complete', { method: 'POST', body: JSON.stringify({ challenge_id, password }) }),
+  cancelTelegramLink: (id: string) => request(`/auth/telegram-link/${id}/cancel`, { method: 'POST' }),
+  prepaymentAttention: () => request<{ count: number; first: { booking: AdminBooking; business_name: string; business_id: number } | null }>('/admin/prepayments/attention'),
+  emailLogin: (email: string, password: string) => request<AuthResponse>('/auth/email/login', {
+    method: 'POST', body: JSON.stringify({ email, password }),
+  }),
+  emailStart: (data: { email: string; password: string; full_name?: string; purpose: 'register' | 'link' | 'reset' }) =>
+    request<{ challenge_id: string; message: string }>('/auth/email/start', { method: 'POST', body: JSON.stringify(data) }),
+  emailVerify: (challenge_id: string, code: string) => request<AuthResponse>('/auth/email/verify', {
+    method: 'POST', body: JSON.stringify({ challenge_id, code }),
+  }),
+  getPrepayments: (businessId: number, status: string, beforeId?: number) =>
+    request<{ items: AdminBooking[]; next_before_id: number | null }>(`/admin/prepayments?business_id=${businessId}&status=${status}${beforeId ? `&before_id=${beforeId}` : ''}`),
+  getPaymentDetails: (bookingId: number) => request<{ booking: AdminBooking; visit: AdminBooking[]; prepayment_total: number;
+    receipts: { id: number; mime_type: string; size: number; created_at: string }[];
+    reviews: { decision: string; reviewer_id: number; reviewed_at: string }[] }>(`/admin/bookings/${bookingId}/payment-details`),
+  reviewPrepayment: (bookingId: number, decision: 'confirm' | 'reject', expected_version: number) =>
+    request<AdminBooking>(`/admin/bookings/${bookingId}/prepayment-review`, {
+      method: 'POST', body: JSON.stringify({ decision, expected_version }),
+    }).then(result => { window.dispatchEvent(new Event('servgo:payment-reviewed')); return result }),
+  downloadReceipt: async (receiptId: number) => {
+    const response = await fetch(`${API}/admin/receipts/${receiptId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+    });
+    if (!response.ok) throw new Error('Не удалось открыть чек');
+    return response.blob();
+  },
   // Auth
   loginPhone: (phone: string) =>
     request<{ message: string; fallback?: boolean }>('/auth/phone', {
@@ -458,6 +581,12 @@ export const api = {
       body: JSON.stringify({ init_data: initData }),
     }),
   getMe: () => request<AuthResponse['user']>('/auth/me'),
+  sharedSession: () => request<AuthResponse>('/auth/session'),
+  telegramLogin: (data: TelegramLoginPayload) => request<AuthResponse>('/auth/telegram-login', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 
   // PWA / Web Push
   getPushPublicKey: () =>
@@ -687,7 +816,7 @@ export const api = {
   // Co-owners
   getOwners: (bizId: number) =>
     request<OwnerInfo[]>(`/admin/businesses/${bizId}/owners`),
-  addOwner: (bizId: number, data: { telegram_id?: number; username?: string }) =>
+  addOwner: (bizId: number, data: { telegram_id?: number; username?: string; email?: string }) =>
     request<OwnerInfo>(`/admin/businesses/${bizId}/owners`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -781,18 +910,39 @@ export const api = {
 
   // AI Chat
   aiChat: (message: string, businessId?: number) =>
-    request<{ reply: string; pending_action?: { action_id: string; description: string; tool_name: string } }>('/ai/chat', {
+    request<SalesChatResult>('/ai/chat', {
       method: 'POST',
       body: JSON.stringify({ message, business_id: businessId }),
     }),
-  aiConfirm: (actionId: string) =>
-    request<{ reply: string }>('/ai/confirm', {
+  aiHistory: (businessId: number) => request<SalesHistory>(`/ai/history?business_id=${businessId}`),
+  aiSelectSlot: (businessId: number, employeeId: number, time: string) =>
+    request<SalesChatResult>('/ai/select-slot', {
+      method: 'POST', body: JSON.stringify({ business_id: businessId, employee_id: employeeId, time }),
+    }),
+  aiHandoff: (businessId: number) => request<SalesChatResult>('/ai/handoff', {
+    method: 'POST', body: JSON.stringify({ business_id: businessId }),
+  }),
+  aiConfirm: (actionId: string, details: SalesConfirmation = {}) =>
+    request<SalesChatResult>('/ai/confirm', {
       method: 'POST',
-      body: JSON.stringify({ action_id: actionId }),
+      body: JSON.stringify({ action_id: actionId, ...details }),
     }),
   aiReject: (actionId: string) =>
     request<{ message: string }>('/ai/reject', {
       method: 'POST',
       body: JSON.stringify({ action_id: actionId }),
     }),
+  salesInbox: (businessId: number) => request<SalesInboxThread[]>(`/admin/ai/businesses/${businessId}/conversations`),
+  salesSettings: (businessId: number) => request<SalesSettings>(`/admin/ai/businesses/${businessId}/settings`),
+  saveSalesSettings: (businessId: number, settings: SalesSettings) => request<SalesSettings>(`/admin/ai/businesses/${businessId}/settings`, {
+    method: 'PUT', body: JSON.stringify({ expected_revision: settings.revision, policy: settings.policy }),
+  }),
+  salesReply: (conversationId: string, message: string) => request(`/admin/ai/conversations/${conversationId}/reply`, {
+    method: 'POST', body: JSON.stringify({ message }),
+  }),
+  salesResume: (conversationId: string) => request(`/admin/ai/conversations/${conversationId}/resume`, { method: 'POST' }),
+  rentalStatus: (token: string) => request<{
+    id: number; status: string; date: string; time: string; duration_minutes: number;
+    estimated_price: number | null; price_requires_confirmation: boolean; prepayment_amount: number | null;
+  }>(`/rental/bookings/${token}`),
 };

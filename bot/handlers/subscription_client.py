@@ -1,6 +1,8 @@
 """
 Обработчики для работы с абонементами (клиент)
 """
+
+from datetime_utils import utc_now
 from datetime import datetime
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
@@ -544,7 +546,7 @@ async def my_subscription_details(callback: CallbackQuery, state: FSMContext):
     )
 
     if cs.status == "active" and cs.expires_at:
-        days_left = (cs.expires_at - datetime.utcnow()).days
+        days_left = (cs.expires_at - utc_now()).days
         if days_left >= 0:
             text += f"⏰ Истекает: {cs.expires_at.strftime('%d.%m.%Y')} (осталось {days_left} дн.)\n"
         else:

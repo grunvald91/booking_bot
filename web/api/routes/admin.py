@@ -2,6 +2,8 @@
 Admin routes: dashboard, booking management, analytics.
 All routes require the user to be a business owner.
 """
+
+from datetime_utils import utc_now
 from datetime import date, datetime, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
 from typing import List, Optional
@@ -163,6 +165,7 @@ def _admin_booking_out(b: Booking) -> AdminBookingOut:
         status=b.status,
         notes=b.notes,
         created_at=b.created_at,
+        version=b.version,
     )
 
 
@@ -773,7 +776,6 @@ async def update_booking_status(
             selectinload(Booking.service),
             selectinload(Booking.employee),
         )
-        .with_for_update()
     )
     booking = result.scalar_one_or_none()
     if not booking:
@@ -782,6 +784,8 @@ async def update_booking_status(
         raise HTTPException(status_code=403, detail="Not your business")
 
     old_status = booking.status
+    if old_status in ("pending_prepayment", "prepayment_sent") and data.status in ("pending", "completed"):
+        raise HTTPException(409, "Сначала подтвердите поступление предоплаты или отклоните сообщение об оплате")
     if data.status == "confirmed" and booking.duration_minutes is not None and (
         booking.price_requires_confirmation or booking.prepayment_amount is None
     ):
@@ -797,6 +801,19 @@ async def update_booking_status(
     )
     visit = await contiguous_visit_bookings(db, booking, statuses=visit_statuses)
     visit_ids = [item.id for item in visit]
+    visit = list((await db.execute(select(Booking).where(Booking.id.in_(visit_ids)).order_by(Booking.id)
+        .with_for_update().execution_options(populate_existing=True))).scalars())
+    if booking.status != old_status:
+        raise HTTPException(409, "Статус записи уже изменился. Обновите страницу")
+
+    payment_reviewed = False
+    if data.status == "confirmed" and old_status in ("prepayment_sent", "pending_prepayment"):
+        from database.prepayment import review_payment, PaymentWindowError
+        try:
+            visit = await review_payment(db, booking, user.id, "confirm")
+            payment_reviewed = True
+        except PaymentWindowError as exc:
+            raise HTTPException(exc.status_code, exc.detail) from None
 
     target_is_active = data.status in ACTIVE_BOOKING_STATUSES
     current_is_active = old_status in ACTIVE_BOOKING_STATUSES
@@ -824,9 +841,15 @@ async def update_booking_status(
                 detail="Нельзя вернуть запись: это время уже занято",
             ) from exc
 
-    confirmed_at = datetime.utcnow()
+    confirmed_at = utc_now()
     for item in visit:
-        item.status = data.status
+        if not payment_reviewed:
+            if data.status == "cancelled" and old_status in ("prepayment_sent", "pending_prepayment"):
+                from database.models import PrepaymentReview
+                db.add(PrepaymentReview(booking_id=item.id, reviewer_id=user.id,
+                    decision="cancel", booking_version=item.version))
+            item.status = data.status
+            item.version += 1
         if (
             data.status == "confirmed"
             and old_status in ("prepayment_sent", "pending_prepayment")
@@ -1950,8 +1973,18 @@ async def add_owner(
     if business_id not in biz_ids:
         raise HTTPException(status_code=403, detail="Not your business")
 
-    # Find user by telegram_id or username
-    if data.telegram_id:
+    # Email grants access only after verification by the target account.
+    if sum(bool(value) for value in (data.email, data.telegram_id, data.username)) != 1:
+        raise HTTPException(422, "Укажите один идентификатор: email, Telegram ID или username")
+    if data.email:
+        from email_utils import normalize_optional_email
+        from database.models import EmailIdentity
+        try:
+            email = normalize_optional_email(data.email)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        result = await db.execute(select(User).join(EmailIdentity, EmailIdentity.user_id == User.id).where(EmailIdentity.email == email))
+    elif data.telegram_id:
         result = await db.execute(select(User).where(User.telegram_id == data.telegram_id))
     elif data.username:
         uname = data.username.lstrip("@")
@@ -1961,7 +1994,7 @@ async def add_owner(
 
     target_user = result.scalar_one_or_none()
     if not target_user:
-        raise HTTPException(status_code=404, detail="User not found (they must first start the bot)")
+        raise HTTPException(status_code=404, detail="Пользователь не найден. Сначала зарегистрируйтесь по email или в боте")
 
     # Check not already owner
     existing = await db.execute(
