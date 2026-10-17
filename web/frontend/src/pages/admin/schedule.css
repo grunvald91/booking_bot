@@ -1,458 +1,186 @@
-/* ─────────────────────────────────────────────────────────────────────────
-   Расписание (admin) — экранный слой. Палитра/тема/базовые компоненты вынесены
-   в styles/design-system.css (единый дизайн-файл). Здесь — только то, что
-   специфично для таймлайна расписания. Токены берутся из data-theme на .sched-root.
-   ───────────────────────────────────────────────────────────────────────── */
+/* ═════════════════════════════════════════════════════════════════════════
+   ServGo · Расписание (макет servgo_admin_schedule_focus_v16)
+   График в приоритете: полосы записей окрашены цветом мастера, управление —
+   в нижнем доке у большого пальца, инструменты скрываются в «ящик».
+   ═════════════════════════════════════════════════════════════════════════ */
 
-/* ── Каркас экрана (токены приходят из design-system: [data-theme]) ── */
-.sched-root {
-  --gutter: 46px;
-  --pxh: 56px;                  /* высота часа; в рантайме перебивается inline-стилем */
+.sched-screen { font-size: 13.5px; }
+.sched-hsub { display: flex; align-items: center; gap: 5px; margin-top: 2px; font-size: 11px; color: var(--s-muted-2); font-weight: 350; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sched-hsub .dot { width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: var(--s-success); }
 
-  /* Полноэкранный mini-app экран поверх центрированного Layout SPA */
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--s-bg);
-  color: var(--s-text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
-  font-feature-settings: 'tnum';
-  -webkit-font-smoothing: antialiased;
+.sched-page {
+  flex: 1; min-height: 0; position: relative;
+  display: flex; flex-direction: column; overflow: hidden;
+  padding: 0 16px 4px;
 }
 
-/* Обёртка контента (всё, кроме боковой навигации) — прозрачна для внутреннего flex-layout */
-.sched-main { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+/* Верхний контекст (по кнопке «Информация») */
+.sched-context { flex: none; display: flex; flex-direction: column; gap: 5px; padding: 5px 1px 8px; }
+.sched-context .ds-context-headline { font-size: 13px; line-height: 1.1; }
+.sched-context-strip { display: flex; gap: 4px; overflow: hidden; }
+.sched-context-strip > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 5px 7px; border-radius: 10px; background: var(--s-surface-2); }
+.sched-context-strip b { color: var(--s-accent); font-size: 12px; font-weight: 500; }
+.sched-context-strip span { font-size: 10px; color: var(--s-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Telegram WebApp: рендерится порталом прямо в body, padding-top на body (index.css) сюда
-   не доходит — сдвигаем сам fixed-экран под нативную шапку TG. */
-html.tg-webapp .sched-root { top: var(--tg-safe-top, 0px); }
+/* Легенда цветов мастеров */
+.sched-legend { flex: none; display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 2px 0 4px; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+.sched-legend::-webkit-scrollbar { display: none; }
+.sched-legend-tag { display: inline-flex; align-items: center; gap: 5px; padding: 3px 2px; border: 0; background: transparent; font: inherit; font-size: 10.5px; color: var(--s-muted); white-space: nowrap; cursor: pointer; }
+.sched-legend-tag[aria-pressed='true'] { color: var(--s-accent); }
+.sched-swatch { display: inline-block; flex-shrink: 0; width: 16px; height: 6px; border-radius: 10px; background: var(--master); }
 
-/* Доп. токены, специфичные для таймлайна расписания (нет в общем ките) */
-.sched-root { --s-today: #d8e9fb; --s-weekcol: #eef4fb; }
-.sched-root[data-theme='dark'] { --s-today: #15314e; --s-weekcol: #0f1a27; }
+/* Шапка колонок */
+.sched-colhead { flex: 0 0 34px; display: grid; align-items: center; background: var(--s-bg); }
+.sched-dayhead { min-width: 0; height: 34px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 0; background: transparent; font: inherit; font-size: 10px; color: var(--s-muted-2); position: relative; }
+.sched-dayhead strong { font-size: 10.5px; font-weight: 530; color: var(--s-text); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.025em; }
+.sched-dayhead .sched-swatch { width: 20px; height: 4px; }
+.sched-dayhead.week { cursor: pointer; }
+.sched-dayhead.week strong { font-size: 12px; }
+.sched-dayhead.week small { position: absolute; top: 1px; right: 2px; font-size: 8.5px; font-weight: 500; color: var(--s-accent); }
+.sched-dayhead.today span, .sched-dayhead.today strong { color: var(--s-accent); }
 
-/* Десктоп / сайт: чуть просторнее, фиксированная ширина по центру */
-@media (min-width: 760px) {
-  .sched-root { --gutter: 56px; }
+/* Тело графика */
+.sched-scroll { flex: 1 1 auto; min-height: 80px; overflow: auto; position: relative; overscroll-behavior: contain; touch-action: pan-x pan-y; scrollbar-width: thin; }
+.sched-timeline {
+  position: relative; display: grid; grid-template-columns: 36px 1fr;
 }
+.sched-gutter { position: relative; }
+.sched-hour { position: absolute; left: 0; transform: translateY(-50%); font-size: 9px; color: var(--s-muted-2); font-variant-numeric: tabular-nums; }
+.sched-cols {
+  position: relative; display: grid; height: 100%;
+  background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--hour) - 1px), var(--s-grid) calc(var(--hour) - 1px), var(--s-grid) var(--hour));
+}
+.sched-col { position: relative; min-width: 0; border-left: 1px solid var(--s-grid); cursor: copy; }
+.sched-col.today { background: linear-gradient(180deg, rgba(52, 120, 214, 0.04), transparent); }
 
-.sched-root *,
-.sched-root *::before,
-.sched-root *::after { box-sizing: border-box; }
+/* Полоса записи: независимая дорожка, высота = реальная длительность */
+.sched-block {
+  position: absolute; pointer-events: none; overflow: hidden;
+  left: calc(var(--lane) * 100% / var(--lanes) + 1px); width: calc(100% / var(--lanes) - 2px);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 2px 1px;
+  color: #fff; border-radius: 5px;
+  background: linear-gradient(175deg, color-mix(in srgb, var(--master) 82%, white), var(--master));
+  box-shadow: 0 1px 4px rgba(29, 72, 114, 0.11);
+  transition: filter 0.18s ease, opacity 0.18s ease;
+}
+.sched-block::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 1px; background: #ffffff4d; }
+.sched-block .t { font-size: 9px; line-height: 1.1; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums; }
+.sched-block .t span { display: block; white-space: nowrap; }
+.sched-block .n { font-size: 9px; line-height: 1.1; font-weight: 500; text-align: center; overflow-wrap: anywhere; max-width: 100%; }
+.sched-block.weekly { border-radius: 4px; padding: 0; }
+/* Ожидает подтверждения / предоплаты — штриховка поверх цвета мастера */
+.sched-block.is-awaiting { background:
+  repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.28) 0 4px, transparent 4px 8px),
+  linear-gradient(175deg, color-mix(in srgb, var(--master) 70%, white), color-mix(in srgb, var(--master) 85%, white)); }
+.sched-block.is-done { opacity: 0.55; }
+.sched-block.is-dragging { opacity: 0.3; }
 
-.sched-root ::-webkit-scrollbar { width: 6px; height: 6px; }
-.sched-root ::-webkit-scrollbar-thumb { background: var(--s-line-2); border-radius: 6px; }
-.sched-root ::-webkit-scrollbar-track { background: transparent; }
+.sched-hit { position: absolute; left: 0; right: 0; z-index: 3; padding: 0; border: 0; background: transparent; cursor: pointer; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.sched-hit:focus-visible { outline: 2px solid var(--s-accent); outline-offset: -2px; border-radius: 5px; }
+.sched-hit:active + .sched-block, .sched-hit:hover { background: rgba(255, 255, 255, 0.08); }
 
-/* ── Шапка (заголовок + бизнес + тема) ── */
-.sched-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  flex-shrink: 0;
-}
-.sched-htitle { flex: 1; min-width: 0; }
-.sched-htitle h1 {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 700;
-  line-height: 1.1;
-  color: var(--s-text);
-}
-.sched-hsub {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 1px;
-  font-size: 12px;
-  color: var(--s-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.sched-hsub .dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--st-completed); flex-shrink: 0;
-}
-.sched-biz {
-  max-width: 150px;
-  padding: 8px 11px;
-  border-radius: 11px;
-  border: 1px solid var(--s-line-2);
-  background: var(--s-surface-2);
-  color: var(--s-text-2);
-  font-size: 13px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-}
+.sched-drop { position: absolute; left: 1px; right: 1px; z-index: 5; pointer-events: none; border-radius: 8px; display: grid; place-items: center; font-size: 10px; color: var(--s-text); background: color-mix(in srgb, var(--master) 23%, var(--s-surface)); outline: 2px dashed var(--master); outline-offset: -2px; }
+.sched-ghost { position: fixed; z-index: 95; pointer-events: none; min-width: 130px; max-width: 180px; padding: 9px 12px; border-radius: 13px; color: #fff; font-size: 11px; line-height: 1.35; opacity: 0.94; transform: translate(12px, 12px); background: linear-gradient(115deg, var(--master), color-mix(in srgb, var(--master) 78%, #192638)); box-shadow: 0 8px 25px rgba(20, 46, 72, 0.4); }
+.sched-ghost strong { display: block; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched-ghost small { display: block; color: #fff; }
 
-/* ── Иконочные кнопки ── */
-.sched-iconbtn {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 34px; height: 34px; flex-shrink: 0;
-  border: none; border-radius: 11px;
-  background: var(--s-surface-2); color: var(--s-text-2);
-  cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
-}
-.sched-iconbtn.bordered { border: 1px solid var(--s-line-2); }
-.sched-iconbtn:hover { color: var(--s-text); }
-.sched-iconbtn.is-on { color: var(--s-accent); border-color: var(--s-accent); background: var(--s-accent-soft); }
+.sched-now { position: absolute; left: 36px; right: 0; height: 0; border-top: 1.5px solid var(--s-now); z-index: 4; pointer-events: none; }
+.sched-now .knob { position: absolute; left: -4px; top: -4.5px; width: 7px; height: 7px; border-radius: 50%; background: var(--s-now); }
+.sched-now .lbl { position: absolute; left: -36px; top: -7px; font-size: 9px; font-weight: 600; color: var(--s-now); background: var(--s-bg); padding: 0 2px; }
 
-/* ── Поиск ── */
-.sched-toolbar { padding: 0 14px 8px; flex-shrink: 0; }
-.sched-search {
-  display: flex; align-items: center; gap: 9px;
-  background: var(--s-surface-2); border: 1px solid var(--s-line);
-  border-radius: 12px; padding: 9px 12px;
-}
-.sched-search svg { flex-shrink: 0; color: var(--s-muted-2); }
-.sched-search input {
-  flex: 1; border: none; background: transparent; color: var(--s-text);
-  font-size: 14px; outline: none; font-family: inherit;
-}
-.sched-search input::placeholder { color: var(--s-muted-2); }
-.sched-search .clear {
-  border: none; background: transparent; color: var(--s-muted-2);
-  cursor: pointer; font-size: 18px; line-height: 1; padding: 0;
-}
+.sched-empty { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 40px 0; color: var(--s-muted); font-size: 13px; }
+.sched-pull { position: sticky; top: 6px; z-index: 10; margin: 0 auto -32px; width: max-content; display: flex; align-items: center; gap: 7px; padding: 8px 12px; border-radius: 20px; background: var(--s-surface); color: var(--s-accent); font-size: 11.5px; box-shadow: 0 6px 22px rgba(32, 83, 131, 0.12); }
 
-/* ── Ряд управления: режим + листалка дат + сворачивание ── */
-.sched-controls {
-  display: flex; align-items: center; gap: 7px;
-  padding: 0 14px 9px; flex-shrink: 0;
-}
-.sched-seg {
-  display: inline-flex; flex-shrink: 0;
-  background: var(--s-surface); border: 1px solid var(--s-line);
-  border-radius: 10px; padding: 2px; gap: 2px;
-}
-.sched-seg button {
-  padding: 5px 13px; border: none; border-radius: 8px;
-  font-size: 13px; font-weight: 650; cursor: pointer;
-  background: transparent; color: var(--s-muted);
-  font-family: inherit; white-space: nowrap;
-  transition: color 0.15s ease, background 0.15s ease;
-}
-.sched-seg button.active { background: var(--s-accent); color: var(--s-accent-ink); }
-
-.sched-stepper { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 2px; }
-.sched-stepper-nav {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; flex-shrink: 0;
-  border: none; border-radius: 8px; background: transparent;
-  color: var(--s-muted); cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
-}
-.sched-stepper-nav:hover { color: var(--s-text); background: var(--s-surface-2); }
-.sched-stepper-label {
-  flex: 1; min-width: 0;
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 4px; border: none; background: transparent; cursor: pointer;
-  font-family: inherit; overflow: hidden;
-}
-.sched-stepper-label .main {
-  font-size: 15px; font-weight: 700; color: var(--s-text);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.sched-stepper-label .sub { font-size: 12px; color: var(--s-muted); white-space: nowrap; flex-shrink: 0; }
-
-.sched-details-toggle {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; flex-shrink: 0;
-  border: 1px solid var(--s-line-2); border-radius: 9px;
-  background: var(--s-surface-2); color: var(--s-muted); cursor: pointer;
-}
-.sched-details-toggle svg { transition: transform 0.2s ease; }
-.sched-details-toggle.open svg { transform: rotate(180deg); }
-.sched-details-toggle.open { color: var(--s-accent); border-color: var(--s-accent); background: var(--s-accent-soft); }
-
-/* ── Сводка + легенда (сворачиваемые) ── */
-.sched-summary { display: flex; gap: 8px; padding: 0 14px 10px; flex-shrink: 0; }
-.sched-summary .tile {
-  flex: 1; background: var(--s-surface); border: 1px solid var(--s-line);
-  border-radius: 13px; padding: 9px 12px;
-}
-.sched-summary .tile .num { font-size: 19px; font-weight: 750; color: var(--s-text); line-height: 1; }
-.sched-summary .tile .lbl { font-size: 11px; color: var(--s-muted); margin-top: 3px; }
-
-.sched-legend { display: flex; gap: 14px; padding: 0 16px 10px; flex-shrink: 0; overflow-x: auto; }
-.sched-legend .item { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.sched-legend .swatch { width: 9px; height: 9px; border-radius: 3px; }
-.sched-legend .item span { font-size: 11px; color: var(--s-muted); white-space: nowrap; }
-
-/* ── Прилипшая шапка колонок ── */
-.sched-colhead {
-  display: grid; flex-shrink: 0; background: var(--s-bg);
-  border-top: 1px solid var(--s-line); border-bottom: 1px solid var(--s-line);
-}
-/* День: тонкие цветные «шапки» колонок (имена — в нижнем фильтре) */
-.sched-emp-cap { display: flex; align-items: center; padding: 7px 8px; cursor: pointer; transition: opacity 0.2s ease; }
-.sched-emp-cap .cap { flex: 1; height: 5px; border-radius: 3px; }
-
-.sched-emp-head {
-  display: flex; align-items: center; gap: 6px; padding: 8px;
-  cursor: pointer; overflow: hidden; transition: opacity 0.2s ease;
-}
-.sched-emp-head .ava {
-  width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 700; color: #04121f;
-}
-.sched-emp-head .nm {
-  font-size: 12px; font-weight: 600; color: var(--s-text-2);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.sched-wday-head { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 2px; }
-.sched-wday-head.today { background: var(--s-today); }
-.sched-wday-head .wd { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--s-muted); }
-.sched-wday-head .dt { font-size: 14px; font-weight: 700; color: var(--s-text); }
-
-/* ── Таймлайн (тело, скроллится вертикально) ── */
-.sched-tl { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; position: relative; touch-action: pan-y; }
-.sched-tl-inner { position: relative; }
-.sched-tl-gutter { position: absolute; left: 0; top: 0; width: var(--gutter); height: 100%; }
-.sched-tl-hour {
-  position: absolute; left: 0; width: var(--gutter); text-align: center;
-  font-size: 11px; color: var(--s-muted-2); transform: translateY(-7px);
-}
-.sched-tl-cols { position: absolute; left: var(--gutter); right: 0; top: 0; height: 100%; display: grid; }
-.sched-tl-col {
-  position: relative; height: 100%;
-  border-left: 1px solid var(--s-grid);
-  background-image: repeating-linear-gradient(
-    to bottom, transparent 0, transparent calc(var(--pxh) - 1px),
-    var(--s-grid) calc(var(--pxh) - 1px), var(--s-grid) var(--pxh));
-}
-.sched-tl-col.today { background-color: var(--s-weekcol); }
-
-/* Карточка записи (день) */
-.sched-card {
-  position: absolute; border-radius: 9px; padding: 5px 7px; overflow: hidden;
-  cursor: grab; z-index: 5; color: var(--s-text);
-  border-left: 3px solid var(--card-accent, var(--s-accent));
-  background: var(--card-bg, var(--s-accent-soft));
-  border: 1px solid var(--card-bd, transparent);
-  border-left: 3px solid var(--card-accent, var(--s-accent));
-  touch-action: pan-y; transition: box-shadow 0.12s ease;
-}
-.sched-card.is-draggable { cursor: grab; }
-.sched-card:active { filter: brightness(1.08); }
-.sched-card.is-cancelled { opacity: 0.6; }
-.sched-card.is-cancelled .c-name { text-decoration: line-through; }
-.sched-card.is-pending { border-left-style: dashed; }
-.sched-card.is-dragging { opacity: 0.4; }
-.sched-card .c-name { font-size: 11px; font-weight: 700; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sched-card .c-sub { font-size: 10px; color: var(--s-muted); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
-
-/* Узкая карточка недели */
-.sched-wk-card {
-  position: absolute; border-radius: 5px; padding: 2px 3px; overflow: hidden;
-  cursor: pointer; color: #04121f; z-index: 5;
-  font-size: 9px; font-weight: 700; line-height: 1.1; white-space: nowrap; text-overflow: ellipsis;
-}
-
-/* Агрегат «N записей» (перегруженный день недели) */
-.sched-wk-count {
-  position: absolute; left: 1px; right: 1px; border-radius: 6px; cursor: pointer; overflow: hidden; z-index: 5;
-  background: var(--s-surface-2); border: 1px solid var(--s-line-2); border-left: 3px solid var(--s-accent);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-}
-.sched-wk-count .num { font-size: 15px; font-weight: 800; color: var(--s-text); line-height: 1; }
-.sched-wk-count .lbl { font-size: 9px; color: var(--s-muted); line-height: 1; }
-
-/* Линия «сейчас» */
-.sched-now { position: absolute; left: 0; right: 0; height: 0; z-index: 6; pointer-events: none; }
-.sched-now .bar { position: absolute; left: var(--gutter); right: 0; top: 0; border-top: 2px solid var(--s-now); }
-.sched-now .knob { position: absolute; left: calc(var(--gutter) - 6px); top: -7px; width: 14px; height: 14px; border-radius: 50%; background: var(--s-now); box-shadow: 0 0 0 3px var(--s-bg); }
-.sched-now .lbl { position: absolute; left: 2px; top: -8px; font-size: 9px; font-weight: 700; color: var(--s-now); }
-
-/* ── Пустое состояние ── */
-.sched-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 30px; gap: 14px; text-align: center; }
-.sched-empty .ico { width: 64px; height: 64px; border-radius: 20px; background: var(--s-surface); border: 1px solid var(--s-line); display: flex; align-items: center; justify-content: center; color: var(--s-muted-2); }
-.sched-empty .t1 { font-size: 16px; font-weight: 700; color: var(--s-text-2); }
-.sched-empty .t2 { font-size: 13px; color: var(--s-muted-2); margin-top: 3px; }
-
-/* ── Чипы-фильтры мастеров ── */
-.sched-chips { display: flex; gap: 7px; overflow-x: auto; padding: 9px 14px 7px; flex-shrink: 0; border-top: 1px solid var(--s-line); background: var(--s-surface); }
-.sched-chip {
-  display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0;
-  padding: 7px 14px; border-radius: 20px; font-size: 13px; font-weight: 600;
-  cursor: pointer; white-space: nowrap; font-family: inherit;
-  background: var(--s-surface-2); color: var(--s-muted); border: 1px solid var(--s-line);
-  transition: background 0.15s ease, color 0.15s ease;
-}
-.sched-chip.active { background: var(--s-accent); color: var(--s-accent-ink); border-color: var(--s-accent); }
-.sched-chip .chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-
-/* ── Нижняя навигация (как в архиве) ── */
-.sched-bottomnav {
-  display: flex; align-items: stretch; flex-shrink: 0;
-  border-top: 1px solid var(--s-line); background: var(--s-bg);
-  padding: 6px 4px calc(9px + env(safe-area-inset-bottom, 0px));
-}
-.sched-bn {
-  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
-  padding: 4px 2px; cursor: pointer; text-decoration: none;
-  color: var(--s-muted); font-size: 10px; font-weight: 600;
-}
-.sched-bn span { font-size: 10px; }
-.sched-bn.active { color: var(--s-accent); font-weight: 700; }
-
-/* ── Поля в модалках (перенос / новая запись) ── */
-.sched-input {
-  width: 100%;
-  padding: 11px 13px;
-  border-radius: 11px;
-  border: 1px solid var(--s-line);
-  background: var(--s-surface-2);
-  color: var(--s-text);
-  font-size: 14px;
-  outline: none;
-  font-family: inherit;
-}
-.sched-input:focus { border-color: var(--s-accent); }
-.sched-input::placeholder { color: var(--s-muted-2); }
-
-/* ── Гхост при перетаскивании ── */
-.sched-drag-ghost {
-  border-radius: 9px; padding: 5px 7px; overflow: hidden;
-  background: var(--s-surface); color: var(--s-text);
-  border: 1px solid var(--s-accent); border-left: 3px solid var(--s-accent);
-  box-shadow: 0 12px 30px -6px rgba(0, 0, 0, 0.5); opacity: 0.95;
-}
-.sched-drag-ghost .c-name { font-size: 11px; font-weight: 700; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sched-drag-ghost .c-sub { font-size: 10px; color: var(--s-accent); font-weight: 700; line-height: 1.2; margin-top: 1px; }
-
-/* ── Панель «записи рядом» (неделя, ±окно) ── */
-.sched-peek {
-  position: relative; width: 100%; max-height: 64vh;
-  background: var(--s-surface); border-top: 1px solid var(--s-line-2);
-  border-radius: 22px 22px 0 0; padding: 16px 16px calc(18px + env(safe-area-inset-bottom, 0px));
-  display: flex; flex-direction: column;
-}
-.sched-peek-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.sched-peek-head h3 { font-size: 16px; font-weight: 700; color: var(--s-text); margin: 0; }
-.sched-peek-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
-.sched-peek-empty { font-size: 13px; color: var(--s-muted-2); padding: 14px 0; text-align: center; }
-.sched-di {
-  display: flex; align-items: stretch; gap: 11px; text-align: left;
-  padding: 11px 12px; border-radius: 13px; cursor: pointer; font-family: inherit;
-  background: var(--s-surface-2); border: 1px solid var(--s-line); border-left-width: 3px;
-}
-.sched-di .di-time { display: flex; flex-direction: column; align-items: flex-start; min-width: 46px; }
-.sched-di .di-time .t1 { font-size: 14px; font-weight: 700; color: var(--s-text); line-height: 1.1; }
-.sched-di .di-time .t2 { font-size: 10px; color: var(--s-muted-2); margin-top: 2px; }
-.sched-di .di-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.sched-di .di-name { font-size: 14px; font-weight: 650; color: var(--s-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sched-di .di-svc { font-size: 12px; color: var(--s-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
-.sched-di .di-emp { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--s-muted); margin-top: 4px; }
-.sched-di .di-emp .ed { width: 7px; height: 7px; border-radius: 50%; }
-.sched-di .di-badge { align-self: flex-start; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 20px; white-space: nowrap; }
-.sched-di.cancelled .di-name { text-decoration: line-through; opacity: 0.7; }
-
-/* ── Боттом-шит: новая запись / формы ── */
-.sched-sheet-ov {
-  position: fixed; inset: 0; z-index: 60;
-  display: flex; align-items: flex-end; justify-content: center;
-  background: rgba(4, 9, 16, 0.55);
-}
-.sched-center-ov {
-  position: fixed; inset: 0; z-index: 70;
-  display: flex; align-items: center; justify-content: center; padding: 16px;
-  background: rgba(4, 9, 16, 0.6);
-}
-.sched-sheet {
-  position: relative; width: 100%; max-width: 480px;
-  background: var(--s-surface); border-top: 1px solid var(--s-line-2);
-  border-radius: 22px 22px 0 0; max-height: 92vh; overflow-y: auto;
-  padding: 14px 18px calc(20px + env(safe-area-inset-bottom, 0px));
-}
-.sched-sheet-grip { width: 38px; height: 4px; border-radius: 3px; background: var(--s-line-2); margin: 0 auto 12px; }
-.sched-sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-.sched-sheet-head h3 { font-size: 19px; font-weight: 750; color: var(--s-text); margin: 0; }
-.sched-sheet-head p { font-size: 13px; color: var(--s-muted); margin: 2px 0 0; text-transform: capitalize; }
-.sched-field { margin-bottom: 13px; }
-.sched-field > label { display: block; font-size: 12px; font-weight: 650; color: var(--s-muted); margin-bottom: 6px; }
-.sched-field-row { display: flex; gap: 10px; }
-.sched-field-row > * { flex: 1; min-width: 0; }
-.sched-seg-full { display: flex; gap: 6px; }
-.sched-seg-full button {
-  flex: 1; padding: 9px 4px; border-radius: 11px; cursor: pointer; font-family: inherit;
-  border: 1px solid var(--s-line); background: var(--s-surface-2); color: var(--s-text-2);
-  font-size: 13px; font-weight: 650;
-}
-.sched-seg-full button.on { background: var(--s-accent); color: var(--s-accent-ink); border-color: var(--s-accent); }
-.sched-hint { font-size: 12px; color: var(--s-muted); margin: 7px 2px 0; line-height: 1.35; }
-.sched-error { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--st-cancelled); margin-bottom: 10px; }
-.sched-submit {
-  width: 100%; margin-top: 4px; padding: 14px; border: none; border-radius: 14px;
-  background: var(--s-accent); color: var(--s-accent-ink); font-size: 15px; font-weight: 700;
-  cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 8px;
-}
-.sched-submit:disabled { opacity: 0.5; }
-textarea.sched-input { resize: none; min-height: 54px; }
-
-/* ── Диалог подтверждения переноса ── */
-.sched-confirm {
-  position: relative; width: 100%; max-width: 420px;
-  background: var(--s-surface); border: 1px solid var(--s-line-2);
-  border-radius: 20px; padding: 20px;
-}
-.sched-confirm h3 { font-size: 18px; font-weight: 750; color: var(--s-text); margin: 0 0 4px; }
-.sched-confirm > p { font-size: 14px; color: var(--s-text-2); margin: 0 0 12px; }
-.sched-confirm-from { font-size: 12px; color: var(--s-muted-2); margin: 0 0 10px; }
-.sched-confirm-to {
-  display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 650;
-  color: var(--s-accent); background: var(--s-accent-soft); border-radius: 12px; padding: 11px 13px; margin-bottom: 16px;
-}
-.sched-confirm-actions { display: flex; gap: 10px; }
-.sched-confirm-actions button {
-  flex: 1; padding: 12px; border-radius: 13px; font-size: 14px; font-weight: 700;
-  cursor: pointer; font-family: inherit; border: none;
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-}
-.sched-confirm-actions .ghost { background: var(--s-surface-2); color: var(--s-text-2); border: 1px solid var(--s-line); }
-.sched-confirm-actions .primary { background: var(--s-accent); color: var(--s-accent-ink); }
-
-/* ── FAB ── */
-.sched-fab {
-  position: absolute; right: 18px; bottom: 86px; z-index: 30;
-  width: 54px; height: 54px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  border: none; cursor: pointer; color: #fff;
-  background: linear-gradient(150deg, var(--s-accent), var(--s-accent-press));
-  box-shadow: 0 14px 28px -8px rgba(47, 91, 235, 0.55);
-  transition: transform 0.12s ease;
-}
-.sched-fab:hover { transform: translateY(-2px); }
+/* Плавающие кнопки — над нижней границей графика */
+.sched-floating { position: relative; height: 0; flex: none; z-index: 6; }
+.sched-fab { position: absolute; right: -6px; bottom: 10px; width: 42px; height: 42px; border: 0; border-radius: 50%; display: grid; place-items: center; color: #fff; cursor: pointer; background: linear-gradient(130deg, #3478df, #6298ec); box-shadow: 0 4px 15px rgba(50, 121, 213, 0.3); opacity: 0.95; }
 .sched-fab:active { transform: scale(0.94); }
+.sched-zoom-reset { position: absolute; left: -6px; bottom: 10px; width: 38px; height: 38px; border: 0; border-radius: 50%; display: grid; place-items: center; cursor: pointer; background: var(--s-surface-2); color: var(--s-accent); box-shadow: 0 3px 15px rgba(36, 107, 209, 0.18); }
 
-/* ── Десктоп: боковая навигация вместо нижней ── */
+/* Нижний док */
+.sched-dock { flex: none; display: flex; align-items: center; gap: 5px; min-height: 43px; padding: 5px 0 1px; background: var(--s-bg); }
+.sched-dock .ds-seg button { min-height: 31px; padding: 5px 9px; font-size: 11px; }
+.sched-stepper { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 1px; }
+.sched-stepper button { min-width: 24px; min-height: 31px; display: grid; place-items: center; border: 0; background: none; padding: 3px; color: var(--s-muted); cursor: pointer; font: inherit; }
+.sched-stepper .label { min-width: 54px; font-size: 11.5px; font-weight: 500; color: var(--s-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched-mini { flex: none; width: 32px; height: 33px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 9px; background: transparent; color: var(--s-muted); cursor: pointer; }
+.sched-mini[aria-pressed='true'], .sched-mini[aria-expanded='true'] { color: var(--s-accent); background: var(--s-surface-3); }
+
+.sched-tools { flex: none; display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0 5px; }
+.sched-tools button { flex: 1 1 28%; min-height: 29px; padding: 5px 6px; border: 0; border-radius: 9px; background: var(--s-surface-2); color: var(--s-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.sched-tools button[aria-pressed='true'] { color: var(--s-accent); background: var(--s-surface-3); }
+.sched-search { flex: none; margin: 3px 0; height: 34px; }
+.sched-summary { flex: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px 0; }
+.sched-filters { flex: none; display: flex; gap: 5px; overflow-x: auto; padding: 3px 0 5px; scrollbar-width: none; }
+.sched-filters::-webkit-scrollbar { display: none; }
+
+/* Режим «на весь экран»: без шапки и навигации, но с выходом в доке */
+.sched-screen.is-focus .sched-page { padding: env(safe-area-inset-top, 4px) 8px env(safe-area-inset-bottom, 4px); }
+
+/* ── Шторки ── */
+.sched-sheet-grab { display: flex; align-items: center; justify-content: center; width: 100%; height: 22px; margin: -8px 0 6px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.sched-sheet-grab span { width: 40px; height: 4px; border-radius: 10px; background: var(--s-muted-2); opacity: 0.45; }
+
+.sched-detail { display: flex; flex-direction: column; gap: 12px; font-size: 13px; }
+.sched-detail-head { display: flex; gap: 10px; align-items: center; }
+.sched-detail-dot { width: 6px; height: 34px; flex: none; border-radius: 6px; background: var(--master); }
+.sched-detail-name { font-size: 16px; font-weight: 540; letter-spacing: -0.025em; }
+.sched-detail-sub { margin-top: 3px; }
+.sched-status { display: inline-flex; font-size: 10.5px; font-weight: 500; padding: 3px 8px; border-radius: 10px; color: var(--st-confirmed); background: var(--st-confirmed-bg); }
+.sched-status.st-pending { color: var(--st-pending); background: var(--st-pending-bg); }
+.sched-status.st-pending_prepayment, .sched-status.st-prepayment_sent { color: var(--st-prepay); background: var(--st-prepay-bg); }
+.sched-status.st-completed { color: var(--st-completed); background: var(--st-completed-bg); }
+.sched-status.st-cancelled { color: var(--st-cancelled); background: var(--st-cancelled-bg); }
+.sched-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+.sched-detail-grid > div { min-width: 0; padding: 3px 0; }
+.sched-detail-grid small, .sched-detail-notes small { display: block; font-size: 10px; color: var(--s-muted-2); margin-bottom: 3px; }
+.sched-detail-grid strong { font-weight: 500; font-size: 12px; line-height: 1.25; overflow-wrap: anywhere; }
+.sched-phone { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; color: var(--s-accent); text-decoration: none; }
+.sched-detail-notes { font-size: 12px; color: var(--s-text-2); white-space: pre-line; line-height: 1.45; }
+.sched-detail-pay { display: flex; flex-direction: column; gap: 5px; padding: 11px 12px; border-radius: 12px; background: var(--s-surface-2); }
+.sched-detail-pay .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--s-muted); }
+.sched-detail-pay .row strong { color: var(--s-accent); font-weight: 550; }
+.sched-detail-pay small { font-size: 10.5px; color: var(--s-muted-2); line-height: 1.4; }
+.sched-progress { height: 5px; border-radius: 20px; background: var(--s-surface-3); overflow: hidden; margin: 3px 0 2px; }
+.sched-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #53bca9, #4f88db); }
+.sched-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.sched-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 38px; padding: 8px 5px; border: 0; border-radius: 10px; background: var(--s-surface-2); color: var(--s-muted); font: inherit; font-size: 11.5px; font-weight: 450; cursor: pointer; }
+.sched-actions button.primary { grid-column: 1 / -1; background: var(--s-surface-3); color: var(--s-accent); font-weight: 500; }
+.sched-actions button.danger { color: var(--s-danger); background: #fcebeb; }
+[data-theme='dark'] .sched-actions button.danger { background: rgba(240, 156, 156, 0.12); }
+.sched-actions button:disabled { opacity: 0.4; cursor: default; }
+
+.sched-group { display: flex; flex-direction: column; gap: 7px; }
+.sched-group-item { width: 100%; display: grid; grid-template-columns: 5px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 76px; padding: 12px 10px 12px 13px; border: 0; border-radius: 17px; background: var(--s-surface-2); color: var(--s-text); text-align: left; font: inherit; cursor: pointer; transition: background 0.15s ease, transform 0.15s ease; }
+.sched-group-item:active { transform: scale(0.992); background: var(--s-surface-3); }
+.sched-group-item .sched-detail-dot { width: 5px; height: 48px; }
+.sched-group-item .meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; line-height: 1.25; }
+.sched-group-item .master { color: var(--s-accent); font-size: 10px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched-group-item strong { font-size: 13.4px; font-weight: 540; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched-group-item small { font-size: 11px; color: var(--s-muted); overflow-wrap: anywhere; }
+.sched-group-item .end { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
+.sched-group-item .time { font-size: 11.2px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sched-group-item .arrow { width: 23px; height: 23px; border-radius: 50%; display: grid; place-items: center; background: rgba(80, 139, 219, 0.08); color: var(--s-accent); }
+
+.sched-stepper-row { display: flex; align-items: center; gap: 8px; margin: -2px 0 8px; font-size: 13px; font-weight: 500; }
+
+.sched-move { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 14px; padding: 13px 14px; border-radius: 14px; background: var(--s-surface-2); font-size: 12px; }
+.sched-move strong { font-weight: 570; }
+.sched-move .old { color: var(--s-muted-2); font-size: 11px; }
+.sched-move .new { color: var(--s-accent); font-size: 13px; }
+
 @media (min-width: 900px) {
-  .sched-root {
-    display: grid;
-    grid-template-columns: 232px 1fr;
-    grid-template-areas: "nav main";
-  }
-  .sched-main { grid-area: main; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
-  .sched-bottomnav {
-    grid-area: nav;
-    flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 4px;
-    width: 232px; padding: 20px 14px; border-top: none; border-right: 1px solid var(--s-line);
-  }
-  .sched-bn {
-    flex-direction: row; justify-content: flex-start; gap: 12px;
-    padding: 10px 12px; border-radius: 11px; font-size: 14px;
-    transition: background 0.15s ease, color 0.15s ease;
-  }
-  .sched-bn:hover { background: var(--s-surface-2); color: var(--s-text); }
-  .sched-bn.active { background: var(--s-accent-soft); }
-  .sched-bn span { font-size: 14px; }
-  .sched-fab { right: 32px; bottom: 32px; }
+  .sched-page { padding: 8px 28px 8px; max-width: 1100px; width: 100%; margin: 0 auto; grid-area: content; }
+  .sched-screen.is-focus { display: flex; }
+  .sched-screen.is-focus .sched-page { max-width: none; }
+  .sched-fab { right: 0; }
+}
+@media (max-height: 620px) {
+  .sched-legend { min-height: 25px; }
+  .sched-dock { min-height: 36px; }
+  .sched-colhead { flex-basis: 29px; }
+  .sched-dayhead { height: 29px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sched-block, .sched-group-item { transition: none; }
 }
