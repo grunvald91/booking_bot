@@ -104,7 +104,8 @@ async def chat(provider, tools, conversation, message: str):
                         conversation.stage = "availability"
                         conversation.facts = {**conversation.facts, "_slot_offer": {
                             "service_id": args.service_id, "date": output["date"],
-                            "duration_hours": args.duration_hours, "slots": output["slots"][:120],
+                            "service_name": output["service_name"], "duration_minutes": output["duration_minutes"],
+                            "solo": args.solo, "slots": output["slots"][:120],
                             "expires_at": (utc_now() + timedelta(minutes=10)).isoformat(),
                         }}
             except ValidationError:
@@ -133,9 +134,7 @@ async def chat(provider, tools, conversation, message: str):
             return response(conversation, reply)
         if slot_response is not None:
             # Availability is verified by ServGo; skip a model request for text-only slots.
-            if slot_response.get("duration_hours_required"):
-                reply = "С удовольствием помогу! Подскажите, на сколько часов хотите забронировать?"
-            elif slot_response["slots"]:
+            if slot_response["slots"]:
                 reply = "Нашёл свободное время! Выберите удобный вариант в карточке ниже 😊"
             else:
                 reply = "На эту дату свободного времени не нашлось. Давайте посмотрим другой день?"

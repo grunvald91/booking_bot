@@ -1,8 +1,25 @@
 // === Type definitions ===
 
+export interface SalesBookingSummary {
+  business_name: string;
+  service_name: string;
+  resource_name: string;
+  resource_label: string;
+  date: string;
+  time: string;
+  duration_minutes: number;
+  solo: boolean;
+  addons: string[];
+  amount: number | null;
+  prepayment_amount: number | null;
+  prepayment_percent: number | null;
+  receipt_required: boolean;
+}
+
 export interface SalesPendingAction {
   action_id: string;
   description: string;
+  summary?: SalesBookingSummary | null;
   tool_name: string;
   requires_contact: boolean;
   requires_legal_consent: boolean;
@@ -14,7 +31,9 @@ export interface SalesPendingAction {
 export interface SalesSlotOffer {
   date: string;
   service_id: number;
-  duration_hours: number | null;
+  service_name?: string | null;
+  duration_minutes?: number | null;
+  solo?: boolean;
   slots: { employee_id: number; employee_name: string; time: string }[];
   expires_at: string;
 }

@@ -1,8 +1,8 @@
 import { Fragment, useState, useRef, useEffect, useCallback } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Bot, Send, Check, X, Loader2, RotateCw } from 'lucide-react'
+import { Sparkles, Send, Check, Loader2, RotateCw, ChevronRight, ArrowRight } from 'lucide-react'
 import { api, type Business, type SalesPendingAction, type SalesConfirmation, type SalesSlotOffer } from '../../api/client'
-import { ClientShell } from '../../components/ClientShell'
+import { AirFrame } from './AirFrame'
 
 interface ChatMessage {
   id: string
@@ -20,6 +20,18 @@ function errorText(error: unknown) {
     } catch { /* Non-JSON network failure. */ }
   }
   return 'Не удалось связаться с сервисом. Попробуйте ещё раз.'
+}
+
+const money = (n: number) => `${n.toLocaleString('ru-RU')} ₽`
+
+function dayLabel(iso: string) {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })
+}
+
+function durationLabel(minutes?: number | null) {
+  if (!minutes) return ''
+  const h = Math.floor(minutes / 60), m = minutes % 60
+  return [h ? `${h} ч` : '', m ? `${m} мин` : ''].filter(Boolean).join(' ')
 }
 
 // Render a deliberately small, safe Markdown subset. HTML stays literal text.
@@ -40,51 +52,70 @@ function RichMessage({ text }: { text: string }) {
   })}</>
 }
 
+function useExpired(expiresAt: string) {
+  const [expired, setExpired] = useState(() => new Date(`${expiresAt}Z`).getTime() <= Date.now())
+  useEffect(() => {
+    const timer = window.setTimeout(() => setExpired(true),
+      Math.max(0, new Date(`${expiresAt}Z`).getTime() - Date.now()))
+    return () => window.clearTimeout(timer)
+  }, [expiresAt])
+  return expired
+}
+
+const VISIBLE_TIMES = 12
+
+// Компактный выбор времени: фильтр по специалисту/залу, сетка времени, одна кнопка.
 function SlotPicker({ offer, busy, onChoose }: {
   offer: SalesSlotOffer
   busy: boolean
   onChoose: (employeeId: number, time: string) => void
 }) {
-  const [selected, setSelected] = useState('')
+  const expired = useExpired(offer.expires_at)
+  const resources = Array.from(new Map(offer.slots.map(s => [s.employee_id, s.employee_name])).entries())
+  const [resource, setResource] = useState<number | null>(resources.length === 1 ? resources[0][0] : null)
+  const [time, setTime] = useState('')
   const [expanded, setExpanded] = useState(false)
-  const [expired, setExpired] = useState(() => new Date(`${offer.expires_at}Z`).getTime() <= Date.now())
-  useEffect(() => {
-    const timer = window.setTimeout(() => setExpired(true),
-      Math.max(0, new Date(`${offer.expires_at}Z`).getTime() - Date.now()))
-    return () => window.clearTimeout(timer)
-  }, [offer.expires_at])
-  const slots = expanded ? offer.slots : offer.slots.slice(0, 24)
-  const choice = offer.slots.find(slot => `${slot.employee_id}:${slot.time}` === selected)
-  const dateLabel = new Date(`${offer.date}T00:00:00`).toLocaleDateString('ru-RU', {
-    day: 'numeric', month: 'long', weekday: 'long',
-  })
-  return <div className="ds-card" style={{ padding: 16, margin: '12px 0', display: 'grid', gap: 12 }}>
-    <div>
-      <p className="ds-text" style={{ fontWeight: 700, marginBottom: 4 }}>Свободное время · {dateLabel}</p>
-      <p className="ds-sub">Выберите удобное время и подтвердите выбор. Окончательная запись — на следующем шаге.</p>
+  const pool = offer.slots.filter(s => resource == null || s.employee_id === resource)
+  // Одно время — одна кнопка; при «Все» берём первый свободный ресурс на это время.
+  const byTime = new Map<string, { employee_id: number; employee_name: string }>()
+  for (const s of pool) if (!byTime.has(s.time)) byTime.set(s.time, s)
+  const times = Array.from(byTime.keys())
+  const shown = expanded ? times : times.slice(0, VISIBLE_TIMES)
+  const choice = time ? byTime.get(time) : undefined
+  const meta = [offer.service_name, durationLabel(offer.duration_minutes), offer.solo ? 'индивидуально' : ''].filter(Boolean).join(' · ')
+
+  return (
+    <div className="bf-chat-card" aria-label="Свободное время">
+      <div className="bf-chat-card-head">
+        <strong>Свободно · {dayLabel(offer.date)}</strong>
+        {meta && <span>{meta}</span>}
+      </div>
+      {resources.length > 1 && (
+        <div className="bf-chat-chips" role="group" aria-label="Кто или где">
+          <button type="button" className="bf-chip" aria-pressed={resource == null} onClick={() => { setResource(null); setTime('') }}>Все</button>
+          {resources.map(([id, name]) => (
+            <button key={id} type="button" className="bf-chip" aria-pressed={resource === id} onClick={() => { setResource(id); setTime('') }}>{name}</button>
+          ))}
+        </div>
+      )}
+      <div className="bf-time-grid" role="group" aria-label="Время">
+        {shown.map(t => (
+          <button key={t} type="button" className={`bf-time${time === t ? ' selected' : ''}`} aria-pressed={time === t}
+            disabled={busy || expired} onClick={() => setTime(t)}>{t}</button>
+        ))}
+      </div>
+      {!expanded && times.length > VISIBLE_TIMES && (
+        <button type="button" className="bf-about" onClick={() => setExpanded(true)}>Ещё {times.length - VISIBLE_TIMES}</button>
+      )}
+      {expired && <p className="bf-chat-note" role="status">Варианты устарели — попросите проверить время ещё раз.</p>}
+      <button type="button" className="bf-primary bf-chat-cta" disabled={!choice || busy || expired}
+        onClick={() => { if (choice) onChoose(choice.employee_id, time) }}>
+        {busy ? <><Loader2 className="animate-spin" /> Проверяю время…</>
+          : choice ? <>Выбрать {time}{resources.length > 1 ? ` · ${choice.employee_name}` : ''} <ArrowRight /></>
+            : 'Выберите время'}
+      </button>
     </div>
-    <div role="group" aria-label="Свободное время" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-      {slots.map(slot => {
-        const key = `${slot.employee_id}:${slot.time}`
-        return <button type="button" key={key} aria-pressed={selected === key} disabled={busy || expired}
-          className="ds-btn ds-btn--sm"
-          style={{ background: selected === key ? 'var(--s-accent-soft)' : 'var(--s-surface-2)',
-            border: selected === key ? '2px solid var(--s-accent)' : '1px solid var(--s-line)',
-            textAlign: 'center', minWidth: 94, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-          onClick={() => setSelected(key)}>
-          {slot.time} · {slot.employee_name}
-        </button>
-      })}
-    </div>
-    {!expanded && offer.slots.length > 24 && <button type="button" className="ds-chip"
-      onClick={() => setExpanded(true)}>Показать ещё {offer.slots.length - 24}</button>}
-    {expired && <p className="ds-sub" role="status">Эти варианты устарели. Попросите проверить время ещё раз.</p>}
-    <button type="button" className="ds-btn ds-btn--primary" style={{ justifyContent: 'center' }}
-      disabled={!choice || busy || expired}
-      onClick={() => { if (choice) onChoose(choice.employee_id, choice.time) }}>
-      {busy ? 'Проверяю время…' : 'Выбрать это время'}
-    </button>
-  </div>
+  )
 }
 
 function ConfirmationCard({ action, busy, onConfirm, onReject }: {
@@ -97,50 +128,70 @@ function ConfirmationCard({ action, busy, onConfirm, onReject }: {
   const [phone, setPhone] = useState('')
   const [consent, setConsent] = useState(false)
   const [terms, setTerms] = useState(false)
-  const [expired, setExpired] = useState(() => new Date(`${action.expires_at}Z`).getTime() <= Date.now())
-  useEffect(() => {
-    const timer = window.setTimeout(() => setExpired(true), Math.max(0, new Date(`${action.expires_at}Z`).getTime() - Date.now()))
-    return () => window.clearTimeout(timer)
-  }, [action.expires_at])
-  const validContact = !action.requires_contact || (name.trim().length >= 2 && /^\+?[0-9\s()-]+$/.test(phone) && phone.replace(/\D/g, '').length >= 10 && phone.replace(/\D/g, '').length <= 15)
+  const expired = useExpired(action.expires_at)
+  const digits = phone.replace(/\D/g, '')
+  const validContact = !action.requires_contact || (name.trim().length >= 2 && /^\+?[0-9\s()-]+$/.test(phone) && digits.length >= 10 && digits.length <= 15)
   const canConfirm = !busy && !expired && validContact && (!action.requires_legal_consent || (consent && terms))
+  const s = action.summary
   return (
-    <div className="ds-card" style={{ padding: 14, margin: '12px 0' }}>
-      <p className="ds-text" style={{ fontWeight: 600 }}>{action.description}</p>
-      {action.cancellation_policy && <p className="ds-sub" style={{ marginTop: 8 }}>{action.cancellation_policy}</p>}
+    <div className="bf-chat-card" aria-label="Подтверждение записи">
+      <div className="bf-chat-card-head"><strong>Проверьте запись</strong>{s && <span>{s.business_name}</span>}</div>
+      {s ? (
+        <div className="bf-receipt">
+          <div><span>Услуга</span><strong className="wrap">{s.service_name}{s.solo ? ' · индивидуально' : ''}</strong></div>
+          <div><span>{s.resource_label}</span><strong className="wrap">{s.resource_name}</strong></div>
+          <div><span>Когда</span><strong>{dayLabel(s.date)}, {s.time}</strong></div>
+          {s.duration_minutes > 0 && <div><span>Длительность</span><strong>{durationLabel(s.duration_minutes)}</strong></div>}
+          {s.addons.length > 0 && <div><span>Дополнительно</span><strong className="wrap">{s.addons.join(', ')}</strong></div>}
+          <div><span>Стоимость</span><strong>{s.amount != null ? money(s.amount) : 'подтвердит менеджер'}</strong></div>
+          {s.prepayment_amount != null && (
+            <div><span>Предоплата{s.prepayment_percent && s.prepayment_percent < 100 ? ` ${s.prepayment_percent}%` : ''}</span><strong>{money(s.prepayment_amount)}</strong></div>
+          )}
+        </div>
+      ) : (
+        <p className="bf-chat-text">{action.description}</p>
+      )}
+      {s?.prepayment_amount != null && (
+        <p className="bf-chat-note">Предоплата переводится напрямую бизнесу; запись подтверждается после проверки владельцем.{s.receipt_required ? ' Понадобится чек.' : ''}</p>
+      )}
+      {action.cancellation_policy && <p className="bf-chat-note">{action.cancellation_policy}</p>}
       {action.requires_contact && (
-        <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
-          <label className="ds-sub">Ваше имя
-            <input className="ds-input" autoComplete="name" maxLength={120} value={name} onChange={e => setName(e.target.value)} />
+        <div className="bf-chat-fields">
+          <label><span className="bf-field-label">Ваше имя</span>
+            <input className="bf-input" autoComplete="name" maxLength={120} value={name} onChange={e => setName(e.target.value)} />
           </label>
-          <label className="ds-sub">Телефон для записи
-            <input className="ds-input" type="tel" autoComplete="tel" maxLength={30} value={phone} onChange={e => setPhone(e.target.value)} />
+          <label><span className="bf-field-label">Телефон</span>
+            <input className="bf-input" type="tel" inputMode="tel" autoComplete="tel" maxLength={30} value={phone} onChange={e => setPhone(e.target.value)} />
           </label>
         </div>
       )}
       {action.requires_legal_consent && (
-        <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
-          <label className="ds-sub">
-            <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />{' '}
-            Даю <Link to={`/legal/consent/${action.business_id}`} target="_blank">согласие на обработку данных</Link>
+        <div>
+          <label className="bf-legal">
+            <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />
+            <span>Даю <Link to={`/legal/consent/${action.business_id}`} target="_blank">согласие на обработку данных</Link></span>
           </label>
-          <label className="ds-sub">
-            <input type="checkbox" checked={terms} onChange={e => setTerms(e.target.checked)} />{' '}
-            Принимаю <Link to={`/legal/terms/${action.business_id}`} target="_blank">условия записи</Link>
+          <label className="bf-legal">
+            <input type="checkbox" checked={terms} onChange={e => setTerms(e.target.checked)} />
+            <span>Принимаю <Link to={`/legal/terms/${action.business_id}`} target="_blank">условия записи</Link></span>
           </label>
         </div>
       )}
-      {expired && <p className="ds-sub">Подтверждение истекло. Попросите проверить время снова.</p>}
-      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-        <button className="ds-btn ds-btn--primary ds-btn--sm" disabled={!canConfirm} onClick={() => onConfirm({
+      {expired && <p className="bf-chat-note" role="status">Подтверждение истекло — попросите проверить время снова.</p>}
+      <div className="bf-chat-actions">
+        <button type="button" className="bf-back" disabled={busy} onClick={onReject}>Отмена</button>
+        <button type="button" className="bf-primary" disabled={!canConfirm} onClick={() => onConfirm({
           client_name: action.requires_contact ? name.trim() : undefined,
           client_phone: action.requires_contact ? phone.trim() : undefined,
           personal_data_consent: consent, booking_terms_accepted: terms,
-        })}>{busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Подтвердить</button>
-        <button className="ds-btn ds-btn--ghost ds-btn--sm" disabled={busy} onClick={onReject}><X size={14} /> Отмена</button>
+        })}>{busy ? <Loader2 className="animate-spin" /> : <Check />} Подтвердить</button>
       </div>
     </div>
   )
+}
+
+function welcome(business: Business): ChatMessage {
+  return { id: 'welcome', role: 'ai', text: `Здравствуйте! Помогу подобрать услугу в «${business.name}» и найти удобное время. Что вас интересует?` }
 }
 
 function SalesThread({ business }: { business: Business }) {
@@ -155,34 +206,26 @@ function SalesThread({ business }: { business: Business }) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const operation = useRef(false)
 
-  const loadHistory = useCallback(async () => {
-    const history = await api.aiHistory(business.id)
-    const restored: ChatMessage[] = history.messages.length ? history.messages : [{
-      id: 'welcome', role: 'ai', text: `Здравствуйте! Помогу подобрать услугу в «${business.name}» и найти удобное время. Что вас интересует?`,
-    }]
+  const applyHistory = useCallback((history: Awaited<ReturnType<typeof api.aiHistory>>) => {
+    const restored: ChatMessage[] = history.messages.length ? history.messages : [welcome(business)]
     if (history.booking_url && restored.length) restored[restored.length - 1].booking_url = history.booking_url
     setMessages(restored)
     setPending(history.pending_action || null)
     setOffer(history.available_slots || null)
     setMode(history.mode)
-  }, [business.id, business.name])
+  }, [business])
+
+  const loadHistory = useCallback(async () => applyHistory(await api.aiHistory(business.id)), [applyHistory, business.id])
 
   useEffect(() => {
     let active = true
     api.aiHistory(business.id).then(history => {
       if (!active) return
-      const restored: ChatMessage[] = history.messages.length ? history.messages : [{
-        id: 'welcome', role: 'ai', text: `Здравствуйте! Помогу подобрать услугу в «${business.name}» и найти удобное время. Что вас интересует?`,
-      }]
-      if (history.booking_url && restored.length) restored[restored.length - 1].booking_url = history.booking_url
-      setMessages(restored)
-      setPending(history.pending_action || null)
-      setOffer(history.available_slots || null)
-      setMode(history.mode)
+      applyHistory(history)
       setReady(true)
     }).catch(err => { if (active) setError(errorText(err)) })
     return () => { active = false }
-  }, [business.id, business.name])
+  }, [business.id, applyHistory])
 
   useEffect(() => {
     if (mode !== 'human') return
@@ -192,7 +235,15 @@ function SalesThread({ business }: { business: Business }) {
     return () => window.clearInterval(timer)
   }, [mode, loadHistory])
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, pending, busy])
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, [messages, pending, offer, busy])
+
+  const run = async (task: () => Promise<void>) => {
+    if (operation.current || !ready) return
+    operation.current = true
+    setBusy(true)
+    setError('')
+    try { await task() } catch (err) { setError(errorText(err)) } finally { operation.current = false; setBusy(false) }
+  }
 
   const send = async (text = input.trim(), retryId?: string) => {
     if (!text || operation.current || !ready) return
@@ -219,109 +270,105 @@ function SalesThread({ business }: { business: Business }) {
     } finally { operation.current = false; setBusy(false) }
   }
 
-  const selectSlot = async (employeeId: number, time: string) => {
-    if (operation.current || !ready) return
-    operation.current = true
-    setBusy(true)
-    setError('')
-    try {
-      await api.aiSelectSlot(business.id, employeeId, time)
-      await loadHistory()
-    } catch (err) {
-      setError(errorText(err))
-    } finally { operation.current = false; setBusy(false) }
-  }
+  const selectSlot = (employeeId: number, time: string) => run(async () => {
+    await api.aiSelectSlot(business.id, employeeId, time)
+    await loadHistory()
+  })
 
-  const handleAction = async (confirm: boolean, details: SalesConfirmation = {}) => {
-    if (!pending || operation.current) return
-    operation.current = true
-    setBusy(true)
-    setError('')
-    try {
+  const handleAction = (confirm: boolean, details: SalesConfirmation = {}) => {
+    if (!pending) return
+    return run(async () => {
       if (confirm) await api.aiConfirm(pending.action_id, details)
       else await api.aiReject(pending.action_id)
       await loadHistory()
-    } catch (err) { setError(errorText(err)) }
-    finally { operation.current = false; setBusy(false) }
+    })
   }
 
-  const requestOperator = async () => {
-    if (operation.current || !ready) return
-    operation.current = true; setBusy(true); setError('')
-    try { await api.aiHandoff(business.id); await loadHistory() }
-    catch (err) { setError(errorText(err)) }
-    finally { operation.current = false; setBusy(false) }
-  }
+  const requestOperator = () => run(async () => { await api.aiHandoff(business.id); await loadHistory() })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      {mode === 'human' && <p className="ds-sub" role="status">Диалог передан оператору. Ответ появится здесь.</p>}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 0' }} aria-live="polite">
-        {messages.map(message => <div key={message.id} style={{ display: 'flex', gap: 8, marginBottom: 12, justifyContent: message.role === 'user' ? 'flex-end' : 'flex-start' }}>
-          {message.role === 'ai' && <Bot size={20} style={{ flexShrink: 0, color: 'var(--s-accent)', marginTop: 10 }} />}
-          <div className="ds-text" style={{ maxWidth: '85%', whiteSpace: 'pre-wrap', padding: '12px 14px', borderRadius: 16, background: message.role === 'user' ? 'var(--s-accent-soft)' : 'var(--s-surface-2)' }}>
-            {message.role === 'ai' ? <RichMessage text={message.text} /> : message.text}
-            {message.status === 'sending' && <p className="ds-sub" role="status">Отправляется…</p>}
-            {message.status === 'failed' && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-                gap: 7, marginTop: 6 }}>
-                <span className="ds-caption" style={{ color: 'var(--s-danger)' }}>Не отправлено</span>
-                <button type="button" aria-label="Отправить сообщение повторно"
-                  title="Повторить отправку" disabled={busy}
-                  onClick={() => void send(message.text, message.id)}
-                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    width: 32, height: 32, flexShrink: 0, padding: 0,
-                    borderRadius: '50%', border: '1px solid var(--s-line)',
-                    background: 'var(--s-surface-2)', color: 'var(--s-accent)',
-                    cursor: busy ? 'not-allowed' : 'pointer',
-                    opacity: busy ? 0.5 : 1 }}>
-                  <RotateCw size={16} strokeWidth={2} aria-hidden="true" />
-                </button>
-              </div>
-            )}
-            {message.booking_url && <div style={{ marginTop: 8 }}><Link className="ds-accent" to={message.booking_url}>Открыть запись</Link></div>}
+    <section className="bf-screen" aria-label={`Чат с ${business.name}`}>
+      <div className="bf-chat-head">
+        <span className="bf-chat-avatar" aria-hidden="true"><Sparkles /></span>
+        <span className="bf-biz-body">
+          <span className="bf-option-title">{business.name}</span>
+          <span className="bf-biz-line">{mode === 'human' ? 'Диалог у оператора — ответ появится здесь' : 'AI-помощник по записи'}</span>
+        </span>
+      </div>
+      <div className="bf-inner bf-chat-log" aria-live="polite">
+        {messages.map(message => (
+          <div key={message.id} className={`bf-msg ${message.role}`}>
+            <div className="bf-msg-bubble">
+              {message.role === 'ai' ? <RichMessage text={message.text} /> : message.text}
+              {message.status === 'sending' && <span className="bf-msg-state" role="status">Отправляется…</span>}
+              {message.status === 'failed' && (
+                <span className="bf-msg-state is-failed">
+                  Не отправлено
+                  <button type="button" aria-label="Отправить сообщение повторно" disabled={busy}
+                    onClick={() => void send(message.text, message.id)}><RotateCw /></button>
+                </span>
+              )}
+              {message.booking_url && <Link className="bf-msg-link" to={message.booking_url}>Открыть запись <ChevronRight /></Link>}
+            </div>
           </div>
-        </div>)}
+        ))}
         {offer && mode === 'ai' && !pending && <SlotPicker key={offer.expires_at + offer.service_id} offer={offer}
           busy={busy} onChoose={(employeeId, time) => void selectSlot(employeeId, time)} />}
-        {pending && <ConfirmationCard key={pending.action_id} action={pending} busy={busy} onConfirm={details => handleAction(true, details)} onReject={() => handleAction(false)} />}
-        {busy && <p className="ds-sub" role="status">Обрабатываю…</p>}
+        {pending && <ConfirmationCard key={pending.action_id} action={pending} busy={busy}
+          onConfirm={details => void handleAction(true, details)} onReject={() => void handleAction(false)} />}
+        {busy && <div className="bf-msg ai"><div className="bf-msg-bubble bf-typing" role="status" aria-label="Обрабатываю"><span /><span /><span /></div></div>}
         <div ref={messagesEndRef} />
       </div>
-      {error && <p className="ds-sub" role="alert" style={{ color: 'var(--s-danger)', marginBottom: 8 }}>{error}</p>}
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-        <Link className="ds-accent" to={`/book/${business.id}`}>Обычная запись</Link>
-        {mode === 'ai' && <button className="ds-chip" disabled={busy || !ready} onClick={requestOperator}>Позвать оператора</button>}
+      <div className="bf-chat-bar">
+        {error && <p className="bf-error" role="alert">{error}</p>}
+        <div className="bf-chat-links">
+          <Link to={`/book/${business.id}`}>Обычная запись</Link>
+          {mode === 'ai' && <button type="button" disabled={busy || !ready} onClick={() => void requestOperator()}>Позвать оператора</button>}
+        </div>
+        <form className="bf-chat-input" onSubmit={e => { e.preventDefault(); void send() }}>
+          <input aria-label="Сообщение" value={input} maxLength={4000} onChange={e => setInput(e.target.value)}
+            placeholder={mode === 'human' ? 'Сообщение оператору…' : 'Напишите сообщение…'} disabled={busy || !ready} />
+          <button type="submit" aria-label="Отправить" disabled={!input.trim() || busy || !ready}><Send /></button>
+        </form>
       </div>
-      <div className="ds-search" style={{ borderRadius: 999, paddingRight: 6 }}>
-        <input aria-label="Сообщение" value={input} maxLength={4000} onChange={e => setInput(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
-          placeholder={mode === 'human' ? 'Сообщение оператору…' : 'Напишите сообщение…'} disabled={busy || !ready} />
-        <button className="ds-icon-btn" aria-label="Отправить" disabled={!input.trim() || busy || !ready} onClick={() => send()}><Send size={18} /></button>
-      </div>
-    </div>
+    </section>
   )
 }
 
 export function ChatPage() {
   const [params, setParams] = useSearchParams()
   const [businesses, setBusinesses] = useState<Business[]>([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const selectedId = Number(params.get('business_id'))
   const business = businesses.find(b => b.id === selectedId)
-  useEffect(() => { api.getBusinesses().then(setBusinesses).catch(err => setError(errorText(err))) }, [])
+  useEffect(() => {
+    api.getBusinesses().then(setBusinesses).catch(err => setError(errorText(err))).finally(() => setLoading(false))
+  }, [])
   return (
-    <ClientShell title="Подобрать услугу">
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 8 }}>
-        <label className="ds-sub">Компания
-          <select className="ds-input" value={business?.id || ''} onChange={e => setParams({ business_id: e.target.value })}>
-            <option value="">Выберите компанию</option>
-            {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-        </label>
-        {error && <p role="alert" className="ds-sub">{error}</p>}
-        {business ? <SalesThread key={business.id} business={business} /> : <p className="ds-sub">Выберите компанию — помогу подобрать услугу, сравнить варианты и найти удобное время.</p>}
-      </div>
-    </ClientShell>
+    <AirFrame label="AI-помощник ServGo" backTo={business ? `/business/${business.id}` : '/'} tabs={!business}>
+      {business ? <SalesThread key={business.id} business={business} /> : (
+        <section className="bf-screen" aria-label="Выбор компании">
+          <div className="bf-inner bf-page">
+            <h1 className="bf-h2">AI-помощник</h1>
+            <p className="bf-intro">Подберёт услугу, подскажет цену и найдёт свободное время. Выберите место:</p>
+            {error && <p className="bf-error" role="alert">{error}</p>}
+            <div className="bf-kicker">{loading ? 'Загружаем…' : 'Места'}</div>
+            <nav className="bf-list" aria-label="Места">
+              {businesses.map(b => (
+                <button key={b.id} type="button" className="bf-biz bf-biz--button" onClick={() => setParams({ business_id: String(b.id) })}>
+                  <span className="bf-thumb" aria-hidden="true">{b.name.replace(/[«»"']/g, '').trim().charAt(0).toUpperCase()}</span>
+                  <span className="bf-biz-body">
+                    <span className="bf-option-title">{b.name}</span>
+                    {b.address && <span className="bf-biz-line">{b.address}</span>}
+                  </span>
+                  <ChevronRight className="bf-chevron" />
+                </button>
+              ))}
+            </nav>
+          </div>
+        </section>
+      )}
+    </AirFrame>
   )
 }
