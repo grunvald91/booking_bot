@@ -19,6 +19,10 @@ PROMPT = ("Find 5 real, currently operating {niche} in {city}. For each give: na
           "(one observable sign they could use an online booking system, e.g. 'booking by phone only'). "
           "Only include businesses you can verify; return fewer rather than guess. "
           'Reply with JSON only: {{"companies":[{{"name":"","website":"","email":"","source_url":"","need_signal":""}}]}}')
+DEBUG = os.environ.get("EVAL_DEBUG") == "1"
+if DEBUG:
+    NICHES = NICHES[2:]
+    CONFIGS = [("kimi-k3", False), ("kimi-k3", True)]
 UA = {"User-Agent": "Mozilla/5.0 (compatible; ServGoProspectCheck/1.0)"}
 
 
@@ -33,9 +37,13 @@ def chat(model, use_search, prompt):
             r = c.post(BASE + "/chat/completions", json=body, headers={"Authorization": "Bearer " + KEY})
             if r.status_code != 200:
                 return None, f"HTTP {r.status_code}: {r.text[:200]}", searched
-            choice = r.json()["choices"][0]
+            data = r.json()
+            choice = data["choices"][0]
             msg = choice["message"]
             calls = msg.get("tool_calls") or []
+            if DEBUG:
+                print(f"    debug: finish={choice.get('finish_reason')} calls={[ (c.get('type'), c['function'].get('name'), c['function'].get('arguments','')[:160]) for c in calls]} "
+                      f"content_head={(msg.get('content') or '')[:300]!r} extra_keys={sorted(k for k in msg if k not in ('role','content','tool_calls'))} usage={data.get('usage')}")
             if choice.get("finish_reason") == "tool_calls" and calls:
                 msgs.append(msg)
                 for call in calls:
