@@ -181,7 +181,8 @@ def too_many_failures(client: str) -> bool:
         if not LOGIN_FAILURES[key]:
             del LOGIN_FAILURES[key]
     total = sum(len(v) for v in LOGIN_FAILURES.values())
-    return len(LOGIN_FAILURES.get(client, ())) >= 8 or total >= 40
+    # Per-address limit stops guessing; the global cap is high so strangers cannot lock the owner out.
+    return len(LOGIN_FAILURES.get(client, ())) >= 8 or total >= 200
 
 
 def note_failure(client: str):
