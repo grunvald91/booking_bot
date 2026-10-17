@@ -8,6 +8,7 @@ import {
   Clock,
   ChevronUp,
   ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 import { api, type Service, type GroupPricingTier } from '../../api/client'
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
@@ -102,6 +103,9 @@ export function ServicesPage() {
   const [editingService, setEditingService] = useState<Service | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Service | null>(null)
+  const [allowMultiple, setAllowMultiple] = useState<boolean | null>(null)
+  const [isVenue, setIsVenue] = useState(false)
+  const [savingMultiple, setSavingMultiple] = useState(false)
   const [form, setForm] = useState<ServiceFormData>({
     name: '',
     description: '',
@@ -122,6 +126,38 @@ export function ServicesPage() {
       .catch(() => setServices(placeholderServices))
       .finally(() => setLoading(false))
   }, [businessId])
+
+  // Настройка записи: можно ли выбрать несколько услуг в одной записи
+  useEffect(() => {
+    if (!businessId) return
+    let ignore = false
+    setAllowMultiple(null)
+    api
+      .getBusinessDetail(businessId)
+      .then((biz) => {
+        if (ignore) return
+        setAllowMultiple(!!biz.allow_multiple_services)
+        setIsVenue(biz.business_type === 'venue_rental')
+      })
+      // При ошибке значение неизвестно — переключатель остаётся недоступным.
+      .catch(() => {})
+    return () => { ignore = true }
+  }, [businessId])
+
+  const toggleAllowMultiple = async () => {
+    if (!businessId || allowMultiple === null) return
+    const next = !allowMultiple
+    setAllowMultiple(next)
+    setSavingMultiple(true)
+    try {
+      await api.updateBusiness(businessId, { allow_multiple_services: next })
+    } catch (e) {
+      setAllowMultiple(!next)
+      alert('Не удалось сохранить настройку: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setSavingMultiple(false)
+    }
+  }
 
   const openCreate = () => {
     setForm({ name: '', description: '', price: '', duration: '', is_additional: false, is_hourly_price: false, pricing_type: 'fixed', group_pricing: [] })
@@ -211,6 +247,10 @@ export function ServicesPage() {
 
   const mainServices = sortedServices.filter((s) => !s.is_additional)
   const additionalServices = sortedServices.filter((s) => s.is_additional)
+  const minActivePrice = mainServices.reduce<number | null>(
+    (min, s) => (s.is_active && s.price != null && s.price > 0 && (min == null || s.price < min) ? s.price : min),
+    null
+  )
 
   const handleMoveUp = async (service: Service, group: Service[]) => {
     const idx = group.findIndex((s) => s.id === service.id)
@@ -270,10 +310,10 @@ export function ServicesPage() {
   const renderServiceCard = (service: Service, group: Service[], idx: number) => (
     <div
       key={service.id}
-      className="ds-card"
       style={{
-        padding: '12px 14px',
-        opacity: service.is_active ? 1 : 0.6,
+        padding: '10px 2px 9px',
+        borderBottom: '1px solid var(--s-line)',
+        opacity: service.is_active ? 1 : 0.55,
         transition: 'opacity 0.2s ease',
       }}
     >
@@ -292,7 +332,7 @@ export function ServicesPage() {
             <p className="ds-sub" style={{ marginTop: 2 }}>{service.description}</p>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--s-text)' }}>
+            <span style={{ fontSize: 12.5, fontWeight: 550, color: 'var(--s-text)' }}>
               {formatPrice(service.price, service.is_hourly_price)}
               {service.pricing_type === 'per_person' && (
                 <span className="ds-sub" style={{ fontWeight: 400, marginLeft: 2 }}>/чел</span>
@@ -381,21 +421,42 @@ export function ServicesPage() {
       title="Услуги"
       headerExtra={<BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />}
     >
-      {/* Add button */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4, marginBottom: 14 }}>
-        <button onClick={openCreate} className="ds-btn ds-btn--primary ds-btn--sm">
-          <Plus size={15} />
-          Добавить услугу
-        </button>
+      {/* Каталог: краткая сводка по реальному списку */}
+      <div className="ds-context">
+        <div className="ds-context-eyebrow">Ваши услуги</div>
+        <div className="ds-context-headline">Каталог услуг</div>
+        <div className="ds-context-strip">
+          <div><strong>{mainServices.filter((s) => s.is_active).length}</strong><span>активных</span></div>
+          {services.some((s) => !s.is_active) && (
+            <div><strong>{services.filter((s) => !s.is_active).length}</strong><span>неактивных</span></div>
+          )}
+          {minActivePrice != null && <div><strong>{formatPrice(minActivePrice)}</strong><span>минимальная цена</span></div>}
+        </div>
       </div>
 
+      {/* Список — прокручивается в середине экрана */}
+      {/* Режим выбора услуг клиентом — компактно, над списком */}
+      <div className="ds-toggle-row ds-toggle-row--compact"
+        title={isVenue ? 'Для аренды залов клиент всегда может выбрать несколько услуг' : 'Клиент сможет выбрать несколько услуг в одной записи'}>
+        <span className="t1">{isVenue ? 'Несколько услуг в записи · всегда для залов' : 'Несколько услуг в одной записи'}</span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={isVenue || !!allowMultiple}
+          aria-label="Разрешить несколько услуг при записи"
+          className={`ds-toggle ds-toggle--sm ${isVenue || allowMultiple ? 'on' : ''}`}
+          disabled={isVenue || allowMultiple === null || savingMultiple}
+          onClick={toggleAllowMultiple}
+        />
+      </div>
+      <div className="ds-list-scroll">
       {/* Main services section */}
       {mainServices.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <p className="ds-caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, marginBottom: 8 }}>
+          <p className="ds-eyebrow">
             Основные услуги
           </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
             {mainServices.map((service, idx) =>
               renderServiceCard(service, mainServices, idx)
             )}
@@ -406,10 +467,10 @@ export function ServicesPage() {
       {/* Additional services section */}
       {additionalServices.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <p className="ds-caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, marginBottom: 8 }}>
+          <p className="ds-eyebrow">
             Дополнительные услуги
           </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
             {additionalServices.map((service, idx) =>
               renderServiceCard(service, additionalServices, idx)
             )}
@@ -424,6 +485,25 @@ export function ServicesPage() {
           <p className="ds-sub">Нет услуг. Нажмите «Добавить услугу» чтобы создать первую.</p>
         </div>
       )}
+      </div>
+
+      {/* Управление — внизу, у большого пальца */}
+      <div className="ds-bottom-controls">
+      {businessId && (
+        <div style={{ margin: '0 0 4px' }}>
+          <a href={`/book/${businessId}`} target="_blank" rel="noopener noreferrer" className="ds-accent" style={{ fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
+            Как увидит клиент <ChevronRight size={14} />
+          </a>
+        </div>
+      )}
+      {/* Add button */}
+      <div style={{ marginTop: 6 }}>
+        <button onClick={openCreate} className="ds-btn ds-btn--primary ds-btn--block">
+          <Plus size={15} />
+          Добавить услугу
+        </button>
+      </div>
+      </div>
 
       {/* Create / Edit sheet */}
       {isCreating && (

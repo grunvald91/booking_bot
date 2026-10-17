@@ -2,6 +2,8 @@
 Сервис синхронизации с базой MLM бота
 Проверяет статус подписки пользователя в базе MLM бота
 """
+
+from datetime_utils import utc_now
 import logging
 import secrets
 import string
@@ -293,7 +295,7 @@ async def create_trial_subscription(
                     "username": username,
                     "full_name": full_name,
                     "referral_code": referral_code,
-                    "created_at": datetime.utcnow()
+                    "created_at": utc_now()
                 })
                 user_id = user_result.fetchone()[0]
 
@@ -301,7 +303,7 @@ async def create_trial_subscription(
             price = 2000 if tariff == "standard" else 4000
 
             # Создаём trial подписку
-            trial_ends = datetime.utcnow() + timedelta(days=trial_days)
+            trial_ends = utc_now() + timedelta(days=trial_days)
 
             insert_sub = text("""
                 INSERT INTO subscriptions
@@ -313,11 +315,11 @@ async def create_trial_subscription(
                 "user_id": user_id,
                 "tariff": tariff,
                 "price": price,
-                "started_at": datetime.utcnow(),
+                "started_at": utc_now(),
                 "trial_ends_at": trial_ends,
                 "next_payment_date": trial_ends,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
+                "created_at": utc_now(),
+                "updated_at": utc_now()
             })
 
             await session.commit()

@@ -79,3 +79,6 @@ A task is not complete merely because code was written; preserve a committed/pus
 ## GitHub Actions budget policy (mandatory)
 
 Before planning or executing any CI, deployment or GitHub Actions operation, read and follow [AGENTS.md](AGENTS.md). Its cost, safety, diagnostics, limits and reporting rules apply equally to Claude Code and any delegated agent. Do not bypass them through issue comments or other automation triggers.
+
+## Design system
+UI work follows the ServGo Air brand book: `docs/brand/servgo-air.md` (tokens in `docs/brand/tokens.json`). On mobile, information goes at the top and controls stay at the bottom within thumb reach.

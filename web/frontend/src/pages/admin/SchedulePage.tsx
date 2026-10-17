@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   ChevronLeft,
   ChevronRight,
@@ -8,23 +8,26 @@ import {
   Minus,
   X,
   Phone,
-  Clock,
-  CheckCircle,
-  XCircle,
-  AlertCircle,
   Loader2,
   Search,
   Moon,
   Sun,
-  ChevronDown,
+  LogOut,
   CalendarClock,
   LayoutDashboard,
   Scissors,
   Users,
   Settings,
+  Clock,
+  SlidersHorizontal,
+  Maximize2,
+  Minimize2,
+  RotateCcw,
+  AlertCircle,
 } from 'lucide-react'
 import { api, type AdminBooking, type Service, type Employee } from '../../api/client'
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
+import { useTheme } from '../../hooks/useTheme'
 import { BusinessSelector } from '../../components/BusinessSelector'
 import './schedule.css'
 
@@ -33,36 +36,39 @@ const DAYS_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const DAY_START_H = 8
 const DAY_END_H = 22
 const TOTAL_MIN = (DAY_END_H - DAY_START_H) * 60
+const GUTTER = 36
+const DEFAULT_HOUR_PX = 55
+const MIN_HOUR_PX = 26
+const MAX_HOUR_PX = 130
 
-// Палитра цветов мастеров (для цветных кнопок-фильтров)
-const MASTER_COLORS = ['#2f5beb', '#e0533a', '#1b9e54', '#c98a16', '#7c3aed', '#0ea5b7', '#d6457e', '#5b7c0a', '#0f766e', '#9333ea']
+// Цвет мастера — основа графика: каждая запись окрашена цветом специалиста.
+const MASTER_PALETTE = ['#3279d2', '#925dd1', '#149985', '#d68132', '#dc638f', '#4f8f2f', '#c4544a', '#2f8fb0', '#8a6d3b', '#5d6fd6']
 
 const STATUS_LABELS: Record<string, string> = {
-  pending: 'Ожидает',
-  confirmed: 'Подтверждено',
-  completed: 'Завершено',
-  cancelled: 'Отменено',
-  pending_prepayment: 'Ждёт оплату',
-  prepayment_sent: 'Оплата отправлена',
+  pending: 'Ожидает подтверждения',
+  confirmed: 'Подтверждена',
+  completed: 'Завершена',
+  cancelled: 'Отменена',
+  pending_prepayment: 'Ждёт предоплату',
+  prepayment_sent: 'Предоплата отправлена',
 }
 
-// status → CSS var suffix
-const STATUS_VAR: Record<string, string> = {
-  pending: 'pending',
-  confirmed: 'confirmed',
-  completed: 'completed',
-  cancelled: 'cancelled',
-  pending_prepayment: 'prepay',
-  prepayment_sent: 'prepay',
-}
-
-const LEGEND_ITEMS = [
-  { key: 'pending', label: 'Ожидает' },
-  { key: 'confirmed', label: 'Подтверждено' },
-  { key: 'completed', label: 'Завершено' },
-  { key: 'cancelled', label: 'Отменено' },
-  { key: 'prepay', label: 'Оплата' },
+const NAV = [
+  { to: '/admin', label: 'Панель', Icon: LayoutDashboard },
+  { to: '/admin/schedule', label: 'Расписание', Icon: Clock },
+  { to: '/admin/services', label: 'Услуги', Icon: Scissors },
+  { to: '/admin/employees', label: 'Мастера', Icon: Users },
+  { to: '/admin/settings', label: 'Настройки', Icon: Settings },
 ]
+
+type ToolKey = 'search' | 'filters' | 'details' | 'legend' | 'context'
+const TOOL_LABELS: Record<ToolKey, string> = {
+  search: 'Поиск',
+  filters: 'Мастера',
+  details: 'Сводка',
+  legend: 'Цвета',
+  context: 'Информация',
+}
 
 // ── Helpers ──
 function formatDateISO(d: Date) {
@@ -71,13 +77,16 @@ function formatDateISO(d: Date) {
 function getMonday(d: Date): Date {
   const date = new Date(d)
   const day = date.getDay()
-  const diff = day === 0 ? -6 : 1 - day
-  date.setDate(date.getDate() + diff)
+  date.setDate(date.getDate() + (day === 0 ? -6 : 1 - day))
   date.setHours(0, 0, 0, 0)
   return date
 }
 function formatDateShort(d: Date) {
   return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+}
+function dateFromISO(s: string) {
+  const [y, m, d] = s.split('-').map(Number)
+  return new Date(y, m - 1, d)
 }
 function timeToMin(t: string) {
   const [h, m] = t.split(':').map(Number)
@@ -85,55 +94,119 @@ function timeToMin(t: string) {
 }
 function minToTime(min: number) {
   const h = Math.floor(min / 60)
-  const m = min % 60
+  const m = Math.round(min % 60)
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
-function calcEndTime(start: string, durationMin: number) {
-  return minToTime((timeToMin(start) + durationMin) % (24 * 60))
+function durationOf(b: AdminBooking) {
+  return b.service_duration || 60
+}
+function endOf(b: AdminBooking) {
+  return minToTime((timeToMin(b.time) + durationOf(b)) % (24 * 60))
+}
+function money(n?: number | null) {
+  return `${new Intl.NumberFormat('ru-RU').format(n || 0)} ₽`
+}
+function firstName(name?: string) {
+  return (name || '').split(' ')[0]
+}
+function isActive(b: AdminBooking) {
+  return b.status !== 'cancelled'
+}
+function parseError(e: unknown, fallback: string) {
+  let msg = e instanceof Error ? e.message : fallback
+  try {
+    const parsed = JSON.parse(msg)
+    if (parsed?.detail) msg = typeof parsed.detail === 'string' ? parsed.detail : fallback
+  } catch {
+    // не JSON — оставляем исходный текст
+  }
+  return msg || fallback
 }
 
-type Positioned = { booking: AdminBooking; startMin: number; endMin: number; lane: number; lanes: number }
+type Lane = { booking: AdminBooking; startMin: number; endMin: number; lane: number; lanes: number }
+type Cluster = { startMin: number; endMin: number; entries: AdminBooking[] }
 
-// Greedy lane assignment for overlapping intervals within a column.
-function layoutColumn(bookings: AdminBooking[]): Positioned[] {
-  const items = bookings
-    .map((b) => {
-      const startMin = timeToMin(b.time)
-      const dur = b.service_duration || 60
-      return { booking: b, startMin, endMin: startMin + dur }
-    })
-    .sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin)
-
-  const laneEnds: number[] = []
-  const placed = items.map((it) => {
-    let lane = laneEnds.findIndex((e) => e <= it.startMin)
-    if (lane === -1) {
-      lane = laneEnds.length
-      laneEnds.push(it.endMin)
-    } else {
-      laneEnds[lane] = it.endMin
+// Пересекающиеся записи — независимые полосы; дорожки считаются внутри каждой группы пересечений.
+function layoutLanes(list: AdminBooking[]): Lane[] {
+  const items = list
+    .map((b) => ({ booking: b, startMin: timeToMin(b.time), endMin: timeToMin(b.time) + durationOf(b) }))
+    .sort((a, b) => a.startMin - b.startMin || b.endMin - a.endMin)
+  const groups: (typeof items)[] = []
+  let group: typeof items = []
+  let until = -Infinity
+  for (const it of items) {
+    if (group.length && it.startMin >= until) {
+      groups.push(group)
+      group = []
+      until = -Infinity
     }
-    return { ...it, lane }
+    group.push(it)
+    until = Math.max(until, it.endMin)
+  }
+  if (group.length) groups.push(group)
+  return groups.flatMap((arr) => {
+    const laneEnds: number[] = []
+    const placed = arr.map((it) => {
+      let lane = laneEnds.findIndex((end) => end <= it.startMin)
+      if (lane < 0) {
+        lane = laneEnds.length
+        laneEnds.push(it.endMin)
+      } else {
+        laneEnds[lane] = it.endMin
+      }
+      return { ...it, lane }
+    })
+    return placed.map((p) => ({ ...p, lanes: laneEnds.length }))
   })
-  const lanes = Math.max(1, laneEnds.length)
-  return placed.map((p) => ({ ...p, lanes }))
 }
 
-function statusVar(status: string) {
-  return STATUS_VAR[status] || 'confirmed'
+function clustersOf(list: AdminBooking[]): Cluster[] {
+  const sorted = [...list].sort((a, b) => timeToMin(a.time) - timeToMin(b.time))
+  const out: Cluster[] = []
+  for (const b of sorted) {
+    const s = timeToMin(b.time)
+    const e = s + durationOf(b)
+    const prev = out[out.length - 1]
+    if (prev && s < prev.endMin) {
+      prev.endMin = Math.max(prev.endMin, e)
+      prev.entries.push(b)
+    } else {
+      out.push({ startMin: s, endMin: e, entries: [b] })
+    }
+  }
+  return out
 }
 
-// ── Booking detail modal ──
-function BookingDetailModal({
-  booking,
-  onClose,
-  onStatusChange,
-  onReschedule,
-  onQuote,
-  error,
-  updating,
+// ── Sheet wrapper ──
+function Sheet({ title, sub, onClose, children, z }: { title: string; sub?: string; onClose: () => void; children: React.ReactNode; z?: number }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div className="ds-sheet-ov" style={z ? { zIndex: z } : undefined} onClick={onClose}>
+      <div className="ds-sheet" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="sched-sheet-grab" onClick={onClose} aria-label="Свернуть панель"><span /></button>
+        <div className="ds-sheet-head">
+          <div style={{ minWidth: 0 }}>
+            <h3>{title}</h3>
+            {sub && <p>{sub}</p>}
+          </div>
+          <button type="button" className="ds-icon-btn" onClick={onClose} aria-label="Закрыть"><X size={18} /></button>
+        </div>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// ── Карточка записи ──
+function BookingDetailSheet({
+  booking, color, onClose, onStatusChange, onReschedule, onQuote, error, updating,
 }: {
   booking: AdminBooking
+  color: string
   onClose: () => void
   onStatusChange: (id: number, status: string) => void
   onReschedule: (b: AdminBooking) => void
@@ -143,101 +216,135 @@ function BookingDetailModal({
 }) {
   const [rentalPrice, setRentalPrice] = useState(String(booking.price ?? ''))
   const [deposit, setDeposit] = useState(String(booking.prepayment_amount ?? 0))
-  const endTime = calcEndTime(booking.time, booking.service_duration || 60)
-  const sv = statusVar(booking.status)
+  const open = booking.status !== 'cancelled' && booking.status !== 'completed'
+  const awaitingPayment = booking.status === 'pending_prepayment' || booking.status === 'prepayment_sent'
+  const price = booking.price ?? 0
+  const prepay = booking.prepayment_amount ?? 0
+  const dateLabel = dateFromISO(booking.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'short' })
+  const quoteInvalid = rentalPrice === '' || !Number.isInteger(Number(rentalPrice)) || !Number.isInteger(Number(deposit)) ||
+    Number(rentalPrice) < 0 || Number(deposit) < 0 || Number(deposit) > Number(rentalPrice) * 0.2
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div
-        className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5"
-        style={{ background: 'var(--s-surface)', color: 'var(--s-text)', boxShadow: '0 -8px 30px rgba(0,0,0,.2)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex justify-between items-start mb-4">
-          <h3 className="text-lg font-bold" style={{ color: 'var(--s-text)' }}>{booking.client_name}</h3>
-          <button onClick={onClose} className="sched-iconbtn"><X size={18} /></button>
-        </div>
-        <div className="space-y-2.5 mb-5 text-sm" style={{ color: 'var(--s-text)' }}>
-          {booking.client_phone && (
-            <div className="flex items-center gap-2">
-              <Phone size={15} style={{ color: 'var(--s-muted)' }} />
-              <a href={`tel:${booking.client_phone}`} style={{ color: 'var(--s-accent)' }}>{booking.client_phone}</a>
+    <Sheet title="Карточка записи" onClose={onClose}>
+      <div className="sched-detail">
+        <div className="sched-detail-head">
+          <span className="sched-detail-dot" style={{ '--master': color } as CSSProperties} />
+          <div style={{ minWidth: 0 }}>
+            <div className="sched-detail-name">{booking.client_name}</div>
+            <div className="sched-detail-sub">
+              <span className={`sched-status st-${booking.status}`}>{STATUS_LABELS[booking.status] || booking.status}</span>
             </div>
-          )}
-          <div className="flex items-center gap-2">
-            <Clock size={15} style={{ color: 'var(--s-muted)' }} />
-            <span>{booking.time} — {endTime} ({booking.service_duration || 60} мин)</span>
           </div>
-          <div><span style={{ color: 'var(--s-muted)' }}>Услуга: </span><span className="font-medium">{booking.service_name}</span>{booking.price ? ` — ${booking.price}₽` : ''}</div>
-          {booking.employee_name && <div><span style={{ color: 'var(--s-muted)' }}>Специалист: </span><span className="font-medium">{booking.employee_name}</span></div>}
-          {booking.notes && <div><span style={{ color: 'var(--s-muted)' }}>Комментарий: </span><span>{booking.notes}</span></div>}
-          <span
-            className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold"
-            style={{ color: `var(--st-${sv})`, background: `var(--st-${sv}-bg)` }}
-          >
-            {STATUS_LABELS[booking.status] || booking.status}
-          </span>
         </div>
-        {booking.is_rental && booking.status !== 'cancelled' && booking.status !== 'completed' && (
-          <div className="mb-4 rounded-xl p-3 text-sm" style={{ background: 'var(--s-surface-2)' }}>
-            <div className="font-semibold mb-2">Стоимость аренды и предоплата</div>
-            {booking.price_requires_confirmation && <p className="mb-2">Требуется подтверждение цены менеджером.</p>}
-            <label>Итоговая стоимость, ₽
-              <input type="number" min="0" step="1" value={rentalPrice}
-                onChange={(e) => setRentalPrice(e.target.value)} className="w-full rounded-lg p-2 mt-1" />
-            </label>
-            <label className="block mt-2">Предоплата (до 20%), ₽
-              <input type="number" min="0" step="1" max={rentalPrice ? Math.floor(Number(rentalPrice) * 0.2) : undefined}
-                value={deposit} onChange={(e) => setDeposit(e.target.value)} className="w-full rounded-lg p-2 mt-1" />
-            </label>
-            <button className="ds-btn ds-btn--primary mt-2" disabled={updating || rentalPrice === '' ||
-              !Number.isInteger(Number(rentalPrice)) || !Number.isInteger(Number(deposit)) ||
-              Number(rentalPrice) < 0 || Number(deposit) < 0 || Number(deposit) > Number(rentalPrice) * 0.2}
+        {['pending_prepayment', 'prepayment_sent'].includes(booking.status) && (
+          <Link to="/admin/prepayments" className="sched-detail-link">Проверить предоплату и открыть чек</Link>
+        )}
+        <div className="sched-detail-grid">
+          <div><small>Специалист</small><strong>{booking.employee_name || '—'}</strong></div>
+          <div><small>Дата</small><strong>{dateLabel}</strong></div>
+          <div><small>Время и длительность</small><strong>{booking.time}–{endOf(booking)} · {durationOf(booking)} мин</strong></div>
+          <div><small>Услуга</small><strong>{booking.service_name}</strong></div>
+          <div>
+            <small>Телефон клиента</small>
+            {booking.client_phone ? <a href={`tel:${booking.client_phone}`} className="sched-phone"><Phone size={12} />{booking.client_phone}</a> : <strong>—</strong>}
+          </div>
+          {booking.client_email && <div><small>Email</small><strong>{booking.client_email}</strong></div>}
+        </div>
+        {booking.notes && <div className="sched-detail-notes"><small>Комментарий</small>{booking.notes}</div>}
+        {(price > 0 || prepay > 0) && (
+          <div className="sched-detail-pay">
+            <div className="ds-eyebrow" style={{ margin: 0 }}>Оплата</div>
+            <div className="row"><span>Стоимость</span><strong>{money(price)}</strong></div>
+            {prepay > 0 && (
+              <>
+                <div className="row">
+                  <span>Предоплата</span>
+                  <strong>{money(prepay)}</strong>
+                </div>
+                {!awaitingPayment && <div className="sched-progress"><span style={{ width: `${Math.round(Math.min(1, price > 0 ? prepay / price : 1) * 100)}%` }} /></div>}
+                <small>
+                  {booking.status === 'prepayment_sent'
+                    ? 'Клиент сообщил об оплате — проверьте поступление и подтвердите запись.'
+                    : booking.status === 'pending_prepayment'
+                      ? 'Клиент ещё не сообщил об оплате.'
+                      : `Остаток при визите: ${money(Math.max(0, price - prepay))}`}
+                </small>
+              </>
+            )}
+          </div>
+        )}
+        {booking.is_rental && open && (
+          <div className="sched-detail-pay">
+            <div className="ds-eyebrow" style={{ margin: 0 }}>Стоимость аренды и предоплата</div>
+            {booking.price_requires_confirmation && <small>Требуется подтверждение цены менеджером.</small>}
+            <div className="ds-field-row" style={{ marginTop: 6 }}>
+              <label className="ds-field" style={{ marginBottom: 0 }}><span className="ds-label">Итого, ₽</span>
+                <input type="number" min="0" step="1" value={rentalPrice} onChange={(e) => setRentalPrice(e.target.value)} className="ds-input" />
+              </label>
+              <label className="ds-field" style={{ marginBottom: 0 }}><span className="ds-label">Предоплата ≤ 20%, ₽</span>
+                <input type="number" min="0" step="1" max={rentalPrice ? Math.floor(Number(rentalPrice) * 0.2) : undefined} value={deposit} onChange={(e) => setDeposit(e.target.value)} className="ds-input" />
+              </label>
+            </div>
+            <button className="ds-btn ds-btn--ghost ds-btn--sm" style={{ marginTop: 8 }} disabled={updating || quoteInvalid}
               onClick={() => onQuote(booking.id, Number(rentalPrice), Number(deposit))}>
               Сохранить цену и предоплату
             </button>
           </div>
         )}
-        {error && <p className="mb-3 text-sm" style={{ color: 'var(--st-cancelled)' }} role="alert">{error}</p>}
-        {booking.status !== 'cancelled' && booking.status !== 'completed' && (
-          <div className="grid grid-cols-2 gap-2">
-            {booking.status === 'pending' && (
-              <button onClick={() => onStatusChange(booking.id, 'confirmed')} disabled={updating || !!booking.price_requires_confirmation || (booking.is_rental && booking.prepayment_amount == null)}
-                className="flex items-center justify-center gap-1.5 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                style={{ background: 'var(--st-confirmed)' }}>
-                <CheckCircle size={16} /> Подтвердить
-              </button>
-            )}
-            <button onClick={() => onStatusChange(booking.id, 'completed')} disabled={updating}
-              className="flex items-center justify-center gap-1.5 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-              style={{ background: 'var(--st-completed)' }}>
-              <CheckCircle size={16} /> Завершить
-            </button>
-            <button onClick={() => onReschedule(booking)} disabled={updating}
-              className="flex items-center justify-center gap-1.5 font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-              style={{ background: 'var(--s-surface-2)', color: 'var(--s-text)' }}>
-              <CalendarClock size={16} /> Перенести
-            </button>
-            <button onClick={() => onStatusChange(booking.id, 'cancelled')} disabled={updating}
-              className="flex items-center justify-center gap-1.5 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-              style={{ background: 'var(--st-cancelled)' }}>
-              <XCircle size={16} /> Отменить
-            </button>
-          </div>
+        {error && <div className="ds-error" role="alert"><AlertCircle size={14} />{error}</div>}
+        {open && (
+          <>
+            <div className="ds-eyebrow" style={{ margin: '2px 0 0' }}>Управление записью</div>
+            <div className="sched-actions">
+              {(booking.status === 'pending' || booking.status === 'prepayment_sent') && (
+                <button className="primary" onClick={() => onStatusChange(booking.id, 'confirmed')}
+                  disabled={updating || !!booking.price_requires_confirmation || (booking.is_rental && booking.prepayment_amount == null)}>
+                  {booking.status === 'prepayment_sent' ? 'Оплата получена · подтвердить' : 'Подтвердить запись'}
+                </button>
+              )}
+              <button onClick={() => onReschedule(booking)} disabled={updating}><CalendarClock size={14} />Перенести</button>
+              <button onClick={() => onStatusChange(booking.id, 'completed')} disabled={updating || awaitingPayment}>Завершить</button>
+              <button className="danger" onClick={() => onStatusChange(booking.id, 'cancelled')} disabled={updating}>Отменить</button>
+            </div>
+          </>
         )}
       </div>
-    </div>
+    </Sheet>
   )
 }
 
-// ── Reschedule modal ──
-function RescheduleModal({
-  booking,
-  employees,
-  onClose,
-  onSubmit,
-  submitting,
-  error,
-}: {
+// ── Несколько записей в одно время ──
+function GroupSheet({ entries, color, onClose, onPick }: {
+  entries: AdminBooking[]
+  color: (id?: number) => string
+  onClose: () => void
+  onPick: (b: AdminBooking) => void
+}) {
+  const sorted = [...entries].sort((a, b) => timeToMin(a.time) - timeToMin(b.time) || (a.employee_id || 0) - (b.employee_id || 0))
+  return (
+    <Sheet title={`${entries.length} ${entries.length < 5 ? 'записи' : 'записей'} в одно время`} onClose={onClose}>
+      <p className="ds-sub" style={{ margin: '0 0 12px' }}>Выберите запись для просмотра и управления</p>
+      <div className="sched-group">
+        {sorted.map((b) => (
+          <button key={b.id} type="button" className="sched-group-item" onClick={() => onPick(b)}>
+            <span className="sched-detail-dot" style={{ '--master': color(b.employee_id) } as CSSProperties} />
+            <span className="meta">
+              <span className="master">{b.employee_name || 'Без специалиста'}</span>
+              <strong>{b.client_name}</strong>
+              <small>{b.service_name} · {durationOf(b)} мин · {STATUS_LABELS[b.status] || b.status}</small>
+            </span>
+            <span className="end">
+              <span className="time">{b.time}–{endOf(b)}</span>
+              <span className="arrow"><ChevronRight size={15} /></span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </Sheet>
+  )
+}
+
+// ── Перенос ──
+function RescheduleSheet({ booking, employees, onClose, onSubmit, submitting, error }: {
   booking: AdminBooking
   employees: Employee[]
   onClose: () => void
@@ -249,57 +356,48 @@ function RescheduleModal({
   const [time, setTime] = useState(booking.time)
   const [employeeId, setEmployeeId] = useState<number | undefined>(booking.employee_id)
   return (
-    <div className="fixed inset-0 bg-black/40 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5" style={{ background: 'var(--s-surface)', color: 'var(--s-text)' }} onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-between items-start mb-4">
-          <h3 className="text-lg font-bold" style={{ color: 'var(--s-text)' }}>Перенести запись</h3>
-          <button onClick={onClose} className="sched-iconbtn"><X size={18} /></button>
-        </div>
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--s-muted)' }}>Дата</label>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="sched-input w-full" />
+    <Sheet title="Перенести запись" sub={`${booking.client_name} · ${booking.service_name}`} onClose={onClose} z={75}>
+      <div className="ds-field"><label>Дата</label><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="ds-input" /></div>
+      <div className="ds-field-row">
+        <div className="ds-field"><label>Время</label><input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="ds-input" /></div>
+        {employees.length > 0 && (
+          <div className="ds-field">
+            <label>Специалист / зал</label>
+            <select value={employeeId ?? ''} onChange={(e) => setEmployeeId(Number(e.target.value) || undefined)} className="ds-input">
+              <option value="">Без изменения</option>
+              {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
           </div>
-          <div>
-            <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--s-muted)' }}>Время</label>
-            <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="sched-input w-full" />
-          </div>
-          {employees.length > 0 && (
-            <div>
-              <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--s-muted)' }}>Специалист / Зал</label>
-              <select value={employeeId ?? ''} onChange={(e) => setEmployeeId(Number(e.target.value) || undefined)} className="sched-input w-full">
-                <option value="">Без изменения</option>
-                {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-              </select>
-            </div>
-          )}
-          {error && <div className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--st-cancelled)' }}><AlertCircle size={14} />{error}</div>}
-        </div>
-        <button onClick={() => onSubmit(date, time, employeeId)} disabled={submitting}
-          className="w-full mt-4 text-white font-semibold py-3 rounded-xl disabled:opacity-50 flex items-center justify-center gap-2"
-          style={{ background: 'var(--s-accent)' }}>
-          {submitting ? <Loader2 size={16} className="animate-spin" /> : <CalendarClock size={16} />}
-          {submitting ? 'Переносим...' : 'Перенести'}
+        )}
+      </div>
+      {error && <div className="ds-error"><AlertCircle size={14} />{error}</div>}
+      <div className="ds-sheet-actions">
+        <button className="ds-btn ds-btn--ghost" onClick={onClose}>Отмена</button>
+        <button className="ds-btn ds-btn--primary" onClick={() => onSubmit(date, time, employeeId)} disabled={submitting}>
+          {submitting ? <Loader2 size={15} className="animate-spin" /> : <CalendarClock size={15} />}
+          {submitting ? 'Переносим…' : 'Перенести'}
         </button>
       </div>
-    </div>
+    </Sheet>
   )
 }
 
-// ── Manual booking modal (новый дизайн + повтор по неделям) ──
-function ManualBookingModal({
-  businessId, services, employees, selectedDate, selectedTime, onClose, onCreated,
+// ── Новая запись (повтор по неделям) ──
+function ManualBookingSheet({
+  businessId, services, employees, selectedDate, selectedTime, selectedEmployeeId, onClose, onCreated,
 }: {
   businessId: number
   services: Service[]
   employees: Employee[]
   selectedDate: Date
   selectedTime?: string
+  selectedEmployeeId?: number | null
   onClose: () => void
   onCreated: (toastMessage?: string) => void
 }) {
   const [serviceId, setServiceId] = useState<number | null>(null)
-  const [employeeId, setEmployeeId] = useState<number | null>(null)
+  const [employeeId, setEmployeeId] = useState<number | null>(selectedEmployeeId ?? null)
+  const [date, setDate] = useState(formatDateISO(selectedDate))
   const [time, setTime] = useState(selectedTime || '10:00')
   const [clientName, setClientName] = useState('')
   const [clientPhone, setClientPhone] = useState('')
@@ -309,7 +407,7 @@ function ManualBookingModal({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
-  const dateLabel = selectedDate.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })
+  const dateLabel = dateFromISO(date).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })
 
   const handleSubmit = async () => {
     if (!serviceId || !clientName) return
@@ -320,126 +418,74 @@ function ManualBookingModal({
         business_id: businessId,
         service_id: serviceId,
         employee_id: employeeId ?? undefined,
-        date: formatDateISO(selectedDate),
+        date,
         time,
         client_name: clientName,
         client_phone: clientPhone || undefined,
         notes: notes || undefined,
         repeat_weeks: repeatEnabled ? repeatWeeks : undefined,
       })
-      if (Array.isArray(created) && created.length > 1) {
-        onCreated(`Создано ${created.length} записей`)
-      } else {
-        onCreated()
-      }
+      onCreated(Array.isArray(created) && created.length > 1 ? `Создано ${created.length} записей` : 'Запись создана')
     } catch (e) {
-      let msg = e instanceof Error ? e.message : 'Ошибка'
-      try {
-        const parsed = JSON.parse(msg)
-        if (parsed?.detail) msg = parsed.detail
-      } catch {
-        // не JSON — оставляем исходный текст
-      }
-      setError(msg)
+      setError(parseError(e, 'Ошибка'))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <div className="sched-sheet-ov" onClick={onClose}>
-      <div className="sched-sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="sched-sheet-grip" />
-        <div className="sched-sheet-head">
-          <div><h3>Новая запись</h3><p>{dateLabel}</p></div>
-          <button onClick={onClose} className="sched-iconbtn"><X size={18} /></button>
+    <Sheet title="Новая запись" sub={dateLabel} onClose={onClose}>
+      <div className="ds-field">
+        <label>Услуга</label>
+        <select value={serviceId ?? ''} onChange={(e) => setServiceId(Number(e.target.value) || null)} className="ds-input">
+          <option value="">Выберите услугу</option>
+          {services.filter((s) => s.is_active && !s.is_additional).map((s) => (
+            <option key={s.id} value={s.id}>{s.name} {s.duration_minutes ? `(${s.duration_minutes} мин)` : ''} {s.price ? `— ${s.price}₽` : ''}</option>
+          ))}
+        </select>
+      </div>
+      <div className="ds-field">
+        <label>Специалист / зал</label>
+        <select value={employeeId ?? ''} onChange={(e) => setEmployeeId(Number(e.target.value) || null)} className="ds-input">
+          <option value="">Любой</option>
+          {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
+      </div>
+      <div className="ds-field-row">
+        <div className="ds-field"><label>Дата</label><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="ds-input" /></div>
+        <div className="ds-field"><label>Время</label><input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="ds-input" /></div>
+      </div>
+      <div className="ds-field-row">
+        <div className="ds-field"><label>Имя клиента</label><input type="text" value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="Введите имя" className="ds-input" /></div>
+        <div className="ds-field"><label>Телефон</label><input type="tel" inputMode="tel" value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} placeholder="+7" className="ds-input" /></div>
+      </div>
+      <div className="ds-field"><label>Комментарий</label><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="ds-input" /></div>
+      <div className="ds-toggle-row">
+        <div><div className="t1">Повторять еженедельно</div><div className="t2">То же время и день недели</div></div>
+        <button type="button" role="switch" aria-checked={repeatEnabled} aria-label="Повторять еженедельно" className={`ds-toggle ${repeatEnabled ? 'on' : ''}`} onClick={() => setRepeatEnabled((v) => !v)} />
+      </div>
+      {repeatEnabled && (
+        <div className="sched-stepper-row">
+          <button type="button" className="ds-icon-btn" onClick={() => setRepeatWeeks((w) => Math.max(2, w - 1))} aria-label="Меньше недель"><Minus size={16} /></button>
+          <span>{repeatWeeks} нед</span>
+          <button type="button" className="ds-icon-btn" onClick={() => setRepeatWeeks((w) => Math.min(8, w + 1))} aria-label="Больше недель"><Plus size={16} /></button>
+          <span className="ds-hint" style={{ margin: 0 }}>Будет создано {repeatWeeks} записей</span>
         </div>
-
-        <div className="sched-field">
-          <label>Услуга</label>
-          <select value={serviceId ?? ''} onChange={(e) => setServiceId(Number(e.target.value) || null)} className="sched-input">
-            <option value="">Выберите услугу</option>
-            {services.filter((s) => s.is_active).map((s) => (
-              <option key={s.id} value={s.id}>{s.name} {s.duration_minutes ? `(${s.duration_minutes} мин)` : ''} {s.price ? `— ${s.price}₽` : ''}</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="sched-field">
-          <label>Специалист / Зал</label>
-          <select value={employeeId ?? ''} onChange={(e) => setEmployeeId(Number(e.target.value) || null)} className="sched-input">
-            <option value="">Любой</option>
-            {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-          </select>
-        </div>
-
-        <div className="sched-field">
-          <div className="sched-field-row">
-            <div>
-              <label>Время</label>
-              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="sched-input" />
-            </div>
-            <div>
-              <label>Телефон</label>
-              <input type="tel" value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} placeholder="+7" className="sched-input" />
-            </div>
-          </div>
-        </div>
-
-        <div className="sched-field">
-          <label>Имя клиента</label>
-          <input type="text" value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="Введите имя" className="sched-input" />
-        </div>
-
-        <div className="sched-field">
-          <label>Комментарий</label>
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="sched-input" />
-        </div>
-
-        <div className="sched-field">
-          <label>Повторять еженедельно</label>
-          <div className="sched-seg-full">
-            <button className={!repeatEnabled ? 'on' : ''} onClick={() => setRepeatEnabled(false)}>Нет</button>
-            <button className={repeatEnabled ? 'on' : ''} onClick={() => setRepeatEnabled(true)}>Повторять</button>
-          </div>
-          {repeatEnabled && (
-            <>
-              <div className="bk-addon-hours" style={{ marginTop: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => setRepeatWeeks((w) => Math.max(2, w - 1))}
-                  className="ds-icon-btn"
-                >
-                  <Minus size={16} />
-                </button>
-                <span className="val">{repeatWeeks} нед</span>
-                <button
-                  type="button"
-                  onClick={() => setRepeatWeeks((w) => Math.min(8, w + 1))}
-                  className="ds-icon-btn"
-                >
-                  <Plus size={16} />
-                </button>
-              </div>
-              <p className="sched-hint">Будет создано {repeatWeeks} записей — то же время и день недели, {repeatWeeks} недель подряд.</p>
-            </>
-          )}
-        </div>
-
-        {error && <div className="sched-error"><AlertCircle size={14} />{error}</div>}
-        <button onClick={handleSubmit} disabled={submitting || !serviceId || !clientName} className="sched-submit">
-          {submitting ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+      )}
+      {error && <div className="ds-error"><AlertCircle size={14} />{error}</div>}
+      <div className="ds-sheet-actions">
+        <button className="ds-btn ds-btn--ghost" onClick={onClose}>Отмена</button>
+        <button onClick={handleSubmit} disabled={submitting || !serviceId || !clientName} className="ds-btn ds-btn--primary">
+          {submitting ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
           {submitting ? 'Записываем…' : repeatEnabled ? `Записать · ${repeatWeeks}` : 'Записать'}
         </button>
       </div>
-    </div>
+    </Sheet>
   )
 }
 
-// ── Подтверждение переноса (после drag&drop) ──
-function ConfirmMoveModal({
-  clientName, fromLabel, toLabel, submitting, onCancel, onConfirm,
-}: {
+// ── Подтверждение переноса (после перетаскивания) ──
+function ConfirmMoveDialog({ clientName, fromLabel, toLabel, submitting, onCancel, onConfirm }: {
   clientName: string
   fromLabel: string
   toLabel: string
@@ -448,115 +494,19 @@ function ConfirmMoveModal({
   onConfirm: () => void
 }) {
   return (
-    <div className="sched-center-ov" onClick={onCancel}>
-      <div className="sched-confirm" onClick={(e) => e.stopPropagation()}>
+    <div className="ds-center-ov" onClick={onCancel}>
+      <div className="ds-dialog" onClick={(e) => e.stopPropagation()}>
         <h3>Перенести запись?</h3>
-        <p>{clientName}</p>
-        <div className="sched-confirm-from">Было: {fromLabel}</div>
-        <div className="sched-confirm-to"><CalendarClock size={16} />{toLabel}</div>
-        <div className="sched-confirm-actions">
-          <button className="ghost" onClick={onCancel} disabled={submitting}>Отмена</button>
-          <button className="primary" onClick={onConfirm} disabled={submitting}>
+        <div className="sched-move">
+          <strong>{clientName}</strong>
+          <span className="old">Было: {fromLabel}</span>
+          <span className="new">Станет: {toLabel}</span>
+        </div>
+        <div className="ds-dialog-actions">
+          <button className="ds-btn ds-btn--ghost" onClick={onCancel} disabled={submitting}>Отмена</button>
+          <button className="ds-btn ds-btn--primary" onClick={onConfirm} disabled={submitting}>
             {submitting ? <Loader2 size={15} className="animate-spin" /> : <CalendarClock size={15} />}Перенести
           </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Booking card ──
-function BookingCard({
-  p, pxPerMin, showEmployee, onClick, onPointerDown, dragging,
-}: {
-  p: Positioned
-  pxPerMin: number
-  showEmployee: boolean
-  onClick?: () => void
-  onPointerDown?: (e: React.PointerEvent) => void
-  dragging?: boolean
-}) {
-  const b = p.booking
-  const sv = statusVar(b.status)
-  const top = (p.startMin - DAY_START_H * 60) * pxPerMin
-  const height = Math.max(20, (p.endMin - p.startMin) * pxPerMin - 2)
-  const laneWPct = 100 / p.lanes
-  const cardStyle = {
-    top,
-    height,
-    left: `calc(${(p.lane * laneWPct).toFixed(4)}% + 2px)`,
-    width: `calc(${laneWPct.toFixed(4)}% - 4px)`,
-    opacity: dragging ? 0.35 : undefined,
-    '--card-accent': `var(--st-${sv})`,
-    '--card-bg': `var(--st-${sv}-bg)`,
-  } as CSSProperties
-  return (
-    <div
-      className={`sched-card ${b.status === 'cancelled' ? 'is-cancelled' : ''} ${b.status === 'pending' ? 'is-pending' : ''} ${onPointerDown ? 'is-draggable' : ''}`}
-      style={cardStyle}
-      onPointerDown={onPointerDown}
-      onClick={(e) => { e.stopPropagation(); onClick?.() }}
-    >
-      <div className="c-name">{b.client_name}</div>
-      {height > 32 && <div className="c-sub">{b.service_name}</div>}
-      {height > 46 && showEmployee && b.employee_name && <div className="c-sub">{b.employee_name}</div>}
-      {height > 46 && <div className="c-sub">{b.time}–{calcEndTime(b.time, b.service_duration || 60)}</div>}
-    </div>
-  )
-}
-
-// ── Day-peek sheet (±окно вокруг места тапа в недельном виде) ──
-function DayPeekSheet({
-  dateStr, lo, hi, bookings, empColor, onClose, onPick,
-}: {
-  dateStr: string
-  lo: number
-  hi: number
-  bookings: AdminBooking[]
-  empColor: (id: number) => string
-  onClose: () => void
-  onPick: (b: AdminBooking) => void
-}) {
-  const [y, m, da] = dateStr.split('-').map(Number)
-  const d = new Date(y, m - 1, da)
-  const list = bookings
-    .filter((b) => b.date === dateStr)
-    .filter((b) => {
-      const s = timeToMin(b.time)
-      return s < hi && s + (b.service_duration || 60) > lo
-    })
-    .sort((a, b) => timeToMin(a.time) - timeToMin(b.time))
-  const title = `${d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })} · ${minToTime(lo)}–${minToTime(hi)}`
-  return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center" onClick={onClose}>
-      <div className="absolute inset-0" style={{ background: 'rgba(4,9,16,.55)' }} />
-      <div className="sched-peek" onClick={(e) => e.stopPropagation()}>
-        <div className="sched-peek-head">
-          <h3>{title}</h3>
-          <button onClick={onClose} className="sched-iconbtn"><X size={17} /></button>
-        </div>
-        <div className="sched-peek-list">
-          {list.length === 0 ? (
-            <div className="sched-peek-empty">В этом промежутке записей нет</div>
-          ) : list.map((b) => {
-            const sv = statusVar(b.status)
-            const end = calcEndTime(b.time, b.service_duration || 60)
-            return (
-              <button key={b.id} className={`sched-di ${b.status === 'cancelled' ? 'cancelled' : ''}`}
-                style={{ borderLeftColor: `var(--st-${sv})` }}
-                onClick={() => onPick(b)}>
-                <span className="di-time"><span className="t1">{b.time}</span><span className="t2">{b.service_duration || 60} мин</span></span>
-                <span className="di-main">
-                  <span className="di-name">{b.client_name}</span>
-                  <span className="di-svc">{b.service_name}</span>
-                  {b.employee_name && b.employee_id != null && (
-                    <span className="di-emp"><span className="ed" style={{ background: empColor(b.employee_id) }} />{b.employee_name} · {b.time}–{end}</span>
-                  )}
-                </span>
-                <span className="di-badge" style={{ background: `var(--st-${sv}-bg)`, color: `var(--st-${sv})` }}>{STATUS_LABELS[b.status] || b.status}</span>
-              </button>
-            )
-          })}
         </div>
       </div>
     </div>
@@ -566,70 +516,85 @@ function DayPeekSheet({
 // ── Main ──
 export function SchedulePage() {
   const { businesses, selectedId: businessId, selectBusiness } = useAdminBusiness()
+  const [theme, toggleTheme] = useTheme()
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
   const [viewMode, setViewMode] = useState<'week' | 'day'>('day')
   const [weekOffset, setWeekOffset] = useState(0)
   const [dayOffset, setDayOffset] = useState(0)
   const [bookings, setBookings] = useState<AdminBooking[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<AdminBooking | null>(null)
+  const [groupEntries, setGroupEntries] = useState<AdminBooking[] | null>(null)
   const [bookingError, setBookingError] = useState('')
   const [rescheduleBooking, setRescheduleBooking] = useState<AdminBooking | null>(null)
   const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false)
   const [rescheduleError, setRescheduleError] = useState('')
   const [updating, setUpdating] = useState(false)
-  const [showManualBooking, setShowManualBooking] = useState(false)
-  const [manualBookingTime, setManualBookingTime] = useState<string | undefined>()
-  const [manualBookingDate, setManualBookingDate] = useState<Date>(new Date())
+  const [manual, setManual] = useState<null | { date: Date; time?: string; employeeId?: number | null }>(null)
   const [services, setServices] = useState<Service[]>([])
   const [allEmployees, setAllEmployees] = useState<Employee[]>([])
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null)
-  const [pxPerMin, setPxPerMin] = useState(0.8)
+  const [hourPx, setHourPx] = useState(DEFAULT_HOUR_PX)
   const [search, setSearch] = useState('')
-  const [detailsOpen, setDetailsOpen] = useState(false)
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    const saved = localStorage.getItem('schedTheme')
-    if (saved === 'dark' || saved === 'light') return saved
-    const tg = (window as unknown as { Telegram?: { WebApp?: { colorScheme?: string } } }).Telegram?.WebApp?.colorScheme
-    if (tg === 'dark') return 'dark'
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  const [tools, setTools] = useState<Record<ToolKey, boolean>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('schedTools') || 'null')
+      if (saved && typeof saved === 'object') return { search: false, filters: false, details: false, legend: true, context: false, ...saved }
+    } catch { /* noop */ }
+    return { search: false, filters: false, details: false, legend: true, context: false }
   })
-  const [daySheet, setDaySheet] = useState<{ dateStr: string; lo: number; hi: number } | null>(null)
-  // живое состояние перетаскивания (день)
-  const [drag, setDrag] = useState<null | {
-    id: number; clientName: string; x: number; y: number; w: number; h: number; grabDY: number; newMin: number; durMin: number
-  }>(null)
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const [focus, setFocus] = useState(false)
+  const [toast, setToast] = useState('')
+  const [pull, setPull] = useState<null | { dist: number; refreshing: boolean }>(null)
+  const [drag, setDrag] = useState<null | { id: number; clientName: string; color: string; x: number; y: number; newMin: number; durMin: number; colIndex: number }>(null)
   const [pendingMove, setPendingMove] = useState<null | {
     id: number; clientName: string; date: string; time: string; employeeId?: number; fromLabel: string; toLabel: string
   }>(null)
   const [movingSubmit, setMovingSubmit] = useState(false)
   const colsRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const suppressClickUntil = useRef(0)
+  const pxPerMin = hourPx / 60
 
-  useEffect(() => { localStorage.setItem('schedTheme', theme) }, [theme])
-
-  const WINDOW = 120 // ±минут для панели «записи рядом» в недельном виде
-
-  // ── Pinch-to-zoom (щипком) по таймлайну + Ctrl+колесо на десктопе ──
-  const tlRef = useRef<HTMLDivElement>(null)
-  const pxPerMinRef = useRef(pxPerMin)
-  useEffect(() => { pxPerMinRef.current = pxPerMin }, [pxPerMin])
+  useEffect(() => { try { localStorage.setItem('schedTools', JSON.stringify(tools)) } catch { /* noop */ } }, [tools])
   useEffect(() => {
-    const el = tlRef.current
+    if (!toast) return
+    const t = setTimeout(() => setToast(''), 2400)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  const handleLogout = () => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('userRole')
+    localStorage.removeItem('userName')
+    sessionStorage.setItem('servgoExplicitLogout', '1')
+    navigate('/login', { replace: true })
+  }
+
+  // ── Масштаб щипком + Ctrl+колесо ──
+  const hourPxRef = useRef(hourPx)
+  useEffect(() => { hourPxRef.current = hourPx }, [hourPx])
+  useEffect(() => {
+    const el = scrollRef.current
     if (!el) return
-    const clamp = (v: number) => Math.min(1.8, Math.max(0.35, +v.toFixed(3)))
+    const clamp = (v: number) => Math.min(MAX_HOUR_PX, Math.max(MIN_HOUR_PX, Math.round(v)))
     const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
-    let base: { d: number; ppm: number } | null = null
-    const onStart = (e: TouchEvent) => { if (e.touches.length === 2) base = { d: dist(e.touches), ppm: pxPerMinRef.current } }
+    let base: { d: number; px: number } | null = null
+    const onStart = (e: TouchEvent) => { if (e.touches.length === 2) base = { d: dist(e.touches), px: hourPxRef.current } }
     const onMove = (e: TouchEvent) => {
       if (e.touches.length === 2 && base) {
         e.preventDefault()
-        setPxPerMin(clamp(base.ppm * (dist(e.touches) / base.d)))
+        suppressClickUntil.current = Date.now() + 650
+        setHourPx(clamp(base.px * (dist(e.touches) / base.d)))
       }
     }
     const onEnd = (e: TouchEvent) => { if (e.touches.length < 2) base = null }
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return
       e.preventDefault()
-      setPxPerMin((p) => clamp(p - e.deltaY * 0.0025))
+      setHourPx((p) => clamp(p - e.deltaY * 0.15))
     }
     el.addEventListener('touchstart', onStart, { passive: false })
     el.addEventListener('touchmove', onMove, { passive: false })
@@ -644,14 +609,15 @@ export function SchedulePage() {
   }, [])
 
   const employees = useMemo(
-    () => allEmployees.filter((e) => !e.role || e.role === 'master' || e.role === 'master_and_admin'),
+    () => allEmployees.filter((e) => e.is_active !== false && (!e.role || e.role === 'master' || e.role === 'master_and_admin')),
     [allEmployees]
   )
 
   const empColor = useCallback(
-    (id: number) => {
+    (id?: number) => {
+      if (id == null) return '#7f94ad'
       const i = employees.findIndex((e) => e.id === id)
-      return MASTER_COLORS[(i < 0 ? 0 : i) % MASTER_COLORS.length]
+      return i < 0 ? '#7f94ad' : MASTER_PALETTE[i % MASTER_PALETTE.length]
     },
     [employees]
   )
@@ -673,32 +639,27 @@ export function SchedulePage() {
     return d
   }, [dayOffset])
 
-  const weekLabel = useMemo(() => {
-    if (weekOffset === 0) return 'Эта неделя'
-    if (weekOffset === 1) return 'След. неделя'
-    if (weekOffset === -1) return 'Прош. неделя'
-    return `${formatDateShort(weekDates[0])} — ${formatDateShort(weekDates[6])}`
-  }, [weekOffset, weekDates])
-
-  const dayLabel = useMemo(() => {
+  const periodLabel = useMemo(() => {
+    if (viewMode === 'week') {
+      if (weekOffset === 0) return 'Эта неделя'
+      if (weekOffset === 1) return 'След. неделя'
+      if (weekOffset === -1) return 'Прош. неделя'
+      return `${formatDateShort(weekDates[0])} — ${formatDateShort(weekDates[6])}`
+    }
     if (dayOffset === 0) return 'Сегодня'
     if (dayOffset === 1) return 'Завтра'
     if (dayOffset === -1) return 'Вчера'
     return dayDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', weekday: 'short' })
-  }, [dayOffset, dayDate])
+  }, [viewMode, weekOffset, dayOffset, weekDates, dayDate])
 
   const fetchBookings = useCallback(async () => {
     if (!businessId) return
     setLoading(true)
     try {
       let params = `business_id=${businessId}`
-      if (viewMode === 'week') {
-        params += `&start_date=${formatDateISO(weekDates[0])}&end_date=${formatDateISO(weekDates[6])}`
-      } else {
-        params += `&date=${formatDateISO(dayDate)}`
-      }
-      const data = await api.getAdminBookings(params)
-      setBookings(data)
+      if (viewMode === 'week') params += `&start_date=${formatDateISO(weekDates[0])}&end_date=${formatDateISO(weekDates[6])}`
+      else params += `&date=${formatDateISO(dayDate)}`
+      setBookings(await api.getAdminBookings(params))
     } catch {
       // ignore
     } finally {
@@ -714,20 +675,24 @@ export function SchedulePage() {
 
   useEffect(() => {
     if (!businessId) return
+    setSelectedEmployeeId(null)
     Promise.all([api.getServices(businessId), api.getEmployees(businessId)])
       .then(([svc, emp]) => { setServices(svc); setAllEmployees(emp) })
       .catch(() => {})
   }, [businessId])
 
+  const replaceBooking = (updated: AdminBooking) => setBookings((prev) => prev.map((b) => (b.id === updated.id ? updated : b)))
+
   const handleStatusChange = async (bookingId: number, status: string) => {
     setUpdating(true)
     setBookingError('')
     try {
-      const updated = await api.updateBookingStatus(bookingId, status)
-      setBookings((prev) => prev.map((b) => (b.id === bookingId ? updated : b)))
+      replaceBooking(await api.updateBookingStatus(bookingId, status))
       setSelectedBooking(null)
+      setToast(status === 'confirmed' ? 'Запись подтверждена' : status === 'completed' ? 'Запись завершена' : status === 'cancelled' ? 'Запись отменена' : 'Статус изменён')
+      fetchBookings()
     } catch (e) {
-      setBookingError(e instanceof Error ? e.message : 'Не удалось изменить статус')
+      setBookingError(parseError(e, 'Не удалось изменить статус'))
     } finally {
       setUpdating(false)
     }
@@ -738,10 +703,10 @@ export function SchedulePage() {
     setBookingError('')
     try {
       const updated = await api.updateRentalQuote(bookingId, price, prepayment)
-      setBookings((prev) => prev.map((b) => (b.id === bookingId ? updated : b)))
+      replaceBooking(updated)
       setSelectedBooking(updated)
     } catch (e) {
-      setBookingError(e instanceof Error ? e.message : 'Не удалось сохранить стоимость')
+      setBookingError(parseError(e, 'Не удалось сохранить стоимость'))
     } finally {
       setUpdating(false)
     }
@@ -749,15 +714,11 @@ export function SchedulePage() {
 
   const doReschedule = async (bookingId: number, date: string, time: string, employeeId?: number, optimistic = false) => {
     const prev = bookings
-    if (optimistic) {
-      setBookings((bs) => bs.map((b) => (b.id === bookingId ? { ...b, date, time, employee_id: employeeId ?? b.employee_id } : b)))
-    }
+    if (optimistic) setBookings((bs) => bs.map((b) => (b.id === bookingId ? { ...b, date, time, employee_id: employeeId ?? b.employee_id } : b)))
     try {
-      const updated = await api.adminReschedule(bookingId, date, time, employeeId)
-      setBookings((bs) => bs.map((b) => (b.id === bookingId ? updated : b)))
-      return true
+      replaceBooking(await api.adminReschedule(bookingId, date, time, employeeId))
     } catch (e) {
-      if (optimistic) setBookings(prev) // rollback
+      if (optimistic) setBookings(prev)
       throw e
     }
   }
@@ -770,113 +731,13 @@ export function SchedulePage() {
       await doReschedule(rescheduleBooking.id, date, time, employeeId)
       setRescheduleBooking(null)
       setSelectedBooking(null)
+      setToast('Запись перенесена')
       fetchBookings()
     } catch (e) {
-      setRescheduleError(e instanceof Error ? e.message : 'Не удалось перенести')
+      setRescheduleError(parseError(e, 'Не удалось перенести'))
     } finally {
       setRescheduleSubmitting(false)
     }
-  }
-
-  const openNewBooking = (date: Date, time?: string) => {
-    setManualBookingDate(date)
-    setManualBookingTime(time)
-    setShowManualBooking(true)
-  }
-
-  // ── Pointer-based drag&drop переноса (день): работает и на touch, и мышью ──
-  const beginCardDrag = (e: React.PointerEvent, p: Positioned) => {
-    if (viewMode !== 'day') return
-    if (e.pointerType === 'mouse' && e.button !== 0) return
-    e.stopPropagation()
-    const el = e.currentTarget as HTMLElement
-    const rect = el.getBoundingClientRect()
-    const grabDY = e.clientY - rect.top
-    const startX = e.clientX, startY = e.clientY
-    const ptrId = e.pointerId
-    const durMin = p.endMin - p.startMin
-    let dragging = false
-    let holdTimer: number | undefined
-
-    const target = (cx: number, cy: number) => {
-      const cont = colsRef.current
-      if (!cont) return { colIndex: 0, newMin: p.startMin }
-      const cr = cont.getBoundingClientRect()
-      const colW = cr.width / Math.max(1, dayColumns.length)
-      const colIndex = Math.max(0, Math.min(dayColumns.length - 1, Math.floor((cx - cr.left) / colW)))
-      const rawMin = DAY_START_H * 60 + (cy - grabDY - cr.top) / pxPerMin
-      const newMin = Math.max(DAY_START_H * 60, Math.min(DAY_END_H * 60 - durMin, Math.round(rawMin / 5) * 5))
-      return { colIndex, newMin }
-    }
-
-    const begin = (cx: number, cy: number) => {
-      dragging = true
-      try { el.setPointerCapture?.(ptrId) } catch { /* noop */ }
-      const t = target(cx, cy)
-      setDrag({ id: p.booking.id, clientName: p.booking.client_name, x: cx, y: cy, w: rect.width, h: rect.height, grabDY, newMin: t.newMin, durMin })
-    }
-
-    const onMove = (ev: PointerEvent) => {
-      const moved = Math.hypot(ev.clientX - startX, ev.clientY - startY)
-      if (!dragging) {
-        if (e.pointerType === 'touch') {
-          // до long-press любое движение = скролл таймлайна → отменяем кандидата
-          if (moved > 10) { cleanup(); }
-          return
-        }
-        if (moved > 5) begin(ev.clientX, ev.clientY); else return
-      }
-      ev.preventDefault()
-      const t = target(ev.clientX, ev.clientY)
-      setDrag((d) => (d ? { ...d, x: ev.clientX, y: ev.clientY, newMin: t.newMin } : d))
-    }
-
-    const onUp = (ev: PointerEvent) => {
-      const wasDragging = dragging
-      cleanup()
-      if (wasDragging) {
-        const t = target(ev.clientX, ev.clientY)
-        const emp = dayColumns[t.colIndex]
-        const dateStr = formatDateISO(dayDate)
-        const empChanged = !!emp && emp.id !== 0 && emp.id !== (p.booking.employee_id || 0)
-        const changed = t.newMin !== p.startMin || empChanged
-        setDrag(null)
-        if (changed) {
-          const wd = dayDate.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })
-          const fromEmp = dayColumns.find((c) => c.id === (p.booking.employee_id || 0))?.name
-          setPendingMove({
-            id: p.booking.id,
-            clientName: p.booking.client_name,
-            date: dateStr,
-            time: minToTime(t.newMin),
-            employeeId: emp?.id || undefined,
-            fromLabel: `${minToTime(p.startMin)}${fromEmp ? `, ${fromEmp}` : ''}`,
-            toLabel: `${wd}, ${minToTime(t.newMin)}${empChanged ? `, ${emp!.name}` : ''}`,
-          })
-        }
-      } else {
-        setSelectedBooking(p.booking)
-      }
-    }
-
-    function cleanup() {
-      dragging = false
-      if (holdTimer) { clearTimeout(holdTimer); holdTimer = undefined }
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', onUp)
-    }
-
-    window.addEventListener('pointermove', onMove, { passive: false })
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', onUp)
-    if (e.pointerType === 'touch') holdTimer = window.setTimeout(() => begin(startX, startY), 220)
-  }
-
-  const openDayPeek = (dateStr: string, tappedMin: number) => {
-    const lo = Math.max(DAY_START_H * 60, Math.round(tappedMin) - WINDOW)
-    const hi = Math.min(DAY_END_H * 60, Math.round(tappedMin) + WINDOW)
-    setDaySheet({ dateStr, lo, hi })
   }
 
   const confirmMove = async () => {
@@ -884,7 +745,10 @@ export function SchedulePage() {
     setMovingSubmit(true)
     try {
       await doReschedule(pendingMove.id, pendingMove.date, pendingMove.time, pendingMove.employeeId, true)
-    } catch { /* ignore */ } finally {
+      setToast('Запись перенесена')
+    } catch (e) {
+      setToast(parseError(e, 'Не удалось перенести'))
+    } finally {
       setMovingSubmit(false)
       setPendingMove(null)
     }
@@ -892,274 +756,464 @@ export function SchedulePage() {
 
   // Filtering: by employee + search
   const visibleBookings = useMemo(() => {
-    let list = bookings
+    let list = bookings.filter(isActive)
     if (selectedEmployeeId) list = list.filter((b) => b.employee_id === selectedEmployeeId)
     const q = search.trim().toLowerCase()
     if (q) {
       list = list.filter((b) =>
-        (b.client_name || '').toLowerCase().includes(q) ||
-        (b.service_name || '').toLowerCase().includes(q) ||
-        (b.client_phone || '').toLowerCase().includes(q)
+        [b.client_name, b.service_name, b.client_phone, b.employee_name].some((v) => (v || '').toLowerCase().includes(q))
       )
     }
     return list
   }, [bookings, selectedEmployeeId, search])
 
-  // Summary
+  // Day columns = masters (or single column)
+  const dayColumns = useMemo(() => {
+    const base = selectedEmployeeId ? employees.filter((e) => e.id === selectedEmployeeId) : employees
+    return base.length > 0 ? base : [{ id: 0, name: 'Все записи' } as Employee]
+  }, [employees, selectedEmployeeId])
+
+  const colCount = viewMode === 'day' ? dayColumns.length : 7
+
   const summary = useMemo(() => {
-    const active = visibleBookings.filter((b) => b.status !== 'cancelled')
     const revenue = visibleBookings
       .filter((b) => b.status === 'confirmed' || b.status === 'completed')
       .reduce((sum, b) => sum + (b.price || 0), 0)
-    const busyMin = active.reduce((sum, b) => sum + (b.service_duration || 60), 0)
-    const cols = viewMode === 'week' ? 7 : Math.max(1, employees.length || 1)
-    const load = Math.min(100, Math.round((busyMin / (TOTAL_MIN * cols)) * 100))
-    return { count: active.length, revenue, load }
-  }, [visibleBookings, viewMode, employees.length])
+    const busyMin = visibleBookings.reduce((sum, b) => sum + durationOf(b), 0)
+    const load = Math.min(100, Math.round((busyMin / (TOTAL_MIN * colCount)) * 100))
+    return { count: visibleBookings.length, revenue, load }
+  }, [visibleBookings, colCount])
 
-  const nowMin = useMemo(() => {
-    const n = new Date()
-    return n.getHours() * 60 + n.getMinutes()
-  }, [bookings])
+  const [nowMin, setNowMin] = useState(() => new Date().getHours() * 60 + new Date().getMinutes())
+  useEffect(() => {
+    const t = setInterval(() => setNowMin(new Date().getHours() * 60 + new Date().getMinutes()), 60000)
+    return () => clearInterval(t)
+  }, [])
+
+  // Прокрутить к текущему времени один раз при открытии (не на каждом опросе раз в 15 с).
+  const didAutoScroll = useRef(false)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || loading || didAutoScroll.current) return
+    didAutoScroll.current = true
+    const target = (Math.max(DAY_START_H * 60, nowMin - 60) - DAY_START_H * 60) * pxPerMin
+    if (el.scrollTop === 0) el.scrollTop = Math.max(0, target)
+  }, [loading]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const colHeight = TOTAL_MIN * pxPerMin
   const currentBizName = businesses.find((b) => b.id === businessId)?.name
   const todayISO = formatDateISO(new Date())
-  const hourMarks = Array.from({ length: DAY_END_H - DAY_START_H + 1 }, (_, i) => DAY_START_H + i)
-
-  // Day columns = masters (or single)
-  const dayColumns = useMemo(() => {
-    const base = selectedEmployeeId ? employees.filter((e) => e.id === selectedEmployeeId) : employees
-    return base.length > 0 ? base : [{ id: 0, name: 'Расписание' } as Employee]
-  }, [employees, selectedEmployeeId])
-
+  const hourMarks = Array.from({ length: DAY_END_H - DAY_START_H - 1 }, (_, i) => DAY_START_H + i + 1)
   const showNow =
     (viewMode === 'day' ? formatDateISO(dayDate) === todayISO : weekOffset === 0) &&
     nowMin >= DAY_START_H * 60 && nowMin <= DAY_END_H * 60
-  const colCount = viewMode === 'day' ? dayColumns.length : 7
+
+  const openBookings = (entries: AdminBooking[]) => {
+    if (Date.now() < suppressClickUntil.current) return
+    setBookingError('')
+    if (entries.length === 1) setSelectedBooking(entries[0])
+    else setGroupEntries(entries)
+  }
+
+  // ── Перетаскивание одиночной записи (день): long-press на тач, сразу — мышью ──
+  const beginDrag = (e: React.PointerEvent, b: AdminBooking) => {
+    if (viewMode !== 'day') return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    const startX = e.clientX
+    const startY = e.clientY
+    const ptrId = e.pointerId
+    const el = e.currentTarget as HTMLElement
+    const startMin = timeToMin(b.time)
+    const durMin = durationOf(b)
+    const grabDY = (startY - el.getBoundingClientRect().top)
+    let dragging = false
+    let holdTimer: number | undefined
+
+    const target = (cx: number, cy: number) => {
+      const cont = colsRef.current
+      if (!cont) return { colIndex: 0, newMin: startMin }
+      const cr = cont.getBoundingClientRect()
+      const colW = cr.width / Math.max(1, dayColumns.length)
+      const colIndex = Math.max(0, Math.min(dayColumns.length - 1, Math.floor((cx - cr.left) / colW)))
+      const rawMin = DAY_START_H * 60 + (cy - grabDY - cr.top) / pxPerMin
+      const newMin = Math.max(DAY_START_H * 60, Math.min(DAY_END_H * 60 - durMin, Math.round(rawMin / 5) * 5))
+      return { colIndex, newMin }
+    }
+    const begin = (cx: number, cy: number) => {
+      dragging = true
+      try { el.setPointerCapture?.(ptrId) } catch { /* noop */ }
+      navigator.vibrate?.(12)
+      const t = target(cx, cy)
+      setDrag({ id: b.id, clientName: b.client_name, color: empColor(b.employee_id), x: cx, y: cy, newMin: t.newMin, durMin, colIndex: t.colIndex })
+    }
+    const onMove = (ev: PointerEvent) => {
+      if (!dragging) {
+        const moved = Math.hypot(ev.clientX - startX, ev.clientY - startY)
+        if (e.pointerType === 'touch') {
+          if (moved > 10) cleanup()
+          return
+        }
+        if (moved > 5) begin(ev.clientX, ev.clientY)
+        else return
+      }
+      ev.preventDefault()
+      const t = target(ev.clientX, ev.clientY)
+      setDrag((d) => (d ? { ...d, x: ev.clientX, y: ev.clientY, newMin: t.newMin, colIndex: t.colIndex } : d))
+    }
+    const onUp = (ev: PointerEvent) => {
+      const wasDragging = dragging
+      cleanup()
+      if (!wasDragging) return
+      suppressClickUntil.current = Date.now() + 400
+      const t = target(ev.clientX, ev.clientY)
+      const emp = dayColumns[t.colIndex]
+      const empChanged = !!emp && emp.id !== 0 && emp.id !== (b.employee_id || 0)
+      setDrag(null)
+      if (t.newMin !== startMin || empChanged) {
+        const wd = dayDate.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })
+        setPendingMove({
+          id: b.id,
+          clientName: b.client_name,
+          date: formatDateISO(dayDate),
+          time: minToTime(t.newMin),
+          employeeId: emp?.id || undefined,
+          fromLabel: `${b.time}${b.employee_name ? `, ${b.employee_name}` : ''}`,
+          toLabel: `${wd}, ${minToTime(t.newMin)}${empChanged ? `, ${emp!.name}` : ''}`,
+        })
+      }
+    }
+    function cleanup() {
+      dragging = false
+      if (holdTimer) { clearTimeout(holdTimer); holdTimer = undefined }
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+    }
+    // Прерванный жест (браузер забрал его под прокрутку) — не перенос.
+    const onCancel = () => {
+      const wasDragging = dragging
+      cleanup()
+      if (wasDragging) { suppressClickUntil.current = Date.now() + 400; setDrag(null) }
+    }
+    window.addEventListener('pointermove', onMove, { passive: false })
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
+    if (e.pointerType === 'touch') holdTimer = window.setTimeout(() => begin(startX, startY), 260)
+  }
+
+  // ── Потянуть вниз для обновления ──
+  const pullStart = useRef<number | null>(null)
+  const onTouchStartPull = (e: React.TouchEvent) => {
+    pullStart.current = e.touches.length === 1 && (scrollRef.current?.scrollTop ?? 1) <= 0 ? e.touches[0].clientY : null
+  }
+  const onTouchMovePull = (e: React.TouchEvent) => {
+    if (pullStart.current == null || drag) return
+    const dist = e.touches[0].clientY - pullStart.current
+    if (dist > 8) setPull({ dist, refreshing: false })
+    else if (pull) setPull(null)
+  }
+  const onTouchEndPull = async () => {
+    const current = pull
+    pullStart.current = null
+    if (!current) return
+    if (current.dist > 70) {
+      setPull({ dist: current.dist, refreshing: true })
+      await fetchBookings()
+      setToast('Расписание обновлено')
+    }
+    setPull(null)
+  }
+
+  const tapFreeSlot = (e: React.MouseEvent<HTMLDivElement>, date: Date, employeeId: number | null) => {
+    if (e.target !== e.currentTarget || Date.now() < suppressClickUntil.current) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const min = DAY_START_H * 60 + Math.round(((e.clientY - rect.top) / pxPerMin) / 15) * 15
+    setManual({ date, time: minToTime(Math.max(DAY_START_H * 60, Math.min(DAY_END_H * 60 - 15, min))), employeeId })
+  }
+
+  const renderColumn = (list: AdminBooking[], key: string | number, date: Date, employeeId: number | null, week: boolean, isToday: boolean) => {
+    const colWidth = Math.max(140, (scrollRef.current?.clientWidth ?? 340) - GUTTER) / colCount
+    return (
+      <div key={key} className={`sched-col ${isToday && week ? 'today' : ''}`} onClick={(e) => tapFreeSlot(e, date, employeeId)}>
+        {layoutLanes(list).map((l) => {
+          const available = colWidth / l.lanes - 2
+          const dur = l.endMin - l.startMin
+          const hasTime = !week && available >= 55 && dur * pxPerMin >= 34
+          const hasName = !week && available >= 70 && dur * pxPerMin >= 56
+          const b = l.booking
+          const awaiting = b.status === 'pending' || b.status === 'pending_prepayment' || b.status === 'prepayment_sent'
+          return (
+            <div
+              key={b.id}
+              className={`sched-block ${week ? 'weekly' : ''} ${awaiting ? 'is-awaiting' : ''} ${b.status === 'completed' ? 'is-done' : ''} ${drag?.id === b.id ? 'is-dragging' : ''}`}
+              aria-hidden="true"
+              style={{
+                '--master': empColor(b.employee_id),
+                '--lane': l.lane,
+                '--lanes': l.lanes,
+                top: (l.startMin - DAY_START_H * 60) * pxPerMin + 1,
+                height: Math.max(6, dur * pxPerMin - 2),
+              } as CSSProperties}
+            >
+              {hasTime && <div className="t"><span>{b.time}</span><span>{endOf(b)}</span></div>}
+              {hasName && <div className="n">{firstName(b.client_name)}</div>}
+            </div>
+          )
+        })}
+        {clustersOf(list).map((c) => {
+          const names = c.entries.map((b) => b.client_name).join(', ')
+          const label = c.entries.length === 1
+            ? `Открыть запись: ${c.entries[0].client_name}, ${c.entries[0].time}`
+            : `${c.entries.length} пересекающихся записей: ${names}`
+          return (
+            <button
+              key={`${c.startMin}-${c.entries[0].id}`}
+              type="button"
+              className="sched-hit"
+              aria-label={label}
+              title={label}
+              style={{ top: (c.startMin - DAY_START_H * 60) * pxPerMin, height: Math.max(8, (c.endMin - c.startMin) * pxPerMin) }}
+              onPointerDown={c.entries.length === 1 && !week ? (e) => beginDrag(e, c.entries[0]) : undefined}
+              onClick={(e) => { e.stopPropagation(); openBookings(c.entries) }}
+            />
+          )
+        })}
+        {drag && !week && dayColumns[drag.colIndex]?.id === (employeeId ?? 0) && (
+          <div className="sched-drop" style={{ '--master': drag.color, top: (drag.newMin - DAY_START_H * 60) * pxPerMin, height: drag.durMin * pxPerMin } as CSSProperties}>
+            {minToTime(drag.newMin)}–{minToTime(drag.newMin + drag.durMin)}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const nextUp = visibleBookings
+    .filter((b) => viewMode === 'week' || b.date === formatDateISO(dayDate))
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
+    .filter((b) => b.date > todayISO || (b.date === todayISO && timeToMin(b.time) + durationOf(b) >= nowMin) || b.date < todayISO)
+    .slice(0, 3)
+
+  const toggleTool = (k: ToolKey) => setTools((t) => ({ ...t, [k]: !t[k] }))
+  const shiftPeriod = (dir: number) => (viewMode === 'week' ? setWeekOffset((w) => w + dir) : setDayOffset((d) => d + dir))
 
   return createPortal(
-    <div className="sched-root" data-theme={theme}>
-      <div className="sched-main">
-      {/* Header */}
-      <header className="sched-header">
-        <div className="sched-htitle">
-          <h1>Расписание</h1>
-          {currentBizName && <div className="sched-hsub"><span className="dot" />{currentBizName}</div>}
-        </div>
-        <button className="sched-iconbtn bordered" onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))} aria-label="Тема">
-          {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
-        </button>
-        <BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />
-      </header>
-
-      {/* Search */}
-      <div className="sched-toolbar">
-        <div className="sched-search">
-          <Search size={17} />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск по клиенту, услуге, телефону" />
-          {search && <button className="clear" onClick={() => setSearch('')} aria-label="Очистить">×</button>}
-        </div>
-      </div>
-
-      {/* Control row: режим + листалка дат + сворачивание сводки */}
-      <div className="sched-controls">
-        <div className="sched-seg">
-          <button onClick={() => setViewMode('day')} className={viewMode === 'day' ? 'active' : ''}>День</button>
-          <button onClick={() => setViewMode('week')} className={viewMode === 'week' ? 'active' : ''}>Неделя</button>
-        </div>
-        <div className="sched-stepper">
-          <button onClick={() => (viewMode === 'week' ? setWeekOffset((w) => w - 1) : setDayOffset((d) => d - 1))} className="sched-stepper-nav" aria-label="Назад"><ChevronLeft size={18} /></button>
-          <button className="sched-stepper-label" onClick={() => { setWeekOffset(0); setDayOffset(0) }}>
-            <span className="main">{viewMode === 'week' ? weekLabel : dayLabel}</span>
-          </button>
-          <button onClick={() => (viewMode === 'week' ? setWeekOffset((w) => w + 1) : setDayOffset((d) => d + 1))} className="sched-stepper-nav" aria-label="Вперёд"><ChevronRight size={18} /></button>
-        </div>
-        <button className={`sched-details-toggle ${detailsOpen ? 'open' : ''}`} onClick={() => setDetailsOpen((v) => !v)} aria-label="Сводка и легенда">
-          <ChevronDown size={16} />
-        </button>
-      </div>
-
-      {/* Сводка + легенда (свёрнуты по умолчанию) */}
-      {detailsOpen && (
-        <>
-          <div className="sched-summary">
-            <div className="tile"><div className="num">{summary.count}</div><div className="lbl">записей</div></div>
-            <div className="tile"><div className="num">{summary.revenue.toLocaleString('ru-RU')}</div><div className="lbl">выручка ₽</div></div>
-            <div className="tile"><div className="num">{summary.load}%</div><div className="lbl">загрузка</div></div>
+    <div className={`ds-screen sched-screen ${focus ? 'is-focus' : ''}`} data-theme={theme}>
+      {!focus && (
+        <header className="ds-shell-header" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 13px 5px 16px', flexShrink: 0 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h1 className="ds-h1">Расписание</h1>
+            {currentBizName && <div className="sched-hsub"><span className="dot" />{currentBizName}</div>}
           </div>
-          <div className="sched-legend">
-            {LEGEND_ITEMS.map((it) => (
-              <div className="item" key={it.key}>
-                <span className="swatch" style={{ background: `var(--st-${it.key})` }} /><span>{it.label}</span>
-              </div>
-            ))}
-          </div>
-        </>
+          <BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />
+          <button className="ds-icon-btn" onClick={toggleTheme} aria-label="Тема">{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</button>
+          <button className="ds-icon-btn" onClick={handleLogout} aria-label="Выйти" title="Выйти"><LogOut size={19} /></button>
+        </header>
       )}
 
-      {/* Прилипшая шапка колонок */}
-      <div className="sched-colhead" style={{ gridTemplateColumns: `var(--gutter) repeat(${colCount}, 1fr)` }}>
-        <div />
-        {viewMode === 'day'
-          ? dayColumns.map((emp) => {
-              const dim = selectedEmployeeId !== null && emp.id !== 0 && selectedEmployeeId !== emp.id
-              return (
-                <div key={emp.id} className="sched-emp-cap" style={{ opacity: dim ? 0.35 : 1 }}
-                  onClick={() => emp.id !== 0 && setSelectedEmployeeId(selectedEmployeeId === emp.id ? null : emp.id)}>
-                  <span className="cap" style={{ background: emp.id !== 0 ? empColor(emp.id) : 'var(--s-line-2)' }} />
-                </div>
-              )
-            })
-          : weekDates.map((d, i) => (
-              <div key={i} className={`sched-wday-head ${formatDateISO(d) === todayISO ? 'today' : ''}`}>
-                <span className="wd">{DAYS_SHORT[i]}</span><span className="dt">{d.getDate()}</span>
-              </div>
-            ))}
-      </div>
-
-      {/* Таймлайн (тело) */}
-      <div className="sched-tl" ref={tlRef}>
-        {loading && bookings.length === 0 ? (
-          <div className="sched-empty"><Loader2 size={22} className="animate-spin" /> Загрузка…</div>
-        ) : (
-          <div className="sched-tl-inner" style={{ height: colHeight, '--pxh': `${(60 * pxPerMin).toFixed(2)}px` } as CSSProperties}>
-            <div className="sched-tl-gutter">
-              {hourMarks.map((h) => (
-                <div key={h} className="sched-tl-hour" style={{ top: (h - DAY_START_H) * 60 * pxPerMin }}>{h}:00</div>
+      <div className="sched-page">
+        {tools.context && !focus && (
+          <div className="sched-context">
+            <div className="ds-context-eyebrow">Расписание · {periodLabel}</div>
+            <div className="ds-context-headline">{viewMode === 'week' ? 'Неделя · записи по специалистам' : dayOffset === 0 ? 'Кто записан сегодня' : 'Кто записан в этот день'}</div>
+            <div className="sched-context-strip">
+              {nextUp.length === 0 ? (
+                <div><b>—</b><span>Нет записей</span></div>
+              ) : nextUp.map((b) => (
+                <div key={b.id}><b>{b.time}–{endOf(b)}</b><span>{firstName(b.employee_name) || b.client_name} · {b.service_name}</span></div>
               ))}
             </div>
-            <div className="sched-tl-cols" ref={colsRef} style={{ gridTemplateColumns: `repeat(${colCount}, 1fr)` }}>
-              {viewMode === 'day'
-                ? dayColumns.map((emp) => {
-                    const dateStr = formatDateISO(dayDate)
-                    const colBookings = visibleBookings.filter((b) => b.date === dateStr && (emp.id === 0 || b.employee_id === emp.id))
-                    const positioned = layoutColumn(colBookings)
-                    const dim = selectedEmployeeId !== null && emp.id !== 0 && selectedEmployeeId !== emp.id
-                    return (
-                      <div
-                        key={emp.id}
-                        className="sched-tl-col"
-                        style={{ opacity: dim ? 0.32 : 1 }}
-                        onClick={(e) => {
-                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                          const min = DAY_START_H * 60 + Math.round(((e.clientY - rect.top) / pxPerMin) / 15) * 15
-                          openNewBooking(dayDate, minToTime(Math.max(DAY_START_H * 60, Math.min(DAY_END_H * 60 - 15, min))))
-                        }}
-                      >
-                        {positioned.map((p) => (
-                          <BookingCard
-                            key={p.booking.id}
-                            p={p}
-                            pxPerMin={pxPerMin}
-                            showEmployee={false}
-                            dragging={drag?.id === p.booking.id}
-                            onPointerDown={(e) => beginCardDrag(e, p)}
-                          />
-                        ))}
-                      </div>
-                    )
-                  })
-                : weekDates.map((d, dayIdx) => {
-                    const dateStr = formatDateISO(d)
-                    const dayBookings = visibleBookings.filter((b) => b.date === dateStr)
-                    const isToday = dateStr === todayISO
-                    return (
-                      <div key={dayIdx} className={`sched-tl-col ${isToday ? 'today' : ''}`}
-                        style={{ cursor: 'pointer' }}
-                        onClick={(e) => {
-                          if (dayBookings.length === 0) { openNewBooking(d); return }
-                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                          const t = DAY_START_H * 60 + (e.clientY - rect.top) / pxPerMin
-                          openDayPeek(dateStr, t)
-                        }}>
-                        {layoutColumn(dayBookings).map((p) => (
-                          <BookingCard
-                            key={p.booking.id}
-                            p={p}
-                            pxPerMin={pxPerMin}
-                            showEmployee
-                          />
-                        ))}
-                      </div>
-                    )
-                  })}
+          </div>
+        )}
+
+        {tools.legend && employees.length > 0 && (
+          <div className="sched-legend" role="group" aria-label="Цвета специалистов">
+            {employees.map((e) => (
+              <button
+                key={e.id}
+                type="button"
+                className="sched-legend-tag choice-accent"
+                aria-pressed={selectedEmployeeId === e.id}
+                title={`Показать только: ${e.name}`}
+                onClick={() => setSelectedEmployeeId(selectedEmployeeId === e.id ? null : e.id)}
+              >
+                <span className="sched-swatch" style={{ '--master': empColor(e.id) } as CSSProperties} />{firstName(e.name)}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="sched-colhead" style={{ gridTemplateColumns: `${GUTTER}px repeat(${colCount}, minmax(0, 1fr))` }}>
+          <div />
+          {viewMode === 'day'
+            ? dayColumns.map((emp) => (
+                <div key={emp.id} className="sched-dayhead" title={emp.name}>
+                  {emp.id !== 0 && <span className="sched-swatch" style={{ '--master': empColor(emp.id) } as CSSProperties} />}
+                  <strong>{emp.id === 0 ? dayDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : firstName(emp.name)}</strong>
+                </div>
+              ))
+            : weekDates.map((d, i) => {
+                const n = visibleBookings.filter((b) => b.date === formatDateISO(d)).length
+                const today = formatDateISO(d) === todayISO
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    className={`sched-dayhead week ${today ? 'today' : ''}`}
+                    title={`Открыть ${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })} по мастерам`}
+                    onClick={() => {
+                      const t = new Date(); t.setHours(0, 0, 0, 0)
+                      setDayOffset(Math.round((d.getTime() - t.getTime()) / 86400000))
+                      setViewMode('day')
+                    }}
+                  >
+                    <span>{DAYS_SHORT[i]}</span><strong>{d.getDate()}</strong>{n > 0 && <small>{n}</small>}
+                  </button>
+                )
+              })}
+        </div>
+
+        <div
+          className="sched-scroll"
+          ref={scrollRef}
+          aria-label="Календарный график, масштаб — двумя пальцами"
+          onTouchStart={onTouchStartPull}
+          onTouchMove={onTouchMovePull}
+          onTouchEnd={onTouchEndPull}
+        >
+          {pull && (
+            <div className="sched-pull" role="status">
+              {pull.refreshing ? <Loader2 size={15} className="animate-spin" /> : <span>{pull.dist > 70 ? '↻' : '↓'}</span>}
+              {pull.refreshing ? 'Обновляем…' : pull.dist > 70 ? 'Отпустите для обновления' : 'Потяните вниз для обновления'}
             </div>
-            {showNow && (
-              <div className="sched-now" style={{ top: (nowMin - DAY_START_H * 60) * pxPerMin }}>
-                <div className="bar" /><div className="knob" />
-                {viewMode === 'day' && <div className="lbl">{minToTime(nowMin)}</div>}
+          )}
+          {loading && bookings.length === 0 && !businessId ? null : loading && bookings.length === 0 ? (
+            <div className="sched-empty"><Loader2 size={20} className="animate-spin" /> Загрузка…</div>
+          ) : (
+            <div className="sched-timeline" style={{ height: colHeight, '--hour': `${hourPx}px` } as CSSProperties}>
+              <div className="sched-gutter">
+                {hourMarks.map((h) => (
+                  <span key={h} className="sched-hour" style={{ top: (h - DAY_START_H) * hourPx }}>{h}:00</span>
+                ))}
               </div>
-            )}
+              <div className="sched-cols" ref={colsRef} style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
+                {viewMode === 'day'
+                  ? dayColumns.map((emp) => {
+                      const dateStr = formatDateISO(dayDate)
+                      const list = visibleBookings.filter((b) => b.date === dateStr && (emp.id === 0 || b.employee_id === emp.id))
+                      return renderColumn(list, emp.id, dayDate, emp.id || null, false, false)
+                    })
+                  : weekDates.map((d, i) => {
+                      const dateStr = formatDateISO(d)
+                      return renderColumn(visibleBookings.filter((b) => b.date === dateStr), i, d, null, true, dateStr === todayISO)
+                    })}
+              </div>
+              {showNow && (
+                <div className="sched-now" style={{ top: (nowMin - DAY_START_H * 60) * pxPerMin }}>
+                  <span className="knob" />
+                  {viewMode === 'day' && <span className="lbl">{minToTime(nowMin)}</span>}
+                </div>
+              )}
+            </div>
+          )}
+
+        </div>
+
+        <div className="sched-floating">
+          {hourPx !== DEFAULT_HOUR_PX && (
+            <button className="sched-zoom-reset" onClick={() => setHourPx(DEFAULT_HOUR_PX)} aria-label="Вернуть масштаб 100%" title="Сбросить масштаб"><RotateCcw size={18} /></button>
+          )}
+          {businessId && (
+            <button className="sched-fab" onClick={() => setManual({ date: viewMode === 'week' ? new Date() : dayDate, employeeId: selectedEmployeeId })} aria-label="Записать клиента">
+              <Plus size={22} />
+            </button>
+          )}
+        </div>
+
+        <div className="sched-dock">
+          <div className="ds-seg">
+            <button onClick={() => setViewMode('day')} className={`choice-accent ${viewMode === 'day' ? 'active' : ''}`}>День</button>
+            <button onClick={() => setViewMode('week')} className={`choice-accent ${viewMode === 'week' ? 'active' : ''}`}>Неделя</button>
+          </div>
+          <div className="sched-stepper">
+            <button onClick={() => shiftPeriod(-1)} aria-label="Предыдущая дата"><ChevronLeft size={17} /></button>
+            <button className="label" onClick={() => { setWeekOffset(0); setDayOffset(0) }} aria-label="Вернуться к текущей дате">{periodLabel}</button>
+            <button onClick={() => shiftPeriod(1)} aria-label="Следующая дата"><ChevronRight size={17} /></button>
+          </div>
+          <button className="sched-mini" aria-expanded={toolsOpen} aria-label="Настроить вид" title="Показать инструменты" onClick={() => setToolsOpen((v) => !v)}>
+            <SlidersHorizontal size={16} />
+          </button>
+          <button className="sched-mini" aria-pressed={focus} aria-label={focus ? 'Свернуть график' : 'Развернуть график'} title={focus ? 'Вернуть панель' : 'Развернуть график'} onClick={() => setFocus((v) => !v)}>
+            {focus ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </button>
+        </div>
+
+        {toolsOpen && (
+          <div className="sched-tools">
+            {(Object.keys(TOOL_LABELS) as ToolKey[]).map((k) => (
+              <button key={k} type="button" aria-pressed={tools[k]} onClick={() => toggleTool(k)}>{TOOL_LABELS[k]}</button>
+            ))}
+          </div>
+        )}
+
+        {tools.search && (
+          <div className="ds-search sched-search">
+            <Search size={16} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск по клиенту, услуге, телефону" />
+            {search && <button className="ds-icon-btn" style={{ width: 24, height: 24 }} onClick={() => setSearch('')} aria-label="Очистить">×</button>}
+          </div>
+        )}
+
+        {tools.details && (
+          <div className="sched-summary">
+            <div className="ds-tile"><div className="num">{summary.count}</div><div className="lbl">записей</div></div>
+            <div className="ds-tile"><div className="num">{summary.revenue.toLocaleString('ru-RU')}</div><div className="lbl">выручка ₽</div></div>
+            <div className="ds-tile"><div className="num">{summary.load}%</div><div className="lbl">загрузка</div></div>
+          </div>
+        )}
+
+        {tools.filters && employees.length > 0 && (
+          <div className="sched-filters">
+            <button onClick={() => setSelectedEmployeeId(null)} className={`ds-chip choice-accent ${selectedEmployeeId === null ? 'active' : ''}`}>Все</button>
+            {employees.map((emp) => (
+              <button key={emp.id} onClick={() => setSelectedEmployeeId(selectedEmployeeId === emp.id ? null : emp.id)} className={`ds-chip choice-accent ${selectedEmployeeId === emp.id ? 'active' : ''}`}>
+                <span className="sched-swatch" style={{ '--master': empColor(emp.id) } as CSSProperties} />{emp.name}
+              </button>
+            ))}
           </div>
         )}
       </div>
 
-      {/* Чипы-фильтры мастеров */}
-      {employees.length > 0 && (
-        <div className="sched-chips">
-          <button onClick={() => setSelectedEmployeeId(null)} className={`sched-chip ${selectedEmployeeId === null ? 'active' : ''}`}>Все</button>
-          {employees.map((emp) => {
-            const col = empColor(emp.id)
-            const active = selectedEmployeeId === emp.id
-            return (
-              <button
-                key={emp.id}
-                onClick={() => setSelectedEmployeeId(active ? null : emp.id)}
-                className={`sched-chip ${active ? 'active' : ''}`}
-                style={active ? { background: col, borderColor: col, color: '#04121f' } : undefined}
-              >
-                {!active && <span className="chip-dot" style={{ background: col }} />}
-                {emp.name}
-              </button>
-            )
-          })}
-        </div>
-      )}
-      </div>
-
-      {/* Нижняя навигация (как в архиве) */}
-      <nav className="sched-bottomnav">
-        <Link to="/admin" className="sched-bn"><LayoutDashboard size={21} /><span>Панель</span></Link>
-        <Link to="/admin/schedule" className="sched-bn active"><Clock size={21} /><span>Расписание</span></Link>
-        <Link to="/admin/services" className="sched-bn"><Scissors size={21} /><span>Услуги</span></Link>
-        <Link to="/admin/employees" className="sched-bn"><Users size={21} /><span>Мастера</span></Link>
-        <Link to="/admin/settings" className="sched-bn"><Settings size={21} /><span>Настройки</span></Link>
-      </nav>
-
-      {/* FAB — крупная плавающая кнопка (как в архиве) */}
-      {businessId && (
-        <button onClick={() => openNewBooking(viewMode === 'week' ? new Date() : dayDate)}
-          className="sched-fab" aria-label="Записать клиента">
-          <Plus size={26} strokeWidth={2.4} />
-        </button>
+      {!focus && (
+        <nav className="ds-bottomnav">
+          {NAV.map(({ to, label, Icon }) => (
+            <Link key={to} to={to} className={`ds-bn${pathname === to ? ' active' : ''}`}>
+              <Icon size={21} />
+              <span>{label}</span>
+            </Link>
+          ))}
+        </nav>
       )}
 
-      {/* Гхост при перетаскивании */}
       {drag && (
-        <div className="sched-drag-ghost" style={{
-          position: 'fixed', left: drag.x + 10, top: drag.y - drag.grabDY,
-          width: drag.w, height: drag.h, pointerEvents: 'none', zIndex: 80,
-        }}>
-          <div className="c-name">{drag.clientName}</div>
-          <div className="c-sub">{minToTime(drag.newMin)}–{minToTime(drag.newMin + drag.durMin)}</div>
+        <div className="sched-ghost" style={{ left: drag.x, top: drag.y, '--master': drag.color } as CSSProperties}>
+          <strong>{drag.clientName}</strong>
+          <small>{minToTime(drag.newMin)}–{minToTime(drag.newMin + drag.durMin)}{dayColumns[drag.colIndex]?.id ? ` · ${dayColumns[drag.colIndex].name}` : ''}</small>
         </div>
       )}
 
-      {daySheet && (
-        <DayPeekSheet
-          dateStr={daySheet.dateStr}
-          lo={daySheet.lo}
-          hi={daySheet.hi}
-          bookings={visibleBookings}
-          empColor={empColor}
-          onClose={() => setDaySheet(null)}
-          onPick={(b) => { setDaySheet(null); setBookingError(''); setSelectedBooking(b) }}
+      {toast && <div className="ds-toast" role="status">{toast}</div>}
+
+      {groupEntries && (
+        <GroupSheet
+          entries={groupEntries}
+          color={empColor}
+          onClose={() => setGroupEntries(null)}
+          onPick={(b) => { setGroupEntries(null); setBookingError(''); setSelectedBooking(b) }}
         />
       )}
 
       {pendingMove && (
-        <ConfirmMoveModal
+        <ConfirmMoveDialog
           clientName={pendingMove.clientName}
           fromLabel={pendingMove.fromLabel}
           toLabel={pendingMove.toLabel}
@@ -1170,8 +1224,9 @@ export function SchedulePage() {
       )}
 
       {selectedBooking && (
-        <BookingDetailModal
+        <BookingDetailSheet
           booking={selectedBooking}
+          color={empColor(selectedBooking.employee_id)}
           onClose={() => setSelectedBooking(null)}
           onStatusChange={handleStatusChange}
           onQuote={handleRentalQuote}
@@ -1182,7 +1237,7 @@ export function SchedulePage() {
       )}
 
       {rescheduleBooking && (
-        <RescheduleModal
+        <RescheduleSheet
           booking={rescheduleBooking}
           employees={employees}
           onClose={() => setRescheduleBooking(null)}
@@ -1192,18 +1247,19 @@ export function SchedulePage() {
         />
       )}
 
-      {showManualBooking && businessId && (
-        <ManualBookingModal
+      {manual && businessId && (
+        <ManualBookingSheet
           businessId={businessId}
           services={services}
           employees={employees}
-          selectedDate={manualBookingDate}
-          selectedTime={manualBookingTime}
-          onClose={() => setShowManualBooking(false)}
-          onCreated={(toastMessage) => {
-            setShowManualBooking(false)
+          selectedDate={manual.date}
+          selectedTime={manual.time}
+          selectedEmployeeId={manual.employeeId}
+          onClose={() => setManual(null)}
+          onCreated={(message) => {
+            setManual(null)
             fetchBookings()
-            if (toastMessage) alert(toastMessage)
+            if (message) setToast(message)
           }}
         />
       )}

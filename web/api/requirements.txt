@@ -5,3 +5,4 @@ asyncpg
 python-jose[cryptography]
 pydantic
 httpx>=0.28.0
+python-multipart>=0.0.20

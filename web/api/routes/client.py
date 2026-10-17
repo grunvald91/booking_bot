@@ -1,6 +1,8 @@
 """
 Client-facing routes: browse businesses, view slots, create/cancel bookings.
 """
+
+from datetime_utils import utc_now
 from datetime import datetime, date, time, timedelta
 from typing import List, Optional
 
@@ -23,6 +25,7 @@ from ..photo_transport import create_photo_client
 from ..database import get_db, Business, Service, Employee, EmployeeService, Booking, User, VenueTimePricing
 from ..deps import get_current_user, get_current_user_optional
 from database.crud import get_or_create_guest_user
+from database.prepayment import payment_deadline
 from email_utils import normalize_optional_email
 from bot.services.email_notifications import send_booking_email_by_ids
 from database.booking_safety import (
@@ -237,6 +240,7 @@ def _booking_to_out(b: Booking, can_cancel: bool = False, can_reschedule: bool =
         can_cancel=can_cancel,
         can_reschedule=can_reschedule,
         notify_token=b.notify_token,
+        prepayment_amount=b.prepayment_amount,
     )
 
 
@@ -397,6 +401,7 @@ async def get_business(business_id: int, db: AsyncSession = Depends(get_db)):
             if getattr(biz, 'booking_flow_order', 'service_first') in ("service_first", "resource_first")
             else "service_first"
         ),
+        allow_multiple_services=bool(getattr(biz, 'allow_multiple_services', False)),
     )
 
 
@@ -449,6 +454,12 @@ async def get_slots(
             raise HTTPException(status_code=404, detail="Service not found")
         requested_duration = service_resource_duration(service)
     requested_duration = requested_duration or interval
+    if employee_id:
+        from ..sales.schedule import resource_works
+        if not await resource_works(db, emp, date, requested_duration):
+            return []
+    if interval <= 0 or interval > 1440:
+        raise HTTPException(409, "Invalid booking interval")
 
     start_time = business.working_hours_start or time(9, 0)
     end_time = business.working_hours_end or time(18, 0)
@@ -457,15 +468,14 @@ async def get_slots(
     if end_time <= start_time:
         end_dt += timedelta(days=1)
 
-    if date == datetime.now().date():
-        now_plus = datetime.now() + timedelta(hours=1)
-        if current < now_plus:
-            current = now_plus
-            minutes = (current.minute // interval + 1) * interval
-            if minutes >= 60:
-                current = current.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-            else:
-                current = current.replace(minute=minutes, second=0, microsecond=0)
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("Europe/Moscow")).replace(tzinfo=None)
+    if date < now.date():
+        return []
+    if date == now.date():
+        import math
+        steps = max(0, math.ceil(((now + timedelta(hours=1)) - current).total_seconds() / (interval * 60)))
+        current += timedelta(minutes=steps * interval)
 
     busy_intervals: list[tuple[datetime, datetime]] = []
     booked_times: set[time] = set()
@@ -541,6 +551,13 @@ async def calculate_price(
     db: AsyncSession = Depends(get_db),
 ):
     """Calculate price based on venue time pricing rules."""
+    return await compute_venue_time_price(db, employee_id, time, duration, date)
+
+
+async def compute_venue_time_price(
+    db: AsyncSession, employee_id: int, time: str, duration: int, date: Optional[str] = None,
+) -> CalculatePriceOut:
+    """Venue time-based price; shared by the price preview and booking creation."""
     # Fetch pricing rules for employee
     query = select(VenueTimePricing).where(VenueTimePricing.employee_id == employee_id)
     result = await db.execute(query)
@@ -620,6 +637,37 @@ async def calculate_price(
     return CalculatePriceOut(has_time_price=True, total=total, segments=segments)
 
 
+def business_allows_multiple_services(business: Business) -> bool:
+    """Несколько услуг в одной записи: настройка бизнеса; площадкам — всегда
+    (пакеты длительности), как на странице записи."""
+    from bot.utils.business_types import is_venue_rental_type
+
+    return bool(getattr(business, "allow_multiple_services", False)) or is_venue_rental_type(business.business_type or "")
+
+
+async def _visit_base_price(
+    db: AsyncSession, business: Business, main_services: list, employee: Optional[Employee],
+    *, is_solo: bool, start: str, duration: int, occ_date: date,
+) -> int:
+    """Price of the visit without add-ons — the same rules the booking page shows.
+
+    Venues: solo hourly price when chosen, otherwise time-based pricing of the
+    resource, otherwise the services' fixed prices.
+    """
+    from bot.utils.business_types import is_venue_rental_type
+
+    services_total = sum((service.price or 0) for service in main_services)
+    if employee is None or not is_venue_rental_type(business.business_type or ""):
+        return services_total
+    solo_rate = getattr(employee, "solo_price_per_hour", None)
+    if is_solo and solo_rate:
+        return int(solo_rate * max(1, duration / 60))
+    quote = await compute_venue_time_price(db, employee.id, start, duration, occ_date.isoformat())
+    if quote.has_time_price and quote.total > 0:
+        return quote.total
+    return services_total
+
+
 # ---------- POST /bookings ----------
 
 @router.post("/bookings", response_model=List[BookingOut])
@@ -627,6 +675,12 @@ async def create_booking(
     body: CreateBookingIn,
     db: AsyncSession = Depends(get_db),
     user: Optional[User] = Depends(get_current_user_optional),
+):
+    return await create_booking_visit(body, db, user)
+
+
+async def create_booking_visit(
+    body: CreateBookingIn, db: AsyncSession, user: Optional[User], *, commit: bool = True,
 ):
     """Create a complete visit atomically under one resource lock."""
     biz_result = await db.execute(select(Business).where(Business.id == body.business_id))
@@ -653,7 +707,7 @@ async def create_booking(
                 status_code=422,
                 detail="Необходимо принять условия записи.",
             )
-        legal_accepted_at = datetime.utcnow()
+        legal_accepted_at = utc_now()
 
     try:
         client_email = normalize_optional_email(body.client_email)
@@ -682,6 +736,11 @@ async def create_booking(
         raise HTTPException(status_code=400, detail="No service specified")
     if len(svc_ids) != len(set(svc_ids)):
         raise HTTPException(status_code=400, detail="Duplicate services are not allowed")
+    if len(svc_ids) > 1 and not business_allows_multiple_services(business):
+        raise HTTPException(
+            status_code=422,
+            detail="В этом бизнесе в одну запись можно выбрать только одну услугу.",
+        )
 
     services_result = await db.execute(
         select(Service).where(
@@ -698,6 +757,7 @@ async def create_booking(
     if any(service.is_additional for service in main_services):
         raise HTTPException(status_code=400, detail="Additional service cannot be a main booking service")
 
+    selected_employee: Optional[Employee] = None
     if body.employee_id:
         emp_result = await db.execute(
             select(Employee).where(
@@ -762,18 +822,26 @@ async def create_booking(
             booking_notes += "\n"
         booking_notes += "Доп. услуги: " + ", ".join(addon_notes_parts)
 
-    visit_prepayment_amount = None
+    visit_duration = sum((service.duration_minutes or 30) for service in main_services)
+
+    # Предоплата считается от той же цены, что видит клиент (для площадок —
+    # почасовые тарифы и solo-цена), отдельно для каждой даты серии.
+    prepayment_by_date: dict[date, int] = {}
     if getattr(business, "prepayment_enabled", False):
-        visit_total_price = sum((service.price or 0) for service in main_services) + addon_total_price
         prepayment_percent = business.prepayment_percent or 100
-        visit_prepayment_amount = int(visit_total_price * prepayment_percent / 100)
+        for occ_date in occurrence_dates:
+            base_price = await _visit_base_price(
+                db, business, main_services, selected_employee,
+                is_solo=bool(body.is_solo_booking), start=body.time,
+                duration=visit_duration, occ_date=occ_date,
+            )
+            prepayment_by_date[occ_date] = int((base_price + addon_total_price) * prepayment_percent / 100)
 
     # One lock per resource/day window for the whole recurring series. The
     # second concurrent request waits here, then re-checks availability after
     # the first request commits.
     await lock_resource_days(db, body.employee_id, occurrence_dates)
 
-    visit_duration = sum((service.duration_minutes or 30) for service in main_services)
     for occ_date in occurrence_dates:
         try:
             await ensure_resource_available(
@@ -793,7 +861,7 @@ async def create_booking(
 
     initial_status = (
         "pending_prepayment"
-        if getattr(business, "prepayment_enabled", False)
+        if getattr(business, "prepayment_enabled", False) and any(v > 0 for v in prepayment_by_date.values())
         else "pending"
     )
 
@@ -812,7 +880,7 @@ async def create_booking(
                 notes=booking_notes or None,
                 notify_token=str(uuid.uuid4()),
                 prepayment_amount=(
-                    visit_prepayment_amount
+                    prepayment_by_date.get(occ_date)
                     if initial_status == "pending_prepayment"
                     else None
                 ),
@@ -828,7 +896,10 @@ async def create_booking(
             current_time += timedelta(minutes=resource_duration)
 
     try:
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
     except IntegrityError as exc:
         await db.rollback()
         message = str(exc).lower()
@@ -856,6 +927,14 @@ async def create_booking(
         can_c, can_r = _can_modify_booking(loaded)
         result_bookings.append(_booking_to_out(loaded, can_cancel=can_c, can_reschedule=can_r))
 
+    if commit:
+        await notify_created_visit(created_bookings, db, business, client_email)
+
+    return result_bookings
+
+
+async def notify_created_visit(created_bookings, db, business, client_email=None):
+    """Shared post-commit events for ordinary and AI-created visits."""
     # Mandatory immediate event after a real booking is created.
     # If prepayment is enabled, this event is intentionally delayed until the
     # owner confirms receipt of payment.
@@ -888,8 +967,6 @@ async def create_booking(
                 "created",
             )
         )
-
-    return result_bookings
 
 
 # ---------- GET /my/bookings ----------
@@ -1192,7 +1269,13 @@ async def get_telegram_photo(file_id: str):
 
 async def _mark_prepayment_sent(booking: Booking, db: AsyncSession) -> dict:
     """Mark payment as sent and request owner confirmation via Telegram + PWA."""
-    booking.status = "prepayment_sent"
+    from database.prepayment import submit_payment, PaymentWindowError
+    try:
+        visit = await submit_payment(db, booking)
+        if not visit:
+            return {"message": "Payment notification already recorded"}
+    except PaymentWindowError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
     await db.commit()
     await db.refresh(booking)
 
@@ -1219,13 +1302,24 @@ async def _mark_prepayment_sent(booking: Booking, db: AsyncSession) -> dict:
 
 async def _send_receipt_and_notify(booking: Booking, db: AsyncSession, file: UploadFile) -> dict:
     """Upload a receipt to owners, then request confirmation through both channels."""
-    booking.status = "prepayment_sent"
+    from database.prepayment import submit_payment, PaymentWindowError
+    try:
+        visit = await submit_payment(db, booking, receipt=True)
+        if not visit:
+            return {"message": "Receipt payment notification already recorded"}
+    except PaymentWindowError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
+    file_content = await file.read(10 * 1024 * 1024 + 1)
+    from database.receipts import save_receipt
+    try:
+        proof = save_receipt(db, booking, file_content)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
     await db.commit()
     await db.refresh(booking)
 
-    file_content = await file.read()
-    content_type = file.content_type or "image/jpeg"
-    filename = file.filename or "receipt.jpg"
+    content_type = proof.mime_type
+    filename = "receipt.pdf" if content_type == "application/pdf" else "receipt.jpg"
     is_pdf = content_type == "application/pdf" or filename.lower().endswith(".pdf")
     bot_token = os.getenv("BOT_TOKEN", "").strip()
 
@@ -1443,9 +1537,16 @@ async def get_booking_by_token(token: str, db: AsyncSession = Depends(get_db)):
         for b in group if b.service
     ]
     total_price = sum(s.price or 0 for s in services)
+    rental = booking.duration_minutes is not None
+    if rental:
+        total_price = booking.estimated_price or 0
+        services = [PublicServiceItem(name=booking.service.name, price=booking.estimated_price, is_additional=False)]
 
     prepay_pct = business.prepayment_percent or 100
-    computed_prepayment = booking.prepayment_amount or int(total_price * prepay_pct / 100)
+    computed_prepayment = (booking.prepayment_amount if booking.prepayment_amount is not None
+        else 0 if rental else int(total_price * prepay_pct / 100))
+    prepayment_required = computed_prepayment > 0 and (
+        rental or bool(business.prepayment_enabled))
     prepayment_confirmed = booking.prepayment_confirmed_at is not None
     paid_amount = computed_prepayment if prepayment_confirmed else 0
     duration_minutes = sum(
@@ -1465,11 +1566,14 @@ async def get_booking_by_token(token: str, db: AsyncSession = Depends(get_db)):
         time=booking.booking_time.strftime("%H:%M"),
         duration_minutes=duration_minutes,
         employee_name=booking.employee.name if booking.employee else None,
-        employee_label="Помещение" if is_venue else term.get("employee", "Мастер"),
+        employee_label=_parse_booking_labels(business.booking_labels).get("resource")
+            or ("Помещение" if is_venue else term.get("employee", "Мастер")),
         services=services,
         total_price=total_price,
-        prepayment_enabled=getattr(business, "prepayment_enabled", False) or False,
-        prepayment_amount=computed_prepayment if getattr(business, "prepayment_enabled", False) else 0,
+        prepayment_enabled=prepayment_required,
+        prepayment_amount=computed_prepayment if prepayment_required else 0,
+        prepayment_expires_at=payment_deadline(booking),
+        price_requires_confirmation=bool(booking.price_requires_confirmation),
         paid_amount=paid_amount,
         prepayment_confirmed=prepayment_confirmed,
         payment_phone=business.payment_phone,

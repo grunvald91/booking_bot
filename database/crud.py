@@ -2,6 +2,8 @@
 CRUD операции для работы с базой данных
 Create, Read, Update, Delete
 """
+
+from datetime_utils import utc_now
 from datetime import date, time, datetime
 from typing import List, Optional
 from sqlalchemy import select, and_, or_, delete, func
@@ -83,10 +85,12 @@ async def get_or_create_guest_user(
     telegram_id=0.
     """
     clean_phone = None
+    from database.models import UserAccountMerge
     if phone:
         clean_phone = phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
         result = await session.execute(
-            select(User).where(User.phone == clean_phone, User.telegram_id < 0).limit(1)
+            select(User).where(User.phone == clean_phone, User.telegram_id < 0,
+                User.id.not_in(select(UserAccountMerge.source_user_id))).limit(1)
         )
         existing = result.scalars().first()
         if existing:
@@ -1310,7 +1314,7 @@ async def purchase_subscription(
         raise ValueError("Абонемент не найден")
 
     from datetime import datetime
-    expires_at = datetime.utcnow() + timedelta(days=subscription.validity_days)
+    expires_at = utc_now() + timedelta(days=subscription.validity_days)
 
     client_sub = ClientSubscription(
         subscription_id=subscription_id,
@@ -1341,7 +1345,7 @@ async def get_client_subscriptions(
         from datetime import datetime
         query = query.where(
             ClientSubscription.status == "active",
-            ClientSubscription.expires_at > datetime.utcnow()
+            ClientSubscription.expires_at > utc_now()
         )
 
     query = query.options(
@@ -1439,8 +1443,8 @@ async def confirm_subscription_payment(
 
     # Срок действия начинается с момента подтверждения
     client_sub.status = "active"
-    client_sub.payment_confirmed_at = datetime.utcnow()
-    client_sub.expires_at = datetime.utcnow() + timedelta(days=client_sub.subscription.validity_days)
+    client_sub.payment_confirmed_at = utc_now()
+    client_sub.expires_at = utc_now() + timedelta(days=client_sub.subscription.validity_days)
 
     await session.commit()
     await session.refresh(client_sub)
@@ -1617,7 +1621,7 @@ async def get_expiring_subscriptions(
     """Получить абонементы, истекающие в ближайшие N дней"""
     from datetime import datetime, timedelta
 
-    now = datetime.utcnow()
+    now = utc_now()
     expiry_threshold = now + timedelta(days=days_until_expiry)
 
     result = await session.execute(
@@ -1735,25 +1739,10 @@ async def get_business_subscriptions_stats(
 
 async def get_business_owners(session: AsyncSession, business_id: int) -> List[User]:
     """Получить всех владельцев бизнеса"""
-    result = await session.execute(
-        select(User)
-        .join(BusinessOwner, User.id == BusinessOwner.user_id)
-        .where(BusinessOwner.business_id == business_id)
-    )
-    owners = list(result.scalars().all())
-
-    # Fallback: если в business_owners никого нет, получаем legacy owner
-    if not owners:
-        result = await session.execute(
-            select(User)
-            .join(Business, User.id == Business.owner_id)
-            .where(Business.id == business_id)
-        )
-        legacy_owner = result.scalar_one_or_none()
-        if legacy_owner:
-            owners = [legacy_owner]
-
-    return owners
+    legacy = select(Business.owner_id).where(Business.id == business_id).scalar_subquery()
+    shared = select(BusinessOwner.user_id).where(BusinessOwner.business_id == business_id)
+    result = await session.execute(select(User).where(or_(User.id == legacy, User.id.in_(shared))).order_by(User.id))
+    return list(result.scalars())
 
 
 async def get_business_owners_with_roles(session: AsyncSession, business_id: int) -> List[dict]:

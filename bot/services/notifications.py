@@ -1,6 +1,8 @@
 """
 Модуль для отправки уведомлений клиентам, мастерам и владельцам
 """
+
+from datetime_utils import utc_now
 import logging
 import os
 from datetime import datetime, timedelta
@@ -17,6 +19,7 @@ from database import async_session_maker
 from database.models import Booking, User, Business, Employee, NotificationDelivery
 from database.crud import get_business_owners
 from database.booking_safety import booking_resource_duration
+from database.prepayment import expire_due_prepayments
 from notification_rules import (
     due_reminder_offset,
     format_reminder_offset,
@@ -1171,7 +1174,7 @@ async def auto_complete_bookings():
     """Автоматическое завершение записей после окончания времени услуги"""
     try:
         async with async_session_maker() as session:
-            now = datetime.utcnow()  # Используем UTC как в моделях
+            now = utc_now()  # Используем UTC как в моделях
 
             # Находим все подтвержденные записи, которые должны быть завершены
             result = await session.execute(
@@ -1203,27 +1206,18 @@ async def auto_complete_bookings():
 async def expire_unpaid_bookings(bot: Bot):
     """Автоотмена неоплаченных броней (pending_prepayment) старше 10 минут"""
     try:
-        expiry_threshold = datetime.utcnow() - timedelta(minutes=10)
-
         async with async_session_maker() as session:
-            result = await session.execute(
-                select(Booking)
-                .options(selectinload(Booking.client), selectinload(Booking.business), selectinload(Booking.service))
-                .where(
-                    Booking.status == 'pending_prepayment',
-                    Booking.created_at <= expiry_threshold,
-                )
-            )
-            expired = result.scalars().all()
+            expired = await expire_due_prepayments(session)
 
             if not expired:
                 return
+            # Release reservations before Telegram delivery.
+            await session.commit()
 
             cancelled_count = 0
             notified_clients = set()
 
             for booking in expired:
-                booking.status = 'cancelled'
                 cancelled_count += 1
 
                 # Уведомляем клиента один раз на группу (клиент+дата+время)
@@ -1239,7 +1233,8 @@ async def expire_unpaid_bookings(bot: Bot):
                             text=(
                                 f"⏰ Ваша бронь в <b>{business_name}</b> "
                                 f"на {date_str} в {time_str} была автоматически отменена, "
-                                f"так как оплата не поступила в течение 10 минут.\n\n"
+                                f"так как в течение 10 минут вы не сообщили об отправке предоплаты.\n\n"
+                                f"Если вы уже перевели деньги, свяжитесь с компанией.\n"
                                 f"Вы можете забронировать снова."
                             ),
                             parse_mode='HTML',
@@ -1247,7 +1242,6 @@ async def expire_unpaid_bookings(bot: Bot):
                     except Exception:
                         pass
 
-            await session.commit()
             if cancelled_count:
                 logger.info(f"Expired {cancelled_count} unpaid bookings (pending_prepayment)")
 
@@ -1267,7 +1261,7 @@ async def check_and_send_subscription_reminders(bot: Bot):
             for client_sub in expiring_subscriptions:
                 # Проверяем, осталось ли менее 25% времени
                 from datetime import datetime
-                now = datetime.utcnow()
+                now = utc_now()
                 total_days = client_sub.subscription.validity_days
                 days_left = (client_sub.expires_at - now).days
 
@@ -1293,7 +1287,7 @@ async def send_subscription_expiry_reminder(bot: Bot, client_subscription, sessi
         subscription = client_subscription.subscription
         business = client_subscription.business
 
-        days_left = (client_subscription.expires_at - datetime.utcnow()).days
+        days_left = (client_subscription.expires_at - utc_now()).days
 
         # Получаем остаток услуг
         remaining = await get_subscription_remaining(session, client_subscription.id)
