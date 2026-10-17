@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.models import Base, User, Business, Service
+from database.models import Base, User, Business, Service, Employee
 from web.api.database import get_db
 from web.api.routes import admin, client
 from web.api.deps import get_current_admin
@@ -28,7 +28,11 @@ class AllowMultipleServicesTest(unittest.IsolatedAsyncioTestCase):
             business = Business(owner_id=owner.id, name='Студия', business_type='beauty', is_active=True,
                                 working_hours_start=time(9), working_hours_end=time(21))
             db.add(business); await db.flush(); self.business_id = business.id
-            db.add(Service(business_id=business.id, name='Стрижка', duration_minutes=60, price=2000, is_active=True))
+            cut = Service(business_id=business.id, name='Стрижка', duration_minutes=60, price=2000, is_active=True)
+            style = Service(business_id=business.id, name='Укладка', duration_minutes=30, price=1000, is_active=True)
+            master = Employee(business_id=business.id, name='Мастер', is_active=True)
+            db.add_all([cut, style, master]); await db.flush()
+            self.service_ids, self.master_id = [cut.id, style.id], master.id
             await db.commit()
         app = FastAPI()
         app.include_router(client.router)
@@ -61,6 +65,21 @@ class AllowMultipleServicesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.status_code, 200, res.text)
         self.assertTrue(res.json()['allow_multiple_services'])
         self.assertTrue(self.client.get(f'/businesses/{self.business_id}').json()['allow_multiple_services'])
+
+    def book_two(self):
+        return self.client.post('/bookings', json={
+            'business_id': self.business_id, 'service_ids': self.service_ids, 'employee_id': self.master_id,
+            'date': '2030-01-07', 'time': '10:00', 'client_name': 'Клиент', 'client_phone': '+79990000000'})
+
+    def test_server_rejects_several_services_when_disabled(self):
+        res = self.book_two()
+        self.assertEqual(res.status_code, 422, res.text)
+
+    def test_server_accepts_several_services_when_enabled(self):
+        self.client.put(f'/admin/businesses/{self.business_id}', json={'allow_multiple_services': True})
+        res = self.book_two()
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(len(res.json()), 2)
 
 
 if __name__ == '__main__':
