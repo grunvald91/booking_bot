@@ -191,7 +191,11 @@
     "migrations/add_sales_agent_settings.sql",
     "migrations/add_telegram_account_link.sql",
     "migrations/add_prepayment_requested_at.sql",
-    "migrations/add_sales_conversations.sql"
+    "migrations/add_sales_conversations.sql",
+    "_live/web/frontend/dist/assets/index-ByWDA1Cs.js",
+    "_live/web/frontend/dist/assets/jsx-runtime-CBxSU1Q0.js",
+    "_live/web/frontend/dist/index.html",
+    "web/frontend/src/components/OwnerMailEntry.tsx"
   ],
   "frontend_dist": {
     "dist_assets_count": 39,
