@@ -14,7 +14,7 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
     steps:
@@ -89,12 +89,18 @@ jobs:
               try:dist_assets=sorted(sftp.listdir(root+'web/frontend/dist/assets'))
               except FileNotFoundError:pass
               markers={}
-              for name in dist_assets:
-                  if name.endswith('.js'):
+              live=[]
+              try:
+                  with sftp.open(root+'web/frontend/dist/index.html','rb') as f:
+                      import re as _re
+                      live=_re.findall(r'/assets/([A-Za-z0-9._-]+\.js)',f.read().decode('utf-8','replace'))
+              except FileNotFoundError:pass
+              for name in live:
+                  if name in dist_assets:
                       with sftp.open(root+'web/frontend/dist/assets/'+name,'rb') as f:js=f.read().decode('utf-8','replace')
                       for m in ('/auth/email','telegram-link','telegram_link','/payments','owner-mail','mail-campaign','sales','grunvaldlab@gmail.com','bf-root'):
                           if m in js:markers.setdefault(m,[]).append(name)
-              manifest_extra={'dist_assets':dist_assets,'dist_markers':markers}
+              manifest_extra={'dist_assets_count':len(dist_assets),'live_entry':live,'dist_markers':markers}
               manifest={'tracked_checked':len(tracked),'matching':same,'missing_on_server':missing,
                         'too_large':too_large,'extra_server_source':list(extras),'frontend_dist':manifest_extra,
                         'changed':{p:{'server_sha256':hashlib.sha256(data).hexdigest(),
