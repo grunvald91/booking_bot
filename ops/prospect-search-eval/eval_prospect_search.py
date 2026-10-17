@@ -13,7 +13,7 @@ KEY = os.environ.get("XAI_API_KEY", "")
 NICHES = [("dental clinics", "Limassol, Cyprus"),
           ("barbershops", "Dubai Marina, Dubai, UAE"),
           ("yoga studios", "Lisbon, Portugal")]
-CONFIGS = [("kimi-k3", False), ("kimi-k3", True), ("grok-4.7", False)]
+CONFIGS = [("kimi-k3", True), ("grok-4.7", True)]
 PROMPT = ("Find 5 real, currently operating {niche} in {city}. For each give: name, website (full URL), "
           "a public contact email, source_url (the page where that email is published) and need_signal "
           "(one observable sign they could use an online booking system, e.g. 'booking by phone only'). "
@@ -22,18 +22,56 @@ PROMPT = ("Find 5 real, currently operating {niche} in {city}. For each give: na
 DEBUG = os.environ.get("EVAL_DEBUG") == "1"
 if DEBUG:
     NICHES = NICHES[2:]
-    CONFIGS = [("kimi-k3", False), ("kimi-k3", True)]
+    CONFIGS = [("kimi-k3", True)]
 UA = {"User-Agent": "Mozilla/5.0 (compatible; ServGoProspectCheck/1.0)"}
+
+
+import html as _html
+TOOLS = [
+    {"type": "function", "function": {"name": "web_search", "description": "Search the web. Returns up to 8 results with title, url and snippet.",
+     "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
+    {"type": "function", "function": {"name": "open_url", "description": "Open a web page. Returns visible text (truncated) and email addresses found on it.",
+     "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}}},
+]
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}")
+
+
+def tool_web_search(query):
+    try:
+        with httpx.Client(timeout=15, headers=UA, follow_redirects=True) as c:
+            r = c.post("https://html.duckduckgo.com/html/", data={"q": query})
+        out = []
+        for m in re.finditer(r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?<a[^>]+class="result__snippet"[^>]*>(.*?)</a>', r.text, re.S):
+            url = m.group(1)
+            if "uddg=" in url:
+                url = urllib.parse.unquote(url.split("uddg=")[1].split("&")[0])
+            strip = lambda t: _html.unescape(re.sub(r"<[^>]+>", "", t)).strip()
+            out.append({"title": strip(m.group(2))[:120], "url": url, "snippet": strip(m.group(3))[:240]})
+            if len(out) >= 8:
+                break
+        return {"results": out} if out else {"results": [], "note": f"no results (HTTP {r.status_code})"}
+    except Exception as e:
+        return {"error": type(e).__name__}
+
+
+def tool_open_url(url):
+    st, page, final = fetch(url)
+    if st is None or st >= 400:
+        return {"error": f"cannot open ({st if st is not None else final})"}
+    text = _html.unescape(re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", page, flags=re.S)))
+    text = re.sub(r"\s+", " ", text)[:5000]
+    emails = sorted({e for e in EMAIL_RE.findall(page) if not e.endswith((".png", ".jpg", ".webp", ".svg"))})[:10]
+    return {"url": final, "text": text, "emails": emails}
 
 
 def chat(model, use_search, prompt):
     msgs = [{"role": "user", "content": prompt}]
-    body = {"model": model, "messages": msgs, "max_tokens": 2500, "temperature": 0.2}
+    body = {"model": model, "messages": msgs, "max_tokens": 4000, "temperature": 0.2}
     if use_search:
-        body["tools"] = [{"type": "builtin_function", "function": {"name": "$web_search"}}]
+        body["tools"] = TOOLS
     searched = 0
     with httpx.Client(timeout=180) as c:
-        for _ in range(5):
+        for _ in range(14 if use_search else 2):
             r = c.post(BASE + "/chat/completions", json=body, headers={"Authorization": "Bearer " + KEY})
             if r.status_code != 200:
                 return None, f"HTTP {r.status_code}: {r.text[:200]}", searched
@@ -48,8 +86,19 @@ def chat(model, use_search, prompt):
                 msgs.append(msg)
                 for call in calls:
                     searched += 1
-                    msgs.append({"role": "tool", "tool_call_id": call["id"], "name": call["function"]["name"],
-                                 "content": call["function"]["arguments"]})
+                    name = call["function"].get("name")
+                    try:
+                        args = json.loads(call["function"].get("arguments") or "{}")
+                    except ValueError:
+                        args = {}
+                    if name == "web_search":
+                        result = tool_web_search(str(args.get("query", ""))[:300])
+                    elif name == "open_url":
+                        result = tool_open_url(str(args.get("url", ""))[:500])
+                    else:
+                        result = {"error": "unknown tool"}
+                    msgs.append({"role": "tool", "tool_call_id": call["id"], "name": name,
+                                 "content": json.dumps(result, ensure_ascii=False)[:9000]})
                 body["messages"] = msgs
                 continue
             return msg.get("content") or "", None, searched
@@ -109,7 +158,7 @@ if not KEY:
     raise SystemExit("XAI_API_KEY is not set in this container")
 summary = {}
 for model, search in CONFIGS:
-    label = model + (" +$web_search" if search else "")
+    label = model + (" +search tools" if search else "")
     tot = {"returned": 0, "alive": 0, "name_on_site": 0, "email_given": 0, "email_published": 0, "searches": 0, "errors": 0, "seconds": 0}
     print(f"\n=== {label}")
     for niche, city in NICHES:

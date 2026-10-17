@@ -21,7 +21,7 @@ concurrency:
 jobs:
   eval:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
     steps:
@@ -57,9 +57,9 @@ jobs:
               return out
           sftp=s.open_sftp(); sftp.put('ops/prospect-search-eval/eval_prospect_search.py','/tmp/eval_prospect_search.py'); sftp.close()
           run('C=ai-growth-os-worker-1; docker cp /tmp/eval_prospect_search.py $C:/tmp/eval_prospect_search.py; rm -f /tmp/eval_prospect_search.py /tmp/eval_prospect_search.log; '
-              'nohup sh -c "docker exec -e PYTHONUNBUFFERED=1 -e EVAL_DEBUG=1 $C python /tmp/eval_prospect_search.py > /tmp/eval_prospect_search.log 2>&1; '
+              'nohup sh -c "docker exec -e PYTHONUNBUFFERED=1 $C python /tmp/eval_prospect_search.py > /tmp/eval_prospect_search.log 2>&1; '
               'echo EVAL_EXIT=\\$? >> /tmp/eval_prospect_search.log; docker exec $C rm -f /tmp/eval_prospect_search.py" > /dev/null 2>&1 &')
-          shown=0; deadline=time.time()+1200; text=''
+          shown=0; deadline=time.time()+2100; text=''
           while time.time()<deadline:
               time.sleep(20)
               text=run('sed -E "s/(Bearer|sk-)[A-Za-z0-9._-]+/\\1***/g" /tmp/eval_prospect_search.log 2>/dev/null')
