@@ -397,6 +397,7 @@ async def get_business(business_id: int, db: AsyncSession = Depends(get_db)):
             if getattr(biz, 'booking_flow_order', 'service_first') in ("service_first", "resource_first")
             else "service_first"
         ),
+        allow_multiple_services=bool(getattr(biz, 'allow_multiple_services', False)),
     )
 
 

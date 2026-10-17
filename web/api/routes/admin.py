@@ -1555,6 +1555,12 @@ async def update_business(
             raise HTTPException(status_code=422, detail="Invalid booking_flow_order")
         updates["booking_flow_order"] = order
 
+    if "allow_multiple_services" in updates:
+        if updates["allow_multiple_services"] is None:
+            updates.pop("allow_multiple_services")
+        else:
+            updates["allow_multiple_services"] = bool(updates["allow_multiple_services"])
+
     for reminder_field in ("owner_reminder_minutes", "master_reminder_minutes"):
         if reminder_field in updates:
             normalized = normalize_reminder_minutes(

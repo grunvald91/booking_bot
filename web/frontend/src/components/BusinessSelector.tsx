@@ -33,22 +33,23 @@ export function BusinessSelector({ businesses, selectedId, onSelect }: Props) {
     <div ref={ref} style={{ position: 'relative', flexShrink: 0, maxWidth: '42%' }}>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="ds-chip"
+        className="ds-biz-select"
         style={{ maxWidth: '100%', overflow: 'hidden' }}
+        aria-label="Выбрать бизнес"
+        aria-expanded={open}
       >
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {current?.name ?? 'Бизнес'}
-        </span>
+        <span>{current?.name ?? 'Бизнес'}</span>
         <ChevronDown
-          size={14}
+          size={13}
           style={{ flexShrink: 0, transition: 'transform 0.15s ease', transform: open ? 'rotate(180deg)' : 'none' }}
         />
       </button>
 
       {open && (
         <div
-          className="ds-card"
           style={{
+            background: 'var(--s-surface)',
+            borderRadius: 15,
             position: 'absolute',
             top: 'calc(100% + 6px)',
             right: 0,
@@ -77,13 +78,13 @@ export function BusinessSelector({ businesses, selectedId, onSelect }: Props) {
                   gap: 8,
                   width: '100%',
                   textAlign: 'left',
-                  padding: '9px 10px',
-                  borderRadius: 9,
+                  padding: '11px 10px',
+                  borderRadius: 11,
                   border: 'none',
                   background: active ? 'var(--s-accent-soft)' : 'transparent',
                   color: active ? 'var(--s-accent)' : 'var(--s-text)',
-                  fontSize: 14,
-                  fontWeight: active ? 700 : 500,
+                  fontSize: 13,
+                  fontWeight: active ? 500 : 400,
                   fontFamily: 'inherit',
                   cursor: 'pointer',
                 }}

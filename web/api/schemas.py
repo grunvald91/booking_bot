@@ -137,6 +137,7 @@ class BusinessDetailOut(BusinessOut):
     legal_documents_enabled: bool = False
     booking_labels: dict[str, str] = Field(default_factory=dict)
     booking_flow_order: str = "service_first"
+    allow_multiple_services: bool = False
     owner_reminders_enabled: bool = True
     owner_reminder_minutes: List[int] = Field(default_factory=lambda: [1440, 120])
     master_reminders_enabled: bool = True
@@ -474,6 +475,7 @@ class BusinessUpdateIn(BaseModel):
     legal_documents_enabled: Optional[bool] = None
     booking_labels: Optional[dict[str, str]] = None
     booking_flow_order: Optional[str] = None
+    allow_multiple_services: Optional[bool] = None
     owner_reminders_enabled: Optional[bool] = None
     owner_reminder_minutes: Optional[List[int]] = None
     master_reminders_enabled: Optional[bool] = None
@@ -510,6 +512,7 @@ class BusinessAdminDetailOut(BaseModel):
     legal_documents_enabled: bool = False
     booking_labels: dict[str, str] = Field(default_factory=dict)
     booking_flow_order: str = "service_first"
+    allow_multiple_services: bool = False
 
     class Config:
         from_attributes = True

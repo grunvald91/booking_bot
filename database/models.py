@@ -102,6 +102,7 @@ class Business(Base):
     directions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Как добраться
     booking_labels: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON: кастомные названия шагов записи
     booking_flow_order: Mapped[str] = mapped_column(String(32), default="service_first")  # service_first | resource_first
+    allow_multiple_services: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # клиент может выбрать несколько услуг в одной записи
 
     # Staff reminder settings. Immediate booking events are mandatory and are
     # intentionally NOT controlled by these switches.
