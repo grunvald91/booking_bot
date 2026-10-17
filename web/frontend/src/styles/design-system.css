@@ -205,6 +205,12 @@ html.tg-webapp .ds-screen { top: var(--tg-safe-top, 0px); }
 .ds-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; }
 .ds-toggle-row .t1 { font-size: 12.5px; font-weight: 500; color: var(--s-text); }
 .ds-toggle-row .t2 { font-size: 10.6px; color: var(--s-muted-2); margin-top: 3px; line-height: 1.3; }
+.ds-toggle-row--compact { padding: 2px 2px 8px; gap: 10px; }
+.ds-toggle-row--compact .t1 { font-size: 11.5px; font-weight: 450; color: var(--s-muted); }
+.ds-toggle--sm { width: 32px; height: 18px; }
+.ds-toggle--sm::before { top: 2px; left: 2px; width: 14px; height: 14px; }
+.ds-toggle--sm.on::before { transform: translateX(14px); }
+.ds-toggle:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* ─────────────────────────── 5. ФОРМЫ ─────────────────────────── */
 .ds-field { margin-bottom: 11px; }
@@ -381,7 +387,8 @@ textarea.ds-input { resize: vertical; min-height: 70px; }
 .ds-shell-header { min-height: 51px; background: var(--s-bg); position: relative; z-index: 20; }
 .ds-shell-header .ds-h1 { font-size: 17.5px; font-weight: 470; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ds-bottomnav {
-  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: stretch; flex-shrink: 0;
+  /* Все пункты в одну строку, сколько бы их ни было (в админке их 7). */
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); align-items: stretch; flex-shrink: 0;
   border-top: 0; background: var(--s-bg); position: relative; z-index: 12;
   box-shadow: 0 -8px 25px rgba(45, 92, 146, 0.018);
   padding: 3px 8px calc(5px + env(safe-area-inset-bottom, 0px));
@@ -393,7 +400,7 @@ textarea.ds-input { resize: vertical; min-height: 70px; }
   color: var(--s-muted-2); font-size: 9.8px; font-weight: 400; letter-spacing: -0.035em; line-height: 1.05;
 }
 .ds-bn svg { width: 21px; height: 21px; stroke-width: 1.65; flex: none; }
-.ds-bn span { display: block; white-space: nowrap; text-align: center; }
+.ds-bn span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
 .ds-bn.active { color: var(--s-accent); font-weight: 500; }
 .ds-bn::after {
   content: ""; display: none; position: absolute; left: 22%; right: 22%; bottom: 0; height: 2px; pointer-events: none;
