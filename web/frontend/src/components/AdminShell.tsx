@@ -56,19 +56,21 @@ export function AdminShell({
   }
   return createPortal(
     <div className="ds-screen" data-theme={theme}>
-      <header className="ds-shell-header" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 13px 5px 16px', flexShrink: 0 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 className="ds-h1">{title}</h1>
-          {subtitle != null && <div className="ds-sub" style={{ marginTop: 2 }}>{subtitle}</div>}
+      {/* На телефоне в шапке только название и выбор бизнеса: почта, тема и
+          выход живут в «Ещё», чтобы ничего не обрезалось. */}
+      <header className="ds-shell-header" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 10, padding: '5px 16px', flexShrink: 0 }}>
+        <h1 className="ds-h1 ds-shell-title">{title}</h1>
+        <div className="ds-shell-header-extra">{headerExtra}</div>
+        <div className="ds-shell-header-desktop">
+          <OwnerMailEntry />
+          <button className="ds-icon-btn bordered" onClick={toggleTheme} aria-label="Тема">
+            {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
+          </button>
+          <button className="ds-icon-btn bordered" onClick={handleLogout} aria-label="Выйти" title="Выйти">
+            <LogOut size={18} />
+          </button>
         </div>
-        {headerExtra}
-        <OwnerMailEntry />
-        <button className="ds-icon-btn bordered" onClick={toggleTheme} aria-label="Тема">
-          {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
-        </button>
-        <button className="ds-icon-btn bordered" onClick={handleLogout} aria-label="Выйти" title="Выйти">
-          <LogOut size={18} />
-        </button>
+        {subtitle != null && <div className="ds-sub" style={{ flexBasis: '100%', marginTop: 2 }}>{subtitle}</div>}
       </header>
 
       <div className="ds-shell-content" style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '0 16px 16px' }}>
