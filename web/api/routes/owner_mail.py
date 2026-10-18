@@ -19,7 +19,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header, make_header
 from email.message import EmailMessage
-from email.utils import formataddr
+from email.utils import formataddr, parseaddr
 from pathlib import Path
 from uuid import uuid4
 
@@ -603,6 +603,7 @@ class DirectSendInput(BaseModel):
     subject: str = Field(min_length=3, max_length=180)
     body: str = Field(min_length=1, max_length=20000)
     request_id: str = Field(min_length=32, max_length=32)
+    in_reply_to: str = Field(default="", max_length=260)
 
 
 def clean_recipient(value: str) -> str:
@@ -678,6 +679,8 @@ def direct_send(info: DirectSendInput, _: User = Depends(mail_owner)):
     subject = validate_subject(info.subject)
     if not re.fullmatch(r"[a-f0-9]{32}", info.request_id):
         raise HTTPException(422, "Неверный идентификатор отправки")
+    if info.in_reply_to and not MESSAGE_ID.fullmatch(info.in_reply_to):
+        raise HTTPException(422, "Неверная ссылка на исходное письмо")
     sender = os.getenv("SERVGO_MAIL_FROM", "").strip()
     if not ADDRESS.fullmatch(sender):
         raise HTTPException(503, "Исходящий адрес ServGo не настроен")
@@ -702,6 +705,10 @@ def direct_send(info: DirectSendInput, _: User = Depends(mail_owner)):
     message["To"] = recipient
     message["Subject"] = subject
     message["Message-ID"] = "<" + info.request_id + "@servgo.ru>"
+    if info.in_reply_to:
+        # The recipient's mail client shows the reply in the same thread.
+        message["In-Reply-To"] = info.in_reply_to
+        message["References"] = info.in_reply_to
     message.set_content(info.body)
     try:
         with smtplib.SMTP("127.0.0.1", 25, timeout=15) as smtp:
@@ -769,7 +776,21 @@ def imap_message(uid: str):
             "uid": uid, "from": _mime(msg.get("From")),
             "subject": _mime(msg.get("Subject")),
             "date": str(msg.get("Date") or "")[:100], "body": text,
+            **reply_fields(msg),
         }
+
+
+MESSAGE_ID = re.compile(r"<[^<>\s]{3,250}>")
+
+
+def reply_fields(msg) -> dict:
+    """Where a reply goes and which letter it answers; empty when unusable."""
+    address = parseaddr(_mime(msg.get("Reply-To")) or _mime(msg.get("From")))[1].strip().lower()
+    message_id = str(msg.get("Message-ID") or "").strip()
+    return {
+        "reply_to": address if ADDRESS.fullmatch(address) else "",
+        "message_id": message_id if MESSAGE_ID.fullmatch(message_id) else "",
+    }
 
 
 @router.get("/api/message/{uid}")
