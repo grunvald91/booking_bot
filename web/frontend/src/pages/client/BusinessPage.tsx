@@ -4,6 +4,7 @@ import { MapPin, Phone, Clock, Navigation, DoorOpen, X, ChevronRight, ArrowRight
 import { api, type BusinessDetail, type EmployeeWithPricing } from '../../api/client'
 import { AirFrame, HeroArt } from './AirFrame'
 import { parsePhotoList, photoSrc } from './airPhotos'
+import { applySeo, isDemoBusinessName, shortText } from '../../utils/seo'
 
 function linkifyText(text: string): ReactNode {
   const urlPattern = /(https?:\/\/[^\s]+|(?:vk\.com|t\.me)\/[^\s]+)/gi
@@ -88,6 +89,24 @@ export function BusinessPage() {
       .catch(() => setError(true))
       .finally(() => setLoading(false))
   }, [id])
+
+  useEffect(() => {
+    if (!id) return
+    const path = `/business/${id}`
+    if (error) {
+      applySeo({ path, noindex: true })
+      return
+    }
+    if (!business) return
+    const where = business.address?.trim()
+    const fallback = `Онлайн-запись в «${business.name}»${where ? `, ${where}` : ''}: выберите услугу и удобное время без звонков.`
+    applySeo({
+      path,
+      title: `${business.name} — онлайн-запись | ServGo`,
+      description: shortText(business.description?.trim() || fallback),
+      noindex: isDemoBusinessName(business.name),
+    })
+  }, [id, business, error])
 
   if (loading) {
     return (
