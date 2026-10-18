@@ -79,64 +79,107 @@ function KpiCard({ label, value, icon, color, cur, prev, isPoints }: {
   )
 }
 
-// ── Bar + line chart ──
-function DailyChart({ daily }: { daily: AnalyticsDailyPoint[] }) {
-  const points = useMemo(() => (daily.length > 60 ? aggregateByWeek(daily) : daily), [daily])
-  const maxBookings = points.length > 0 ? Math.max(...points.map((p) => p.bookings), 1) : 1
-  const maxRevenue = points.length > 0 ? Math.max(...points.map((p) => p.revenue), 1) : 1
-  const labelStep = points.length > 30 ? 5 : points.length > 14 ? 2 : 1
+function plural(n: number, one: string, few: string, many: string): string {
+  const m10 = n % 10
+  const m100 = n % 100
+  if (m10 === 1 && m100 !== 11) return one
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few
+  return many
+}
 
-  if (points.length === 0) {
-    return <div className="ds-sub" style={{ textAlign: 'center', padding: '40px 0' }}>Нет данных за выбранный период</div>
-  }
+function formatBookings(n: number): string {
+  return `${n} ${plural(n, 'запись', 'записи', 'записей')}`
+}
 
+function dayLabel(iso: string): string {
+  const [, m, d] = iso.split('-')
+  return `${Number(d)}.${m}`
+}
+
+// ── Bar chart: one measure, one scale ──
+// Выручка и записи — разные единицы, поэтому это два отдельных графика, а не
+// одна картинка с двумя шкалами. Весь период помещается в ширину экрана;
+// касание столбика показывает значение дня в заголовке.
+function DayBars({ title, points, weekly, value, format }: {
+  title: string
+  points: AnalyticsDailyPoint[]
+  weekly: boolean
+  value: (p: AnalyticsDailyPoint) => number
+  format: (n: number) => string
+}) {
+  const [active, setActive] = useState<number | null>(null)
+  const values = points.map(value)
+  const max = Math.max(0, ...values)
+  const total = values.reduce((s, v) => s + v, 0)
   const n = points.length
-  const linePoints = points.map((p, i) => ({ x: i + 0.5, y: 100 - (p.revenue / maxRevenue) * 100 }))
-  const pathD = linePoints.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt.x.toFixed(3)} ${pt.y.toFixed(2)}`).join(' ')
-  const needsScroll = n > 14
-  const innerStyle = needsScroll ? { minWidth: `${n * 22}px` } : undefined
+  const ticks = n <= 1 ? [0] : [...new Set([0, Math.round((n - 1) / 3), Math.round((2 * (n - 1)) / 3), n - 1])]
+  const periodName = (i: number) => (weekly ? `Неделя с ${dayLabel(points[i].date)}` : dayLabel(points[i].date))
 
   return (
-    <div style={{ position: 'relative' }}>
-      <div className="scrollbar-hide" style={{ overflowX: 'auto' }}>
-        <div style={innerStyle}>
-          <div style={{ position: 'relative', height: 160 }}>
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-end', gap: 2 }}>
-              {points.map((p, i) => (
-                <div key={`bar-${i}`} style={{ flex: 1, minWidth: 14, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}>
-                  <span style={{ fontSize: 9, color: 'var(--s-muted)', fontWeight: 600, lineHeight: 1 }}>{p.bookings > 0 ? p.bookings : ''}</span>
-                  <div style={{ width: '100%', height: `${Math.max((p.bookings / maxBookings) * 100, 2)}%`, minHeight: 3, background: 'var(--s-accent)', borderRadius: '4px 4px 0 0' }} />
-                </div>
-              ))}
+    <div className="ds-card" style={{ padding: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
+        <h2 className="ds-h3" style={{ margin: 0 }}>{title}</h2>
+        <span className="ds-sub" style={{ whiteSpace: 'nowrap' }} aria-live="polite">
+          {active != null ? `${periodName(active)}: ${format(values[active])}` : `Всего ${format(total)}`}
+        </span>
+      </div>
+      {max === 0 ? (
+        <div className="ds-sub" style={{ textAlign: 'center', padding: '28px 0' }}>Нет данных за выбранный период</div>
+      ) : (
+        <>
+          <div style={{ position: 'relative', height: 120, borderTop: '1px dashed var(--s-surface-3)', borderBottom: '1px solid var(--s-surface-3)' }}>
+            <span className="ds-caption" style={{ position: 'absolute', top: 2, left: 0, lineHeight: 1 }}>{format(max)}</span>
+            <div style={{ position: 'absolute', inset: '16px 0 0', display: 'flex', alignItems: 'flex-end', gap: n > 40 ? 1 : 2 }}>
+              {points.map((p, i) => {
+                const v = values[i]
+                return (
+                  <button
+                    key={p.date}
+                    type="button"
+                    aria-label={`${periodName(i)}: ${format(v)}`}
+                    onClick={() => setActive(active === i ? null : i)}
+                    onPointerEnter={(e) => { if (e.pointerType === 'mouse') setActive(i) }}
+                    onPointerLeave={(e) => { if (e.pointerType === 'mouse') setActive(null) }}
+                    style={{ flex: 1, minWidth: 0, height: '100%', display: 'flex', alignItems: 'flex-end', padding: 0, border: 0, background: 'none', cursor: 'pointer' }}
+                  >
+                    <span style={{
+                      display: 'block', width: '100%',
+                      height: v > 0 ? `max(3px, ${(v / max) * 100}%)` : 0,
+                      background: 'var(--s-accent)',
+                      opacity: active == null || active === i ? 1 : 0.35,
+                      borderRadius: '4px 4px 0 0',
+                    }} />
+                  </button>
+                )
+              })}
             </div>
-            <svg viewBox={`0 0 ${n} 100`} preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', color: 'var(--s-warning)' }}>
-              <path d={pathD} fill="none" strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" stroke="currentColor" />
-              {linePoints.map((pt, i) => (
-                <circle key={`pt-${i}`} cx={pt.x} cy={pt.y} r="2" vectorEffect="non-scaling-stroke" fill="currentColor" />
-              ))}
-            </svg>
           </div>
-          <div style={{ display: 'flex', gap: 2, marginTop: 4 }}>
-            {points.map((p, i) => {
-              const d = new Date(p.date)
-              const label = `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}`
-              return (
-                <span key={`lbl-${i}`} style={{ flex: 1, minWidth: 14, textAlign: 'center', fontSize: 8, color: 'var(--s-muted)', lineHeight: 1, visibility: i % labelStep === 0 ? 'visible' : 'hidden' }}>{label}</span>
-              )
-            })}
+          <div style={{ position: 'relative', height: 14, marginTop: 5 }}>
+            {ticks.map((i) => (
+              <span key={i} className="ds-caption" style={{
+                position: 'absolute', top: 0, lineHeight: 1, whiteSpace: 'nowrap',
+                left: `${((i + 0.5) / n) * 100}%`,
+                transform: i === 0 ? 'translateX(-4px)' : i === n - 1 ? 'translateX(calc(-100% + 4px))' : 'translateX(-50%)',
+              }}>{dayLabel(points[i].date)}</span>
+            ))}
           </div>
-        </div>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12, justifyContent: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{ width: 12, height: 12, borderRadius: 3, background: 'var(--s-accent)' }} />
-          <span className="ds-caption">Записи</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{ width: 20, height: 2, borderRadius: 2, background: 'var(--s-warning)' }} />
-          <span className="ds-caption">Выручка</span>
-        </div>
-      </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function DailyCharts({ daily }: { daily: AnalyticsDailyPoint[] }) {
+  const weekly = daily.length > 60
+  const points = useMemo(() => (weekly ? aggregateByWeek(daily) : daily), [daily, weekly])
+  if (points.length === 0) {
+    return <div className="ds-card ds-sub" style={{ padding: 14, textAlign: 'center' }}>Нет данных за выбранный период</div>
+  }
+  const unit = weekly ? 'неделям' : 'дням'
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <DayBars title={`Выручка по ${unit}`} points={points} weekly={weekly} value={(p) => p.revenue} format={formatRub} />
+      <DayBars title={`Записи по ${unit}`} points={points} weekly={weekly} value={(p) => p.bookings} format={formatBookings} />
     </div>
   )
 }
@@ -194,11 +237,9 @@ export function AnalyticsPage() {
       title="Аналитика"
       headerExtra={<BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />}
     >
-      {/* Период */}
-      <div className="ds-seg ds-seg--full" style={{ marginTop: 4, marginBottom: 14 }}>
-        {periods.map((p) => (
-          <button key={p.value} className={period === p.value ? 'on' : ''} onClick={() => setPeriod(p.value)}>{p.label}</button>
-        ))}
+      <div className="ds-context" style={{ paddingBottom: 8 }}>
+        <div className="ds-context-eyebrow">Аналитика · последние {PERIOD_DAYS[period]} {plural(PERIOD_DAYS[period], 'день', 'дня', 'дней')}</div>
+        <div className="ds-context-help">Подтверждённые и завершённые записи. Стрелка — сравнение с предыдущим таким же периодом.</div>
       </div>
 
       {loading ? (
@@ -218,19 +259,27 @@ export function AnalyticsPage() {
             <KpiCard label="Загрузка" value={kpis && kpis.load_percent != null ? `${kpis.load_percent.toFixed(1)}%` : '—'} icon={<Activity size={16} />} color="var(--s-danger)" cur={kpis?.load_percent ?? 0} prev={kpis?.load_percent_prev ?? 0} isPoints />
           </div>
 
-          {/* График */}
-          <div className="ds-card" style={{ padding: 14, marginTop: 14 }}>
-            <h2 className="ds-h3" style={{ marginBottom: 14 }}>Записи и выручка по дням</h2>
-            <DailyChart daily={data?.daily ?? []} />
+          {/* Графики */}
+          <div style={{ marginTop: 14 }}>
+            <DailyCharts daily={data?.daily ?? []} />
           </div>
 
           {/* Топы */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12, marginBottom: 12 }}>
             <TopCard title="Топ услуг" icon={<Scissors size={14} style={{ color: 'var(--s-accent)' }} />} items={data?.top_services ?? []} />
             <TopCard title="Топ сотрудников" icon={<User size={14} style={{ color: 'var(--s-accent)' }} />} items={data?.top_employees ?? []} />
           </div>
         </>
       )}
+
+      {/* Период — внизу, у большого пальца */}
+      <div className="ds-bottom-controls" style={{ marginTop: 'auto' }}>
+        <div className="ds-seg ds-seg--full" role="group" aria-label="Период">
+          {periods.map((p) => (
+            <button key={p.value} className={period === p.value ? 'on' : ''} aria-pressed={period === p.value} onClick={() => setPeriod(p.value)}>{p.label}</button>
+          ))}
+        </div>
+      </div>
     </AdminShell>
   )
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { RefreshCw, X } from 'lucide-react'
 import { api, type AdminBooking } from '../../api/client'
 import { errorMessage } from '../../authUtils'
 import { AdminShell } from '../../components/AdminShell'
@@ -168,34 +169,25 @@ export function PrepaymentsPage() {
     catch (err) { setError(errorMessage(err)) } finally { setBusy(false) }
   }
 
-  return <AdminShell title="Предоплаты" subtitle="Поступление денег проверяет владелец" headerExtra={<BusinessSelector businesses={businesses} selectedId={selectedId} onSelect={selectBusiness} />}>
-    <label className="ds-field" style={{ margin: '12px 0' }}>Показать<select className="ds-input" value={filter} disabled={busy} onChange={e => setFilter(e.target.value)}> 
-      <option value="prepayment_sent">На проверке</option><option value="pending_prepayment">Ожидают отправки</option><option value="all">Все предоплаты</option>
-    </select></label>
-    {filter === 'prepayment_sent' && <div className="ds-card" style={{ padding: 14, margin: '12px 0' }}>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button type="button" className="ds-btn ds-btn--ghost ds-btn--sm" disabled={busy || loading}
-          onClick={() => void selectAllPending()}>Выбрать все заявки</button>
-        <button type="button" className="ds-btn ds-btn--ghost ds-btn--sm" disabled={busy || !selected.length}
-          onClick={() => setSelected([])}>Снять выделение</button>
-        <span className="ds-sub">Выбрано: {selected.length}</span>
+  const filterNames: Record<string, string> = { prepayment_sent: 'на проверке', pending_prepayment: 'ждут отправки', all: 'всего предоплат' }
+  const closeDetails = () => { setDetails(null); setProof(null) }
+
+  return <AdminShell title="Предоплаты" headerExtra={<BusinessSelector businesses={businesses} selectedId={selectedId} onSelect={selectBusiness} />}>
+    {/* Информация — сверху */}
+    <div className="ds-context">
+      <div className="ds-context-eyebrow">Предоплаты</div>
+      <div className="ds-context-headline">Поступление денег проверяет владелец</div>
+      <div className="ds-context-strip">
+        <div><strong>{loading ? '…' : `${items.length}${cursor ? '+' : ''}`}</strong><span>{filterNames[filter]}</span></div>
       </div>
-      {selected.length > 0 && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-        <button type="button" className="ds-btn ds-btn--primary ds-btn--sm" disabled={busy}
-          onClick={() => void reviewSelected('confirm')}>Подтвердить поступление ({selected.length})</button>
-        <button type="button" className="ds-btn ds-btn--ghost ds-btn--sm" disabled={busy}
-          onClick={() => void reviewSelected('reject')}>Не подтверждаю ({selected.length})</button>
-      </div>}
-      <p className="ds-hint" style={{ marginTop: 10 }}>Действие применяется только к выбранным заявкам.
-        Перед подтверждением проверьте реальные поступления в банке.
-        Для нескольких услуг одного визита достаточно одного подтверждения — сервер обновит весь визит.</p>
-      {bulkProgress && <p role="status" className="ds-sub">Обработка: {bulkProgress.done} из {bulkProgress.total}…</p>}
-      {bulkSummary && <p role="status" className="ds-sub" style={{ marginTop: 8 }}>{bulkSummary}</p>}
-    </div>}
-    {error && <p role="alert" style={{ color: 'var(--s-danger)' }}>{error}</p>}
-    {loading && <p role="status">Загрузка…</p>}
-    {!loading && !items.length && <p>Заявок в этом списке нет.</p>}
-    <div style={{ display: 'grid', gap: 10 }}>
+      <div className="ds-context-help">Перед подтверждением проверьте реальные поступления в банке.
+        Для нескольких услуг одного визита достаточно одного подтверждения — сервер обновит весь визит.</div>
+    </div>
+
+    {error && <p role="alert" className="ds-error">{error}</p>}
+    {loading && <p role="status" className="ds-sub">Загрузка…</p>}
+    {!loading && !items.length && <p className="ds-sub" style={{ textAlign: 'center', padding: '16px 0' }}>Заявок в этом списке нет.</p>}
+    <div className="ds-list-scroll" style={{ display: 'grid', gap: 10, alignContent: 'start' }}>
       {items.map(item => <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         {filter === 'prepayment_sent' && item.status === 'prepayment_sent' && (
           <input type="checkbox" aria-label={`Выбрать заявку №${item.id}`} checked={selected.includes(item.id)}
@@ -204,33 +196,70 @@ export function PrepaymentsPage() {
         )}
         <button className="ds-card" disabled={busy} style={{ padding: 14, textAlign: 'left', flex: 1 }}
           onClick={() => void open(item.id)}>
-          <strong>{item.client_name} · {item.prepayment_amount == null ? 'Сумма не указана' : `${item.prepayment_amount} ₽`}</strong>
-          <p>{item.service_name} · {item.date} {item.time}</p><span>{labels[item.status] || item.status}</span>
+          <strong style={{ fontSize: 14, fontWeight: 550 }}>{item.client_name} · {item.prepayment_amount == null ? 'Сумма не указана' : `${item.prepayment_amount} ₽`}</strong>
+          <p className="ds-sub" style={{ margin: '4px 0 2px' }}>{item.service_name} · {item.date.split('-').reverse().join('.')} в {item.time}</p>
+          <span className="ds-caption">{labels[item.status] || item.status}</span>
         </button>
       </div>)}
+      {cursor && <button className="ds-btn ds-btn--ghost" disabled={busy} onClick={() => void more()}>Загрузить ещё</button>}
     </div>
-    {cursor && <button className="ds-btn ds-btn--ghost" disabled={busy} onClick={() => void more()}>Загрузить ещё</button>}
-    <button className="ds-btn ds-btn--ghost" disabled={busy} onClick={() => { extraPages.current = false; void load() }}>Обновить список</button>
-    {details && <section className="ds-card" style={{ padding: 16, marginTop: 16 }}>
-      <h2 className="ds-h3">Запись №{details.booking.id} · {details.booking.client_name}</h2>
-      <p>{details.booking.date} {details.booking.time} · {details.booking.service_name}</p>
-      <p>Предоплата за визит: {details.prepayment_total} ₽ · {labels[details.booking.status] || details.booking.status}</p>
-      {details.visit.length > 1 && <p>Решение применяется ко всему визиту: {details.visit.map(b => b.service_name).join(', ')}.</p>}
-      {details.booking.client_phone && <p><a href={`tel:${details.booking.client_phone}`}>{details.booking.client_phone}</a></p>}
-      <h3>Чеки</h3>
-      {!details.receipts.length && <p>Сохранённого чека нет. Проверьте поступление в банке; старые чеки из Telegram здесь недоступны.</p>}
-      {details.receipts.map(receipt => <button key={receipt.id} className="ds-btn ds-btn--ghost" disabled={busy} onClick={() => void viewProof(receipt.id)}>Открыть чек · {new Date(receipt.created_at + 'Z').toLocaleString('ru-RU')}</button>)}
-      {proof && <div style={{ margin: '12px 0' }}>
-        {proof.mime.startsWith('image/') && <img src={proof.url} alt="Чек клиента" style={{ maxWidth: '100%', maxHeight: 480, objectFit: 'contain' }} />}
-        <p><a href={proof.url} target="_blank" rel="noopener noreferrer">Открыть файл</a> · <a href={proof.url} download="receipt">Скачать</a></p>
+
+    {/* Управление — внизу, у большого пальца */}
+    <div className="ds-bottom-controls" style={{ marginTop: 'auto' }}>
+      {bulkProgress && <p role="status" className="ds-sub">Обработка: {bulkProgress.done} из {bulkProgress.total}…</p>}
+      {bulkSummary && <p role="status" className="ds-sub" style={{ margin: '0 0 6px' }}>{bulkSummary}</p>}
+      {filter === 'prepayment_sent' && selected.length > 0 && <div className="ds-sheet-actions" style={{ margin: '0 0 8px' }}>
+        <button type="button" className="ds-btn ds-btn--primary" disabled={busy}
+          onClick={() => void reviewSelected('confirm')}>Подтвердить ({selected.length})</button>
+        <button type="button" className="ds-btn ds-btn--ghost" disabled={busy}
+          onClick={() => void reviewSelected('reject')}>Не подтверждаю</button>
       </div>}
-      {details.booking.status === 'prepayment_sent' && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-        <button className="ds-btn ds-btn--primary" disabled={busy} onClick={() => void decide('confirm')}>Подтвердить поступление</button>
-        <button className="ds-btn ds-btn--ghost" disabled={busy} onClick={() => void decide('reject')}>Отклонить сообщение об оплате</button>
+      {filter === 'prepayment_sent' && <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+        {selected.length > 0
+          ? <button type="button" className="ds-btn ds-btn--ghost ds-btn--sm" disabled={busy} onClick={() => setSelected([])}>Снять выделение · {selected.length}</button>
+          : <button type="button" className="ds-btn ds-btn--ghost ds-btn--sm" disabled={busy || loading || !items.length}
+              onClick={() => void selectAllPending()}>Выбрать все заявки</button>}
       </div>}
-      {!['cancelled', 'completed'].includes(details.booking.status) && <button className="ds-btn ds-btn--ghost" disabled={busy} onClick={() => void decide('cancel')}>Отменить бронь</button>}
-      {!!details.reviews.length && <div><h3>История проверки</h3>{details.reviews.map((review, index) => <p key={index}>{review.decision === 'confirm' ? 'Оплата подтверждена' : review.decision === 'cancel' ? 'Бронь отменена' : 'Сообщение отклонено'} · {new Date(review.reviewed_at + 'Z').toLocaleString('ru-RU')} · сотрудник №{review.reviewer_id}</p>)}</div>}
-      <button className="ds-btn ds-btn--ghost" onClick={() => { setDetails(null); setProof(null) }}>Закрыть</button>
-    </section>}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <select className="ds-input" aria-label="Показать" style={{ flex: 1, minWidth: 0 }} value={filter} disabled={busy} onChange={e => setFilter(e.target.value)}>
+          <option value="prepayment_sent">На проверке</option><option value="pending_prepayment">Ожидают отправки</option><option value="all">Все предоплаты</option>
+        </select>
+        <button type="button" className="ds-icon-btn bordered" aria-label="Обновить список" title="Обновить список" disabled={busy}
+          onClick={() => { extraPages.current = false; void load() }}><RefreshCw size={18} /></button>
+      </div>
+    </div>
+
+    {/* Детали и действия — шторкой снизу */}
+    {details && <div className="ds-sheet-ov" onClick={closeDetails}>
+      <section className="ds-sheet" role="dialog" aria-label={`Запись №${details.booking.id}`} onClick={e => e.stopPropagation()}>
+        <div className="ds-sheet-grip" />
+        <div className="ds-sheet-head">
+          <div>
+            <h3>{details.booking.client_name}</h3>
+            <p>Запись №{details.booking.id} · {details.booking.date} {details.booking.time} · {details.booking.service_name}</p>
+          </div>
+          <button className="ds-icon-btn" onClick={closeDetails} aria-label="Закрыть"><X size={18} /></button>
+        </div>
+        <p>Предоплата за визит: {details.prepayment_total} ₽ · {labels[details.booking.status] || details.booking.status}</p>
+        {details.visit.length > 1 && <p>Решение применяется ко всему визиту: {details.visit.map(b => b.service_name).join(', ')}.</p>}
+        {details.booking.client_phone && <p><a href={`tel:${details.booking.client_phone}`}>{details.booking.client_phone}</a></p>}
+        <h3 className="ds-h3">Чеки</h3>
+        {!details.receipts.length && <p className="ds-sub">Сохранённого чека нет. Проверьте поступление в банке; старые чеки из Telegram здесь недоступны.</p>}
+        {details.receipts.map(receipt => <button key={receipt.id} className="ds-btn ds-btn--ghost" disabled={busy} onClick={() => void viewProof(receipt.id)}>Открыть чек · {new Date(receipt.created_at + 'Z').toLocaleString('ru-RU')}</button>)}
+        {proof && <div style={{ margin: '12px 0' }}>
+          {proof.mime.startsWith('image/') && <img src={proof.url} alt="Чек клиента" style={{ maxWidth: '100%', maxHeight: 480, objectFit: 'contain' }} />}
+          <p><a href={proof.url} target="_blank" rel="noopener noreferrer">Открыть файл</a> · <a href={proof.url} download="receipt">Скачать</a></p>
+        </div>}
+        {!!details.reviews.length && <div><h3 className="ds-h3">История проверки</h3>{details.reviews.map((review, index) => <p key={index} className="ds-sub">{review.decision === 'confirm' ? 'Оплата подтверждена' : review.decision === 'cancel' ? 'Бронь отменена' : 'Сообщение отклонено'} · {new Date(review.reviewed_at + 'Z').toLocaleString('ru-RU')} · сотрудник №{review.reviewer_id}</p>)}</div>}
+        {error && <p role="alert" className="ds-error">{error}</p>}
+        {details.booking.status === 'prepayment_sent' && <div className="ds-sheet-actions">
+          <button className="ds-btn ds-btn--primary" disabled={busy} onClick={() => void decide('confirm')}>Подтвердить поступление</button>
+          <button className="ds-btn ds-btn--ghost" disabled={busy} onClick={() => void decide('reject')}>Отклонить</button>
+        </div>}
+        {!['cancelled', 'completed'].includes(details.booking.status) && <div className="ds-sheet-actions">
+          <button className="ds-btn ds-btn--ghost" disabled={busy} onClick={() => void decide('cancel')}>Отменить бронь</button>
+        </div>}
+      </section>
+    </div>}
   </AdminShell>
 }
