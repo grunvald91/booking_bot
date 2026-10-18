@@ -82,3 +82,5 @@ Before planning or executing any CI, deployment or GitHub Actions operation, rea
 
 ## Design system
 UI work follows the ServGo Air brand book: `docs/brand/servgo-air.md` (tokens in `docs/brand/tokens.json`). On mobile, information goes at the top and controls stay at the bottom within thumb reach.
+
+**Mobile is the primary design target.** Every page is designed for a phone first and the desktop layout is derived from it. A feature that cannot be reached in the mobile view counts as missing: every link, button and setting available on desktop must also be reachable on mobile (bottom navigation, a "More" menu or in-page controls), never only from a desktop sidebar. Before shipping UI, check it at phone width (~390px): no horizontal overflow that hides controls, primary actions within thumb reach at the bottom.
