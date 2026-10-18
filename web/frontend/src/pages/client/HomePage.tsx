@@ -114,6 +114,10 @@ export function HomePage() {
 
           <footer className="bf-foot">
             <div className="bf-kicker">ServGo для бизнеса</div>
+            <p className="bf-foot-pitch">
+              ИИ-платформа роста для бизнеса услуг: онлайн-запись, заполнение пустых окон, контент и ответы клиентам
+              в соцсетях, разведка конкурентов и аналитика — в одном месте.
+            </p>
             <nav className="bf-chips" aria-label="Презентации ServGo по нишам">
               {nichePresentations.map((item) => (
                 <a key={item.href} href={item.href} target="_blank" rel="noopener noreferrer" className="bf-chip">{item.label}</a>

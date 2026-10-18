@@ -4,7 +4,7 @@ import { MapPin, Phone, Clock, Navigation, DoorOpen, X, ChevronRight, ArrowRight
 import { api, type BusinessDetail, type EmployeeWithPricing } from '../../api/client'
 import { AirFrame, HeroArt } from './AirFrame'
 import { parsePhotoList, photoSrc } from './airPhotos'
-import { applySeo, isDemoBusinessName, shortText } from '../../utils/seo'
+import { applySeo, shortText } from '../../utils/seo'
 
 function linkifyText(text: string): ReactNode {
   const urlPattern = /(https?:\/\/[^\s]+|(?:vk\.com|t\.me)\/[^\s]+)/gi
@@ -104,7 +104,6 @@ export function BusinessPage() {
       path,
       title: `${business.name} — онлайн-запись | ServGo`,
       description: shortText(business.description?.trim() || fallback),
-      noindex: isDemoBusinessName(business.name),
     })
   }, [id, business, error])
 

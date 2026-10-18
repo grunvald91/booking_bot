@@ -3,14 +3,9 @@
 
 export const SITE_URL = 'https://servgo.ru'
 
-export const DEFAULT_TITLE = 'ServGo — онлайн-запись на услуги без звонков'
+export const DEFAULT_TITLE = 'ServGo — ИИ-платформа роста для бизнеса услуг и онлайн-запись'
 export const DEFAULT_DESCRIPTION =
-  'ServGo — онлайн-запись на услуги без звонков. Выберите салон или студию, услугу и удобное время за пару минут.'
-
-// Примеры и демо-витрины не индексируем, чтобы не засорять выдачу.
-export function isDemoBusinessName(name?: string | null): boolean {
-  return !!name && /пример|демо|demo|example/i.test(name)
-}
+  'ServGo — онлайн-запись без звонков и ИИ-платформа роста для бизнеса услуг: заполняет пустые окна, создаёт контент, отвечает клиентам и изучает конкурентов.'
 
 function setMeta(attr: 'name' | 'property', key: string, content: string) {
   let el = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`)
