@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   ChevronLeft,
   ChevronRight,
@@ -14,11 +14,6 @@ import {
   Sun,
   LogOut,
   CalendarClock,
-  LayoutDashboard,
-  Scissors,
-  Users,
-  Settings,
-  Clock,
   SlidersHorizontal,
   Maximize2,
   Minimize2,
@@ -28,6 +23,7 @@ import {
 import { api, type AdminBooking, type Service, type Employee } from '../../api/client'
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
 import { useTheme } from '../../hooks/useTheme'
+import { AdminBottomNav } from '../../components/AdminShell'
 import { BusinessSelector } from '../../components/BusinessSelector'
 import './schedule.css'
 
@@ -53,13 +49,6 @@ const STATUS_LABELS: Record<string, string> = {
   prepayment_sent: 'Предоплата отправлена',
 }
 
-const NAV = [
-  { to: '/admin', label: 'Панель', Icon: LayoutDashboard },
-  { to: '/admin/schedule', label: 'Расписание', Icon: Clock },
-  { to: '/admin/services', label: 'Услуги', Icon: Scissors },
-  { to: '/admin/employees', label: 'Мастера', Icon: Users },
-  { to: '/admin/settings', label: 'Настройки', Icon: Settings },
-]
 
 type ToolKey = 'search' | 'filters' | 'details' | 'legend' | 'context'
 const TOOL_LABELS: Record<ToolKey, string> = {
@@ -517,7 +506,6 @@ function ConfirmMoveDialog({ clientName, fromLabel, toLabel, submitting, onCance
 export function SchedulePage() {
   const { businesses, selectedId: businessId, selectBusiness } = useAdminBusiness()
   const [theme, toggleTheme] = useTheme()
-  const { pathname } = useLocation()
   const navigate = useNavigate()
   const [viewMode, setViewMode] = useState<'week' | 'day'>('day')
   const [weekOffset, setWeekOffset] = useState(0)
@@ -1184,14 +1172,7 @@ export function SchedulePage() {
       </div>
 
       {!focus && (
-        <nav className="ds-bottomnav">
-          {NAV.map(({ to, label, Icon }) => (
-            <Link key={to} to={to} className={`ds-bn${pathname === to ? ' active' : ''}`}>
-              <Icon size={21} />
-              <span>{label}</span>
-            </Link>
-          ))}
-        </nav>
+        <AdminBottomNav theme={theme} toggleTheme={toggleTheme} onLogout={handleLogout} />
       )}
 
       {drag && (
