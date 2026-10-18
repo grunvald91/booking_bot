@@ -10,7 +10,8 @@ Disallow: /chat
 Disallow: /subscriptions
 Disallow: /b/
 Disallow: /rental/b/
-Disallow: /api/
+Disallow: /book
+Disallow: /legal/
 Disallow: /schedule
 Disallow: /analytics
 Disallow: /calendar
