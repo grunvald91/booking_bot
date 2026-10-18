@@ -5,4 +5,15 @@
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
+  <!-- Страницы реальных бизнесов. Примеры и демо (ПРИМЕР/ДЕМО) сюда не добавлять — они закрыты noindex. -->
+  <url>
+    <loc>https://servgo.ru/business/6</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://servgo.ru/business/7</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
 </urlset>

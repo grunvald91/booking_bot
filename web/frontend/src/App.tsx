@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useEffect } from 'react'
-import { Routes, Route, Navigate, useSearchParams } from 'react-router-dom'
+import { Routes, Route, Navigate, useSearchParams, useLocation } from 'react-router-dom'
 import { api, ApiError } from './api/client'
 import { clearLogin, saveLogin } from './authUtils'
 import { Layout } from './components/Layout'
@@ -24,6 +24,7 @@ import { SalesInboxPage } from './pages/admin/SalesInboxPage'
 import { SalesSettingsPage } from './pages/admin/SalesSettingsPage'
 import { RentalBookingStatusPage } from './pages/client/RentalBookingStatusPage'
 import { LegalPage } from './pages/client/LegalPage'
+import { applySeo } from './utils/seo'
 
 const BookingPage = lazy(() => import('./pages/client/BookingPage').then(module => ({ default: module.BookingPage })))
 const SchedulePage = lazy(() => import('./pages/admin/SchedulePage').then(module => ({ default: module.SchedulePage })))
@@ -55,6 +56,17 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/login" replace />
   }
   return <>{children}</>
+}
+
+// Мета-теги по маршруту. Страница бизнеса ставит свои сама, когда загрузит данные.
+function RouteSeo() {
+  const { pathname } = useLocation()
+  useEffect(() => {
+    if (pathname.startsWith('/business/')) return
+    // В поиск идут только главная и страницы бизнесов; всё остальное — служебное или личное.
+    applySeo({ path: pathname, noindex: pathname !== '/' })
+  }, [pathname])
+  return null
 }
 
 function App() {
@@ -104,7 +116,7 @@ function App() {
   }
 
   return (
-    <><AdminPaymentAttention /><Suspense fallback={<div role="status" className="flex min-h-[30vh] items-center justify-center">Загрузка…</div>}><Routes>
+    <><RouteSeo /><AdminPaymentAttention /><Suspense fallback={<div role="status" className="flex min-h-[30vh] items-center justify-center">Загрузка…</div>}><Routes>
       <Route element={<Layout />}>
         {/* Client routes */}
         <Route path="/" element={<HomePage />} />
