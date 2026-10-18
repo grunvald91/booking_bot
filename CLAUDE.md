@@ -76,9 +76,9 @@ Use the repository's existing tests first. Add focused regression tests for ever
 
 A task is not complete merely because code was written; preserve a committed/pushed working checkpoint.
 
-## GitHub Actions budget policy (mandatory)
+## GitHub Actions policy (mandatory)
 
-Before planning or executing any CI, deployment or GitHub Actions operation, read and follow [AGENTS.md](AGENTS.md). Its cost, safety, diagnostics, limits and reporting rules apply equally to Claude Code and any delegated agent. Do not bypass them through issue comments or other automation triggers.
+Before planning or executing any CI, deployment or GitHub Actions operation, read and follow [AGENTS.md](AGENTS.md). The repository is public: GitHub Actions minutes on standard runners are free and unlimited, so use Actions whenever it is faster or more reliable. Because logs and history are public, its secret- and data-safety rules apply equally to Claude Code and any delegated agent. Do not bypass them through issue comments or other automation triggers.
 
 ## Design system
 UI work follows the ServGo Air brand book: `docs/brand/servgo-air.md` (tokens in `docs/brand/tokens.json`). On mobile, information goes at the top and controls stay at the bottom within thumb reach.
