@@ -19,6 +19,7 @@ import { EmployeesPage } from './pages/admin/EmployeesPage'
 import { AnalyticsPage } from './pages/admin/AnalyticsPage'
 import { SubscriptionsAdminPage } from './pages/admin/SubscriptionsAdminPage'
 import { ChatPage } from './pages/client/ChatPage'
+import { NotFoundPage } from './pages/client/NotFoundPage'
 import { SalesInboxPage } from './pages/admin/SalesInboxPage'
 import { SalesSettingsPage } from './pages/admin/SalesSettingsPage'
 import { RentalBookingStatusPage } from './pages/client/RentalBookingStatusPage'
@@ -192,6 +193,7 @@ function App() {
             </AdminRoute>
           }
         />
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes></Suspense></>
   )
