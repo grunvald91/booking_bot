@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { LayoutDashboard, LogOut } from 'lucide-react'
 import { api } from '../../api/client'
 import { EmailAuthForm } from '../../components/EmailAuthForm'
-import { errorMessage } from '../../authUtils'
+import { clearLogin, errorMessage } from '../../authUtils'
 import { TelegramAccountLink } from '../../components/TelegramAccountLink'
 import { ClientShell } from '../../components/ClientShell'
 
@@ -10,15 +11,29 @@ export function AccountPage() {
   const [account, setAccount] = useState<Awaited<ReturnType<typeof api.emailAccount>> | null>(null)
   const [error, setError] = useState('')
   useEffect(() => { api.emailAccount().then(setAccount).catch(e => setError(errorMessage(e))) }, [])
-  return <ClientShell title="Вход в аккаунт" backTo={localStorage.getItem('userRole') === 'client' ? '/my' : '/admin/settings'}>
-    <div className="ds-form-narrow" style={{ paddingTop: 20 }}>
+  const role = localStorage.getItem('userRole')
+  const isAdmin = role === 'admin' || role === 'owner'
+  const logout = async () => {
+    sessionStorage.setItem('servgoExplicitLogout', '1')
+    clearLogin()
+    try { await api.logout() } catch { /* локальный выход действует и без сети */ }
+    window.location.href = '/'
+  }
+  return <ClientShell title="Профиль" subtitle={localStorage.getItem('userName') || undefined}
+    backTo={role === 'client' ? '/my' : '/admin/settings'}>
+    <div className="ds-form-narrow">
       {error && <p role="alert">{error}</p>}
-      {account && (account.email ? <div className="ds-card" style={{ padding: 16 }}>
-        <h2 className="ds-h3">Email подтверждён</h2><p>{account.email}</p>
-        <p>Вы можете входить по email и паролю без Telegram.</p>
-        <Link to="/login">Восстановить пароль на странице входа</Link>
+      {account && (account.email ? <div className="bf-account-card">
+        <span className="bf-kicker">Email подтверждён</span>
+        <strong>{account.email}</strong>
+        <p>Можно входить по email и паролю без Telegram.</p>
+        <Link to="/login">Забыли пароль? Восстановить</Link>
       </div> : <><p>Привяжите подтверждённую почту к текущему аккаунту — ваши бизнесы и права сохранятся.</p><EmailAuthForm link /></>)}
-      {account?.telegram ? <div className="ds-card" style={{ padding: 16, marginTop: 16 }}><h2 className="ds-h3">Telegram привязан</h2><p>{account.telegram.username ? `@${account.telegram.username}` : account.telegram.id}</p></div> : account?.email && (account.telegram_link_available ? <TelegramAccountLink /> : <p>Привязка Telegram пока не настроена администратором платформы.</p>)}
+      {account?.telegram ? <div className="bf-account-card"><span className="bf-kicker">Telegram привязан</span><strong>{account.telegram.username ? `@${account.telegram.username}` : account.telegram.id}</strong></div> : account?.email && (account.telegram_link_available ? <TelegramAccountLink /> : <p className="bf-intro">Привязка Telegram пока не настроена администратором платформы.</p>)}
+      <div className="bf-account-actions">
+        {isAdmin && <Link to="/admin" className="bf-account-row"><LayoutDashboard /><span>Кабинет бизнеса</span></Link>}
+        <button type="button" className="bf-account-row danger" onClick={logout}><LogOut /><span>Выйти</span></button>
+      </div>
     </div>
   </ClientShell>
 }
