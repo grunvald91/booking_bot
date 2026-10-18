@@ -43,7 +43,7 @@ export function BusinessSelector({ businesses, selectedId, onSelect }: Props) {
   const current = businesses.find((b) => b.id === selectedId);
 
   return (
-    <div ref={ref} style={{ position: 'relative', flexShrink: 0, maxWidth: '42%' }}>
+    <div ref={ref} style={{ position: 'relative', minWidth: 0, maxWidth: '100%' }}>
       <button
         onClick={toggle}
         className="ds-biz-select"
