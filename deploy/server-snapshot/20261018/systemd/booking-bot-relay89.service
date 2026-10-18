@@ -1,0 +1,13 @@
+[Unit]
+Description=Private SSH SOCKS egress to relay 89 for booking bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -N -D 127.0.0.1:1089 -i /root/.ssh/servgo_89_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/booking-bot-relay89/known_hosts -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 root@89.125.90.101
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
