@@ -5,7 +5,7 @@ export const SITE_URL = 'https://servgo.ru'
 
 export const DEFAULT_TITLE = 'ServGo — ИИ-платформа роста для бизнеса услуг и онлайн-запись'
 export const DEFAULT_DESCRIPTION =
-  'ServGo — онлайн-запись без звонков и ИИ-платформа роста для бизнеса услуг: заполняет пустые окна, создаёт контент, отвечает клиентам и изучает конкурентов.'
+  'ServGo — ИИ-платформа роста для бизнеса услуг: онлайн-запись, пустые окна, смены и зарплата сотрудников, контент, ответы клиентам и разведка конкурентов.'
 
 function setMeta(attr: 'name' | 'property', key: string, content: string) {
   let el = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`)
