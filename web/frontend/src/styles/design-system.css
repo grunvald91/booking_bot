@@ -387,7 +387,7 @@ textarea.ds-input { resize: vertical; min-height: 70px; }
 .ds-shell-header { min-height: 51px; background: var(--s-bg); position: relative; z-index: 20; }
 .ds-shell-header .ds-h1 { font-size: 17.5px; font-weight: 470; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ds-bottomnav {
-  /* Все пункты в одну строку, сколько бы их ни было (в админке их 7). */
+  /* Все пункты в одну строку: четыре раздела + «Ещё». */
   display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); align-items: stretch; flex-shrink: 0;
   border-top: 0; background: var(--s-bg); position: relative; z-index: 12;
   box-shadow: 0 -8px 25px rgba(45, 92, 146, 0.018);
@@ -397,7 +397,7 @@ textarea.ds-input { resize: vertical; min-height: 70px; }
 .ds-bn {
   position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
   min-height: 54px; padding: 3px 1px 5px; cursor: pointer; text-decoration: none; background: none; border: 0; font-family: inherit;
-  color: var(--s-muted-2); font-size: 9.8px; font-weight: 400; letter-spacing: -0.035em; line-height: 1.05;
+  color: var(--s-muted-2); font-size: 11px; font-weight: 400; letter-spacing: -0.035em; line-height: 1.05;
 }
 .ds-bn svg { width: 21px; height: 21px; stroke-width: 1.65; flex: none; }
 .ds-bn span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
@@ -410,6 +410,19 @@ textarea.ds-input { resize: vertical; min-height: 70px; }
   animation: dsFlowLine 3.7s linear infinite;
 }
 .ds-bn.active::after { display: block; }
+
+.ds-more-list { display: flex; flex-direction: column; gap: 2px; }
+.ds-more-item {
+  display: flex; align-items: center; gap: 13px; min-height: 52px; padding: 0 12px; border: 0; border-radius: 14px;
+  background: none; color: var(--s-text); font-family: inherit; font-size: 15px; font-weight: 420; text-align: left;
+  text-decoration: none; cursor: pointer; width: 100%;
+}
+.ds-more-item svg { color: var(--s-muted); flex: none; }
+.ds-more-item span { flex: 1; min-width: 0; }
+.ds-more-item:hover, .ds-more-item.active { background: var(--s-surface-2); }
+.ds-more-item.active, .ds-more-item.active svg { color: var(--s-accent); }
+.ds-more-item.danger, .ds-more-item.danger svg { color: var(--s-danger); }
+.ds-more-chev { color: var(--s-muted-2) !important; }
 
 /* Переключатель бизнеса в шапке — пилюля как в макете */
 .ds-biz-select { display: flex; align-items: center; gap: 5px; max-width: 160px; padding: 7px 9px; border: 0; border-radius: 14px; background: var(--s-surface-2); color: var(--s-muted); font-family: inherit; font-size: 11.5px; font-weight: 450; cursor: pointer; }

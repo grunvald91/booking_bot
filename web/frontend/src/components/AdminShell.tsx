@@ -1,18 +1,30 @@
 import { OwnerMailEntry } from './OwnerMailEntry'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Wallet, LayoutDashboard, Clock, Scissors, Users, Settings, Moon, Sun, LogOut, MessageCircle } from 'lucide-react'
+import {
+  Wallet, LayoutDashboard, Clock, Scissors, Users, Settings, Moon, Sun, LogOut, MessageCircle,
+  MoreHorizontal, BarChart3, Repeat, Bot, Mail, Sparkles, X, ChevronRight,
+} from 'lucide-react'
 import { useTheme } from '../hooks/useTheme'
 
+// Нижняя панель: пять пунктов, которые нужны каждый день. Всё остальное —
+// в «Ещё», чтобы любой раздел был доступен с телефона.
 const NAV = [
   { to: '/admin', label: 'Панель', Icon: LayoutDashboard },
   { to: '/admin/schedule', label: 'Расписание', Icon: Clock },
   { to: '/admin/prepayments', label: 'Оплаты', Icon: Wallet },
+  { to: '/admin/sales', label: 'Диалоги', Icon: MessageCircle },
+]
+
+const MORE = [
   { to: '/admin/services', label: 'Услуги', Icon: Scissors },
   { to: '/admin/employees', label: 'Мастера', Icon: Users },
-  { to: '/admin/sales', label: 'Диалоги', Icon: MessageCircle },
+  { to: '/admin/analytics', label: 'Аналитика', Icon: BarChart3 },
+  { to: '/admin/subscriptions', label: 'Абонементы', Icon: Repeat },
+  { to: '/admin/sales/settings', label: 'ИИ-продавец', Icon: Bot },
   { to: '/admin/settings', label: 'Настройки', Icon: Settings },
+  { to: '/mail', label: 'Почта ServGo', Icon: Mail },
 ]
 
 /**
@@ -33,7 +45,6 @@ export function AdminShell({
   children: ReactNode
 }) {
   const [theme, toggleTheme] = useTheme()
-  const { pathname } = useLocation()
   const navigate = useNavigate()
 
   const handleLogout = () => {
@@ -65,15 +76,67 @@ export function AdminShell({
         <div className="ds-page">{children}</div>
       </div>
 
-      <nav className="ds-bottomnav">
-        {NAV.map(({ to, label, Icon }) => (
-          <Link key={to} to={to} className={`ds-bn${pathname === to ? ' active' : ''}`}>
-            <Icon size={21} />
-            <span>{label}</span>
-          </Link>
-        ))}
-      </nav>
+      <AdminBottomNav theme={theme} toggleTheme={toggleTheme} onLogout={handleLogout} />
     </div>,
     document.body
+  )
+}
+
+
+/** Нижняя навигация админки: четыре раздела и «Ещё» со всеми остальными. */
+export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
+  theme: 'light' | 'dark'
+  toggleTheme: () => void
+  onLogout: () => void
+}) {
+  const { pathname } = useLocation()
+  const [moreOpen, setMoreOpen] = useState(false)
+  const moreActive = MORE.some(item => item.to === pathname)
+  const handleLogout = onLogout
+  return (
+    <>
+        <nav className="ds-bottomnav">
+          {NAV.map(({ to, label, Icon }) => (
+            <Link key={to} to={to} className={`ds-bn${pathname === to ? ' active' : ''}`}>
+              <Icon size={21} />
+              <span>{label}</span>
+            </Link>
+          ))}
+          <button type="button" className={`ds-bn${moreActive || moreOpen ? ' active' : ''}`}
+            onClick={() => setMoreOpen(true)} aria-haspopup="dialog" aria-expanded={moreOpen}>
+            <MoreHorizontal size={21} />
+            <span>Ещё</span>
+          </button>
+        </nav>
+  
+        {moreOpen && (
+          <div className="ds-sheet-ov" onClick={() => setMoreOpen(false)}>
+            <div className="ds-sheet" role="dialog" aria-label="Все разделы" onClick={e => e.stopPropagation()}>
+              <div className="ds-sheet-grip" />
+              <div className="ds-sheet-head">
+                <h3>Все разделы</h3>
+                <button className="ds-icon-btn" onClick={() => setMoreOpen(false)} aria-label="Закрыть"><X size={18} /></button>
+              </div>
+              <nav className="ds-more-list">
+                {MORE.map(({ to, label, Icon }) => (
+                  <Link key={to} to={to} onClick={() => setMoreOpen(false)} className={`ds-more-item${pathname === to ? ' active' : ''}`}>
+                    <Icon size={20} /><span>{label}</span><ChevronRight size={17} className="ds-more-chev" />
+                  </Link>
+                ))}
+                <a className="ds-more-item" href="https://growth.servgo.ru/studio">
+                  <Sparkles size={20} /><span>Маркетинг — AI Growth OS</span><ChevronRight size={17} className="ds-more-chev" />
+                </a>
+                <button type="button" className="ds-more-item" onClick={toggleTheme}>
+                  {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+                  <span>{theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}</span>
+                </button>
+                <button type="button" className="ds-more-item danger" onClick={handleLogout}>
+                  <LogOut size={20} /><span>Выйти</span>
+                </button>
+              </nav>
+            </div>
+          </div>
+        )}
+    </>
   )
 }
