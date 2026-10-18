@@ -34,6 +34,8 @@ dialog{border:1px solid var(--line);border-radius:19px;padding:25px;width:min(64
 .switch[aria-checked="true"]{background:#23a26b}.switch[aria-checked="true"]::after{transform:translateX(22px)}
 .switch:focus-visible{outline:3px solid #9cc7ff;outline-offset:2px}
 #notice{position:fixed;bottom:18px;right:18px;max-width:390px;border-radius:12px;padding:13px 18px;background:#14396b;color:#fff;box-shadow:0 12px 32px #123c6555;display:none;font-size:13px}
+.fab{display:none}
+@media(max-width:850px){.fab{display:flex;position:fixed;right:14px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:20;border-radius:16px;padding:14px 18px;background:var(--blue);color:#fff;font-weight:800;font-size:15px;text-decoration:none;box-shadow:0 10px 26px #0d78f355}#notice{bottom:calc(84px + env(safe-area-inset-bottom));left:12px;right:12px;max-width:none}main{padding-bottom:96px}}
 @media(max-width:850px){.app{grid-template-columns:1fr}aside{padding:14px 16px}nav{display:flex;gap:6px;overflow:auto}.brand{margin-bottom:12px}main{padding:17px}.panels{grid-template-columns:1fr}.numbers{grid-template-columns:repeat(2,minmax(0,1fr))}.top{align-items:flex-start}}
 </style>
 </head>
@@ -71,6 +73,7 @@ dialog{border:1px solid var(--line);border-radius:19px;padding:25px;width:min(64
 <label class="field"><span>Текст письма</span><textarea id="edit-body" minlength="30" maxlength="12000" required style="min-height:290px"></textarea></label>
 <p class="hint" id="edit-critique"></p>
 <div class="row" style="justify-content:flex-end"><button type="button" class="btn light" id="edit-cancel">Закрыть</button><button type="submit" class="btn">Сохранить и отправить на проверку</button></div></form></dialog>
+<a class="fab" href="/api/mailbox-dashboard#compose">✉ Написать</a>
 <div id="notice"></div>
 <script>
 const state={campaigns:[],selected:null,detail:null,checked:new Set(),editing:null};
