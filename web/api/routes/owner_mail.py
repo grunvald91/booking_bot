@@ -719,11 +719,13 @@ def direct_send(info: DirectSendInput, _: User = Depends(mail_owner)):
 def outbox(_: User = Depends(mail_owner)):
     with db_open() as db:
         return [dict(x) for x in db.execute("""
-            SELECT status,created_at,company,email FROM (
-              SELECT l.status,l.created_at,p.company,p.email
+            SELECT status,created_at,company,email,subject,body FROM (
+              SELECT l.status,l.created_at,p.company,p.email,
+                     COALESCE(r.subject,'') AS subject,COALESCE(r.body,'') AS body
               FROM deliveries l JOIN prospects p ON p.id=l.prospect_id
+              LEFT JOIN drafts r ON r.prospect_id=l.prospect_id
               UNION ALL
-              SELECT d.status,d.created_at,d.email AS company,d.email
+              SELECT d.status,d.created_at,d.email AS company,d.email,d.subject,d.body
               FROM direct_mail d
             ) ORDER BY created_at DESC LIMIT 100
         """).fetchall()]
