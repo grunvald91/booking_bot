@@ -385,7 +385,11 @@ textarea.ds-input { resize: vertical; min-height: 70px; }
 
 /* ─────────────────────────── 10. ШАПКА И НИЖНЯЯ НАВИГАЦИЯ ─────────────────────────── */
 .ds-shell-header { min-height: 51px; background: var(--s-bg); position: relative; z-index: 20; }
-.ds-shell-header .ds-h1 { font-size: 17.5px; font-weight: 470; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ds-shell-header .ds-h1 { font-size: 17.5px; font-weight: 470; white-space: nowrap; }
+/* Название раздела не сжимается; выбор бизнеса берёт остаток строки и прижат вправо. */
+.ds-shell-title { flex: 0 0 auto; }
+.ds-shell-header-extra { flex: 1 1 0; min-width: 0; display: flex; justify-content: flex-end; }
+.ds-shell-header-desktop { display: none; align-items: center; gap: 7px; flex: none; }
 .ds-bottomnav {
   /* Все пункты в одну строку: четыре раздела + «Ещё». */
   display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); align-items: stretch; flex-shrink: 0;
@@ -425,7 +429,7 @@ textarea.ds-input { resize: vertical; min-height: 70px; }
 .ds-more-chev { color: var(--s-muted-2) !important; }
 
 /* Переключатель бизнеса в шапке — пилюля как в макете */
-.ds-biz-select { display: flex; align-items: center; gap: 5px; max-width: 160px; padding: 7px 9px; border: 0; border-radius: 14px; background: var(--s-surface-2); color: var(--s-muted); font-family: inherit; font-size: 11.5px; font-weight: 450; cursor: pointer; }
+.ds-biz-select { display: flex; align-items: center; gap: 5px; max-width: 100%; padding: 7px 9px; border: 0; border-radius: 14px; background: var(--s-surface-2); color: var(--s-muted); font-family: inherit; font-size: 11.5px; font-weight: 450; cursor: pointer; }
 .ds-biz-select span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -439,6 +443,8 @@ textarea.ds-input { resize: vertical; min-height: 70px; }
 .ds-bottom-controls { position: sticky; bottom: 0; z-index: 2; background: var(--s-bg); padding: 6px 0 2px; }
 @media (max-width: 899px) {
   .ds-shell-content { display: flex; flex-direction: column; }
+  /* Панель прилипает к самому низу, перекрывая нижний отступ контента: ничего не просвечивает. */
+  .ds-shell-content .ds-bottom-controls { bottom: -16px; padding-bottom: 18px; }
   .ds-page { flex: 1 0 auto; display: flex; flex-direction: column; }
   .ds-page > .ds-context { flex: 1 1 auto; justify-content: center; min-height: 96px; }
   .ds-list-scroll { flex: 0 1 auto; max-height: min(52vh, 480px); max-height: min(52dvh, 480px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
@@ -459,6 +465,8 @@ textarea.ds-input { resize: vertical; min-height: 70px; }
   }
   .ds-shell-header { grid-area: header; padding: 10px 26px !important; }
   .ds-shell-header .ds-h1 { font-size: 21px; font-weight: 550; }
+  .ds-shell-header-desktop { display: flex; }
+  .ds-shell-content .ds-bottom-controls { bottom: -42px; padding-bottom: 44px; }
   .ds-shell-content {
     grid-area: content;
     max-width: 1080px; width: 100%; margin: 0 auto;
