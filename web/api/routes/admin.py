@@ -279,27 +279,6 @@ async def list_bookings(
         .limit(200)
     )
     bookings = list(result.scalars().all())
-
-    try:
-        from bot.services.notification_events import dispatch_booking_event
-        # Recurring manual bookings are distinct visits, so notify each one
-        # independently rather than presenting the whole series as one visit.
-        for created in bookings:
-            await dispatch_booking_event(
-                [created],
-                db,
-                "booking_created",
-                include_client=True,
-                staff_audience="all",
-            )
-    except Exception as notification_error:
-        logger.error(
-            "Manual booking notification failed ids=%s: %s",
-            [item.id for item in bookings],
-            notification_error,
-            exc_info=True,
-        )
-
     return [_admin_booking_out(b) for b in bookings]
 
 
@@ -749,7 +728,28 @@ async def create_manual_booking(
         )
         .order_by(Booking.booking_date)
     )
-    bookings = result.scalars().all()
+    bookings = list(result.scalars().all())
+
+    try:
+        from bot.services.notification_events import dispatch_booking_event
+        # Recurring manual bookings are distinct visits, so notify each one
+        # independently rather than presenting the whole series as one visit.
+        for created in bookings:
+            await dispatch_booking_event(
+                [created],
+                db,
+                "booking_created",
+                include_client=True,
+                staff_audience="all",
+            )
+    except Exception as notification_error:
+        logger.error(
+            "Manual booking notification failed ids=%s: %s",
+            [item.id for item in bookings],
+            notification_error,
+            exc_info=True,
+        )
+
     return [_admin_booking_out(b) for b in bookings]
 
 
