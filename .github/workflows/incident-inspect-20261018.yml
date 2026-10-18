@@ -3,7 +3,7 @@ name: Inspect 2026-10-18 incident side effects (read-only)
 on:
   push:
     branches: [ops/restore-20261018]
-    paths: [.github/incident/**, .github/workflows/incident-inspect-20261018.yml]
+    paths: [.github/incident/incident_check.py]
 
 permissions:
   contents: read

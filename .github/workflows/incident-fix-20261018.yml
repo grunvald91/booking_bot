@@ -1,0 +1,27 @@
+name: Fix 2026-10-18 incident side effects
+
+# One-off: restores the pre-incident frontend build, the 2026-10-15 mailbox password and the
+# mail.servgo.ru nginx site. Every replaced item is backed up on the server first.
+on:
+  push:
+    branches: [ops/restore-20261018]
+    paths: [.github/incident/fix.py, .github/incident/mail-servgo.conf, .github/workflows/incident-fix-20261018.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: booking-production
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install -q --disable-pip-version-check 'paramiko==3.5.1'
+      - env:
+          SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+        run: python .github/incident/fix.py
