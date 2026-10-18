@@ -115,8 +115,8 @@ export function HomePage() {
           <footer className="bf-foot">
             <div className="bf-kicker">ServGo для бизнеса</div>
             <p className="bf-foot-pitch">
-              ИИ-платформа роста для бизнеса услуг: онлайн-запись, заполнение пустых окон, контент и ответы клиентам
-              в соцсетях, разведка конкурентов и аналитика — в одном месте.
+              ИИ-платформа роста для бизнеса услуг: онлайн-запись, заполнение пустых окон, смены и зарплата
+              сотрудников, контент и ответы клиентам в соцсетях, разведка конкурентов и аналитика — в одном месте.
             </p>
             <nav className="bf-chips" aria-label="Презентации ServGo по нишам">
               {nichePresentations.map((item) => (
@@ -127,6 +127,7 @@ export function HomePage() {
               <span>Связаться</span>
               <a href="mailto:grunvaldlab@gmail.com">grunvaldlab@gmail.com</a>
               <a href="tel:+79023911399">8 902 391-13-99</a>
+              <a href="https://t.me/servgo_smena_bot" target="_blank" rel="noopener noreferrer">Смены и зарплата — @servgo_smena_bot</a>
             </div>
           </footer>
         </div>
