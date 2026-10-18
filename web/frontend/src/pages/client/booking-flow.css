@@ -32,12 +32,12 @@ html.tg-webapp .bf-root { top: var(--tg-safe-top, 0px); }
 }
 
 /* ── Шапка ── */
-.bf-topbar { height: 46px; flex: 0 0 46px; display: flex; align-items: center; gap: 9px; padding: 0 17px; background: #fff; position: relative; z-index: 3; }
+.bf-topbar { height: 52px; flex: 0 0 52px; display: flex; align-items: center; gap: 9px; padding: 0 17px; background: #fff; position: relative; z-index: 3; }
 .bf-brand { display: flex; align-items: center; gap: 7px; min-width: 0; text-decoration: none; }
 .bf-brand-name { font-size: 18px; font-weight: 800; letter-spacing: -0.055em; color: #0D1B2A; line-height: 1; }
 .bf-brand-name > span { color: #2F5BEB; }
 .bf-spacer { flex: 1; }
-.bf-user { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 50%; background: #f5f8fc; color: #1e3146; text-decoration: none; flex-shrink: 0; }
+.bf-user { display: grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 50%; background: #f5f8fc; color: #1e3146; text-decoration: none; flex-shrink: 0; }
 .bf-user svg { width: 18px; height: 18px; }
 
 /* ── Экраны ── */
@@ -301,7 +301,7 @@ textarea.bf-input { height: auto; min-height: 40px; resize: vertical; }
 }
 
 /* ═══ Главная и страница бизнеса (тот же язык Air) ═══ */
-.bf-top-link { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 10px; border-radius: 16px; background: #f5f8fc; color: #2d4d74; font-size: 11.5px; font-weight: 500; text-decoration: none; }
+.bf-top-link { display: inline-flex; align-items: center; gap: 5px; min-height: 40px; padding: 0 10px; border-radius: 16px; background: #f5f8fc; color: #2d4d74; font-size: 11.5px; font-weight: 500; text-decoration: none; }
 .bf-top-link svg { width: 15px; height: 15px; }
 .bf-topbar .bf-user + .bf-brand { margin-left: 2px; }
 
@@ -425,3 +425,22 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
 .bf-chat-input button:disabled { background: #dfe7f1; color: #fff; cursor: not-allowed; }
 .bf-chat-input button svg { width: 17px; height: 17px; }
 @media (hover: none) and (pointer: coarse) { .bf-chat-input input { font-size: 16px; } }
+
+/* ── Каркас остальных клиентских экранов (ClientShell) ── */
+.bf-shell-page { gap: 0; }
+.bf-shell-head { padding: 6px 0 14px; }
+.bf-shell-page .ds-card { background: #f6f9fd; border: 0; box-shadow: none; border-radius: 18px; }
+.bf-account-actions { display: flex; flex-direction: column; gap: 4px; margin-top: 22px; }
+.bf-account-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 14px; border: 0; border-radius: 16px; background: #f6f9fd; color: var(--bf-ink); font-size: 15px; text-decoration: none; text-align: left; width: 100%; }
+.bf-account-row svg { width: 20px; height: 20px; color: var(--bf-muted); }
+.bf-account-row.danger, .bf-account-row.danger svg { color: #c24d4d; }
+
+.bf-notfound { justify-content: center; align-items: flex-start; }
+.bf-notfound-code { font-size: 64px; font-weight: 300; letter-spacing: -0.06em; color: #c3d8ef; line-height: 1; margin-bottom: 12px; }
+.bf-notfound-actions { display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 26px; }
+.bf-notfound-actions .bf-primary { flex: none; width: 100%; }
+.bf-notfound-link { display: grid; place-items: center; min-height: 48px; border-radius: 16px; background: #f3f8ff; color: var(--bf-blue-deep); text-decoration: none; font-size: 15px; }
+.bf-account-card { display: flex; flex-direction: column; gap: 4px; padding: 16px; border-radius: 18px; background: #f6f9fd; margin-bottom: 12px; }
+.bf-account-card strong { font-size: 17px; font-weight: 520; color: var(--bf-ink); overflow-wrap: anywhere; }
+.bf-account-card p { font-size: 13px; color: var(--bf-muted); line-height: 1.4; }
+.bf-account-card a { font-size: 14px; color: var(--bf-blue-deep); text-decoration: none; margin-top: 6px; }
