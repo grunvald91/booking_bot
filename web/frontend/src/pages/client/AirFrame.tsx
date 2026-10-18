@@ -46,12 +46,14 @@ export function AirFrame({
   label,
   backTo,
   tabs = false,
+  topExtra,
   overlay,
   children,
 }: {
   label: string
   backTo?: string
   tabs?: boolean
+  topExtra?: ReactNode
   overlay?: ReactNode
   children: ReactNode
 }) {
@@ -71,6 +73,7 @@ export function AirFrame({
           ) : null}
           <Link to="/" className="bf-brand" aria-label="ServGo — на главную"><Logo size={28} /></Link>
           <div className="bf-spacer" />
+          {topExtra}
           {isAdmin && (
             <Link to="/admin" className="bf-top-link"><LayoutDashboard />Кабинет</Link>
           )}
