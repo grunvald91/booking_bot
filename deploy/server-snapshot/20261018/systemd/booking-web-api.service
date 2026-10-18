@@ -1,0 +1,16 @@
+[Unit]
+Description=BookingBot Web API (FastAPI)
+After=network.target postgresql.service
+
+[Service]
+Type=exec
+User=root
+WorkingDirectory=/opt/booking_bot
+Environment=DATABASE_URL=<redacted>
+Environment=JWT_SECRET=<redacted>
+ExecStart=/opt/booking_bot/venv/bin/uvicorn web.api.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

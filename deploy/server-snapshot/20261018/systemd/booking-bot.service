@@ -1,0 +1,15 @@
+[Unit]
+Description=Telegram Booking Bot
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/booking_bot
+Environment="PATH=/opt/booking_bot/venv/bin"
+ExecStart=/opt/booking_bot/venv/bin/python -m bot.main
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
