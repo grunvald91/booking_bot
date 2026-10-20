@@ -163,7 +163,7 @@ def main():
         with c.open_sftp() as sftp:
             with sftp.open('/tmp/migrate_bot_files.py', 'w') as f:
                 f.write(REMOTE_PY)
-        stdin, out, err = c.exec_command('cd /opt/booking_bot && ./venv/bin/python /tmp/migrate_bot_files.py; rc=$?; rm -f /tmp/migrate_bot_files.py; exit $rc', timeout=1500)
+        stdin, out, err = c.exec_command('cd /opt/booking_bot && PYTHONPATH=/opt/booking_bot ./venv/bin/python /tmp/migrate_bot_files.py; rc=$?; rm -f /tmp/migrate_bot_files.py; exit $rc', timeout=1500)
         stdin.write(old + '\n'); stdin.flush(); stdin.channel.shutdown_write()
         text = out.read().decode(errors='replace')
         status = out.channel.recv_exit_status()
