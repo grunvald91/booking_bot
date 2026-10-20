@@ -12,17 +12,21 @@ class Pinned(paramiko.MissingHostKeyPolicy):
         client.get_host_keys().add(hostname, key.get_name(), key)
 
 REMOTE = r'''
-echo "== services"
-for u in booking-web-api booking-bot nginx postgresql; do printf "%s=" $u; systemctl is-active $u; done
-echo "== attention endpoint without login (401 = route alive)"
-curl -s -o /dev/null -w "local=%{http_code}\n" --max-time 10 http://127.0.0.1:8000/admin/prepayments/attention
-curl -sk -o /dev/null -w "public=%{http_code}\n" --max-time 10 --resolve servgo.ru:443:127.0.0.1 https://servgo.ru/api/admin/prepayments/attention
-echo "== attention requests in access log (status codes, last 2 days)"
-journalctl -u booking-web-api --since "2 days ago" --no-pager -o cat 2>/dev/null | grep -F "/admin/prepayments/attention" | grep -oE '" [0-9]{3}' | sort | uniq -c
-echo "== errors (last 2 days, tail)"
-journalctl -u booking-web-api --since "2 days ago" --no-pager -o cat 2>/dev/null | grep -nE "Traceback|Error|Exception|error" | tail -15
-echo "== last traceback"
-journalctl -u booking-web-api --since "2 days ago" --no-pager -o cat 2>/dev/null | awk '/Traceback/{buf=""; on=1} on{buf=buf"\n"$0} /^[A-Za-z_.]+(Error|Exception)/{if(on){last=buf; on=0}} END{print last}' | tail -45
+echo "== HTTP 500 by path (last 2 days)"
+journalctl -u booking-web-api --since "2 days ago" --no-pager -o cat 2>/dev/null | grep -E '" 500' | grep -oE '"(GET|POST|PUT|PATCH|DELETE) [^ ?"]+' | sed -E 's#/[0-9]+#/N#g' | sort | uniq -c | sort -rn | head -25
+echo "== HTTP 2xx booking-related (last 2 days)"
+journalctl -u booking-web-api --since "2 days ago" --no-pager -o cat 2>/dev/null | grep -E '" 20[01]' | grep -oE '"(GET|POST) [^ ?"]*(book|slot|schedule)[^ ?"]*' | sed -E 's#/[0-9]+#/N#g' | sort | uniq -c | sort -rn | head -10
+echo "== first 500 time"
+journalctl -u booking-web-api --since "4 days ago" --no-pager 2>/dev/null | grep -E 'resource_duration_minutes does not exist' | head -1 | cut -c1-16
+echo "== bot errors (last 2 days)"
+journalctl -u booking-bot --since "2 days ago" --no-pager -o cat 2>/dev/null | grep -cE 'resource_duration_minutes|occupies_resource'
+echo "== DB schema (read-only)"
+cd /tmp && sudo -u postgres psql -d booking_bot -At -c "select column_name from information_schema.columns where table_name='bookings' and column_name in ('resource_duration_minutes','occupies_resource','duration_minutes')" 2>&1 | head
+sudo -u postgres psql -d booking_bot -At -c "select 'btree_gist='||count(*) from pg_extension where extname='btree_gist'" 2>&1
+sudo -u postgres psql -d booking_bot -At -c "select 'available_btree_gist='||count(*) from pg_available_extensions where name='btree_gist'" 2>&1
+sudo -u postgres psql -d booking_bot -At -c "select 'bookings_total='||count(*) from bookings" 2>&1
+echo "== active overlaps that would block the DB constraint (read-only)"
+sudo -u postgres psql -d booking_bot -At -c "select 'overlap_pairs='||count(*) from bookings a join bookings b on a.employee_id=b.employee_id and a.id<b.id and a.booking_date=b.booking_date join services sa on sa.id=a.service_id join services sb on sb.id=b.service_id where a.employee_id is not null and a.status in ('pending','confirmed','pending_prepayment','prepayment_sent','prepayment_confirmed') and b.status in ('pending','confirmed','pending_prepayment','prepayment_sent','prepayment_confirmed') and not coalesce(sa.is_additional,false) and not coalesce(sb.is_additional,false) and tsrange(a.booking_date+a.booking_time, a.booking_date+a.booking_time+coalesce(a.duration_minutes,sa.duration_minutes,30)*interval '1 minute','[)') && tsrange(b.booking_date+b.booking_time, b.booking_date+b.booking_time+coalesce(b.duration_minutes,sb.duration_minutes,30)*interval '1 minute','[)')" 2>&1
 '''
 
 def main():
