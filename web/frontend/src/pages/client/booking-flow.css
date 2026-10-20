@@ -37,6 +37,7 @@ html.tg-webapp .bf-root { top: var(--tg-safe-top, 0px); }
 .bf-brand-name { font-size: 18px; font-weight: 800; letter-spacing: -0.055em; color: #0D1B2A; line-height: 1; }
 .bf-brand-name > span { color: #2F5BEB; }
 .bf-spacer { flex: 1; }
+.bf-topnav { display: none; }
 .bf-user { display: grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 50%; background: #f5f8fc; color: #1e3146; text-decoration: none; flex-shrink: 0; }
 .bf-user svg { width: 18px; height: 18px; }
 
@@ -445,3 +446,62 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
 .bf-account-card strong { font-size: 17px; font-weight: 520; color: var(--bf-ink); overflow-wrap: anywhere; }
 .bf-account-card p { font-size: 13px; color: var(--bf-muted); line-height: 1.4; }
 .bf-account-card a { font-size: 14px; color: var(--bf-blue-deep); text-decoration: none; margin-top: 6px; }
+
+/* ═════ Компьютер: полноэкранная версия вместо «телефона» по центру ═════
+   Телефон остаётся основной целью; ниже 1024px ничего не меняется. */
+@media (min-width: 1024px) {
+  .bf-root { padding: 0; background: #fff; --bf-w: 720px; }
+  .bf-device { max-width: none; height: 100%; border-radius: 0; box-shadow: none; }
+  .bf-topbar { height: 68px; flex-basis: 68px; gap: 28px; padding: 0 max(32px, calc((100% - 1180px) / 2)); border-bottom: 1px solid var(--bf-line); }
+  .bf-topnav { display: flex; align-items: center; gap: 4px; }
+  .bf-topnav-link { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 20px; color: #4d6178; font-size: 15px; text-decoration: none; transition: background 0.15s, color 0.15s; }
+  .bf-topnav-link:hover { background: #f3f7fc; color: var(--bf-ink); }
+  .bf-topnav-link.active { color: var(--bf-blue-deep); font-weight: 550; background: var(--bf-tint); }
+  .bf-top-link { font-size: 14px; padding: 0 14px; }
+  .bf-tabbar { display: none; }
+
+  /* Контент — колонка по центру; ширина задаётся --bf-w на экране */
+  .bf-inner, .bf-inside-nav, .bf-bottombar, .bf-screen > .bf-panel { padding-left: max(32px, calc((100% - var(--bf-w)) / 2)); padding-right: max(32px, calc((100% - var(--bf-w)) / 2)); }
+  .bf-screen > .bf-panel .bf-logo { left: max(32px, calc((100% - var(--bf-w)) / 2)); }
+  .bf-screen > .bf-hero { flex: 0 0 300px; width: min(var(--bf-w), calc(100% - 64px)); margin: 24px auto 0; border-radius: 24px; }
+  /* Крупнее шрифты: на компьютере экран дальше от глаз, чем телефон */
+  .bf-h1 { font-size: 30px; }
+  .bf-desc { font-size: 15px; }
+  .bf-choice-name, .bf-option-title { font-size: 15px; }
+  .bf-choice-details { font-size: 12px; }
+  .bf-option-meta { font-size: 12.5px; }
+  .bf-fact-text { font-size: 14px; }
+  .bf-primary { min-height: 48px; font-size: 15px; }
+  .bf-secondary { min-height: 48px; font-size: 14px; }
+  .bf-intro { font-size: 15px; line-height: 1.45; }
+  .bf-kicker { font-size: 11px; }
+  .bf-biz-line { font-size: 12.5px; }
+
+  /* Главная */
+  .bf-screen--home { --bf-w: 1180px; }
+  .bf-screen--home .bf-inner { padding-top: 40px; padding-bottom: 48px; }
+  .bf-screen--home .bf-h2 { font-size: 52px; line-height: 1.05; letter-spacing: -0.05em; }
+  .bf-screen--home .bf-intro { display: block; margin-top: 14px; max-width: 620px; font-size: 18px; }
+  .bf-screen--home .bf-kicker { margin: 40px 0 14px; font-size: 12px; }
+  .bf-screen--home .bf-list { grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+  .bf-screen--home .bf-biz, .bf-screen--home .bf-biz + .bf-biz { min-height: 96px; padding: 14px 16px; border: 1px solid var(--bf-line); border-radius: 18px; }
+  .bf-screen--home .bf-biz:hover { background: #f8fbff; border-color: #d7e5f5; }
+  .bf-screen--home .bf-thumb { width: 68px; height: 68px; border-radius: 16px; font-size: 26px; }
+  .bf-screen--home .bf-option-title { font-size: 16px; }
+  .bf-screen--home .bf-foot { margin-top: 56px; padding-top: 28px; }
+  .bf-screen--home .bf-foot-pitch { max-width: 760px; margin: 12px 0 18px; font-size: 16px; }
+  .bf-screen--home .bf-chips { gap: 8px; }
+  .bf-screen--home .bf-chip { min-height: 38px; padding: 8px 15px; font-size: 13.5px; }
+  .bf-screen--home .bf-chip:hover { background: var(--bf-tint); }
+  .bf-screen--home .bf-contacts { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 6px 22px; margin-top: 22px; font-size: 14px; }
+  .bf-screen--home .bf-contacts span { font-size: 12px; }
+
+  /* Страница бизнеса */
+  .bf-screen--business { --bf-w: 880px; }
+  .bf-screen--business .bf-inner.bf-page--flush { padding-top: 24px; }
+  .bf-screen--business .bf-page-hero { height: 360px; border-radius: 24px; }
+  .bf-screen--business .bf-bottombar { justify-content: flex-end; border-top: 1px solid var(--bf-line); }
+  .bf-screen--business .bf-bottombar .bf-primary { flex: 0 0 auto; min-width: 260px; }
+  .bf-screen--business .bf-bottombar .bf-secondary { flex: 0 0 auto; }
+  .bf-biz:hover, .bf-option--link:hover, button.bf-option:hover { background: #f8fbff; }
+}

@@ -46,7 +46,7 @@ export function HomePage() {
 
   return (
     <AirFrame label="ServGo — онлайн-запись" tabs>
-      <section className="bf-screen" aria-label="Главная">
+      <section className="bf-screen bf-screen--home" aria-label="Главная">
         <div className="bf-inner bf-page">
           <h1 className="bf-h2">Онлайн-запись<br /><span className="bf-accent">на услуги</span></h1>
           <p className="bf-intro">Выберите место и запишитесь на удобное время — без звонков.</p>

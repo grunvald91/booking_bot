@@ -110,7 +110,7 @@ export function BusinessPage() {
   if (loading) {
     return (
       <AirFrame label="Загрузка" backTo="/">
-        <section className="bf-screen" aria-busy="true">
+        <section className="bf-screen bf-screen--business" aria-busy="true">
           <div className="bf-page-hero bf-skel" />
           <div className="bf-inner bf-page">
             <span className="bf-skel" style={{ width: '58%', height: 20, marginTop: 14 }} />
@@ -155,7 +155,7 @@ export function BusinessPage() {
         <ResourceSheet emp={selectedEmp} isVenue={isVenue} businessId={business.id} onClose={() => setSelectedEmp(null)} />
       )}
     >
-      <section className="bf-screen" aria-label={business.name}>
+      <section className="bf-screen bf-screen--business" aria-label={business.name}>
         <div className="bf-inner bf-page bf-page--flush">
           <div className="bf-page-hero">
             {cover ? <img src={photoSrc(cover)} alt={business.name} /> : <HeroArt />}

@@ -72,6 +72,15 @@ export function AirFrame({
             <button type="button" className="bf-user" onClick={() => navigate(backTo)} aria-label="Назад"><ArrowLeft /></button>
           ) : null}
           <Link to="/" className="bf-brand" aria-label="ServGo — на главную"><Logo size={28} /></Link>
+          {tabs && (
+            <nav className="bf-topnav" aria-label="Разделы">
+              {TABS.map(({ to, label: tabLabel }) => (
+                <Link key={to} to={to} className={`bf-topnav-link${pathname === to ? ' active' : ''}`} aria-current={pathname === to ? 'page' : undefined}>
+                  {tabLabel}
+                </Link>
+              ))}
+            </nav>
+          )}
           <div className="bf-spacer" />
           {topExtra}
           {isAdmin && (
