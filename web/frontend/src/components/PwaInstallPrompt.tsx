@@ -28,7 +28,9 @@ export function PwaInstallPrompt() {
     }
   }, [])
 
-  if (dismissed || isStandalonePwa() || (!installEvent && !iosHint)) return null
+  // На компьютере приложение не предлагаем: сайт открывается в браузере в полном виде.
+  const isDesktop = window.matchMedia?.('(hover: hover) and (pointer: fine)').matches ?? false
+  if (isDesktop || dismissed || isStandalonePwa() || (!installEvent && !iosHint)) return null
 
   const dismiss = () => {
     sessionStorage.setItem('servgo-install-dismissed', '1')
