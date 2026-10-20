@@ -5,14 +5,10 @@ import { isStandalonePwa, type BeforeInstallPromptEvent } from '../utils/pwa'
 export function PwaInstallPrompt() {
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null)
   const [dismissed, setDismissed] = useState(() => sessionStorage.getItem('servgo-install-dismissed') === '1')
-  const [iosHint, setIosHint] = useState(false)
+  const [iosHint] = useState(() => /iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()))
 
   useEffect(() => {
     if (isStandalonePwa()) return
-
-    const ua = navigator.userAgent.toLowerCase()
-    const isiOS = /iphone|ipad|ipod/.test(ua)
-    setIosHint(isiOS)
 
     const onBeforeInstall = (event: Event) => {
       event.preventDefault()

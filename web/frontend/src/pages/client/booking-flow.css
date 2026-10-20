@@ -463,7 +463,16 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
   /* Контент — колонка по центру; ширина задаётся --bf-w на экране */
   .bf-inner, .bf-inside-nav, .bf-bottombar, .bf-screen > .bf-panel { padding-left: max(32px, calc((100% - var(--bf-w)) / 2)); padding-right: max(32px, calc((100% - var(--bf-w)) / 2)); }
   .bf-screen > .bf-panel .bf-logo { left: max(32px, calc((100% - var(--bf-w)) / 2)); }
-  .bf-screen > .bf-hero { height: 300px; flex-basis: 300px; }
+  .bf-screen > .bf-hero { flex: 0 0 300px; width: min(var(--bf-w), calc(100% - 64px)); margin: 24px auto 0; border-radius: 24px; }
+  /* Крупнее шрифты: на компьютере экран дальше от глаз, чем телефон */
+  .bf-h1 { font-size: 30px; }
+  .bf-desc { font-size: 15px; }
+  .bf-choice-name, .bf-option-title { font-size: 15px; }
+  .bf-choice-details { font-size: 12px; }
+  .bf-option-meta { font-size: 12.5px; }
+  .bf-fact-text { font-size: 14px; }
+  .bf-primary { min-height: 48px; font-size: 15px; }
+  .bf-secondary { min-height: 48px; font-size: 14px; }
   .bf-intro { font-size: 15px; line-height: 1.45; }
   .bf-kicker { font-size: 11px; }
   .bf-biz-line { font-size: 12.5px; }
