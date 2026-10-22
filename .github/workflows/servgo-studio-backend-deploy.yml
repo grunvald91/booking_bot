@@ -9,6 +9,11 @@ on:
         required: true
         type: boolean
         default: false
+  # Read-only preflight on pushes of this branch (a manual run needs the file on the default branch).
+  push:
+    branches: [ops/studio-backend-deploy]
+    paths:
+      - .github/workflows/servgo-studio-backend-deploy.yml
 permissions:
   contents: read
 concurrency:
