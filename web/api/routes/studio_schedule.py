@@ -37,6 +37,8 @@ class BookingRow(BaseModel):
     client_phone: Optional[str] = None
     client_email: Optional[str] = None
     price: Optional[int] = None
+    # False for add-ons booked together with a main service: they do not take the master's or hall's time.
+    occupies_resource: bool = True
 
 
 class ResourceOut(BaseModel):
@@ -108,7 +110,7 @@ async def studio_schedule(
         duration_minutes=booking.duration_minutes or booking.resource_duration_minutes,
         status=booking.status, service=service.name, resource=employee.name if employee else None,
         client_name=client.full_name, client_phone=client.phone, client_email=client.email,
-        price=booking.estimated_price,
+        price=booking.estimated_price, occupies_resource=bool(booking.occupies_resource),
     ) for booking, service, employee, client in rows]
 
     free_slots: list[FreeSlots] = []
@@ -118,9 +120,15 @@ async def studio_schedule(
         day = date_from
         while day <= date_to:
             for resource in (resources or [None]):
+                # A hall with a minimum rental time has no free start shorter than that minimum, so the window asked
+                # for is at least that long; otherwise the platform's own step is used.
+                minutes = slot_minutes
+                if minutes is None and resource is not None and resource.min_booking_minutes:
+                    step = resource.booking_interval_minutes or business.booking_interval_minutes or 30
+                    minutes = max(step, resource.min_booking_minutes)
                 slots = await get_slots(
                     business_id=business_id, date=day, service_id=None,
-                    employee_id=resource.id if resource else None, duration_minutes=slot_minutes,
+                    employee_id=resource.id if resource else None, duration_minutes=minutes,
                     include_unavailable=False, exclude_booking_id=None, db=db)
                 free_slots.append(FreeSlots(
                     date=day.isoformat(), resource_id=resource.id if resource else None,

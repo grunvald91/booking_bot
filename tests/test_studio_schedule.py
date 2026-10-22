@@ -148,6 +148,24 @@ class StudioScheduleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((slot['date'], slot['resource']), (self.day.isoformat(), 'Мария'))
         self.assertEqual(slot['times'], ['11:00', '13:00'])
 
+    async def test_hall_with_a_minimum_rental_time_still_has_free_windows(self):
+        """Step 60 minutes, minimum 120: windows of 120 minutes are looked for, not none at all."""
+        async with self.sessions() as db:
+            (await db.get(Employee, self.master_id)).min_booking_minutes = 120
+            (await db.get(Business, self.business_id)).working_hours_end = time(18, 0)
+            await db.commit()
+        slot = self.ask(with_slots=True).json()['free_slots'][0]
+        self.assertEqual(slot['times'], ['13:00', '14:00', '15:00', '16:00'])
+
+    async def test_add_ons_are_marked_as_not_taking_time(self):
+        async with self.sessions() as db:
+            booking = (await db.scalars(select(Booking).where(Booking.status == 'confirmed').order_by(Booking.id))).first()
+            booking.occupies_resource = False
+            await db.commit()
+        rows = {item['time']: item for item in self.ask().json()['bookings']}
+        self.assertFalse(rows['10:00']['occupies_resource'])
+        self.assertTrue(rows['11:00']['occupies_resource'])
+
     async def test_no_slots_unless_asked(self):
         self.assertEqual(self.ask().json()['free_slots'], [])
 
