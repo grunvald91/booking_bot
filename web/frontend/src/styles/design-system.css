@@ -494,3 +494,54 @@ textarea.ds-input { resize: vertical; min-height: 70px; }
   /* Формы: не растягивать поля во всю ширину широкого экрана */
   .ds-form-narrow { max-width: 640px; }
 }
+
+/* ─────────────── 12. ГЛАВНАЯ АДМИНКИ: десктоп по логике телефона ───────────────
+   Телефон: сверху информация, рабочая часть ниже. Десктоп: те же блоки, но в одну
+   видимую сетку без прокрутки — цифры сверху, ближайшие записи слева, действия справа. */
+.ds-bottomnav .ds-desk-only { display: none; }
+.dash-more-row, .dash-status-word, .dash-context-all { display: none; }
+.ds-bn-group { font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--s-muted-2); padding: 16px 14px 4px; }
+
+@media (min-width: 900px) {
+  .ds-bottomnav { overflow-y: auto; }
+  .ds-bottomnav .ds-desk-only { display: flex; }
+  .ds-bottomnav .ds-bn-group.ds-desk-only { display: block; }
+  .ds-bottomnav .ds-mobile-only { display: none; }
+
+  .dash-page {
+    display: grid; align-items: start; gap: 16px 20px;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas: "stats stats" "context ai" "context photos";
+  }
+  .dash-page .dash-stats { grid-area: stats; grid-template-columns: repeat(4, 1fr) !important; gap: 12px !important; }
+  .dash-stat { padding: 16px 18px !important; min-height: 104px !important; transition: background 0.15s ease; }
+  .dash-stat:hover { background: var(--s-surface-3); }
+  .dash-stat .ds-sub { font-size: 13px !important; }
+  .dash-stat > div:last-child { font-size: 32px !important; }
+
+  .dash-context { grid-area: context; max-width: none; padding: 22px; border-radius: 22px; background: var(--s-surface-2); gap: 12px; }
+  .dash-context .ds-context-hero { min-height: 0; gap: 22px; }
+  .dash-context .ds-context-art { width: 190px; height: auto; min-height: 220px; flex: none; }
+  .dash-context .ds-context-hero-text { justify-content: flex-start; gap: 4px; }
+  .dash-context .ds-context-headline { margin-bottom: 6px; }
+  .dash-context .ds-context-line { font-size: 14.5px; padding: 10px 12px; margin: 0 -12px; border-radius: var(--r-lg); transition: background 0.15s ease; }
+  .dash-context .ds-context-line:hover { background: var(--s-surface-3); }
+  .dash-context .ds-context-line strong { font-size: 17px; min-width: 52px; }
+  .dash-context .ds-context-help { font-size: 14px; }
+  .dash-more-row { display: flex; }
+  .dash-status-word { display: block; font-size: 12.5px; color: var(--s-muted); white-space: nowrap; }
+  .dash-context-all { display: inline-flex; align-self: flex-start; margin-top: 6px; color: var(--s-accent); font-size: 14px; font-weight: 480; text-decoration: none; }
+  .dash-context-all:hover { text-decoration: underline; }
+
+  .dash-ai { grid-area: ai; margin: 0 !important; }
+  .dash-photos { grid-area: photos; margin-top: 0 !important; }
+}
+
+/* Узкий десктоп (900–1199px): правая колонка уже, декоративная картинка скрыта — всё остаётся в одном экране. */
+@media (min-width: 900px) and (max-width: 1199px) {
+  .dash-page { grid-template-columns: minmax(0, 1fr) 250px; }
+  .dash-context .ds-context-art { display: none; }
+  .dash-stat { padding: 14px !important; }
+  .dash-stat > div:last-child { font-size: 25px !important; white-space: nowrap; }
+}
