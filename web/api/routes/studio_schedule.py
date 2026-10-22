@@ -68,9 +68,9 @@ def _hours(start, end) -> Optional[str]:
 @router.get("/internal/studio/schedule", response_model=ScheduleOut)
 async def studio_schedule(
     business_id: int,
-    user_id: int,
     date_from: date,
     date_to: date,
+    user_id: Optional[int] = None,
     with_slots: bool = Query(False),
     slot_minutes: Optional[int] = Query(None, ge=1, le=24 * 60),
     x_studio_key: str = Header(default=""),
@@ -80,7 +80,9 @@ async def studio_schedule(
     free start times for each day and resource."""
     if not hmac.compare_digest(x_studio_key.encode(), _secret("STUDIO_INTERNAL_KEY")):
         raise HTTPException(status_code=403, detail="Forbidden")
-    if await studio_role(db, user_id, business_id) is None:
+    # With a user id the person's access is re-checked right now (signed in from ServGo). Without one the studio
+    # answers for a company that its operator linked to this business by hand, and has already checked the sign-in.
+    if user_id is not None and await studio_role(db, user_id, business_id) is None:
         raise HTTPException(status_code=403, detail="Forbidden")
     if date_to < date_from:
         raise HTTPException(status_code=422, detail="date_to is before date_from")

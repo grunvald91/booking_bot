@@ -79,6 +79,8 @@ class StudioScheduleTest(unittest.IsolatedAsyncioTestCase):
     def ask(self, user_id=None, business_id=None, key=KEY, **extra):
         params = {'business_id': business_id or self.business_id, 'user_id': user_id or self.owner_id,
                   'date_from': self.day.isoformat(), 'date_to': self.day.isoformat(), **extra}
+        if user_id == 0:
+            del params['user_id']
         return self.client.get('/internal/studio/schedule', headers={'X-Studio-Key': key}, params=params)
 
     async def test_returns_the_days_bookings_with_client_contacts(self):
@@ -114,6 +116,13 @@ class StudioScheduleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.ask(user_id=self.stranger_id).status_code, 403)
         # the owner owns both businesses, but a stranger asking for the other one is refused as well
         self.assertEqual(self.ask(user_id=self.stranger_id, business_id=self.other_id).status_code, 403)
+
+    async def test_without_a_person_the_key_alone_is_enough_for_a_linked_company(self):
+        self.assertEqual(self.ask(user_id=0).status_code, 200)
+        self.assertEqual(self.ask(user_id=0, key='x' * 40).status_code, 403)
+
+    async def test_unknown_business_is_not_found(self):
+        self.assertEqual(self.ask(user_id=0, business_id=9999).status_code, 404)
 
     async def test_off_without_secrets(self):
         with mock.patch.dict(os.environ, {'STUDIO_INTERNAL_KEY': ''}):
