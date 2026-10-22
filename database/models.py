@@ -222,6 +222,8 @@ class Business(Base):
     legal_address: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     legal_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     legal_documents_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Владелец разрешает администраторам заведения входить в маркетинговую студию (growth.servgo.ru).
+    studio_admin_access: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     ai_instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # AI-инструкция для бизнеса
     sales_agent_settings: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)

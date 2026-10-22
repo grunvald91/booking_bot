@@ -16,6 +16,7 @@ import {
   User as UserIcon,
   ImagePlus,
   ShieldCheck,
+  Sparkles,
 } from 'lucide-react'
 import { api, type BusinessUpdateData, type OwnerInfo, type Employee } from '../../api/client'
 
@@ -204,6 +205,7 @@ export function SettingsPage() {
           legal_address: biz.legal_address || '',
           legal_email: biz.legal_email || '',
           legal_documents_enabled: biz.legal_documents_enabled ?? false,
+          studio_admin_access: biz.studio_admin_access ?? false,
           booking_labels: biz.booking_labels || {},
           booking_flow_order: biz.booking_flow_order || 'service_first',
           owner_reminders_enabled: biz.owner_reminders_enabled ?? true,
@@ -282,6 +284,21 @@ export function SettingsPage() {
       alert('Ошибка при сохранении сценария: ' + (e instanceof Error ? e.message : String(e)))
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Включатель доступа администраторов в студию: сохраняется сразу, при ошибке возвращается назад.
+  const handleStudioAccess = async (value: boolean) => {
+    if (!businessId) return
+    const before = form.studio_admin_access ?? false
+    setForm((prev) => ({ ...prev, studio_admin_access: value }))
+    try {
+      const updated = await api.updateBusiness(businessId, { studio_admin_access: value })
+      setForm((prev) => ({ ...prev, studio_admin_access: updated.studio_admin_access ?? value }))
+      showToast(value ? 'Администраторы допущены в маркетинг' : 'Доступ администраторов закрыт')
+    } catch (e) {
+      setForm((prev) => ({ ...prev, studio_admin_access: before }))
+      alert('Не удалось сохранить: ' + (e instanceof Error ? e.message : String(e)))
     }
   }
 
@@ -1200,6 +1217,22 @@ export function SettingsPage() {
           <button onClick={handleSaveLegal} disabled={saving} className="ds-btn ds-btn--primary ds-btn--block" style={{ marginTop: 14 }}>
             {saving ? 'Сохранение...' : 'Сохранить юридические данные'}
           </button>
+        </section>
+
+        {/* === Маркетинг: доступ администраторов в студию === */}
+        <section style={{ padding: '10px 2px 14px', borderBottom: '1px solid var(--s-line)' }}>
+          <h2 className="ds-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <Sparkles size={18} style={{ color: 'var(--s-accent)' }} />
+            Маркетинг (AI Growth OS)
+          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div>
+              <div className="ds-text" style={{ fontWeight: 600 }}>Пускать администраторов в маркетинговую студию</div>
+              <p className="ds-caption" style={{ marginTop: 3 }}>Администраторы заведения смогут работать с постами, контент-планом и видео. Управлять доступом и удалять компанию можете только вы.</p>
+            </div>
+            <Toggle checked={form.studio_admin_access ?? false} onChange={handleStudioAccess} />
+          </div>
+          {businessId && <p className="ds-caption" style={{ marginTop: 10 }}>Номер вашего заведения для подключения к студии: <b>{businessId}</b></p>}
         </section>
 
         {/* === 3. Prepayment Settings === */}

@@ -200,6 +200,7 @@ export interface BusinessDetail extends Business {
   booking_labels?: Record<string, string>;
   booking_flow_order?: 'service_first' | 'resource_first';
   allow_multiple_services?: boolean;
+  studio_admin_access?: boolean;
 }
 
 export interface Booking {
@@ -420,6 +421,7 @@ export interface BusinessAdminDetail {
   booking_labels?: Record<string, string>;
   booking_flow_order?: 'service_first' | 'resource_first';
   allow_multiple_services?: boolean;
+  studio_admin_access?: boolean;
   owner_reminders_enabled: boolean;
   owner_reminder_minutes: number[];
   master_reminders_enabled: boolean;
@@ -452,6 +454,7 @@ export interface BusinessUpdateData {
   booking_labels?: Record<string, string>;
   booking_flow_order?: 'service_first' | 'resource_first';
   allow_multiple_services?: boolean;
+  studio_admin_access?: boolean;
   owner_reminders_enabled?: boolean;
   owner_reminder_minutes?: number[];
   master_reminders_enabled?: boolean;
@@ -795,6 +798,10 @@ export const api = {
     request<Business[]>('/admin/businesses'),
   getBusinessDetail: (bizId: number) =>
     request<BusinessAdminDetail>(`/admin/businesses/${bizId}/detail`),
+  studioBusinesses: () => request<{ id: number; name: string; role: string }[]>('/studio/businesses'),
+  studioTicket: (businessId: number) =>
+    request<{ url: string; expires_in: number }>('/studio/ticket', { method: 'POST', body: JSON.stringify({ business_id: businessId }) }),
+
   updateBusiness: (bizId: number, data: BusinessUpdateData) =>
     request<BusinessAdminDetail>(`/admin/businesses/${bizId}`, {
       method: 'PUT',

@@ -7,6 +7,8 @@ import {
   MoreHorizontal, BarChart3, Repeat, Bot, Mail, Sparkles, X, ChevronRight,
 } from 'lucide-react'
 import { useTheme } from '../hooks/useTheme'
+import { useAdminBusiness } from '../hooks/useAdminBusiness'
+import { api } from '../api/client'
 
 // Нижняя панель: пять пунктов, которые нужны каждый день. Всё остальное —
 // в «Ещё», чтобы любой раздел был доступен с телефона.
@@ -98,6 +100,20 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
   const [moreOpen, setMoreOpen] = useState(false)
   const moreActive = MORE.some(item => item.to === pathname)
   const handleLogout = onLogout
+  const { selectedId } = useAdminBusiness()
+  const [studioBusy, setStudioBusy] = useState(false)
+  // Одноразовая ссылка на 60 секунд: студия сама узнаёт, кто вы и к какому заведению можно.
+  // Если вход пока не настроен или не получился — открываем обычный вход в студию, как раньше.
+  const openStudio = async () => {
+    if (studioBusy) return
+    setStudioBusy(true)
+    try {
+      const { url } = await api.studioTicket(selectedId as number)
+      window.location.assign(url)
+    } catch {
+      window.location.assign('https://growth.servgo.ru/studio')
+    }
+  }
   return (
     <>
         <nav className="ds-bottomnav">
@@ -115,10 +131,10 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
               <span>{label}</span>
             </Link>
           ))}
-          <a href="https://growth.servgo.ru/studio" className="ds-bn ds-desk-only">
+          <button type="button" className="ds-bn ds-desk-only" onClick={openStudio} disabled={studioBusy}>
             <Sparkles size={21} />
             <span>AI Growth OS</span>
-          </a>
+          </button>
           <button type="button" className={`ds-bn ds-mobile-only${moreActive || moreOpen ? ' active' : ''}`}
             onClick={() => setMoreOpen(true)} aria-haspopup="dialog" aria-expanded={moreOpen}>
             <MoreHorizontal size={21} />
@@ -140,9 +156,9 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
                     <Icon size={20} /><span>{label}</span><ChevronRight size={17} className="ds-more-chev" />
                   </Link>
                 ))}
-                <a className="ds-more-item" href="https://growth.servgo.ru/studio">
+                <button type="button" className="ds-more-item" onClick={openStudio} disabled={studioBusy}>
                   <Sparkles size={20} /><span>Маркетинг — AI Growth OS</span><ChevronRight size={17} className="ds-more-chev" />
-                </a>
+                </button>
                 <button type="button" className="ds-more-item" onClick={toggleTheme}>
                   {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
                   <span>{theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}</span>
