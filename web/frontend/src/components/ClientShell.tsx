@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { AirFrame } from '../pages/client/AirFrame'
+import { StudioEntry } from './StudioEntry'
 
 /**
  * Каркас остальных клиентских экранов (записи, абонементы, статус записи,
@@ -11,12 +12,15 @@ export function ClientShell({
   subtitle,
   backTo,
   headerExtra,
+  studioEntry,
   children,
 }: {
   title?: string
   subtitle?: ReactNode
   backTo?: string
   headerExtra?: ReactNode
+  /** Показать вход в маркетинговую студию (если он открыт этому человеку). */
+  studioEntry?: boolean
   children: ReactNode
 }) {
   return (
@@ -29,6 +33,7 @@ export function ClientShell({
               {subtitle != null && <div className="bf-intro">{subtitle}</div>}
             </header>
           )}
+          {studioEntry && <StudioEntry />}
           {children}
         </div>
       </section>

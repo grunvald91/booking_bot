@@ -499,7 +499,7 @@ export function MyBookingsPage() {
   // ── Loading state ──
   if (loading) {
     return (
-      <ClientShell title="Мои записи">
+      <ClientShell title="Мои записи" studioEntry>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 14 }}>
           {[1, 2, 3].map((i) => (
             <div key={i} className="skeleton" style={{ height: 84, borderRadius: 'var(--r-lg)' }} />
@@ -511,7 +511,7 @@ export function MyBookingsPage() {
 
   if (loadError) {
     return (
-      <ClientShell title="Мои записи">
+      <ClientShell title="Мои записи" studioEntry>
         <div role="alert" className="ds-card" style={{ marginTop: 24, padding: 20 }}>
           <h2 className="ds-h2">Записи временно недоступны</h2>
           <p className="ds-sub" style={{ margin: '12px 0' }}>{loadError}</p>
@@ -527,7 +527,7 @@ export function MyBookingsPage() {
   // ── Empty state ──
   if (bookings.length === 0) {
     return (
-      <ClientShell title="Мои записи">
+      <ClientShell title="Мои записи" studioEntry>
         <div style={{ textAlign: 'center', padding: '64px 16px' }}>
           <div
             style={{
@@ -667,7 +667,7 @@ export function MyBookingsPage() {
   }
 
   return (
-    <ClientShell title="Мои записи">
+    <ClientShell title="Мои записи" studioEntry>
       <NotificationSetup />
       {renderSection('Сегодня', groupedBookings.today)}
       {renderSection('Предстоящие', groupedBookings.upcoming)}

@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.models import Base, User, Business, BusinessOwner, Employee
+from database.models import Base, User, Business, BusinessOwner, Employee, Service
 from web.api.database import get_db
 from web.api.deps import get_current_admin, get_current_user
 from web.api.routes import admin, studio_sso
@@ -175,6 +175,54 @@ class StudioSsoTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.access('admin').json()['allowed'])
         detail = self.client.get(f'/admin/businesses/{self.business_id}/detail').json()
         self.assertTrue(detail['studio_admin_access'])
+
+    async def test_the_entry_list_shows_only_what_the_person_can_open(self):
+        self.current = 'admin'
+        self.assertEqual(self.client.get('/studio/businesses').json(), [])
+        await self.set_flag(True)
+        self.assertEqual(self.client.get('/studio/businesses').json(),
+                         [{'id': self.business_id, 'name': 'Салон', 'role': 'administrator'}])
+        self.current = 'owner'
+        self.assertEqual([b['role'] for b in self.client.get('/studio/businesses').json()], ['owner'])
+        for who in ('stranger', 'master', 'inactive'):
+            self.current = who
+            self.assertEqual(self.client.get('/studio/businesses').json(), [])
+
+    async def test_the_entry_list_is_empty_while_sign_in_is_not_configured(self):
+        with mock.patch.dict(os.environ, {'STUDIO_SSO_SECRET': '', 'STUDIO_INTERNAL_KEY': ''}):
+            self.current = 'owner'
+            self.assertEqual(self.client.get('/studio/businesses').json(), [])
+
+    def profile(self, who, key=KEY, business_id=None):
+        return self.client.get('/internal/studio/business', headers={'X-Studio-Key': key},
+                               params={'user_id': self.u[who], 'business_id': business_id or self.business_id})
+
+    async def test_company_data_goes_only_to_owners_and_only_what_is_public(self):
+        async with self.sessions() as db:
+            business = await db.get(Business, self.business_id)
+            business.address = 'Сочи, Навагинская 1'
+            business.payment_details = 'КАРТА 1111 2222 3333 4444'
+            business.payment_phone = '+79990000000'
+            db.add_all([Service(business_id=self.business_id, name='Стрижка', duration_minutes=60, price=2500, is_active=True),
+                        Service(business_id=self.business_id, name='Скрытая', duration_minutes=30, price=1, is_active=False),
+                        Service(business_id=self.business_id, name='Доп', duration_minutes=0, price=5, is_active=True, is_additional=True)])
+            await db.commit()
+        response = self.profile('owner')
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['name'], 'Салон')
+        self.assertEqual([s['name'] for s in data['services']], ['Стрижка'])
+        self.assertNotIn('1111', response.text)
+        self.assertNotIn('79990000000', response.text)
+        self.assertEqual(self.profile('co').status_code, 200)
+
+    async def test_company_data_is_refused_to_administrators_strangers_and_wrong_key(self):
+        await self.set_flag(True)
+        self.assertEqual(self.profile('admin').status_code, 403)
+        self.assertEqual(self.profile('stranger').status_code, 403)
+        self.assertEqual(self.profile('owner', key='wrong').status_code, 403)
+        with mock.patch.dict(os.environ, {'STUDIO_INTERNAL_KEY': ''}):
+            self.assertEqual(self.profile('owner').status_code, 503)
 
     async def test_the_switch_is_off_by_default(self):
         detail = self.client.get(f'/admin/businesses/{self.business_id}/detail').json()
