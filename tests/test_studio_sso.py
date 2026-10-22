@@ -216,6 +216,16 @@ class StudioSsoTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('79990000000', response.text)
         self.assertEqual(self.profile('co').status_code, 200)
 
+    async def test_rental_halls_are_sent_but_people_never_are(self):
+        self.assertEqual(self.profile('owner').json()['resources'], [])  # a salon: employees are people
+        async with self.sessions() as db:
+            (await db.get(Business, self.business_id)).business_type = 'venue_rental'
+            db.add(Employee(business_id=self.business_id, name='Зал Лофт', role='master', is_active=True, capacity=20))
+            await db.commit()
+        names = [r['name'] for r in self.profile('owner').json()['resources']]
+        self.assertIn('Зал Лофт', names)
+        self.assertNotIn('A', names)  # the administrator is a person, not a hall
+
     async def test_company_data_is_refused_to_administrators_strangers_and_wrong_key(self):
         await self.set_flag(True)
         self.assertEqual(self.profile('admin').status_code, 403)

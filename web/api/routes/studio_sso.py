@@ -149,6 +149,15 @@ class ServiceOut(BaseModel):
     tariff: Optional[str] = None
     duration_minutes: Optional[int] = None
     price: Optional[int] = None
+    per_person: bool = False
+
+
+class ResourceOut(BaseModel):
+    """A hall, boat or room of a rental business — shown to clients on the booking page."""
+    name: str
+    capacity: Optional[int] = None
+    area_sqm: Optional[int] = None
+    description: Optional[str] = None
 
 
 class BusinessProfileOut(BaseModel):
@@ -161,6 +170,7 @@ class BusinessProfileOut(BaseModel):
     break_hours: Optional[str] = None
     prepayment_percent: Optional[int] = None
     services: list[ServiceOut]
+    resources: list[ResourceOut] = []
 
 
 def _hours(start, end) -> Optional[str]:
@@ -181,11 +191,21 @@ async def studio_business(business_id: int, user_id: int, x_studio_key: str = He
     services = (await db.scalars(select(Service).where(
         Service.business_id == business_id, Service.is_active.is_(True), Service.is_additional.is_(False)
     ).order_by(Service.sort_order, Service.id))).all()
+    resources = []
+    if business.business_type == "venue_rental":
+        # Rental halls are stored as employees; for other businesses employees are people and are not sent.
+        halls = (await db.scalars(select(Employee).where(
+            Employee.business_id == business_id, Employee.is_active.is_(True), Employee.role != "administrator"
+        ).order_by(Employee.id))).all()
+        resources = [ResourceOut(name=hall.name, capacity=hall.capacity, area_sqm=hall.area_sqm,
+                                 description=hall.description) for hall in halls]
     return BusinessProfileOut(
+        resources=resources,
         name=business.name, business_type=business.business_type, description=business.description,
         address=business.address, phone=business.phone,
         working_hours=_hours(business.working_hours_start, business.working_hours_end),
         break_hours=_hours(business.break_start, business.break_end),
         prepayment_percent=business.prepayment_percent if business.prepayment_enabled else None,
         services=[ServiceOut(name=item.name, description=item.description, tariff=item.tariff_description,
-                             duration_minutes=item.duration_minutes or None, price=item.price) for item in services])
+                             duration_minutes=item.duration_minutes or None, price=item.price,
+                             per_person=item.pricing_type == "per_person") for item in services])
