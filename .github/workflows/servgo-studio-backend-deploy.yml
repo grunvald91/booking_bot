@@ -25,7 +25,8 @@ jobs:
     timeout-minutes: 10
     env:
       SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
-      APPLY: ${{ inputs.apply }}
+      # A push to this branch applies only when its commit message carries the marker; otherwise read-only.
+      APPLY: ${{ inputs.apply || contains(github.event.head_commit.message, '[apply-studio-backend]') }}
     steps:
       - uses: actions/checkout@v4
         with:
