@@ -1232,6 +1232,7 @@ export function SettingsPage() {
             </div>
             <Toggle checked={form.studio_admin_access ?? false} onChange={handleStudioAccess} />
           </div>
+          {businessId && <p className="ds-caption" style={{ marginTop: 10 }}>Номер вашего заведения для подключения к студии: <b>{businessId}</b></p>}
         </section>
 
         {/* === 3. Prepayment Settings === */}
