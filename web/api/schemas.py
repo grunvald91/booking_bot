@@ -475,6 +475,7 @@ class BusinessUpdateIn(BaseModel):
     booking_labels: Optional[dict[str, str]] = None
     booking_flow_order: Optional[str] = None
     allow_multiple_services: Optional[bool] = None
+    studio_admin_access: Optional[bool] = None
     owner_reminders_enabled: Optional[bool] = None
     owner_reminder_minutes: Optional[List[int]] = None
     master_reminders_enabled: Optional[bool] = None
@@ -512,6 +513,7 @@ class BusinessAdminDetailOut(BaseModel):
     booking_labels: dict[str, str] = Field(default_factory=dict)
     booking_flow_order: str = "service_first"
     allow_multiple_services: bool = False
+    studio_admin_access: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
