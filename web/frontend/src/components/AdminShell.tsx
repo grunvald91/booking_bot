@@ -37,11 +37,14 @@ export function AdminShell({
   title,
   subtitle,
   headerExtra,
+  pageClassName,
   children,
 }: {
   title: string
   subtitle?: ReactNode
   headerExtra?: ReactNode
+  /** Доп. класс страницы: на десктопе позволяет собрать свою сетку вместо телефонной колонки. */
+  pageClassName?: string
   children: ReactNode
 }) {
   const [theme, toggleTheme] = useTheme()
@@ -75,7 +78,7 @@ export function AdminShell({
 
       <div className="ds-shell-content" style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '0 16px 16px' }}>
         {/* Мобильная раскладка «информация сверху — управление снизу» (см. .ds-page) */}
-        <div className="ds-page">{children}</div>
+        <div className={`ds-page${pageClassName ? ` ${pageClassName}` : ''}`}>{children}</div>
       </div>
 
       <AdminBottomNav theme={theme} toggleTheme={toggleTheme} onLogout={handleLogout} />
@@ -104,7 +107,19 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
               <span>{label}</span>
             </Link>
           ))}
-          <button type="button" className={`ds-bn${moreActive || moreOpen ? ' active' : ''}`}
+          {/* Десктоп: все разделы сразу в боковом меню, без «Ещё» — любой экран в один клик. */}
+          <div className="ds-bn-group ds-desk-only">Управление</div>
+          {MORE.map(({ to, label, Icon }) => (
+            <Link key={to} to={to} className={`ds-bn ds-desk-only${pathname === to ? ' active' : ''}`}>
+              <Icon size={21} />
+              <span>{label}</span>
+            </Link>
+          ))}
+          <a href="https://growth.servgo.ru/studio" className="ds-bn ds-desk-only">
+            <Sparkles size={21} />
+            <span>AI Growth OS</span>
+          </a>
+          <button type="button" className={`ds-bn ds-mobile-only${moreActive || moreOpen ? ' active' : ''}`}
             onClick={() => setMoreOpen(true)} aria-haspopup="dialog" aria-expanded={moreOpen}>
             <MoreHorizontal size={21} />
             <span>Ещё</span>
