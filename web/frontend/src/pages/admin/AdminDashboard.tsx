@@ -16,6 +16,15 @@ import { useAdminBusiness } from '../../hooks/useAdminBusiness'
 import { BusinessSelector } from '../../components/BusinessSelector'
 import { AdminShell } from '../../components/AdminShell'
 
+// Слова статусов по брендбуку ServGo Air: цвет точки никогда не единственный носитель смысла.
+const STATUS_WORDS: Record<string, string> = {
+  confirmed: 'Подтверждена',
+  pending: 'Ожидает подтверждения',
+  pending_prepayment: 'Ждёт предоплату',
+  prepayment_sent: 'Предоплата отправлена',
+}
+const statusWord = (status: string) => STATUS_WORDS[status] ?? 'Ожидает'
+
 export function AdminDashboard() {
   const { businesses, selectedId: businessId, selectBusiness } = useAdminBusiness()
   const [data, setData] = useState<DashboardData | null>(null)
@@ -136,8 +145,8 @@ export function AdminDashboard() {
                   <Link key={b.id} to="/admin/schedule" className={`ds-context-line${i >= 3 ? ' dash-more-row' : ''}`} style={{ textDecoration: 'none' }}>
                     <strong>{b.time}</strong>
                     <span>{b.client_name}{b.service_name ? ` · ${b.service_name}` : ''}</span>
-                    <span className="dash-status-word">{b.status === 'confirmed' ? 'Подтверждена' : 'Ожидает'}</span>
-                    <span className={`ds-status-point ${b.status === 'confirmed' ? '' : 'warn'}`} title={b.status === 'confirmed' ? 'Подтверждена' : 'Ожидает'} />
+                    <span className="dash-status-word">{statusWord(b.status)}</span>
+                    <span className={`ds-status-point ${b.status === 'confirmed' ? '' : 'warn'}`} title={statusWord(b.status)} />
                   </Link>
                 ))}
                 <Link to="/admin/schedule" className="dash-context-all">Открыть расписание →</Link>

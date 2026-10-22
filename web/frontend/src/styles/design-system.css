@@ -545,3 +545,8 @@ textarea.ds-input { resize: vertical; min-height: 70px; }
   .dash-stat { padding: 14px !important; }
   .dash-stat > div:last-child { font-size: 25px !important; white-space: nowrap; }
 }
+
+/* Фокус с клавиатуры на кликабельных блоках главной — контур акцентом, как в брендбуке. */
+.dash-stat:focus-visible, .dash-context .ds-context-line:focus-visible, .dash-context-all:focus-visible, .ds-bn:focus-visible {
+  outline: 2px solid var(--s-accent); outline-offset: 2px;
+}
