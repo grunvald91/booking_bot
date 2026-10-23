@@ -403,32 +403,63 @@ def research_public_site(url: str) -> dict:
         return {"source": url, "excerpt": "", "status": "Сайт недоступен"}
 
 
+async def team_models() -> list[str]:
+    """Models picked for the mail agent on the growth.servgo.ru team page (main first), or [] if none."""
+    key = os.getenv("STUDIO_INTERNAL_KEY", "")
+    if len(key) < 32:
+        return []
+    base = os.getenv("GROWTH_INTERNAL_URL", "https://growth.servgo.ru").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            result = await client.get(base + "/studio/internal/model/mail_agent",
+                                      headers={"X-Studio-Key": key})
+        if result.status_code != 200:
+            return []
+        models = result.json().get("models")
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return []
+    return [m for m in models if isinstance(m, str) and m] if isinstance(models, list) else []
+
+
 async def hub(prompt):
     key = os.getenv("CLAUDEHUB_API_KEY") or os.getenv("XAI_API_KEY")
     if not key:
         raise HTTPException(503, "Ключ ClaudeHub не подключён")
-    body = {
-        "model": os.getenv("SERVGO_MAIL_AI_MODEL", "grok-4.7"),
-        "messages": [{"role": "system", "content": "Отвечай только JSON без пояснений."},
-                     {"role": "user", "content": prompt}],
-        # Reasoning models (DeepSeek, Kimi) spend tokens on thinking before the JSON answer;
-        # a small cap cut the JSON off. 32000 fits every model in the ClaudeHub catalog.
-        "max_completion_tokens": int(os.getenv("SERVGO_MAIL_AI_MAX_TOKENS", "32000")),
-    }
-    try:
-        async with httpx.AsyncClient(timeout=float(os.getenv("SERVGO_MAIL_AI_TIMEOUT", "300"))) as client:
-            result = await client.post("https://api.claudehub.fun/v1/chat/completions",
-                                       headers={"Authorization": "Bearer " + key}, json=body)
-            result.raise_for_status()
-        raw = result.json()["choices"][0]["message"]["content"].strip()
-        if raw.startswith(chr(96) * 3):
-            raw = raw.strip(chr(96) + "json\n ")
-        parsed = json.loads(raw)
-        if not isinstance(parsed, dict):
-            raise ValueError("Not JSON object")
-        return parsed
-    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
-        raise HTTPException(502, "Модель не вернула корректный результат") from None
+    # The owner's choice on the team page comes first; the env model is the fallback.
+    chain = await team_models() or [os.getenv("SERVGO_MAIL_AI_MODEL", "grok-4.7")]
+    for position, model in enumerate(chain):
+        body = {
+            "model": model,
+            "messages": [{"role": "system", "content": "Отвечай только JSON без пояснений."},
+                         {"role": "user", "content": prompt}],
+            # Reasoning models (DeepSeek, Kimi) spend tokens on thinking before the JSON answer;
+            # a small cap cut the JSON off. 32000 fits every model in the ClaudeHub catalog.
+            "max_completion_tokens": int(os.getenv("SERVGO_MAIL_AI_MAX_TOKENS", "32000")),
+        }
+        try:
+            async with httpx.AsyncClient(timeout=float(os.getenv("SERVGO_MAIL_AI_TIMEOUT", "300"))) as client:
+                result = await client.post("https://api.claudehub.fun/v1/chat/completions",
+                                           headers={"Authorization": "Bearer " + key}, json=body)
+                result.raise_for_status()
+            raw = result.json()["choices"][0]["message"]["content"].strip()
+            if raw.startswith(chr(96) * 3):
+                raw = raw.strip(chr(96) + "json\n ")
+            parsed = json.loads(raw)
+            if not isinstance(parsed, dict):
+                raise ValueError("Not JSON object")
+            return parsed
+        except httpx.HTTPStatusError as err:
+            # Only a busy or broken provider moves on to the next model; a rejected request would fail again.
+            transient = err.response.status_code in {429, 500, 502, 503, 504}
+            if not transient or position == len(chain) - 1:
+                raise HTTPException(502, "Модель не вернула корректный результат") from None
+        except httpx.HTTPError:
+            if position == len(chain) - 1:
+                raise HTTPException(502, "Модель не вернула корректный результат") from None
+        except (ValueError, KeyError, IndexError, TypeError):
+            if position == len(chain) - 1:
+                raise HTTPException(502, "Модель не вернула корректный результат") from None
+    raise HTTPException(502, "Модель не вернула корректный результат")
 
 
 @router.post("/api/draft/{prospect_id}")
