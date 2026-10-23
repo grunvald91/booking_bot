@@ -32,3 +32,4 @@ jobs:
       - run: python -m pytest -q tests/test_refresh_stale_server_copies.py
       - name: Refresh
         run: python scripts/refresh_stale_server_copies.py ${{ (inputs.apply == 'true' || contains(github.event.head_commit.message, '[apply-refresh]')) && '--apply' || '' }}
+# apply run
