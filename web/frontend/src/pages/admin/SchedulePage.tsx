@@ -988,11 +988,14 @@ export function SchedulePage() {
     <div className={`ds-screen sched-screen ${focus ? 'is-focus' : ''}`} data-theme={theme}>
       {!focus && (
         <header className="ds-shell-header" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 13px 5px 16px', flexShrink: 0 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <h1 className="ds-h1">Расписание</h1>
-            {currentBizName && <div className="sched-hsub"><span className="dot" />{currentBizName}</div>}
+          {/* Заголовок не сжимается: длинное название заведения обрезает селектор, а не «Расписание». */}
+          <div className="ds-shell-title" style={{ minWidth: 0, maxWidth: '45%' }}>
+            <h1 className="ds-h1" style={{ whiteSpace: 'nowrap' }}>Расписание</h1>
+            {currentBizName && <div className="sched-hsub"><span className="dot" /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentBizName}</span></div>}
           </div>
-          <BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />
+          <div className="ds-shell-header-extra">
+            <BusinessSelector businesses={businesses} selectedId={businessId} onSelect={selectBusiness} />
+          </div>
           <button className="ds-icon-btn" onClick={toggleTheme} aria-label="Тема">{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</button>
           <button className="ds-icon-btn" onClick={handleLogout} aria-label="Выйти" title="Выйти"><LogOut size={19} /></button>
         </header>
@@ -1013,7 +1016,9 @@ export function SchedulePage() {
           </div>
         )}
 
-        {tools.legend && employees.length > 0 && (
+        {/* В дне цвет и имя уже в заголовке каждой колонки — второй ряд был дублем. Нужен в неделе, а в дне —
+            только пока выбран один специалист, чтобы этот выбор можно было снять. */}
+        {tools.legend && (viewMode === 'week' || selectedEmployeeId !== null) && employees.length > 0 && (
           <div className="sched-legend" role="group" aria-label="Цвета специалистов">
             {employees.map((e) => (
               <button
