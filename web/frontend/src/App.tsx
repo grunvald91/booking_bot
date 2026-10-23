@@ -107,8 +107,14 @@ function App() {
         if (active) setAuthReady(true)
       }
     }
+    // Проверка входа не должна держать публичные страницы (главную со списком мест): если она
+    // зависла, через пару секунд показываем сайт как есть, а вход доделается в фоне.
+    // В Telegram-приложении не торопимся: там вход приходит из самого Telegram, и без него закрытые
+    // страницы (например, «Записи») отправили бы человека на страницу входа.
+    const inTelegram = Boolean(window.Telegram?.WebApp?.initData)
+    const patience = inTelegram ? 0 : window.setTimeout(() => { if (active) setAuthReady(true) }, 3000)
     void restoreAuth()
-    return () => { active = false }
+    return () => { active = false; window.clearTimeout(patience) }
   }, [])
 
   if (!authReady) {
