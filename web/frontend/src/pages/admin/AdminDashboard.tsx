@@ -8,7 +8,7 @@ import {
   Camera,
   Trash2,
   Plus,
-  ExternalLink,
+  ChevronRight,
   Sparkles,
 } from 'lucide-react'
 import { api, type AdminBooking, type DashboardData } from '../../api/client'
@@ -165,7 +165,7 @@ export function AdminDashboard() {
           <p className="ds-text" style={{ fontWeight: 700, margin: '0 0 4px' }}>AI Growth OS</p>
           <p className="ds-sub" style={{ margin: 0 }}>Открыть инструменты продвижения бизнеса</p>
         </div>
-        <ExternalLink size={18} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--s-accent)' }} />
+        <ChevronRight size={18} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--s-accent)' }} />
       </button>
       {/* Статистика */}
       <div className="ds-stats-grid dash-stats" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
