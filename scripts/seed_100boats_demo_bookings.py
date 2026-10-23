@@ -8,7 +8,7 @@ free-window view and the studio dispatcher have something to show.
 * Reminders of the demo business (owner and masters) are switched off while the demo bookings exist, otherwise the
   owner would get a reminder for each of them; `remove` switches them back on.
 
-Modes (env DEMO_MODE): apply (default: dry run, prints the plan) | write | remove | inspect (aggregates only).
+Modes (env DEMO_MODE): apply (default: dry run, prints the plan) | write | remove | inspect (aggregates only) | confirm_tests.
 """
 import asyncio
 import os
@@ -112,6 +112,22 @@ async def run(mode: str) -> None:
             print('kinds=' + str(kinds))
             print(f'booking_dates={min(dates)}..{max(dates)} created_at={min(created)}..{max(created)} '
                   f'distinct_clients={len({c.id for _, c in rows})}')
+            return
+
+        if mode == 'confirm_tests':
+            # Owner decision of 23.10.2026: the older test requests from today onward are confirmed and kept as
+            # test data. Past ones and cancelled ones stay as they are. Only the status changes; no message is sent.
+            today = datetime.now(ZoneInfo('Europe/Moscow')).date()
+            old = (await db.execute(select(Booking).where(
+                Booking.business_id == BUSINESS_ID, Booking.notes.is_not(None), ~Booking.notes.like(f'%{MARKER}%'),
+                Booking.booking_date >= today, Booking.status == 'pending'))).scalars().all()
+            past_pending = (await db.execute(select(func.count()).select_from(Booking).where(
+                Booking.business_id == BUSINESS_ID, ~Booking.notes.like(f'%{MARKER}%'),
+                Booking.booking_date < today, Booking.status == 'pending'))).scalar_one()
+            for booking in old:
+                booking.status = 'confirmed'
+            await db.commit()
+            print(f'confirmed_old_test_bookings={len(old)} past_pending_left_as_is={past_pending}')
             return
 
         if mode == 'remove':

@@ -38,8 +38,9 @@ jobs:
           msg = os.environ.get('COMMIT_MESSAGE') or ''
           mode = os.environ.get('MODE_INPUT') or ('write' if '[write-demo-bookings]' in msg else
                                                   'remove' if '[remove-demo-bookings]' in msg else
-                                                  'inspect' if '[inspect-demo-bookings]' in msg else 'apply')
-          assert mode in ('apply', 'write', 'remove', 'inspect')
+                                                  'inspect' if '[inspect-demo-bookings]' in msg else
+                                                  'confirm_tests' if '[confirm-test-bookings]' in msg else 'apply')
+          assert mode in ('apply', 'write', 'remove', 'inspect', 'confirm_tests')
           class Pinned(paramiko.MissingHostKeyPolicy):
               def missing_host_key(self, client, hostname, key):
                   fp = base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
@@ -75,3 +76,4 @@ jobs:
           PY
 # inspect shape
 # write
+# confirm
