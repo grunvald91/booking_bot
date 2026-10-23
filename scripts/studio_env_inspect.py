@@ -1,26 +1,26 @@
-"""Names only: which settings the studio api container has, and how its compose files feed it. No values."""
+"""Names only (values masked): does compose resolve the sign-in settings for the studio api container?"""
 import json, re, subprocess
 c = json.loads(subprocess.check_output(["docker", "inspect", "ai-growth-os-api-1"], text=True))[0]
-names = sorted(item.split("=", 1)[0] for item in c["Config"]["Env"])
-print("container_env_names=" + ",".join(n for n in names if n.startswith(("SERVGO", "DISPATCH", "LLM", "ANTHROPIC", "DEEPSEEK", "OPENAI", "MODEL", "DATABASE", "STUDIO", "AGENT"))))
 labels = c["Config"]["Labels"]
 files = labels["com.docker.compose.project.config_files"].split(",")
-print("compose_files=" + ",".join(files))
-for path in files:
-    try:
-        text = open(path, encoding="utf-8").read()
-    except OSError:
-        print("unreadable " + path); continue
-    print("--- " + path)
-    service = None
-    for line in text.splitlines():
-        if re.match(r"^  [a-z0-9_-]+:\s*$", line):
-            service = line.strip()
-        if "env_file" in line:
-            print(f"[{service}] {line.strip()}")
-        m = re.match(r"^\s+- (.+)$", line)
-        match = re.match(r"^\s+(env_file|\.env)", line)
-        key = re.match(r"^\s{6,}([A-Z][A-Z0-9_]+):", line)
-        if key and service == "api:":
-            print(f"[api] env key {key.group(1)}")
-print("dotenv_names=" + ",".join(sorted(l.split("=",1)[0] for l in open("/opt/ai_growth_os/.env") if "=" in l and not l.startswith("#") and l.split("=",1)[0].startswith(("SERVGO","DISPATCH","LLM","MODEL","STUDIO")))))
+cwd = labels["com.docker.compose.project.working_dir"]
+overlay = files[-1]
+print("overlay=" + overlay)
+doc = json.load(open(overlay))
+print("overlay_api_env=" + json.dumps({k: (v if v.startswith("${") else "<value>") for k, v in doc["services"]["api"]["environment"].items()}, ensure_ascii=False))
+cmd = ["docker", "compose", "--project-name", "ai-growth-os", "--env-file", "/opt/ai_growth_os/.env"]
+for f in files:
+    cmd += ["-f", f]
+out = subprocess.run(cmd + ["config", "--format", "json"], cwd=cwd, capture_output=True, text=True)
+print("compose_config_exit=" + str(out.returncode) + " err=" + out.stderr.strip()[:200].replace("\n", " "))
+if out.returncode == 0:
+    env = json.loads(out.stdout)["services"]["api"]["environment"]
+    for key in ("SERVGO_SSO_SECRET", "SERVGO_INTERNAL_KEY", "RELEASE_SHA"):
+        value = env.get(key)
+        print(f"resolved {key}: " + ("MISSING" if key not in env else "null" if value is None else f"len={len(str(value))}"))
+text = open("/opt/ai_growth_os/.env", encoding="utf-8").read().splitlines()
+for line in text:
+    if line.startswith(("SERVGO", "export SERVGO")) or "SERVGO" in line.split("=")[0]:
+        name, _, value = line.partition("=")
+        print(f"dotenv {name!r}: len={len(value)} quoted={value[:1] in '\"\''} ")
+print("dotenv_has_trailing_cr=" + str(any(l.endswith('\r') for l in open('/opt/ai_growth_os/.env', newline='').read().split('\n') if 'SERVGO' in l)))
