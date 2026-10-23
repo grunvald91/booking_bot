@@ -411,10 +411,12 @@ async def hub(prompt):
         "model": os.getenv("SERVGO_MAIL_AI_MODEL", "grok-4.7"),
         "messages": [{"role": "system", "content": "Отвечай только JSON без пояснений."},
                      {"role": "user", "content": prompt}],
-        "max_completion_tokens": 1200,
+        # Reasoning models (DeepSeek, Kimi) spend tokens on thinking before the JSON answer;
+        # a small cap cut the JSON off. 32000 fits every model in the ClaudeHub catalog.
+        "max_completion_tokens": int(os.getenv("SERVGO_MAIL_AI_MAX_TOKENS", "32000")),
     }
     try:
-        async with httpx.AsyncClient(timeout=45) as client:
+        async with httpx.AsyncClient(timeout=float(os.getenv("SERVGO_MAIL_AI_TIMEOUT", "300"))) as client:
             result = await client.post("https://api.claudehub.fun/v1/chat/completions",
                                        headers={"Authorization": "Bearer " + key}, json=body)
             result.raise_for_status()
