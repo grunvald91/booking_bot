@@ -37,6 +37,10 @@ class BookingRow(BaseModel):
     client_phone: Optional[str] = None
     client_email: Optional[str] = None
     price: Optional[int] = None
+    # Who booked and when the booking was made: lets the studio tell new from returning clients and see how
+    # many days ahead people book. Additive: older readers ignore them.
+    client_id: Optional[int] = None
+    created_at: Optional[str] = None
     # False for add-ons booked together with a main service: they do not take the master's or hall's time.
     occupies_resource: bool = True
 
@@ -111,6 +115,8 @@ async def studio_schedule(
         status=booking.status, service=service.name, resource=employee.name if employee else None,
         client_name=client.full_name, client_phone=client.phone, client_email=client.email,
         price=booking.estimated_price, occupies_resource=bool(booking.occupies_resource),
+        client_id=booking.client_id,
+        created_at=booking.created_at.isoformat() if booking.created_at else None,
     ) for booking, service, employee, client in rows]
 
     free_slots: list[FreeSlots] = []
