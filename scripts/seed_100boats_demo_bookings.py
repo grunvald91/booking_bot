@@ -96,6 +96,16 @@ async def run(mode: str) -> None:
                         else 'other_notes' if notes else 'no_notes')
                 kind += '/real_telegram_client' if (client.telegram_id or 0) > 0 else '/guest_client'
                 kinds[kind] = kinds.get(kind, 0) + 1
+            shape = {
+                'minutes_not_00': sum(1 for b, _ in rows if b.booking_time.minute),
+                'with_duration': sum(1 for b, _ in rows if b.duration_minutes),
+                'with_tracking_token': sum(1 for b, _ in rows if b.notify_token),
+                'with_price': sum(1 for b, _ in rows if b.estimated_price),
+                'phone_plus79': sum(1 for _, c in rows if (c.phone or '').startswith('+79')),
+                'with_email': sum(1 for _, c in rows if c.email),
+                'future_from_today': sum(1 for b, _ in rows if b.booking_date >= datetime.now(ZoneInfo('Europe/Moscow')).date()),
+            }
+            print('shape=' + str(shape))
             dates = [b.booking_date for b, _ in rows]
             created = [b.created_at for b, _ in rows if b.created_at]
             print('status=' + str(by_status))
