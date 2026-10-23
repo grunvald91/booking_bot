@@ -92,6 +92,13 @@ class StudioScheduleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((first['service'], first['resource'], first['price'], first['duration_minutes']),
                          ('Стрижка', 'Мария', 1500, 60))
 
+    async def test_bookings_carry_client_id_and_creation_time(self):
+        body = self.ask().json()['bookings']
+        self.assertTrue(all(isinstance(item['client_id'], int) for item in body))
+        self.assertEqual(len({item['client_id'] for item in body}), 2)
+        self.assertTrue(all(item['created_at'] for item in body))
+        datetime.fromisoformat(body[0]['created_at'])
+
     async def test_cancelled_bookings_are_included_with_their_status(self):
         statuses = {item['time']: item['status'] for item in self.ask().json()['bookings']}
         self.assertEqual(statuses, {'10:00': 'confirmed', '11:00': 'cancelled'})
