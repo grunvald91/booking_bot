@@ -1,0 +1,29 @@
+name: Refresh three outdated source copies on the server (GitHub -> server)
+# Manual only. Default is a dry run: it reports what it would do and changes nothing. Run once with apply=false, then
+# once with apply=true. No service is restarted; a copy that is not provably behind git is refused.
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'true = replace the files (with backups); false = report only'
+        required: true
+        default: 'false'
+permissions:
+  contents: read
+concurrency:
+  group: servgo-refresh-stale-copies
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python -m pip install --disable-pip-version-check pytest 'paramiko==3.5.1'
+      - run: python -m pytest -q tests/test_refresh_stale_server_copies.py
+      - name: Refresh
+        run: python scripts/refresh_stale_server_copies.py ${{ inputs.apply == 'true' && '--apply' || '' }}
