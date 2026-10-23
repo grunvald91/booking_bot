@@ -13,6 +13,7 @@ settings, model key and ServGo link. Nothing is published or created for the own
 """
 import asyncio
 import json
+import time
 from decimal import Decimal
 from uuid import uuid4
 
@@ -37,15 +38,9 @@ TEAM = {"set_insights_depth", "send_to_team"}  # change data of the company: onl
 OPEN_TABLES = ("Показатель", "Решение")
 WAIT_SECONDS = 420
 QUESTIONS = [
-    "Что у меня сегодня?",
     "Сколько отмен за последнее время?",
-    "Сколько мы заработали?",
     "Часто ли клиенты возвращаются?",
     "В какие дни недели у меня пустуют яхты?",
-    "Какие яхты берут чаще всего?",
-    "Сколько уже записано на ближайшие дни?",
-    "Как дела в бизнесе?",
-    "Как мне увеличить количество клиентов?",
 ]
 
 
@@ -112,11 +107,13 @@ async def main():
 
     async def spy(request, **kwargs):
         """Shows what the model sent back for each question (its decision, no secrets) and how it failed."""
+        started = time.monotonic()
         try:
             reply = await plain_generate(request, **kwargs)
-        except Exception as error:  # noqa: BLE001
-            print(f"   LLM_ERROR {type(error).__name__}: {str(error)[:200]}")
+        except BaseException as error:  # noqa: BLE001 - a cancelled wait (timeout) must be visible too
+            print(f"   LLM_ERROR {type(error).__name__} after {time.monotonic() - started:.0f}s: {str(error)[:200]}")
             raise
+        print(f"   LLM answered in {time.monotonic() - started:.0f}s")
         usage = reply.usage
         print(f"   LLM stop={reply.stop_reason} tokens_out={getattr(usage, 'output_tokens', None)} "
               f"chars={len(reply.content)} head={reply.content[:240]!r}")
