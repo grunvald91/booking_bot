@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { useTheme } from '../hooks/useTheme'
 import { useAdminBusiness } from '../hooks/useAdminBusiness'
-import { api } from '../api/client'
+import { useOpenStudio } from '../hooks/useOpenStudio'
 
 // Нижняя панель: пять пунктов, которые нужны каждый день. Всё остальное —
 // в «Ещё», чтобы любой раздел был доступен с телефона.
@@ -101,19 +101,7 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
   const moreActive = MORE.some(item => item.to === pathname)
   const handleLogout = onLogout
   const { selectedId } = useAdminBusiness()
-  const [studioBusy, setStudioBusy] = useState(false)
-  // Одноразовая ссылка на 60 секунд: студия сама узнаёт, кто вы и к какому заведению можно.
-  // Если вход пока не настроен или не получился — открываем обычный вход в студию, как раньше.
-  const openStudio = async () => {
-    if (studioBusy) return
-    setStudioBusy(true)
-    try {
-      const { url } = await api.studioTicket(selectedId as number)
-      window.location.assign(url)
-    } catch {
-      window.location.assign('https://growth.servgo.ru/studio')
-    }
-  }
+  const { open: openStudio, busy: studioBusy } = useOpenStudio(selectedId)
   return (
     <>
         <nav className="ds-bottomnav">
