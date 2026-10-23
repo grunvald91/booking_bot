@@ -33,16 +33,28 @@ function servicesLabel(n: number) {
 export function HomePage() {
   const [businesses, setBusinesses] = useState<Business[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
   const [failedPhotos, setFailedPhotos] = useState<Set<number>>(new Set())
   const isAuthenticated = Boolean(localStorage.getItem('token'))
 
   useEffect(() => {
-    api
-      .getBusinesses()
-      .then(setBusinesses)
-      .catch(() => setBusinesses([]))
-      .finally(() => setLoading(false))
-  }, [])
+    let active = true
+    // Ошибка загрузки не должна выглядеть как «мест нет»: показываем её и даём повторить.
+    let timer = 0
+    const timeout = new Promise<never>((_, reject) => { timer = window.setTimeout(() => reject(new Error('timeout')), 20000) })
+    Promise.race([api.getBusinesses(), timeout])
+      .then((list) => { if (active) setBusinesses(list) })
+      .catch(() => { if (active) setLoadFailed(true) })
+      .finally(() => { window.clearTimeout(timer); if (active) setLoading(false) })
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [attempt])
+
+  const retry = () => {
+    setLoadFailed(false)
+    setLoading(true)
+    setAttempt((n) => n + 1)
+  }
 
   return (
     <AirFrame label="ServGo — онлайн-запись" tabs>
@@ -51,7 +63,7 @@ export function HomePage() {
           <h1 className="bf-h2">Онлайн-запись<br /><span className="bf-accent">на услуги</span></h1>
           <p className="bf-intro">Выберите место и запишитесь на удобное время — без звонков.</p>
 
-          <div className="bf-kicker">{loading ? 'Загружаем…' : businesses.length > 0 ? `Места для записи · ${businesses.length}` : 'Места для записи'}</div>
+          <div className="bf-kicker">{loading ? 'Загружаем…' : !loadFailed && businesses.length > 0 ? `Места для записи · ${businesses.length}` : 'Места для записи'}</div>
 
           {loading ? (
             <div className="bf-list" aria-busy="true">
@@ -64,6 +76,13 @@ export function HomePage() {
                   </span>
                 </div>
               ))}
+            </div>
+          ) : loadFailed ? (
+            <div className="bf-empty-state" role="alert">
+              <span className="bf-stage-symbol"><Briefcase /></span>
+              <strong>Не удалось загрузить места</strong>
+              <span>Проверьте интернет и попробуйте ещё раз</span>
+              <button type="button" className="bf-chip" onClick={retry}>Повторить</button>
             </div>
           ) : businesses.length === 0 ? (
             <div className="bf-empty-state">

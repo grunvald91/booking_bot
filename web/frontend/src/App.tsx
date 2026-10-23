@@ -107,8 +107,11 @@ function App() {
         if (active) setAuthReady(true)
       }
     }
+    // Проверка входа не должна держать публичные страницы (главную со списком мест): если она
+    // зависла, через пару секунд показываем сайт как есть, а вход доделается в фоне.
+    const patience = window.setTimeout(() => { if (active) setAuthReady(true) }, 3000)
     void restoreAuth()
-    return () => { active = false }
+    return () => { active = false; window.clearTimeout(patience) }
   }, [])
 
   if (!authReady) {

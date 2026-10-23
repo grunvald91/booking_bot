@@ -6,6 +6,16 @@ import { errorMessage, saveLogin } from '../../authUtils'
 import { ClientShell } from '../../components/ClientShell'
 import { EmailAuthForm } from '../../components/EmailAuthForm'
 
+// Кнопка Telegram сначала берётся через собственный прокси ServGo (tg.servgo.ru): в РФ telegram.org
+// и oauth.telegram.org у многих не открываются. Скрипт кнопки сам берёт адрес рамки и окна входа
+// с того хоста, откуда загружен, поэтому прокси должен отдавать и /js, и /embed, и /auth.
+// Если прокси не отвечает, пробуем напрямую telegram.org.
+const WIDGET_SOURCES = [
+  'https://tg.servgo.ru/js/telegram-widget.js?22',
+  'https://telegram.org/js/telegram-widget.js?22',
+]
+const WIDGET_WAIT_MS = 10000
+
 export function LoginPage() {
   const navigate = useNavigate()
   const [mode, setMode] = useState<'phone' | 'code'>('phone')
@@ -16,6 +26,11 @@ export function LoginPage() {
   const [codeSentVia, setCodeSentVia] = useState<'telegram' | 'fallback'>('telegram')
   const codeRefs = useRef<(HTMLInputElement | null)[]>([])
   const telegramWidgetRef = useRef<HTMLDivElement | null>(null)
+  // Кнопка Telegram приходит с telegram.org. Если эта сеть там закрыта (блокировка провайдера,
+  // расширение браузера), кнопка не появится: тогда честно говорим об этом и показываем другие входы.
+  const [widget, setWidget] = useState<'loading' | 'ready' | 'failed'>('loading')
+  const [widgetAttempt, setWidgetAttempt] = useState(0)
+  const [widgetSource, setWidgetSource] = useState(0)
 
   useEffect(() => {
     if (mode === 'code' && codeRefs.current[0]) {
@@ -44,20 +59,36 @@ export function LoginPage() {
     }
     const script = document.createElement('script')
     script.async = true
-    script.src = 'https://telegram.org/js/telegram-widget.js?22'
+    script.src = WIDGET_SOURCES[widgetSource]
     script.setAttribute('data-telegram-login', 'Sochiservice_bot')
     script.setAttribute('data-size', 'large')
     script.setAttribute('data-onauth', 'window.servgoTelegramWidgetAuth(user)')
-    script.onerror = () => {
-      if (active) setError('Не удалось загрузить вход через Telegram. Попробуйте вход по email.')
+    // Этот источник не сработал: берём следующий, а если их не осталось, сообщаем об этом.
+    const nextSource = () => {
+      if (!active) return
+      if (widgetSource + 1 < WIDGET_SOURCES.length) setWidgetSource(widgetSource + 1)
+      else setWidget('failed')
     }
+    script.onerror = nextSource
     host.appendChild(script)
+    // Скрипт мог загрузиться, а сама кнопка (рамка с oauth.telegram.org) — нет: ждём её появления.
+    const hasButton = () => host.querySelector('iframe') !== null
+    const observer = new MutationObserver(() => { if (active && hasButton()) setWidget('ready') })
+    observer.observe(host, { childList: true, subtree: true })
+    const giveUp = window.setTimeout(() => {
+      if (!active) return
+      if (hasButton()) setWidget('ready')
+      else nextSource()
+    }, WIDGET_WAIT_MS)
     return () => {
       active = false
+      observer.disconnect()
+      window.clearTimeout(giveUp)
       script.remove()
+      host.replaceChildren()
       delete callbackWindow.servgoTelegramWidgetAuth
     }
-  }, [mode, navigate])
+  }, [mode, navigate, widgetAttempt, widgetSource])
 
   const handleSendCode = async () => {
     if (!phone) return
@@ -125,10 +156,25 @@ export function LoginPage() {
           <div>
             <div className="ds-card" style={{ padding: 16, marginBottom: 14, textAlign: 'center' }}>
               <p className="ds-text" style={{ marginBottom: 12, fontWeight: 600 }}>Войти через Telegram</p>
-              <div ref={telegramWidgetRef} style={{ minHeight: 40, display: 'flex', justifyContent: 'center' }} />
-              <p className="ds-hint" style={{ marginTop: 10 }}>
-                Авторизуйтесь кнопкой Telegram выше. Простое открытие бота не выполняет вход на сайт.
-              </p>
+              <div ref={telegramWidgetRef} style={{ minHeight: widget === 'failed' ? 0 : 40, display: 'flex', justifyContent: 'center' }} />
+              {widget === 'loading' && <p className="ds-hint" style={{ marginTop: 6 }}>Загружаем кнопку Telegram…</p>}
+              {widget === 'failed' ? (
+                <div role="status">
+                  <p className="ds-hint" style={{ marginTop: 6 }}>
+                    Кнопка Telegram не открылась ни через наш сервер, ни напрямую: возможно, её блокирует
+                    расширение браузера или сеть. Войдите по номеру телефона ниже (код придёт в бота)
+                    или по email выше.
+                  </p>
+                  <button type="button" onClick={() => { setWidget('loading'); setWidgetSource(0); setWidgetAttempt((n) => n + 1) }}
+                    className="ds-btn ds-btn--ghost ds-btn--sm" style={{ marginTop: 8 }}>
+                    Попробовать ещё раз
+                  </button>
+                </div>
+              ) : (
+                <p className="ds-hint" style={{ marginTop: 10 }}>
+                  Авторизуйтесь кнопкой Telegram выше. Простое открытие бота не выполняет вход на сайт.
+                </p>
+              )}
               <button type="button" onClick={handleTelegramLogin}
                 className="ds-btn ds-btn--ghost ds-btn--sm" style={{ marginTop: 8 }}>
                 <Send size={16} /> Открыть бота
@@ -171,7 +217,7 @@ export function LoginPage() {
 
             <p className="ds-hint" style={{ textAlign: 'center', marginTop: 14 }}>
               Код придёт через @Sochiservice_bot, только если этот номер уже привязан к вашему аккаунту.
-              При отсутствии кода используйте вход через Telegram выше или прежний подтверждённый email.
+              При отсутствии кода используйте прежний подтверждённый email или кнопку Telegram выше, если она открылась.
             </p>
           </div>
         )}
