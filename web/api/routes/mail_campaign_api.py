@@ -50,7 +50,8 @@ def create_campaign(data: CampaignInput, _=Depends(mail_owner)):
     with db_open() as db:
         initialize(db)
         db.execute(
-            "INSERT INTO campaign VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO campaign (id,name,objective,status,created_at,updated_at,not_before,min_interval_seconds)"
+            " VALUES (?,?,?,?,?,?,?,?)",
             (campaign_id, data.name.strip(), data.objective.strip(),
              "draft", utcnow(), utcnow(), "", data.min_interval_seconds),
         )

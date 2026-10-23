@@ -342,10 +342,15 @@ class VisibleHTML(HTMLParser):
         super().__init__()
         self.hidden = 0
         self.parts = []
+        self.mailto = []
 
     def handle_starttag(self, tag, attrs):
         if tag in {"script", "style", "noscript"}:
             self.hidden += 1
+        if tag == "a":
+            href = dict(attrs).get("href") or ""
+            if href.lower().startswith("mailto:"):
+                self.mailto.append(href[7:].split("?", 1)[0].strip())
 
     def handle_endtag(self, tag):
         if tag in {"script", "style", "noscript"} and self.hidden:
@@ -356,7 +361,7 @@ class VisibleHTML(HTMLParser):
             self.parts.append(value)
 
 
-def research_public_site(url: str) -> dict:
+def research_public_site(url: str, max_bytes: int = 150000, with_contacts: bool = False) -> dict:
     """Pinned-DNS HTTPS only; no redirects or private addresses."""
     if not url:
         return {"source": "", "excerpt": "", "status": "Сайт не указан"}
@@ -390,43 +395,93 @@ def research_public_site(url: str) -> dict:
             res = conn.getresponse()
             if res.status != 200 or "text/html" not in res.getheader("Content-Type", ""):
                 return {"source": url, "excerpt": "", "status": "HTTP " + str(res.status)}
-            raw = res.read(150001)
-            if len(raw) > 150000:
+            raw = res.read(max_bytes + 1)
+            if len(raw) > max_bytes:
                 return {"source": url, "excerpt": "", "status": "Страница слишком велика"}
             parser = VisibleHTML()
             parser.feed(raw.decode("utf-8", errors="replace"))
-            text = " ".join(" ".join(parser.parts).split())[:5500]
-            return {"source": url, "excerpt": text, "status": "Прочитан публичный сайт"}
+            full = " ".join(" ".join(parser.parts).split())
+            found = {"source": url, "excerpt": full[:5500], "status": "Прочитан публичный сайт"}
+            if with_contacts:  # the company search looks for an address in the whole page, not the excerpt
+                found.update(mailto=parser.mailto, full_text=full)
+            return found
         finally:
             conn.close()
     except (OSError, ValueError, http.client.HTTPException):
         return {"source": url, "excerpt": "", "status": "Сайт недоступен"}
 
 
+async def studio_get(path: str):
+    """GET from growth.servgo.ru's internal API with the shared key; None when it cannot be asked."""
+    key = os.getenv("STUDIO_INTERNAL_KEY", "")
+    if len(key) < 32:
+        return None
+    base = os.getenv("GROWTH_INTERNAL_URL", "https://growth.servgo.ru").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            result = await client.get(base + path, headers={"X-Studio-Key": key})
+        if result.status_code != 200:
+            return None
+        return result.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+_TEAM_MODELS: dict = {"at": 0.0, "models": []}
+TEAM_MODELS_SECONDS = 60  # a change on the team page reaches the mail within a minute
+
+
+async def team_models() -> list[str]:
+    """Models picked for the mail agent on the growth.servgo.ru team page (main first), or [] if none."""
+    import time
+    if time.monotonic() - _TEAM_MODELS["at"] < TEAM_MODELS_SECONDS:
+        return list(_TEAM_MODELS["models"])
+    data = await studio_get("/studio/internal/model/mail_agent")
+    models = data.get("models") if isinstance(data, dict) else None
+    chain = [m for m in models if isinstance(m, str) and m] if isinstance(models, list) else []
+    _TEAM_MODELS.update(at=time.monotonic(), models=chain)
+    return list(chain)
+
+
 async def hub(prompt):
     key = os.getenv("CLAUDEHUB_API_KEY") or os.getenv("XAI_API_KEY")
     if not key:
         raise HTTPException(503, "Ключ ClaudeHub не подключён")
-    body = {
-        "model": os.getenv("SERVGO_MAIL_AI_MODEL", "grok-4.7"),
-        "messages": [{"role": "system", "content": "Отвечай только JSON без пояснений."},
-                     {"role": "user", "content": prompt}],
-        "max_completion_tokens": 1200,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=45) as client:
-            result = await client.post("https://api.claudehub.fun/v1/chat/completions",
-                                       headers={"Authorization": "Bearer " + key}, json=body)
-            result.raise_for_status()
-        raw = result.json()["choices"][0]["message"]["content"].strip()
-        if raw.startswith(chr(96) * 3):
-            raw = raw.strip(chr(96) + "json\n ")
-        parsed = json.loads(raw)
-        if not isinstance(parsed, dict):
-            raise ValueError("Not JSON object")
-        return parsed
-    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
-        raise HTTPException(502, "Модель не вернула корректный результат") from None
+    # The owner's choice on the team page comes first; the env model is the fallback.
+    chain = await team_models() or [os.getenv("SERVGO_MAIL_AI_MODEL", "grok-4.7")]
+    for position, model in enumerate(chain):
+        body = {
+            "model": model,
+            "messages": [{"role": "system", "content": "Отвечай только JSON без пояснений."},
+                         {"role": "user", "content": prompt}],
+            # Reasoning models (DeepSeek, Kimi) spend tokens on thinking before the JSON answer;
+            # a small cap cut the JSON off. 32000 fits every model in the ClaudeHub catalog.
+            "max_completion_tokens": int(os.getenv("SERVGO_MAIL_AI_MAX_TOKENS", "32000")),
+        }
+        try:
+            async with httpx.AsyncClient(timeout=float(os.getenv("SERVGO_MAIL_AI_TIMEOUT", "300"))) as client:
+                result = await client.post("https://api.claudehub.fun/v1/chat/completions",
+                                           headers={"Authorization": "Bearer " + key}, json=body)
+                result.raise_for_status()
+            raw = result.json()["choices"][0]["message"]["content"].strip()
+            if raw.startswith(chr(96) * 3):
+                raw = raw.strip(chr(96) + "json\n ")
+            parsed = json.loads(raw)
+            if not isinstance(parsed, dict):
+                raise ValueError("Not JSON object")
+            return parsed
+        except httpx.HTTPStatusError as err:
+            # Only a busy or broken provider moves on to the next model; a rejected request would fail again.
+            transient = err.response.status_code in {429, 500, 502, 503, 504}
+            if not transient or position == len(chain) - 1:
+                raise HTTPException(502, "Модель не вернула корректный результат") from None
+        except httpx.HTTPError:
+            if position == len(chain) - 1:
+                raise HTTPException(502, "Модель не вернула корректный результат") from None
+        except (ValueError, KeyError, IndexError, TypeError):
+            if position == len(chain) - 1:
+                raise HTTPException(502, "Модель не вернула корректный результат") from None
+    raise HTTPException(502, "Модель не вернула корректный результат")
 
 
 @router.post("/api/draft/{prospect_id}")

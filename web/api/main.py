@@ -42,10 +42,11 @@ async def health():
     return {"status": "ok"}
 
 # Platform-owner mail console (preserve existing auth and payment routers).
-from .routes import owner_mail, mail_campaign_api, mail_campaign_review, mail_campaign_analytics, mail_campaign_unsubscribe, mail_campaign_ui
+from .routes import owner_mail, mail_campaign_api, mail_campaign_review, mail_campaign_analytics, mail_campaign_unsubscribe, mail_campaign_ui, mail_company_search
 app.include_router(owner_mail.router)
 app.include_router(mail_campaign_api.router)
 app.include_router(mail_campaign_review.router)
 app.include_router(mail_campaign_analytics.router)
 app.include_router(mail_campaign_unsubscribe.router)
 app.include_router(mail_campaign_ui.router)
+app.include_router(mail_company_search.router)
