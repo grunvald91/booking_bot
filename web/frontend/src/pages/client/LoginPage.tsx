@@ -71,18 +71,29 @@ export function LoginPage() {
     }
     script.onerror = nextSource
     host.appendChild(script)
-    // Скрипт мог загрузиться, а сама кнопка (рамка с oauth.telegram.org) — нет: ждём её появления.
-    const hasButton = () => host.querySelector('iframe') !== null
-    const observer = new MutationObserver(() => { if (active && hasButton()) setWidget('ready') })
-    observer.observe(host, { childList: true, subtree: true })
+    // Скрипт мог загрузиться, а рамка с самой кнопкой — нет (пустая рамка тоже бывает). Рамка, которая
+    // действительно открылась, присылает странице сообщение «ready»: только оно считается успехом.
+    const sourceOrigin = new URL(WIDGET_SOURCES[widgetSource]).origin
+    const frameOrigins = sourceOrigin === 'https://telegram.org' ? ['https://oauth.telegram.org'] : [sourceOrigin]
+    let opened = false
+    const onMessage = (event: MessageEvent) => {
+      if (!active || !frameOrigins.includes(event.origin) || typeof event.data !== 'string') return
+      const frame = host.querySelector('iframe')
+      if (!frame || event.source !== frame.contentWindow) return
+      try {
+        const data = JSON.parse(event.data) as { event?: string }
+        if (data.event === 'ready' || data.event === 'resize') { opened = true; setWidget('ready') }
+      } catch {
+        // Чужие сообщения не про кнопку.
+      }
+    }
+    window.addEventListener('message', onMessage)
     const giveUp = window.setTimeout(() => {
-      if (!active) return
-      if (hasButton()) setWidget('ready')
-      else nextSource()
+      if (active && !opened) nextSource()
     }, WIDGET_WAIT_MS)
     return () => {
       active = false
-      observer.disconnect()
+      window.removeEventListener('message', onMessage)
       window.clearTimeout(giveUp)
       script.remove()
       host.replaceChildren()
