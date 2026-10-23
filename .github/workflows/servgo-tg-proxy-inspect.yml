@@ -1,0 +1,22 @@
+name: Inspect tg.servgo.ru proxy (read-only, one run)
+# Разовое чтение настроек веб-прокси Telegram на relay 89: только чтение, секреты маскируются.
+on:
+  push:
+    branches: [ops/tg-proxy-inspect]
+permissions:
+  contents: read
+concurrency:
+  group: tg-proxy-inspect
+  cancel-in-progress: true
+jobs:
+  inspect:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RELAY_PASSWORD: ${{ secrets.RELAY89_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Read relay proxy settings
+        run: python scripts/inspect_tg_proxy.py
