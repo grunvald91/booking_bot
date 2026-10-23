@@ -6,7 +6,10 @@ settings, model key and ServGo link. Nothing is published or created for the own
 * if business 11 has no company in the studio yet, a temporary one is created and deleted again at the end
   (together with everything the probe wrote for it); an existing company is only used, its conversation of the
   probe account is removed afterwards;
-* table cells (client names, phones) are never printed, only table sizes.
+* table cells (client names, phones) are never printed, only table sizes; the cells of the business-summary and
+  decision tables hold no client data and are printed;
+* with a temporary company the probe also lets the team work: the hand-over to the marketing team is carried out and
+  its review is awaited (the production worker runs it), then everything is deleted again.
 """
 import asyncio
 import json
@@ -29,22 +32,23 @@ from app.sso.models import StudioBusinessLink
 
 BUSINESS_ID = 11
 ACCOUNT = "probe-claude"
-READ_ONLY = {"show_schedule", "show_work", "show_review", "show_plan", "go_to", "show_material"}
+READ_ONLY = {"show_schedule", "show_work", "show_review", "show_plan", "go_to", "show_material", "show_insights"}
+TEAM = {"set_insights_depth", "send_to_team"}  # change data of the company: only for the temporary one
+OPEN_TABLES = ("Показатель", "Решение")
+WAIT_SECONDS = 420
 QUESTIONS = [
     "Что у меня сегодня?",
     "Кто следующий клиент?",
-    "Сколько записей на завтра?",
-    "Покажи свободные окна на неделю",
-    "Какая загрузка яхт на неделю?",
-    "Какая яхта загружена меньше всех?",
-    "Какие заявки ждут моего подтверждения?",
+    "Как дела в бизнесе?",
     "Сколько отмен за последнее время?",
-    "Сколько я заработаю на этой неделе?",
+    "Сколько мы заработали?",
     "В какие дни недели у меня пустуют яхты?",
     "Почему в будни мало клиентов?",
     "Как мне увеличить количество клиентов?",
-    "Проанализируй загрузку и скажи, какое одно простое действие даст больше всего новых клиентов",
-    "Кто мои постоянные клиенты и кому написать, чтобы они вернулись?",
+    "Часто ли клиенты возвращаются?",
+    "Покажи итоги за квартал",
+    "Смотри на данные за квартал",
+    "Передай данные маркетинговой команде",
 ]
 
 
@@ -53,12 +57,42 @@ def summary(blocks):
     for block in blocks or []:
         kind = block.get("type")
         if kind == "table":
-            parts.append(f"table {len(block.get('rows') or [])}x{len(block.get('columns') or [])} cols={block.get('columns')}")
+            columns = block.get("columns") or []
+            parts.append(f"table {len(block.get('rows') or [])}x{len(columns)} cols={columns}")
+            if columns and columns[0] in OPEN_TABLES:
+                parts.extend("   | " + " | ".join(str(cell) for cell in row) for row in block.get("rows") or [])
         elif kind == "chips":
             parts.append("chips=" + " | ".join(str(i.get("label")) for i in block.get("items") or []))
         elif kind != "text":
             parts.append(str(kind))
     return "; ".join(parts) or "-"
+
+
+async def team_result(db, ctx, product):
+    """Wait for the marketing team's review of the handed-over facts and print what comes back into the chat."""
+    from app.dispatcher import updates
+    from app.dispatcher.service import open_conversation
+    from app.insights.worker import AGENT
+    from app.models.domain import Decision, Metric, Task
+    metrics = db.scalar(select(func.count()).select_from(Metric).where(Metric.product_id == product.id))
+    print(f"\nmetrics_stored={metrics}")
+    task = db.scalar(select(Task).where(Task.product_id == product.id, Task.assigned_agent == AGENT))
+    if task is None:
+        print("no hand-over task was queued")
+        return
+    for waited in range(0, WAIT_SECONDS, 10):
+        db.expire_all()
+        task = db.get(Task, task.id)
+        if task.status.value in ("completed", "failed"):
+            break
+        await asyncio.sleep(10)
+    print(f"team_task_status={task.status.value} waited_about={waited}s")
+    added = updates.collect_updates(db, ctx, open_conversation(db, product.id, ctx.account))
+    for message in added:
+        print(f"   RESULT CARD: {message.text}")
+        print(f"   blocks: {summary(message.blocks)}")
+    for decision in db.scalars(select(Decision).where(Decision.product_id == product.id)):
+        print(f"   decision {decision.decision_type.value}: evidence_refs={len(decision.evidence_references or [])}")
 
 
 async def main():
@@ -68,9 +102,10 @@ async def main():
         print("no model configured; stop")
         return
     original = service.act
+    created_holder = {"yes": False}
 
     async def guarded(ctx, capability_id, raw_params):
-        if capability_id not in READ_ONLY:
+        if capability_id not in READ_ONLY and not (created_holder["yes"] and capability_id in TEAM):
             print(f"   WOULD_RUN {capability_id} {json.dumps(raw_params, ensure_ascii=False)[:200]}")
             return Outcome(text="[проба: действие не выполнялось]"), None, capability_id
         return await original(ctx, capability_id, raw_params)
@@ -90,6 +125,7 @@ async def main():
         db.add(StudioBusinessLink(servgo_business_id=BUSINESS_ID, product_id=product.id))
         db.commit()
         created = True
+        created_holder["yes"] = True
         print("company_exists=no; temporary company created")
     ctx = Context(db=db, product=product, settings=settings, account=ACCOUNT)
     try:
@@ -110,6 +146,8 @@ async def main():
             print(f"   params={json.dumps(row.params, ensure_ascii=False)[:200]}")
             print(f"   reply: {row.text}")
             print(f"   blocks: {summary(row.blocks)}")
+        if created:
+            await team_result(db, ctx, product)
         spent = db.scalar(select(func.coalesce(func.sum(CostRecord.amount), 0)).where(CostRecord.product_id == product.id))
         calls = db.scalar(select(func.count()).select_from(CostRecord).where(CostRecord.product_id == product.id))
         print(f"\nmodel_calls={calls} cost_usd={Decimal(spent):.4f}")
@@ -117,9 +155,13 @@ async def main():
         service.act = original
         db.rollback()
         if created:
-            for table in reversed(Base.metadata.sorted_tables):
+            from app.models.domain import Task
+            own_tasks = select(Task.id).where(Task.product_id == product.id)
+            for table in reversed(Base.metadata.sorted_tables):  # children before parents
                 if "product_id" in table.c:
                     db.execute(delete(table).where(table.c.product_id == product.id))
+                elif "task_id" in table.c:  # for example the agent runs: they belong to the company through the task
+                    db.execute(delete(table).where(table.c.task_id.in_(own_tasks)))
             db.execute(delete(Product).where(Product.id == product.id))
             db.commit()
             print("temporary company and everything the probe wrote for it: deleted")
