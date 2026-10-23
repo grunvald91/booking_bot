@@ -5,7 +5,16 @@ import os
 os.environ.setdefault("BOT_TOKEN", "test-token")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
+import pytest
+
 from web.api.routes import owner_mail
+
+
+@pytest.fixture(autouse=True)
+def fresh_model_cache():
+    owner_mail._TEAM_MODELS.update(at=0.0, models=[])
+    yield
+    owner_mail._TEAM_MODELS.update(at=0.0, models=[])
 
 
 class FakeResponse:
@@ -154,3 +163,14 @@ def test_hub_keeps_its_own_model_when_no_choice_was_made(monkeypatch):
     monkeypatch.setattr(owner_mail.httpx, "AsyncClient", scripted_client(sent, {"models": []}, ['{"ok": 3}']))
     assert asyncio.run(owner_mail.hub("prompt")) == {"ok": 3}
     assert sent["models"] == ["deepseek-v4.1-flash"]
+
+
+def test_team_page_choice_is_asked_once_a_minute_not_on_every_call(monkeypatch):
+    sent = {}
+    monkeypatch.setenv("CLAUDEHUB_API_KEY", "test-key")
+    monkeypatch.setenv("STUDIO_INTERNAL_KEY", "k" * 40)
+    monkeypatch.setattr(owner_mail.httpx, "AsyncClient",
+                        scripted_client(sent, {"models": ["kimi-k3"]}, ['{"a": 1}', '{"a": 2}']))
+    asyncio.run(owner_mail.hub("one"))
+    asyncio.run(owner_mail.hub("two"))
+    assert len(sent["team_calls"]) == 1 and sent["models"] == ["kimi-k3", "kimi-k3"]

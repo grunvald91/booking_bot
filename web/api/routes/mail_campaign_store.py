@@ -64,6 +64,12 @@ def initialize(db) -> None:
         CREATE INDEX IF NOT EXISTS campaign_event_idx
             ON campaign_event(campaign_id,occurred_at);
     """)
+    # The company a campaign works for (a studio company); empty means ServGo's own offer.
+    columns = {row[1] for row in db.execute("PRAGMA table_info(campaign)")}
+    if "company_id" not in columns:
+        db.execute("ALTER TABLE campaign ADD COLUMN company_id TEXT NOT NULL DEFAULT ''")
+    if "company_brief" not in columns:
+        db.execute("ALTER TABLE campaign ADD COLUMN company_brief TEXT NOT NULL DEFAULT ''")
 
 
 AUTOMATION_KEY = "automation_enabled"
