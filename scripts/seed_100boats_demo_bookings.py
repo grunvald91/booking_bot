@@ -8,7 +8,7 @@ free-window view and the studio dispatcher have something to show.
 * Reminders of the demo business (owner and masters) are switched off while the demo bookings exist, otherwise the
   owner would get a reminder for each of them; `remove` switches them back on.
 
-Modes (env DEMO_MODE): apply (default: dry run, prints the plan) | write | remove.
+Modes (env DEMO_MODE): apply (default: dry run, prints the plan) | write | remove | inspect (aggregates only).
 """
 import asyncio
 import os
@@ -83,6 +83,26 @@ async def run(mode: str) -> None:
         print(f'business=11 vessels={len(vessels)} main_service={"yes" if main else "no"} '
               f'demo_bookings_now={tagged} other_bookings_now={other} '
               f'owner_reminders={business.owner_reminders_enabled} master_reminders={business.master_reminders_enabled}')
+
+        if mode == 'inspect':
+            # Aggregates only: no names, phones or notes are printed.
+            rows = (await db.execute(select(Booking, User).join(User, User.id == Booking.client_id).where(
+                Booking.business_id == BUSINESS_ID))).all()
+            by_status, kinds = {}, {}
+            for booking, client in rows:
+                by_status[booking.status] = by_status.get(booking.status, 0) + 1
+                notes = booking.notes or ''
+                kind = ('rental_form' if notes.startswith('Аренда') else 'seed_marker' if '[DEMO-SEED' in notes
+                        else 'other_notes' if notes else 'no_notes')
+                kind += '/real_telegram_client' if (client.telegram_id or 0) > 0 else '/guest_client'
+                kinds[kind] = kinds.get(kind, 0) + 1
+            dates = [b.booking_date for b, _ in rows]
+            created = [b.created_at for b, _ in rows if b.created_at]
+            print('status=' + str(by_status))
+            print('kinds=' + str(kinds))
+            print(f'booking_dates={min(dates)}..{max(dates)} created_at={min(created)}..{max(created)} '
+                  f'distinct_clients={len({c.id for _, c in rows})}')
+            return
 
         if mode == 'remove':
             ids = (await db.execute(select(Booking.id).where(
