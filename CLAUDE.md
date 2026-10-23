@@ -10,9 +10,9 @@ Primary production service:
 - production systemd service: booking-bot
 
 ## Critical production rule
-Production source has historically diverged from GitHub. Do NOT assume main is byte-identical to the server.
+Production source and GitHub were synchronized by the owner. The source audit of 2026-10-23 (workflow "Audit production source against GitHub") found the server backend byte-identical to `main` at the time: `database/models.py`, `web/api/schemas.py`, `web/api/main.py` and the mail routes matched, and there was no server-only source. The remaining differences were repository-only files (docs, dev scripts) that are not deployed.
 
-Never perform or propose a broad "copy whole repository to production" deployment unless a fresh source audit proves the relevant production paths are synchronized.
+This is a dated fact, not a permanent guarantee. Re-run the audit before any deployment that depends on it, and never perform or propose a broad "copy whole repository to production" deployment unless a fresh audit proves the relevant production paths are synchronized.
 
 Prefer scoped changes with explicit file lists, validation, health checks, and rollback.
 
