@@ -111,6 +111,21 @@ async def main():
         return await original(ctx, capability_id, raw_params)
 
     service.act = guarded
+    plain_generate = llm.generate
+
+    async def spy(request, **kwargs):
+        """Shows what the model sent back for each question (its decision, no secrets) and how it failed."""
+        try:
+            reply = await plain_generate(request, **kwargs)
+        except Exception as error:  # noqa: BLE001
+            print(f"   LLM_ERROR {type(error).__name__}: {str(error)[:200]}")
+            raise
+        usage = reply.usage
+        print(f"   LLM stop={reply.stop_reason} tokens_out={getattr(usage, 'output_tokens', None)} "
+              f"chars={len(reply.content)} head={reply.content[:240]!r}")
+        return reply
+
+    llm.generate = spy
     db = SessionLocal()
     link = db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == BUSINESS_ID))
     created = False
