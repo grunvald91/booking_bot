@@ -1013,7 +1013,8 @@ export function SchedulePage() {
           </div>
         )}
 
-        {tools.legend && employees.length > 0 && (
+        {/* В дне цвет и имя уже в заголовке каждой колонки — второй ряд был дублем. Нужен только в неделе. */}
+        {tools.legend && viewMode === 'week' && employees.length > 0 && (
           <div className="sched-legend" role="group" aria-label="Цвета специалистов">
             {employees.map((e) => (
               <button
