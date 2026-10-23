@@ -6,12 +6,12 @@ import { errorMessage, saveLogin } from '../../authUtils'
 import { ClientShell } from '../../components/ClientShell'
 import { EmailAuthForm } from '../../components/EmailAuthForm'
 
-// Кнопка Telegram сначала берётся через собственный прокси ServGo (tg.servgo.ru): в РФ telegram.org
-// и oauth.telegram.org у многих не открываются. Скрипт кнопки сам берёт адрес рамки и окна входа
-// с того хоста, откуда загружен, поэтому прокси должен отдавать и /js, и /embed, и /auth.
-// Если прокси не отвечает, пробуем напрямую telegram.org.
+// Кнопка Telegram сначала берётся через собственный прокси ServGo (tg.servgo.ru, сервер relay 89): в РФ
+// telegram.org и oauth.telegram.org у многих не открываются. Скрипт кнопки сам берёт адрес рамки и окна
+// входа с того хоста, откуда загружен; прокси отдаёт /widget.js, /embed, /auth и статику с переписанными
+// ссылками. Если прокси не отвечает, пробуем напрямую telegram.org.
 const WIDGET_SOURCES = [
-  'https://tg.servgo.ru/js/telegram-widget.js?22',
+  'https://tg.servgo.ru/widget.js',
   'https://telegram.org/js/telegram-widget.js?22',
 ]
 const WIDGET_WAIT_MS = 10000
