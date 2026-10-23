@@ -14,7 +14,7 @@ concurrency:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 25
     env:
       SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
     steps:
@@ -44,8 +44,9 @@ jobs:
                   conn.close()
                   if attempt == 2: raise
                   time.sleep(3)
+          ssh.get_transport().set_keepalive(20)  # the probe is silent for minutes while the model thinks
           try:
-              stdin, out, err = ssh.exec_command('docker exec -i ai-growth-os-api-1 python -', timeout=600)
+              stdin, out, err = ssh.exec_command('docker exec -i ai-growth-os-api-1 python -', timeout=1300)
               stdin.write(source); stdin.flush(); stdin.channel.shutdown_write()
               text = out.read().decode('utf-8', 'replace')
               status = out.channel.recv_exit_status()
