@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
-      - name: Inspect names only
+      - name: Run the probe inside the studio container
         shell: bash
         run: |
           python - <<'PY'
@@ -32,7 +32,7 @@ jobs:
                   if fp != 'uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU':
                       raise paramiko.SSHException('Host key mismatch')
                   client.get_host_keys().add(hostname, key.get_name(), key)
-          source = pathlib.Path('scripts/studio_env_inspect.py').read_bytes()
+          source = pathlib.Path('scripts/studio_dispatcher_probe.py').read_bytes()
           ssh = None
           for attempt in range(3):
               conn = paramiko.SSHClient(); conn.set_missing_host_key_policy(Pinned())
@@ -45,7 +45,7 @@ jobs:
                   if attempt == 2: raise
                   time.sleep(3)
           try:
-              stdin, out, err = ssh.exec_command('python3 -', timeout=600)
+              stdin, out, err = ssh.exec_command('docker exec -i ai-growth-os-api-1 python -', timeout=600)
               stdin.write(source); stdin.flush(); stdin.channel.shutdown_write()
               text = out.read().decode('utf-8', 'replace')
               status = out.channel.recv_exit_status()
@@ -57,4 +57,4 @@ jobs:
           finally:
               ssh.close()
           PY
-# env inspect
+# probe 2
