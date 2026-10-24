@@ -47,7 +47,7 @@ class NicheLandingsRenderTest(unittest.IsolatedAsyncioTestCase):
             res = await client.get('/')
             self.assertEqual(res.status, 200)
             html = await res.text()
-            self.assertIn('База ваших клиентов стоит дороже, чем вы думаете', html)
+            self.assertIn('Ваша клиентская база стоит', html)
             self.assertIn('data-base-calc', html)
             self.assertNotIn('9 900', html)
             self.assertNotIn('1 490', html)
