@@ -27,7 +27,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png?v=3">
     <link rel="manifest" href="/static/site.webmanifest?v=2">
     <link rel="stylesheet" href="/static/css/landing.css?v=12">
-    <link rel="stylesheet" href="/static/css/niche.css?v=5">
+    <link rel="stylesheet" href="/static/css/niche.css?v=6">
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
@@ -347,7 +347,7 @@
                         {% endfor %}
                     </ul>
                     {% endif %}
-                    <div class="hero-actions"><button class="primary-action" type="button" data-open-connect-form>Занять бесплатное место</button></div>
+                    <div class="hero-actions"><button class="primary-action" type="button" data-open-connect-form data-connect-intent="free_seat">Занять бесплатное место</button></div>
                 </div>
                 <div class="pricing-card" aria-label="Условия ServGo">
                     <span class="pricing-label">Студия маркетинга</span>
@@ -423,8 +423,17 @@
         <div class="connect-modal" role="dialog" aria-modal="true" aria-labelledby="connect-form-title">
             <button class="modal-close" type="button" data-close-connect-form aria-label="Закрыть форму">×</button>
             <p class="eyebrow">Заявка на подключение</p>
-            <h2 id="connect-form-title">Расскажите, как с вами связаться</h2>
+            <h2 id="connect-form-title" data-connect-title data-default-text="Расскажите, как с вами связаться" data-free-seat-text="Занять бесплатное место">Расскажите, как с вами связаться</h2>
             <form class="connect-form" data-connect-form novalidate>
+                <input type="hidden" name="intent" value="">
+                <label>
+                    <span>Ваша ниша</span>
+                    <select name="niche">
+                        <option value="">Выберите нишу</option>
+                        {% for n in niches %}<option value="{{ n.slug }}">{{ n.label }}</option>{% endfor %}
+                        <option value="other">Другое</option>
+                    </select>
+                </label>
                 <label>
                     <span>Имя</span>
                     <input type="text" name="name" autocomplete="name" required>

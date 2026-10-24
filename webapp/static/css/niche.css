@@ -202,3 +202,20 @@
     text-decoration: none;
 }
 .seats-list b { color: #3478d6; white-space: nowrap; }
+
+/* Niche select in the connect form (root landing). */
+.connect-form select {
+    padding: 11px 14px;
+    border-radius: 11px;
+    border: 1px solid var(--line-dk);
+    font-size: 16px;
+    font-family: var(--font);
+    color: var(--navy);
+    background: #fff;
+    width: 100%;
+}
+.connect-form select:focus {
+    outline: none;
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px rgba(47,91,235,.16);
+}

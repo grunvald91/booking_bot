@@ -94,9 +94,19 @@ function setConnectStatus(message, type = "") {
     connectStatus.classList.toggle("is-success", type === "success");
 }
 
-function openConnectModal() {
+function openConnectModal(event) {
     if (!connectModal || !connectForm) {
         return;
+    }
+
+    // Кнопка «Занять бесплатное место» помечает заявку и меняет заголовок формы.
+    const freeSeat = event?.currentTarget?.dataset.connectIntent === "free_seat";
+    if (connectForm.elements.intent) {
+        connectForm.elements.intent.value = freeSeat ? "free_seat" : "";
+    }
+    const title = connectModal.querySelector("[data-connect-title]");
+    if (title) {
+        title.textContent = freeSeat ? title.dataset.freeSeatText : title.dataset.defaultText;
     }
 
     connectModal.hidden = false;
@@ -145,6 +155,8 @@ connectForm?.addEventListener("submit", async (event) => {
         email: String(formData.get("email") || "").trim(),
         comment: String(formData.get("comment") || "").trim(),
         self_reported_source: String(formData.get("self_reported_source") || "").trim(),
+        niche: String(formData.get("niche") || "").trim(),
+        intent: String(formData.get("intent") || "").trim(),
         ...attribution,
     };
 

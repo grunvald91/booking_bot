@@ -87,6 +87,31 @@ def _clean_landing_field(value, limit: int) -> str:
     return str(value or "").strip()[:limit]
 
 
+def _landing_niche_label(value) -> str:
+    """Known niche slug -> its label; 'other' -> 'Другое'; anything else -> ''."""
+    slug = _clean_landing_field(value, 60)
+    if slug == "other":
+        return "Другое"
+    if not slug:
+        return ""
+    from webapp.niches import get_niche
+
+    niche = get_niche(slug)
+    if not niche:
+        return ""
+    return (niche.get("meta") or {}).get("short_label") or slug
+
+
+def landing_request_tag(payload: dict) -> str:
+    """Short tag for the lead: '[Бесплатное место · Салоны красоты]'."""
+    parts = []
+    if payload.get("intent") == "free_seat":
+        parts.append("Бесплатное место")
+    if payload.get("niche"):
+        parts.append(payload["niche"])
+    return f"[{' · '.join(parts)}]" if parts else ""
+
+
 def validate_landing_request_payload(data: dict) -> dict:
     """Validate and normalize a public landing-page connection request."""
     name = _clean_landing_field(data.get("name"), 120)
@@ -116,6 +141,8 @@ def validate_landing_request_payload(data: dict) -> dict:
         "utm_term": _clean_landing_field(data.get("utm_term"), 255),
         "referrer": _clean_landing_field(data.get("referrer"), 2000),
         "landing_path": _clean_landing_field(data.get("landing_path"), 500),
+        "niche": _landing_niche_label(data.get("niche")),
+        "intent": "free_seat" if data.get("intent") == "free_seat" else "",
         "recipient": os.getenv("LANDING_REQUEST_EMAIL", LANDING_REQUEST_RECIPIENT),
         "created_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC"),
     }
@@ -123,8 +150,13 @@ def validate_landing_request_payload(data: dict) -> dict:
 
 def format_landing_request_message(payload: dict) -> str:
     lines = [
-        "Новая заявка на подключение бизнеса",
+        (
+            "Новая заявка: занять бесплатное место"
+            if payload.get("intent") == "free_seat"
+            else "Новая заявка на подключение бизнеса"
+        ),
         "",
+        f"Ниша: {payload.get('niche') or 'не указана'}",
         f"Имя: {payload['name']}",
         f"Телефон: {payload['phone'] or 'не указан'}",
         f"Email: {payload['email'] or 'не указан'}",
@@ -153,7 +185,10 @@ async def persist_landing_marketing_lead(payload: dict) -> int:
             name=payload["name"],
             phone=payload.get("phone") or None,
             email=payload.get("email") or None,
-            comment=payload.get("comment") or None,
+            comment=(
+                " ".join(x for x in (landing_request_tag(payload), payload.get("comment") or "") if x)
+                or None
+            ),
             experiment_id=payload.get("experiment_id") or None,
             utm_source=payload.get("utm_source") or None,
             utm_medium=payload.get("utm_medium") or None,

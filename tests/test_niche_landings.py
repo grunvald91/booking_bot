@@ -68,6 +68,35 @@ class NicheLandingsRenderTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn('https://promo.servgo.ru/roadmap', xml)
 
 
+class LandingLeadTagTest(unittest.TestCase):
+    def test_free_seat_and_niche_reach_the_message(self):
+        from webapp.server import (
+            format_landing_request_message, landing_request_tag, validate_landing_request_payload,
+        )
+        payload = validate_landing_request_payload({
+            'name': 'Анна', 'phone': '+7 900 000-00-00', 'niche': 'beauty', 'intent': 'free_seat',
+        })
+        self.assertEqual(payload['niche'], 'Салоны красоты')
+        self.assertEqual(landing_request_tag(payload), '[Бесплатное место · Салоны красоты]')
+        message = format_landing_request_message(payload)
+        self.assertIn('занять бесплатное место', message)
+        self.assertIn('Ниша: Салоны красоты', message)
+
+    def test_unknown_niche_and_intent_are_dropped(self):
+        from webapp.server import landing_request_tag, validate_landing_request_payload
+        payload = validate_landing_request_payload({
+            'name': 'Анна', 'email': 'a@b.ru', 'niche': '../etc', 'intent': 'hack',
+        })
+        self.assertEqual(payload['niche'], '')
+        self.assertEqual(payload['intent'], '')
+        self.assertEqual(landing_request_tag(payload), '')
+
+    def test_other_niche(self):
+        from webapp.server import validate_landing_request_payload
+        payload = validate_landing_request_payload({'name': 'Анна', 'email': 'a@b.ru', 'niche': 'other'})
+        self.assertEqual(payload['niche'], 'Другое')
+
+
 class OfferLoaderTest(unittest.TestCase):
     def test_money_formatting_and_counters(self):
         from webapp.niches import get_offer
