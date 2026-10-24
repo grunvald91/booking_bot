@@ -78,8 +78,9 @@ async def get_thumbnail(file_id: str, download) -> bytes | None:
             temporary.write_bytes(small)
             os.replace(temporary, path)
             return small
-        except Exception:
-            logger.warning("photo_thumbnail_failed", exc_info=True)
+        except Exception as exc:
+            # No traceback or message: httpx errors carry the Telegram URL with the bot token.
+            logger.warning("photo_thumbnail_failed: %s", type(exc).__name__)
             return None
         finally:
             _locks.pop(path.name, None)

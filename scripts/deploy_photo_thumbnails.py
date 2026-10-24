@@ -81,7 +81,15 @@ from database.database import async_session_maker
 async def check():
     async with async_session_maker() as session:
         rows=await session.execute(text('SELECT photos FROM businesses WHERE photos IS NOT NULL ORDER BY id LIMIT 20'))
-        ids=[p[0] for raw in rows.scalars() if isinstance((p:=json.loads(raw)),list) and p][:4]
+        ids=[]
+        for raw in rows.scalars():
+            try:
+                photos=json.loads(raw)
+            except ValueError:
+                photos=[raw]
+            if isinstance(photos,list) and photos and isinstance(photos[0],str):
+                ids.append(photos[0])
+        ids=ids[:4]
     assert ids,'no existing business photo to verify'
     async with httpx.AsyncClient(timeout=40) as http:
         for file_id in ids:
@@ -137,7 +145,9 @@ def main():
         # Pillow with WEBP must already exist; nothing is installed on production here.
         run(client, ROOT + "/venv/bin/python -c 'from PIL import features; assert features.check(\"webp\"); print(\"pillow_webp_ok=yes\")'")
         print(run(client, "systemctl show -p User -p ProtectSystem -p ReadWritePaths booking-web-api.service"))
-        run(client, "mkdir -p /var/lib/servgo-photo-cache && chmod 755 /var/lib/servgo-photo-cache")
+        user = run(client, "systemctl show -p User --value booking-web-api.service") or "root"
+        run(client, "mkdir -p /var/lib/servgo-photo-cache && chmod 755 /var/lib/servgo-photo-cache && chown "
+            + shlex.quote(user) + " /var/lib/servgo-photo-cache")
         run(client, "cp -p " + shlex.quote(CLIENT) + " " + shlex.quote(backup))
         changed = True
         put(sftp, CACHE_MODULE, cache_bytes)

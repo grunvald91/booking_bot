@@ -113,3 +113,12 @@ def test_endpoint_second_thumb_request_does_not_touch_telegram(monkeypatch):
     first, second = asyncio.run(run())
     assert len(asked) == 1 and first.body == second.body
     assert first.media_type == "image/webp" and "immutable" in first.headers["cache-control"]
+
+
+def test_failure_log_never_contains_the_telegram_url(caplog):
+    async def download():
+        raise RuntimeError("Client error for url 'https://api.telegram.org/file/bot123:SECRET/photos/a.jpg'")
+
+    with caplog.at_level("WARNING"):
+        assert asyncio.run(photo_cache.get_thumbnail("file-6", download)) is None
+    assert "SECRET" not in caplog.text and "api.telegram.org" not in caplog.text
