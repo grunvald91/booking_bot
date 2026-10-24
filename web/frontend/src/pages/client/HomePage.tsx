@@ -4,7 +4,7 @@ import { Briefcase, ChevronRight, Bell } from 'lucide-react'
 import { api, type Business } from '../../api/client'
 import { NotificationSetup } from '../../components/NotificationSetup'
 import { AirFrame } from './AirFrame'
-import { parsePhotoList, photoSrc } from './airPhotos'
+import { parsePhotoList, photoThumbSrc } from './airPhotos'
 
 const nichePresentations = [
   { label: 'Бани и сауны', href: 'https://promo.servgo.ru/banya' },
@@ -92,7 +92,7 @@ export function HomePage() {
             </div>
           ) : (
             <nav className="bf-list" aria-label="Места для записи">
-              {businesses.map((biz) => {
+              {businesses.map((biz, index) => {
                 const hours = formatWorkingHours(biz)
                 const photos = parsePhotoList(biz.photos)
                 const cover = photos.length > 0 && !failedPhotos.has(biz.id) ? photos[0] : null
@@ -102,9 +102,12 @@ export function HomePage() {
                     <span className="bf-thumb" aria-hidden="true">
                       {cover ? (
                         <img
-                          src={photoSrc(cover)}
+                          src={photoThumbSrc(cover)}
                           alt=""
-                          loading="lazy"
+                          width={68}
+                          height={68}
+                          loading={index < 4 ? 'eager' : 'lazy'}
+                          decoding="async"
                           onError={() => setFailedPhotos((prev) => new Set(prev).add(biz.id))}
                         />
                       ) : (
