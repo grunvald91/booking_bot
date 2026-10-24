@@ -44,6 +44,8 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(255))
     phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(320), nullable=True, index=True)
+    # Дата рождения «ГГГГ-ММ-ДД» из Яндекс ID; если год неизвестен, он «0000». Для поздравлений.
+    birthday: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
@@ -75,6 +77,30 @@ class EmailIdentity(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     session_version: Mapped[int] = mapped_column(Integer, default=1)
     verified_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
+class YandexIdentity(Base):
+    """One Yandex ID account belongs to one ServGo user (and the other way round)."""
+    __tablename__ = "yandex_identities"
+    yandex_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    login: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
+class YandexTicket(Base):
+    """One-time pass from the Yandex callback to the web app. Only a hash of the secret is stored."""
+    __tablename__ = "yandex_tickets"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload: Mapped[str] = mapped_column(Text)
+    link_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    code_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    code_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    code_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    sends: Mapped[int] = mapped_column(Integer, default=0)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class EmailChallenge(Base):

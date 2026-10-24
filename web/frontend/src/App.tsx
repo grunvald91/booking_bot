@@ -9,6 +9,7 @@ import { BookingStatusPage } from './pages/client/BookingStatusPage'
 import { MyBookingsPage } from './pages/client/MyBookingsPage'
 import { SubscriptionsPage } from './pages/client/SubscriptionsPage'
 import { LoginPage } from './pages/client/LoginPage'
+import { YandexLoginPage } from './pages/client/YandexLoginPage'
 import { OwnerMailPage } from './pages/client/OwnerMailPage'
 import { AccountPage } from './pages/client/AccountPage'
 import { PrepaymentsPage } from './pages/admin/PrepaymentsPage'
@@ -142,6 +143,7 @@ function App() {
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/legal/:docType/:businessId" element={<LegalPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/login/yandex" element={<YandexLoginPage />} />
         <Route path="/mail" element={<OwnerMailPage />} />
         <Route path="/account" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
         <Route path="/admin/prepayments" element={<AdminRoute><PrepaymentsPage /></AdminRoute>} />
