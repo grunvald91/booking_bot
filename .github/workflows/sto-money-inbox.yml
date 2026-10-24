@@ -1,0 +1,37 @@
+name: STO money inbox (apply encrypted entries)
+# Записи учёта приходят зашифрованными файлами в ветку sto-inbox (папка sto_money/inbox).
+# Расшифровать их может только закрытый ключ на сервере; в лог попадают лишь имена файлов и коды результата.
+# Нужен секрет: SERVER_SSH_PASSWORD. Запуск: пуш в ветку sto-inbox или вручную.
+on:
+  push:
+    branches: [ sto-inbox ]
+    paths:
+      - sto_money/inbox/**
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: sto-money-inbox
+  cancel-in-progress: false
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Encrypted entries (branch sto-inbox)
+        uses: actions/checkout@v4
+        with:
+          ref: sto-inbox
+          path: data
+          persist-credentials: false
+      - name: Delivery script (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: code
+          persist-credentials: false
+      - run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Apply entries on the server
+        env:
+          SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+        run: python code/sto_money/deploy_sto_money.py --inbox data/sto_money/inbox

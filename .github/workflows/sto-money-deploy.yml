@@ -1,0 +1,40 @@
+name: Deploy STO money tracker (scoped)
+# Учёт выручки по бокам СТО на sto.servgo.ru. Только ручной запуск или метка в коммите.
+# apply=false — проверка сервера без изменений. apply=true — установка/обновление сервиса и отдельного
+# файла nginx (существующие сайты и booking-bot не затрагиваются). При сбое добавленное убирается, данные остаются.
+# Нужны секреты: SERVER_SSH_PASSWORD; для первой установки ещё STO_PRIVATE_KEY (закрытый ключ приёма записей).
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Change production (false = read-only preflight)'
+        required: true
+        type: boolean
+        default: false
+  # Проверка при пуше этой ветки (ручной запуск требует файл в основной ветке).
+  push:
+    branches: [ ops/sto-money-deploy ]
+    paths:
+      - .github/workflows/sto-money-deploy.yml
+      - sto_money/**
+permissions:
+  contents: read
+concurrency:
+  group: sto-money-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install --disable-pip-version-check pytest 'paramiko==3.5.1'
+      - name: Tests
+        run: python -m pytest -q tests/test_sto_money.py tests/test_sto_money_deploy.py
+      - name: Preflight or deploy
+        env:
+          SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+          STO_PRIVATE_KEY: ${{ secrets.STO_PRIVATE_KEY }}
+          # Пуш применяет изменения только с меткой в сообщении коммита; иначе — проверка без изменений.
+          APPLY: ${{ inputs.apply || contains(github.event.head_commit.message, '[apply-sto-money]') }}
+        run: python sto_money/deploy_sto_money.py
