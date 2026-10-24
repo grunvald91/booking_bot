@@ -353,7 +353,7 @@
                     <span class="pricing-label">Студия маркетинга</span>
                     <strong class="pricing-amount">{{ offer.studio_price_text }}</strong>
                     <span class="pricing-period">в месяц</span>
-                    <p>Первому бизнесу в каждой нише студия бесплатна на ближайшее время. Остальным — по этой цене.</p>
+                    {% if niches | selectattr('studio_free_left') | list %}<p>Первому бизнесу в каждой нише студия бесплатна на ближайшее время. Остальным — по этой цене.</p>{% endif %}
                 </div>
             </div>
         </section>

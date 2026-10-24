@@ -893,6 +893,7 @@ async def index_handler(request: web.Request) -> web.Response:
             'slug': slug,
             'label': label,
             'seats_left': n['offer']['seats_left'],
+            'studio_free_left': n['offer']['studio_free_left'],
         })
 
     template = _niche_jinja_env.get_template('landing.html')
