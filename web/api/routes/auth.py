@@ -13,14 +13,16 @@ import httpx
 from typing import Dict, Optional, Tuple
 from urllib.parse import parse_qs
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
+from database.account_link import AccountLinkError, merge_yandex_account, phones_match
+from database.models import EmailIdentity, YandexIdentity
 from ..database import get_db, User, Business, BusinessOwner
-from ..deps import create_token, get_current_user
+from ..deps import create_token, get_current_user, get_current_user_optional
 from ..schemas import (
     LoginPhoneIn,
     VerifyCodeIn,
@@ -117,6 +119,28 @@ async def _find_or_create_user_from_telegram(
     return user
 
 
+async def _join_yandex_account(db: AsyncSession, signed_in: Optional[User], target: User) -> User:
+    """The browser was signed in to an account made by Yandex sign-in and has just proven a Telegram account
+    with the same phone. The Yandex account (its bookings, businesses, Yandex login) joins the Telegram one.
+    Anything unusual leaves the accounts separate and the Telegram sign-in still works."""
+    if signed_in is None or signed_in.id == target.id or signed_in.telegram_id > 0 or target.telegram_id <= 0:
+        return target
+    identity = await db.scalar(select(YandexIdentity).where(YandexIdentity.user_id == signed_in.id))
+    # Join only when the data match: the phone Yandex confirmed is this Telegram account's phone.
+    if identity is None or not phones_match(identity.phone, target.phone):
+        return target
+    if await db.scalar(select(EmailIdentity.user_id).where(EmailIdentity.user_id == signed_in.id)) is not None:
+        return target
+    try:
+        await merge_yandex_account(db, signed_in.id, target.id)
+        await db.commit()
+    except AccountLinkError as exc:
+        await db.rollback()
+        logger.info("yandex_join_skipped: %s", exc)
+    await db.refresh(target)
+    return target
+
+
 async def _role_for_user(db: AsyncSession, user: User) -> str:
     """Determine role from business ownership.
     Checks legacy Business.owner_id and BusinessOwner junction.
@@ -142,6 +166,7 @@ async def _token_for_telegram_user(
     first_name: Optional[str] = None,
     last_name: Optional[str] = None,
     username: Optional[str] = None,
+    signed_in: Optional[User] = None,
 ) -> TokenOut:
     user = await _find_or_create_user_from_telegram(
         db,
@@ -150,6 +175,7 @@ async def _token_for_telegram_user(
         last_name=last_name,
         username=username,
     )
+    user = await _join_yandex_account(db, signed_in, user)
     role = await _role_for_user(db, user)
     token = create_token(user.id, role=role)
     return TokenOut(
@@ -216,6 +242,7 @@ async def request_code(body: LoginPhoneIn, db: AsyncSession = Depends(get_db)):
 async def verify_code(
     body: VerifyCodeIn,
     db: AsyncSession = Depends(get_db),
+    authorization: Optional[str] = Header(None),
 ):
     """Verify the code, find-or-create user, return JWT with role from ownership."""
     import time as time_module
@@ -248,6 +275,9 @@ async def verify_code(
         db.add(user)
         await db.commit()
         await db.refresh(user)
+    else:
+        # The code went to this account's Telegram: the person proved it.
+        user = await _join_yandex_account(db, await get_current_user_optional(authorization, db), user)
 
     role = await _role_for_user(db, user)
     token = create_token(user.id, role=role)
@@ -323,6 +353,7 @@ async def telegram_login_widget(
     body: TelegramLoginWidgetIn,
     response: Response,
     db: AsyncSession = Depends(get_db),
+    authorization: Optional[str] = Header(None),
 ):
     """Authenticate via Telegram Login Widget and issue both JWT and shared cookie."""
     auth_payload = body.model_dump(exclude_none=True)
@@ -336,6 +367,7 @@ async def telegram_login_widget(
         first_name=shared_auth.get("first_name"),
         last_name=shared_auth.get("last_name"),
         username=shared_auth.get("username"),
+        signed_in=await get_current_user_optional(authorization, db),
     )
     await _set_shared_auth_cookie(response, shared_auth)
     return token_out
@@ -369,6 +401,7 @@ async def telegram_auth(
     body: TelegramAuthIn,
     response: Response,
     db: AsyncSession = Depends(get_db),
+    authorization: Optional[str] = Header(None),
 ):
     """Authenticate via Telegram WebApp initData. Auto-creates user if needed."""
     tg_user = _validate_init_data(body.init_data)
@@ -385,6 +418,7 @@ async def telegram_auth(
         first_name=tg_user.get("first_name"),
         last_name=tg_user.get("last_name"),
         username=tg_user.get("username"),
+        signed_in=await get_current_user_optional(authorization, db),
     )
     shared_auth = _shared_auth_from_init_data(body.init_data, tg_user)
     if shared_auth:

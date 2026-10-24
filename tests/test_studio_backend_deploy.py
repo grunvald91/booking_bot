@@ -20,7 +20,8 @@ def _now(path):
 
 def test_models_patch_gives_the_reviewed_file():
     patched, changed = patch_models(_before('database/models.py'))
-    assert changed and patched == _now('database/models.py')
+    # Compare with the file as of the feature commit; later features (e.g. Yandex login) edit models.py again.
+    assert changed and patched == _before('database/models.py', FEATURE)
 
 
 def test_schemas_patch_gives_the_reviewed_file():

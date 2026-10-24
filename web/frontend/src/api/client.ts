@@ -560,6 +560,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   emailCapabilities: () => request<{ available: boolean }>('/auth/email/capabilities'),
+  yandexCapabilities: () => request<{ available: boolean }>('/auth/yandex/capabilities'),
+  yandexAccount: () => request<{ available: boolean; linked: boolean; login: string | null; telegram_join: boolean }>('/auth/yandex/account'),
+  yandexLinkStart: () => request<{ url: string }>('/auth/yandex/link/start', { method: 'POST' }),
+  yandexExchange: (body: { ticket: string; code?: string; separate?: boolean }) =>
+    request<({ status: 'ok' } & AuthResponse) | { status: 'linked' } | { status: 'code_required' | 'code_unavailable'; account: 'new' | 'existing' }>(
+      '/auth/yandex/exchange', { method: 'POST', body: JSON.stringify(body) }),
   emailAccount: () => request<{ email: string | null; available: boolean; telegram: { id: number; username: string | null } | null; telegram_link_available: boolean }>('/auth/email/account'),
   startTelegramLink: (password: string) => request<{ challenge_id: string; url: string; expires_at: string }>('/auth/telegram-link/start', { method: 'POST', body: JSON.stringify({ password }) }),
   telegramLinkStatus: (id: string) => request<{ state: string; telegram: { id: number; name: string; username: string | null } | null; business_count: number }>(`/auth/telegram-link/${id}`),

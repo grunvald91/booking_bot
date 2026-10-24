@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Phone, Send } from 'lucide-react'
 import { api, type TelegramLoginPayload } from '../../api/client'
 import { errorMessage, saveLogin } from '../../authUtils'
 import { ClientShell } from '../../components/ClientShell'
 import { EmailAuthForm } from '../../components/EmailAuthForm'
+import { YandexLoginButton } from '../../components/YandexLoginButton'
 
 // Кнопка Telegram сначала берётся через собственный прокси ServGo (tg.servgo.ru, сервер relay 89): в РФ
 // telegram.org и oauth.telegram.org у многих не открываются. Скрипт кнопки сам берёт адрес рамки и окна
@@ -15,9 +16,19 @@ const WIDGET_SOURCES = [
   'https://telegram.org/js/telegram-widget.js?22',
 ]
 const WIDGET_WAIT_MS = 10000
+const YANDEX_PROBLEMS: Record<string, string> = {
+  expired: 'Вход через Яндекс не завершился: ссылка устарела. Нажмите кнопку ещё раз.',
+  denied: 'Вход через Яндекс отменён.',
+  failed: 'Яндекс не ответил. Попробуйте ещё раз или войдите другим способом.',
+  unavailable: 'Вход через Яндекс пока недоступен.',
+}
 
 export function LoginPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const yandexProblem = YANDEX_PROBLEMS[searchParams.get('yandex') || '']
+  // Пришли из профиля Яндекс-аккаунта, чтобы объединить его с Telegram: сразу показываем кнопку Telegram.
+  const joinTelegram = searchParams.get('join') === 'telegram'
   const [mode, setMode] = useState<'phone' | 'code'>('phone')
   const [phone, setPhone] = useState('')
   const [code, setCode] = useState(['', '', '', '', '', ''])
@@ -31,6 +42,10 @@ export function LoginPage() {
   const [widget, setWidget] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [widgetAttempt, setWidgetAttempt] = useState(0)
   const [widgetSource, setWidgetSource] = useState(0)
+
+  useEffect(() => {
+    if (joinTelegram) telegramWidgetRef.current?.scrollIntoView({ block: 'center' })
+  }, [joinTelegram])
 
   useEffect(() => {
     if (mode === 'code' && codeRefs.current[0]) {
@@ -161,8 +176,11 @@ export function LoginPage() {
   return (
     <ClientShell backTo="/" title="Вход">
       <div className="ds-form-narrow" style={{ paddingTop: 4 }}>
+        {yandexProblem && <p role="alert" style={{ color: 'var(--s-danger)', marginBottom: 12 }}>{yandexProblem}</p>}
+        <div style={{ marginBottom: 16 }}><YandexLoginButton /></div>
         <EmailAuthForm />
         <p className="ds-hint" style={{ margin: '16px 0' }}>Для аккаунтов с привязанным Telegram доступны прежние способы входа:</p>
+        {joinTelegram && <p className="ds-hint" role="status" style={{ marginBottom: 12, fontWeight: 600 }}>Войдите через Telegram — если номер телефона в нём тот же, что в Яндексе, аккаунты объединятся автоматически.</p>}
         {mode === 'phone' && (
           <div>
             <div className="ds-card" style={{ padding: 16, marginBottom: 14, textAlign: 'center' }}>
