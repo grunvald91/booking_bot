@@ -4,13 +4,20 @@ import { errorMessage } from '../authUtils'
 
 // Привязка Яндекс ID к аккаунту, в который человек уже вошёл.
 export function YandexAccountLink() {
-  const [state, setState] = useState<{ available: boolean; linked: boolean; login: string | null } | null>(null)
+  const [state, setState] = useState<{ available: boolean; linked: boolean; login: string | null; telegram_join: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   useEffect(() => { api.yandexAccount().then(setState).catch(() => setState(null)) }, [])
   if (!state || (!state.available && !state.linked)) return null
   if (state.linked) {
-    return <div className="bf-account-card"><span className="bf-kicker">Яндекс привязан</span><strong>{state.login || 'Яндекс ID'}</strong><p>Можно входить через Яндекс.</p></div>
+    return <>
+      <div className="bf-account-card"><span className="bf-kicker">Яндекс привязан</span><strong>{state.login || 'Яндекс ID'}</strong><p>Можно входить через Яндекс.</p></div>
+      {state.telegram_join && <div className="bf-account-card">
+        <span className="bf-kicker">Telegram</span>
+        <p>Войдите через Telegram, пока вы в этом аккаунте, — аккаунты объединятся автоматически. Записи и бизнесы сохранятся, входить можно будет и так, и так.</p>
+        <button type="button" className="ds-btn ds-btn--primary" onClick={() => window.location.assign('/login?join=telegram')}>Войти через Telegram</button>
+      </div>}
+    </>
   }
   async function link() {
     setBusy(true); setError('')

@@ -4,6 +4,8 @@ Production changes:
   * database/models.py       - User.birthday and two new tables (only inserted lines, via patch)
   * web/api/main.py          - import and include the new router (only inserted lines, via patch)
   * web/api/routes/yandex_auth.py - new file
+  * web/api/routes/auth.py, database/account_link.py - whole-file replace, only if production equals the
+    reviewed baseline (sha256 below); they add the automatic join of a Yandex-only account on Telegram sign-in
   * migrations/add_yandex_auth.sql - additive SQL (new columns/tables; safe to run twice)
   * /etc/servgo/yandex.env (0600, holds the OAuth secret) + a systemd drop-in that reads it
 Restart: booking-web-api.service only. Backups, automatic rollback. The secret is never printed.
@@ -26,6 +28,13 @@ SERVICE = "booking-web-api.service"
 MODELS = ROOT + "/database/models.py"
 MAIN = ROOT + "/web/api/main.py"
 ROUTE = ROOT + "/web/api/routes/yandex_auth.py"
+# production path -> (repository path, sha256 of the version on main before this feature)
+REPLACED = {
+    ROOT + "/web/api/routes/auth.py": ("web/api/routes/auth.py",
+                                       "a61b5bd602246a582dbc5a52e6d81bb008af5d64e373b061546cd803340392e5"),
+    ROOT + "/database/account_link.py": ("database/account_link.py",
+                                         "cf453b64fab93a3155b0122bb9e717dfa532e0a76598886eb3a5acac22e6b960"),
+}
 ENV_DIR = "/etc/servgo"
 ENV_FILE = ENV_DIR + "/yandex.env"
 DROPIN_DIR = "/etc/systemd/system/" + SERVICE + ".d"
@@ -81,6 +90,15 @@ def patch_main(production: str):
     result = result.replace(INCLUDE_ANCHOR, INCLUDE_ANCHOR + INCLUDE_LINE, 1)
     ast.parse(result)
     return result, True
+
+
+def replacement_needed(production, repository: bytes, baseline: str) -> bool:
+    """True when production still has the reviewed baseline; False when it already has the new file."""
+    if production == repository:
+        return False
+    if production is None or hashlib.sha256(production).hexdigest() != baseline:
+        raise RuntimeError("Production file differs from the reviewed baseline; refusing to replace it")
+    return True
 
 
 def run(client, command: str, timeout: int = 60) -> str:
@@ -159,8 +177,10 @@ with httpx.Client(timeout=15, follow_redirects=False) as http:
         start.status_code, url.netloc, query.get('client_id') == ['%s'],
         query.get('redirect_uri') == ['https://servgo.ru/api/auth/yandex/callback'],
         query.get('code_challenge_method') == ['S256'], 'servgo_yx' in start.headers.get('set-cookie', '')))
-    probe = http.get(location)
-    print('yandex_authorize_status=%%d' %% probe.status_code)
+    try:
+        print('yandex_authorize_status=%%d' %% http.get(location).status_code)
+    except Exception as exc:
+        print('yandex_authorize_status=unreachable_from_server ' + type(exc).__name__)
     print('callback_without_state=' + http.get('http://127.0.0.1:8000/auth/yandex/callback', params={'code': 'x', 'state': 'y'}).headers.get('location', ''))
 """
 
@@ -202,10 +222,17 @@ def main():
         route_current = read(sftp, ROUTE)
         if route_current is not None and route_current != route_bytes:
             raise RuntimeError("Unexpected existing yandex_auth.py on production")
-        print("models_patch_needed=%s main_patch_needed=%s route_needed=%s" % (
-            "yes" if models_changed else "no", "yes" if main_changed else "no", "yes" if route_current is None else "no"))
-        print(run(client, "cd " + ROOT + " && ./venv/bin/python -c " + shlex.quote(SERVICE_ENV_CHECK)))
-        if "jwt_secret_long_enough=yes" not in run(client, "cd " + ROOT + " && ./venv/bin/python -c " + shlex.quote(SERVICE_ENV_CHECK)):
+        replacements = {}
+        for remote, (local, baseline) in REPLACED.items():
+            data = Path(local).read_bytes()
+            if replacement_needed(read(sftp, remote), data, baseline):
+                replacements[remote] = data
+        print("models_patch_needed=%s main_patch_needed=%s route_needed=%s replaced=%s" % (
+            "yes" if models_changed else "no", "yes" if main_changed else "no", "yes" if route_current is None else "no",
+            ",".join(Path(p).name for p in replacements) or "none"))
+        env_report = run(client, "cd " + ROOT + " && ./venv/bin/python -c " + shlex.quote(SERVICE_ENV_CHECK))
+        print(env_report)
+        if "jwt_secret_long_enough=yes" not in env_report:
             raise RuntimeError("Service JWT secret is too short for Yandex login; production untouched")
 
         # 1. additive migration (new tables/column; safe to run twice)
@@ -217,7 +244,7 @@ def main():
         changed = True
 
         # 2. backups, files, secret, drop-in
-        for path, needed in ((MODELS, models_changed), (MAIN, main_changed)):
+        for path, needed in ((MODELS, models_changed), (MAIN, main_changed), *((p, True) for p in replacements)):
             if needed:
                 backups[path] = path + ".bak.yandex." + stamp
                 run(client, "cp -p " + shlex.quote(path) + " " + shlex.quote(backups[path]))
@@ -237,9 +264,12 @@ def main():
             put(sftp, MAIN, main_after.encode("utf-8"), sftp.stat(MAIN).st_mode & 0o777)
         if route_current is None:
             put(sftp, ROUTE, route_bytes)
+        for remote, data in replacements.items():
+            put(sftp, remote, data, sftp.stat(remote).st_mode & 0o777)
         put(sftp, ENV_FILE, ("YANDEX_CLIENT_ID=%s\nYANDEX_CLIENT_SECRET=%s\n" % (client_id, secret)).encode(), 0o600)
         put(sftp, DROPIN, DROPIN_TEXT.encode())
-        run(client, "cd " + ROOT + " && ./venv/bin/python -m py_compile database/models.py web/api/main.py web/api/routes/yandex_auth.py")
+        run(client, "cd " + ROOT + " && ./venv/bin/python -m py_compile database/models.py database/account_link.py "
+            "web/api/main.py web/api/routes/auth.py web/api/routes/yandex_auth.py")
         run(client, "systemctl daemon-reload && systemctl restart " + SERVICE, timeout=60)
         if run(client, "systemctl is-active " + SERVICE) != "active":
             raise RuntimeError("Web API failed after rollout")
@@ -264,7 +294,7 @@ def main():
                     command += "cp -p " + shlex.quote(backup) + " " + shlex.quote(path) + "; "
                 if created:
                     command += "rm -f " + " ".join(shlex.quote(p) for p in created) + "; "
-                command += "rm -f " + " ".join(shlex.quote(p + ".yandex.tmp") for p in (MODELS, MAIN, ROUTE, ENV_FILE, DROPIN)) + "; "
+                command += "rm -f " + " ".join(shlex.quote(p + ".yandex.tmp") for p in (MODELS, MAIN, ROUTE, ENV_FILE, DROPIN, *REPLACED)) + "; "
                 command += "systemctl daemon-reload; systemctl restart " + SERVICE
                 run(client, command, timeout=90)
                 print("yandex_login_rolled_back=yes (new empty tables stay; they are harmless)")

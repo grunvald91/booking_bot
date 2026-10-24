@@ -25,7 +25,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime_utils import utc_now
-from database.models import User, YandexIdentity, YandexTicket
+from database.account_link import AccountLinkError, merge_yandex_account
+from database.models import EmailIdentity, User, YandexIdentity, YandexTicket
 from email_utils import normalize_optional_email
 from .. import deps
 from ..database import get_db
@@ -40,6 +41,9 @@ AUTHORIZE_URL = "https://oauth.yandex.ru/authorize"
 TOKEN_URL = "https://oauth.yandex.ru/token"
 INFO_URL = "https://login.yandex.ru/info"
 COOKIE = "servgo_yx"
+# Binds a one-time ticket to the browser that went through Yandex, so a ticket link sent to someone else is useless.
+TICKET_COOKIE = "servgo_yxt"
+COOKIE_PATH = "/api/auth/yandex"
 FLOW_MINUTES = 10
 CODE_MINUTES = 5
 MAX_ATTEMPTS = 5
@@ -101,7 +105,7 @@ def _start_flow(response: Response, link_user_id: Optional[int]) -> str:
     state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(48)
     response.set_cookie(
         COOKIE, _seal({"s": state, "v": verifier, "u": link_user_id, "exp": int(utc_now().timestamp()) + FLOW_MINUTES * 60}),
-        max_age=FLOW_MINUTES * 60, httponly=True, secure=True, samesite="lax", path="/api/auth/yandex",
+        max_age=FLOW_MINUTES * 60, httponly=True, secure=True, samesite="lax", path=COOKIE_PATH,
     )
     return _authorize_url(state, verifier)
 
@@ -146,7 +150,7 @@ async def fetch_profile(code: str, verifier: str) -> dict:
 
 def _back(path: str) -> RedirectResponse:
     redirect = RedirectResponse(path, status_code=302)
-    redirect.delete_cookie(COOKIE, path="/api/auth/yandex")
+    redirect.delete_cookie(COOKIE, path=COOKIE_PATH)
     redirect.headers["Cache-Control"] = "no-store"
     redirect.headers["Referrer-Policy"] = "no-referrer"
     return redirect
@@ -174,10 +178,18 @@ async def link_start(response: Response, user: User = Depends(deps.get_current_u
     return {"url": _start_flow(response, user.id)}
 
 
+async def yandex_only(db: AsyncSession, user: User) -> bool:
+    """Created by Yandex sign-in and still without Telegram or an email password."""
+    return user.telegram_id < 0 \
+        and await db.scalar(select(YandexIdentity.yandex_id).where(YandexIdentity.user_id == user.id)) is not None \
+        and await db.scalar(select(EmailIdentity.user_id).where(EmailIdentity.user_id == user.id)) is None
+
+
 @router.get("/yandex/account")
 async def account(user: User = Depends(deps.get_current_user), db: AsyncSession = Depends(get_db)):
     identity = await db.scalar(select(YandexIdentity).where(YandexIdentity.user_id == user.id))
-    return {"available": configured(), "linked": identity is not None, "login": identity.login if identity else None}
+    return {"available": configured(), "linked": identity is not None, "login": identity.login if identity else None,
+            "telegram_join": await yandex_only(db, user)}
 
 
 @router.get("/yandex/callback")
@@ -200,7 +212,10 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
                         link_user_id=flow.get("u"), expires_at=utc_now() + timedelta(minutes=FLOW_MINUTES)))
     await db.commit()
     # The secret travels in the URL fragment: it is not sent to servers or written to their logs.
-    return _back("/login/yandex#ticket=" + ticket)
+    redirect = _back("/login/yandex#ticket=" + ticket)
+    redirect.set_cookie(TICKET_COOKIE, _mac("browser:" + _ticket_hash(ticket)), max_age=FLOW_MINUTES * 60,
+                        httponly=True, secure=True, samesite="strict", path=COOKIE_PATH)
+    return redirect
 
 
 class ExchangeIn(BaseModel):
@@ -245,8 +260,11 @@ async def _consume(ticket: YandexTicket) -> None:
 
 
 @router.post("/yandex/exchange")
-async def exchange(body: ExchangeIn, user: Optional[User] = Depends(deps.get_current_user_optional),
+async def exchange(body: ExchangeIn, request: Request, user: Optional[User] = Depends(deps.get_current_user_optional),
                    db: AsyncSession = Depends(get_db)):
+    browser = request.cookies.get(TICKET_COOKIE) or ""
+    if not hmac.compare_digest(browser, _mac("browser:" + _ticket_hash(body.ticket))):
+        raise HTTPException(400, "Ссылка входа открыта не в том браузере. Нажмите «Войти через Яндекс» ещё раз")
     ticket = await db.scalar(select(YandexTicket).where(YandexTicket.id == _ticket_hash(body.ticket)).with_for_update())
     now = utc_now()
     if ticket is None or ticket.consumed or ticket.expires_at <= now:
@@ -259,8 +277,22 @@ async def exchange(body: ExchangeIn, user: Optional[User] = Depends(deps.get_cur
         if user is None or user.id != ticket.link_user_id:
             raise HTTPException(401, "Войдите в аккаунт и повторите привязку")
         if existing is not None:
-            raise HTTPException(409, "Этот Яндекс-аккаунт уже привязан к другому аккаунту ServGo" if existing.user_id != user.id
-                                else "Этот Яндекс уже привязан к вашему аккаунту")
+            if existing.user_id == user.id:
+                raise HTTPException(409, "Этот Яндекс уже привязан к вашему аккаунту")
+            owner = await db.get(User, existing.user_id)
+            if owner is None or not await yandex_only(db, owner):
+                raise HTTPException(409, "Этот Яндекс-аккаунт уже привязан к другому аккаунту ServGo")
+            # The person signed in here and has just proven the Yandex account: its earlier
+            # Yandex-only account (bookings, businesses) joins this one.
+            try:
+                await merge_yandex_account(db, owner.id, user.id)
+            except AccountLinkError as exc:
+                await db.rollback()
+                raise HTTPException(409, str(exc)) from None
+            _fill_missing(user, profile)
+            await _consume(ticket)
+            await db.commit()
+            return await _issue(db, user)
         if await db.scalar(select(YandexIdentity).where(YandexIdentity.user_id == user.id)):
             raise HTTPException(409, "К вашему аккаунту уже привязан другой Яндекс")
         db.add(YandexIdentity(yandex_id=profile["id"], user_id=user.id, login=profile["login"]))

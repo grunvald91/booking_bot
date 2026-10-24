@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from database.models import Base, User, YandexIdentity, YandexTicket
+from database.models import Base, Business, EmailIdentity, User, UserAccountMerge, YandexIdentity, YandexTicket
 from web.api import deps
 from web.api.database import get_db
 from web.api.routes import yandex_auth as yx
@@ -211,13 +211,20 @@ class YandexAuthTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_code_from_another_ticket_does_not_work(self):
         await self.add_user(telegram_id=777, full_name="Иван", phone="+79180001122")
-        first, second = self.begin(), self.begin()
+        first = self.begin()
         self.client.post("/api/auth/yandex/exchange", json={"ticket": first})
         code = self.sent[0][1]
+        second = self.begin()
         self.client.post("/api/auth/yandex/exchange", json={"ticket": second})
-        self.sent.clear()
         stolen = self.client.post("/api/auth/yandex/exchange", json={"ticket": second, "code": code})
         self.assertEqual(stolen.status_code, 400)
+
+    async def test_ticket_opened_in_another_browser_is_refused(self):
+        ticket = self.begin()
+        other = TestClient(self.client.app, base_url="https://testserver", follow_redirects=False)
+        self.assertEqual(other.post("/api/auth/yandex/exchange", json={"ticket": ticket}).status_code, 400)
+        self.assertEqual(await self.users(), [])
+        self.assertEqual(self.client.post("/api/auth/yandex/exchange", json={"ticket": ticket}).status_code, 200)
 
     async def test_when_telegram_cannot_be_reached_the_person_may_continue_separately(self):
         await self.add_user(telegram_id=777, full_name="Иван", phone="+79180001122")
@@ -279,6 +286,40 @@ class YandexAuthTest(unittest.IsolatedAsyncioTestCase):
         headers = {"Authorization": "Bearer " + deps.create_token(second)}
         response = self.client.post("/api/auth/yandex/exchange", json={"ticket": self.begin(headers, link=True)}, headers=headers)
         self.assertEqual(response.status_code, 409)
+
+    async def test_linking_yandex_from_telegram_joins_the_earlier_yandex_only_account(self):
+        created = self.client.post("/api/auth/yandex/exchange", json={"ticket": self.begin()}).json()
+        yandex_only = created["user"]["id"]
+        self.assertTrue(self.client.get("/api/auth/yandex/account", headers={
+            "Authorization": "Bearer " + created["token"]}).json()["telegram_join"])
+        async with self.sessions() as db:
+            db.add(Business(owner_id=yandex_only, name="Мой бизнес", business_type="beauty"))
+            await db.commit()
+        telegram = await self.add_user(telegram_id=555, full_name="Я в Telegram")
+        headers = {"Authorization": "Bearer " + deps.create_token(telegram)}
+        result = self.client.post("/api/auth/yandex/exchange", json={"ticket": self.begin(headers, link=True)}, headers=headers).json()
+        self.assertEqual((result["status"], result["user"]["id"], result["role"]), ("ok", telegram, "admin"))
+        self.assertEqual([(i.yandex_id, i.user_id) for i in await self.identities()], [("1000", telegram)])
+        async with self.sessions() as db:
+            self.assertEqual((await db.execute(select(Business.owner_id))).scalar_one(), telegram)
+            self.assertEqual((await db.get(UserAccountMerge, yandex_only)).target_user_id, telegram)
+            joined = await db.get(User, telegram)
+            self.assertEqual((joined.phone, joined.email, joined.birthday), ("+79180001122", "ivan@yandex.ru", "1990-05-17"))
+        # the old Yandex session and a new Yandex login both land in the Telegram account
+        old = self.client.get("/api/auth/yandex/account", headers={"Authorization": "Bearer " + created["token"]}).json()
+        self.assertEqual((old["linked"], old["telegram_join"]), (True, False))
+        self.assertEqual(self.client.post("/api/auth/yandex/exchange", json={"ticket": self.begin()}).json()["user"]["id"], telegram)
+
+    async def test_yandex_account_with_an_email_password_is_not_joined_by_linking(self):
+        created = self.client.post("/api/auth/yandex/exchange", json={"ticket": self.begin()}).json()
+        async with self.sessions() as db:
+            db.add(EmailIdentity(user_id=created["user"]["id"], email="ivan@yandex.ru", password_hash="x"))
+            await db.commit()
+        telegram = await self.add_user(telegram_id=555, full_name="Я")
+        headers = {"Authorization": "Bearer " + deps.create_token(telegram)}
+        response = self.client.post("/api/auth/yandex/exchange", json={"ticket": self.begin(headers, link=True)}, headers=headers)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual([i.user_id for i in await self.identities()], [created["user"]["id"]])
 
     async def test_link_start_requires_sign_in(self):
         self.assertEqual(self.client.post("/api/auth/yandex/link/start").status_code, 401)

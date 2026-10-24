@@ -7,11 +7,11 @@ import pytest
 
 from scripts.deploy_yandex_login import patch_main, patch_models, sql_statements
 
-BASE = Path('tests/fixtures')
+BASE_COMMIT = '1d0db2f51d3342c99fe587100de12f7c5d1232d8'  # main just before this feature (stays valid after merge)
 
 
 def _origin(path):
-    return subprocess.run(['git', 'show', f'origin/main:{path}'], capture_output=True, text=True, check=True).stdout
+    return subprocess.run(['git', 'show', f'{BASE_COMMIT}:{path}'], capture_output=True, text=True, check=True).stdout
 
 
 def _now(path):
@@ -77,3 +77,18 @@ def test_deploy_script_never_prints_the_secret():
     for line in text.splitlines():
         if 'print(' in line:
             assert 'secret)' not in line and ', secret' not in line and '+ secret' not in line
+
+
+def test_whole_file_replacements_match_the_main_baseline():
+    import hashlib
+    from scripts.deploy_yandex_login import REPLACED, replacement_needed
+    for remote, (local, baseline) in REPLACED.items():
+        before = subprocess.run(['git', 'show', f'{BASE_COMMIT}:{local}'], capture_output=True, check=True).stdout
+        assert hashlib.sha256(before).hexdigest() == baseline, local
+        now = Path(local).read_bytes()
+        assert replacement_needed(before, now, baseline) is True
+        assert replacement_needed(now, now, baseline) is False
+        with pytest.raises(RuntimeError):
+            replacement_needed(before + b'\n# hotfix\n', now, baseline)
+        with pytest.raises(RuntimeError):
+            replacement_needed(None, now, baseline)

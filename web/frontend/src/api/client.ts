@@ -561,7 +561,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
   emailCapabilities: () => request<{ available: boolean }>('/auth/email/capabilities'),
   yandexCapabilities: () => request<{ available: boolean }>('/auth/yandex/capabilities'),
-  yandexAccount: () => request<{ available: boolean; linked: boolean; login: string | null }>('/auth/yandex/account'),
+  yandexAccount: () => request<{ available: boolean; linked: boolean; login: string | null; telegram_join: boolean }>('/auth/yandex/account'),
   yandexLinkStart: () => request<{ url: string }>('/auth/yandex/link/start', { method: 'POST' }),
   yandexExchange: (body: { ticket: string; code?: string; separate?: boolean }) =>
     request<({ status: 'ok' } & AuthResponse) | { status: 'linked' } | { status: 'code_required' } | { status: 'code_unavailable' }>(

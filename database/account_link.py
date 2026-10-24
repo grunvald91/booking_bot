@@ -5,10 +5,11 @@ import hashlib
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select, update, text
+from sqlalchemy import or_, select, update, text
 
 from database.models import (User, EmailIdentity, EmailChallenge, TelegramLinkRequest, UserAccountMerge,
-    Business, BusinessOwner, Booking, ClientSubscription, PushSubscription, SalesConversation)
+    Business, BusinessOwner, Booking, ClientSubscription, PushSubscription, SalesConversation,
+    YandexIdentity, YandexTicket)
 
 
 class AccountLinkError(ValueError):
@@ -66,6 +67,21 @@ async def merge_email_into_telegram(db, request, source_user_id):
         raise AccountLinkError("Telegram уже связан с другой подтверждённой почтой. Обратитесь в поддержку")
     if await db.get(UserAccountMerge, source.id) or await db.get(UserAccountMerge, target.id):
         raise AccountLinkError("Аккаунт уже объединён. Войдите заново")
+    await move_account_data(db, source, target)
+    target.email = identity.email
+    identity.user_id = target.id
+    identity.session_version += 1
+    await db.execute(update(EmailChallenge).where(EmailChallenge.user_id == source.id).values(consumed=True))
+    await db.execute(update(TelegramLinkRequest).where(TelegramLinkRequest.user_id == source.id).values(consumed=True))
+    request.consumed = True
+    await db.flush()
+    return identity
+
+
+async def move_account_data(db, source, target):
+    """Move businesses, bookings, subscriptions and chats from source to target and record the merge.
+
+    Both users must already be locked by the caller. Source stays as a redirect to target."""
     # Preserve an existing paid/manual-owner entitlement; don't guess between two paid plans.
     if source.subscription_status != "none" or source.is_manual_owner:
         if target.subscription_status != "none" or target.is_manual_owner:
@@ -73,7 +89,6 @@ async def merge_email_into_telegram(db, request, source_user_id):
         for name in ("tariff", "max_businesses", "subscription_status", "subscription_expires", "is_manual_owner"):
             setattr(target, name, getattr(source, name))
     target.is_admin = target.is_admin or source.is_admin
-    target.email = identity.email
     if not target.phone:
         target.phone = source.phone
 
@@ -100,11 +115,35 @@ async def merge_email_into_telegram(db, request, source_user_id):
         # Invalidate an unconfirmed card whose booking principal changed; preserve conversation text.
         if thread.action and thread.action.get("status") != "completed":
             thread.action = None; thread.action_id = None
-    identity.user_id = target.id
-    identity.session_version += 1
     db.add(UserAccountMerge(source_user_id=source.id, target_user_id=target.id))
-    await db.execute(update(EmailChallenge).where(EmailChallenge.user_id == source.id).values(consumed=True))
-    await db.execute(update(TelegramLinkRequest).where(TelegramLinkRequest.user_id == source.id).values(consumed=True))
-    request.consumed = True
+
+
+async def merge_yandex_account(db, source_user_id, target_user_id):
+    """Join an account created by Yandex sign-in (no Telegram, no email password) into another account.
+
+    Call only after the same browser proved both sides just now: the Yandex account (its session or a fresh
+    Yandex login) and the target (a fresh Telegram login or its session)."""
+    users = list((await db.execute(select(User).where(User.id.in_([source_user_id, target_user_id]))
+        .order_by(User.id).with_for_update().execution_options(populate_existing=True))).scalars())
+    by_id = {u.id: u for u in users}
+    source, target = by_id.get(source_user_id), by_id.get(target_user_id)
+    if source is None or target is None or source.id == target.id or source.telegram_id > 0:
+        raise AccountLinkError("Эти аккаунты нельзя объединить")
+    yandex = await db.scalar(select(YandexIdentity).where(YandexIdentity.user_id == source.id).with_for_update())
+    if yandex is None:
+        raise AccountLinkError("Аккаунт не создан через Яндекс")
+    if await db.scalar(select(EmailIdentity).where(EmailIdentity.user_id == source.id)):
+        raise AccountLinkError("У аккаунта есть вход по почте: объедините его через привязку Telegram в профиле")
+    if await db.scalar(select(YandexIdentity).where(YandexIdentity.user_id == target.id)):
+        raise AccountLinkError("К аккаунту уже привязан другой Яндекс")
+    if await db.get(UserAccountMerge, source.id) or await db.get(UserAccountMerge, target.id):
+        raise AccountLinkError("Аккаунт уже объединён. Войдите заново")
+    await move_account_data(db, source, target)
+    for name in ("email", "birthday"):
+        if not getattr(target, name) and getattr(source, name):
+            setattr(target, name, getattr(source, name))
+    yandex.user_id = target.id
+    await db.execute(update(YandexTicket).where(or_(YandexTicket.link_user_id == source.id,
+                                                    YandexTicket.code_user_id == source.id)).values(consumed=True))
     await db.flush()
-    return identity
+    return target

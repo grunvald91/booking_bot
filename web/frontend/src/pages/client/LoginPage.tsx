@@ -27,6 +27,8 @@ export function LoginPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const yandexProblem = YANDEX_PROBLEMS[searchParams.get('yandex') || '']
+  // Пришли из профиля Яндекс-аккаунта, чтобы объединить его с Telegram: сразу показываем кнопку Telegram.
+  const joinTelegram = searchParams.get('join') === 'telegram'
   const [mode, setMode] = useState<'phone' | 'code'>('phone')
   const [phone, setPhone] = useState('')
   const [code, setCode] = useState(['', '', '', '', '', ''])
@@ -40,6 +42,10 @@ export function LoginPage() {
   const [widget, setWidget] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [widgetAttempt, setWidgetAttempt] = useState(0)
   const [widgetSource, setWidgetSource] = useState(0)
+
+  useEffect(() => {
+    if (joinTelegram) telegramWidgetRef.current?.scrollIntoView({ block: 'center' })
+  }, [joinTelegram])
 
   useEffect(() => {
     if (mode === 'code' && codeRefs.current[0]) {
@@ -174,6 +180,7 @@ export function LoginPage() {
         <div style={{ marginBottom: 16 }}><YandexLoginButton /></div>
         <EmailAuthForm />
         <p className="ds-hint" style={{ margin: '16px 0' }}>Для аккаунтов с привязанным Telegram доступны прежние способы входа:</p>
+        {joinTelegram && <p className="ds-hint" role="status" style={{ marginBottom: 12, fontWeight: 600 }}>Войдите через Telegram — ваш аккаунт Яндекса объединится с ним автоматически.</p>}
         {mode === 'phone' && (
           <div>
             <div className="ds-card" style={{ padding: 16, marginBottom: 14, textAlign: 'center' }}>
