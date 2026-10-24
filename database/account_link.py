@@ -16,6 +16,29 @@ class AccountLinkError(ValueError):
     pass
 
 
+def phone_key(phone):
+    """Digits of a Russian-style number in one spelling: +7 (918) 000-11-22, 89180001122 -> 79180001122."""
+    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    if len(digits) == 11 and digits.startswith("8"):
+        digits = "7" + digits[1:]
+    return digits if len(digits) >= 10 else ""
+
+
+def phones_match(first, second):
+    return bool(phone_key(first)) and phone_key(first) == phone_key(second)
+
+
+def phone_spellings(phone):
+    """How the same number may be stored in users.phone (bot contacts come without "+")."""
+    key = phone_key(phone)
+    if not key:
+        return set()
+    spellings = {key, "+" + key}
+    if len(key) == 11 and key.startswith("7"):
+        spellings.add("8" + key[1:])
+    return spellings
+
+
 def link_token_hash(token):
     return hashlib.sha256(token.encode()).hexdigest()
 

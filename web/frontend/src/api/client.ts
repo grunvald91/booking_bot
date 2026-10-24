@@ -564,7 +564,7 @@ export const api = {
   yandexAccount: () => request<{ available: boolean; linked: boolean; login: string | null; telegram_join: boolean }>('/auth/yandex/account'),
   yandexLinkStart: () => request<{ url: string }>('/auth/yandex/link/start', { method: 'POST' }),
   yandexExchange: (body: { ticket: string; code?: string; separate?: boolean }) =>
-    request<({ status: 'ok' } & AuthResponse) | { status: 'linked' } | { status: 'code_required' } | { status: 'code_unavailable' }>(
+    request<({ status: 'ok' } & AuthResponse) | { status: 'linked' } | { status: 'code_required' | 'code_unavailable'; account: 'new' | 'existing' }>(
       '/auth/yandex/exchange', { method: 'POST', body: JSON.stringify(body) }),
   emailAccount: () => request<{ email: string | null; available: boolean; telegram: { id: number; username: string | null } | null; telegram_link_available: boolean }>('/auth/email/account'),
   startTelegramLink: (password: string) => request<{ challenge_id: string; url: string; expires_at: string }>('/auth/telegram-link/start', { method: 'POST', body: JSON.stringify({ password }) }),

@@ -4,8 +4,8 @@ Production changes:
   * database/models.py       - User.birthday and two new tables (only inserted lines, via patch)
   * web/api/main.py          - import and include the new router (only inserted lines, via patch)
   * web/api/routes/yandex_auth.py - new file
-  * web/api/routes/auth.py, database/account_link.py - whole-file replace, only if production equals the
-    reviewed baseline (sha256 below); they add the automatic join of a Yandex-only account on Telegram sign-in
+  * web/api/routes/auth.py, web/api/routes/email_auth.py, database/account_link.py - whole-file replace, only if production equals the
+    reviewed baseline (sha256 below); they join accounts of one person when the phone or email match
   * migrations/add_yandex_auth.sql - additive SQL (new columns/tables; safe to run twice)
   * /etc/servgo/yandex.env (0600, holds the OAuth secret) + a systemd drop-in that reads it
 Restart: booking-web-api.service only. Backups, automatic rollback. The secret is never printed.
@@ -32,6 +32,8 @@ ROUTE = ROOT + "/web/api/routes/yandex_auth.py"
 REPLACED = {
     ROOT + "/web/api/routes/auth.py": ("web/api/routes/auth.py",
                                        "a61b5bd602246a582dbc5a52e6d81bb008af5d64e373b061546cd803340392e5"),
+    ROOT + "/web/api/routes/email_auth.py": ("web/api/routes/email_auth.py",
+                                             "6c6d3ad2f422335bdec212befebeafa00b4e4769be11c569b78e4d35797af602"),
     ROOT + "/database/account_link.py": ("database/account_link.py",
                                          "cf453b64fab93a3155b0122bb9e717dfa532e0a76598886eb3a5acac22e6b960"),
 }
@@ -269,7 +271,7 @@ def main():
         put(sftp, ENV_FILE, ("YANDEX_CLIENT_ID=%s\nYANDEX_CLIENT_SECRET=%s\n" % (client_id, secret)).encode(), 0o600)
         put(sftp, DROPIN, DROPIN_TEXT.encode())
         run(client, "cd " + ROOT + " && ./venv/bin/python -m py_compile database/models.py database/account_link.py "
-            "web/api/main.py web/api/routes/auth.py web/api/routes/yandex_auth.py")
+            "web/api/main.py web/api/routes/auth.py web/api/routes/email_auth.py web/api/routes/yandex_auth.py")
         run(client, "systemctl daemon-reload && systemctl restart " + SERVICE, timeout=60)
         if run(client, "systemctl is-active " + SERVICE) != "active":
             raise RuntimeError("Web API failed after rollout")

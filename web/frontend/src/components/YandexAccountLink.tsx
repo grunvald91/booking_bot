@@ -14,7 +14,7 @@ export function YandexAccountLink() {
       <div className="bf-account-card"><span className="bf-kicker">Яндекс привязан</span><strong>{state.login || 'Яндекс ID'}</strong><p>Можно входить через Яндекс.</p></div>
       {state.telegram_join && <div className="bf-account-card">
         <span className="bf-kicker">Telegram</span>
-        <p>Войдите через Telegram, пока вы в этом аккаунте, — аккаунты объединятся автоматически. Записи и бизнесы сохранятся, входить можно будет и так, и так.</p>
+        <p>Если у вашего Telegram тот же номер телефона, что и в Яндексе, войдите через Telegram, пока вы в этом аккаунте, — аккаунты объединятся автоматически. Записи и бизнесы сохранятся, входить можно будет и так, и так.</p>
         <button type="button" className="ds-btn ds-btn--primary" onClick={() => window.location.assign('/login?join=telegram')}>Войти через Telegram</button>
       </div>}
     </>

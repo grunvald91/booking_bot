@@ -16,7 +16,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from bot.services.email_notifications import email_channel_configured, send_email
-from database.models import EmailIdentity, EmailChallenge, AuthRateBucket, User, Business, BusinessOwner
+from database.models import EmailIdentity, EmailChallenge, AuthRateBucket, User, Business, BusinessOwner, YandexIdentity
 from email_utils import normalize_optional_email
 from .. import deps
 from ..database import get_db
@@ -88,6 +88,14 @@ async def rate_limit(db, key, limit, minutes):
     if bucket.count > limit:
         await db.commit()
         raise HTTPException(429, "Слишком много попыток. Попробуйте позже")
+
+
+async def yandex_account_for_email(db, email):
+    for user_id in (await db.execute(select(YandexIdentity.user_id).where(YandexIdentity.email == email)
+                                     .order_by(YandexIdentity.created_at))).scalars():
+        if await db.scalar(select(EmailIdentity.email).where(EmailIdentity.user_id == user_id)) is None:
+            return user_id
+    return None
 
 
 async def token_for(db, identity):
@@ -176,10 +184,19 @@ async def verify(body: Verify, user=Depends(deps.get_current_user_optional), db=
             await db.commit()
             raise HTTPException(409, "Адрес уже используется. Войдите или восстановите пароль")
         if challenge.purpose == "register":
-            new_user = User(telegram_id=-secrets.randbelow(2**62 - 1) - 1, full_name=challenge.full_name, email=challenge.email)
-            db.add(new_user)
-            await db.flush()
-            user_id = new_user.id
+            # The address is now confirmed by a code. If Yandex confirmed the same address for a ServGo account
+            # without an email login, this email login goes to that account instead of a new one.
+            yandex_user = await yandex_account_for_email(db, challenge.email)
+            if yandex_user is not None:
+                user_id = yandex_user
+                owner = await db.get(User, user_id)
+                if owner is not None and not owner.email:
+                    owner.email = challenge.email
+            else:
+                new_user = User(telegram_id=-secrets.randbelow(2**62 - 1) - 1, full_name=challenge.full_name, email=challenge.email)
+                db.add(new_user)
+                await db.flush()
+                user_id = new_user.id
         else:
             user_id = user.id
             user.email = challenge.email

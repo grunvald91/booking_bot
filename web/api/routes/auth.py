@@ -19,7 +19,7 @@ from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
-from database.account_link import AccountLinkError, merge_yandex_account
+from database.account_link import AccountLinkError, merge_yandex_account, phones_match
 from database.models import EmailIdentity, YandexIdentity
 from ..database import get_db, User, Business, BusinessOwner
 from ..deps import create_token, get_current_user, get_current_user_optional
@@ -120,13 +120,14 @@ async def _find_or_create_user_from_telegram(
 
 
 async def _join_yandex_account(db: AsyncSession, signed_in: Optional[User], target: User) -> User:
-    """The browser was signed in to an account made by Yandex sign-in and has just proven a Telegram account.
-
-    Both belong to the same person, so the Yandex account (its bookings, businesses, Yandex login) joins the
-    Telegram one. Anything unusual leaves the accounts separate and the Telegram sign-in still works."""
+    """The browser was signed in to an account made by Yandex sign-in and has just proven a Telegram account
+    with the same phone. The Yandex account (its bookings, businesses, Yandex login) joins the Telegram one.
+    Anything unusual leaves the accounts separate and the Telegram sign-in still works."""
     if signed_in is None or signed_in.id == target.id or signed_in.telegram_id > 0 or target.telegram_id <= 0:
         return target
-    if await db.scalar(select(YandexIdentity.yandex_id).where(YandexIdentity.user_id == signed_in.id)) is None:
+    identity = await db.scalar(select(YandexIdentity).where(YandexIdentity.user_id == signed_in.id))
+    # Join only when the data match: the phone Yandex confirmed is this Telegram account's phone.
+    if identity is None or not phones_match(identity.phone, target.phone):
         return target
     if await db.scalar(select(EmailIdentity.user_id).where(EmailIdentity.user_id == signed_in.id)) is not None:
         return target

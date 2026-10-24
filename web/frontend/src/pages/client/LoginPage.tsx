@@ -180,7 +180,7 @@ export function LoginPage() {
         <div style={{ marginBottom: 16 }}><YandexLoginButton /></div>
         <EmailAuthForm />
         <p className="ds-hint" style={{ margin: '16px 0' }}>Для аккаунтов с привязанным Telegram доступны прежние способы входа:</p>
-        {joinTelegram && <p className="ds-hint" role="status" style={{ marginBottom: 12, fontWeight: 600 }}>Войдите через Telegram — ваш аккаунт Яндекса объединится с ним автоматически.</p>}
+        {joinTelegram && <p className="ds-hint" role="status" style={{ marginBottom: 12, fontWeight: 600 }}>Войдите через Telegram — если номер телефона в нём тот же, что в Яндексе, аккаунты объединятся автоматически.</p>}
         {mode === 'phone' && (
           <div>
             <div className="ds-card" style={{ padding: 16, marginBottom: 14, textAlign: 'center' }}>

@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime_utils import utc_now
-from database.account_link import AccountLinkError, merge_yandex_account
+from database.account_link import AccountLinkError, merge_yandex_account, phone_spellings, phones_match
 from database.models import EmailIdentity, User, YandexIdentity, YandexTicket
 from email_utils import normalize_optional_email
 from .. import deps
@@ -259,6 +259,97 @@ async def _consume(ticket: YandexTicket) -> None:
     ticket.consumed = True
 
 
+async def _has_yandex(db: AsyncSession, user_id: int) -> bool:
+    return await db.scalar(select(YandexIdentity.yandex_id).where(YandexIdentity.user_id == user_id)) is not None
+
+
+async def _email_match(db: AsyncSession, profile: dict) -> Optional[User]:
+    """The account whose confirmed email login (address and password) uses the Yandex email."""
+    if not profile.get("email"):
+        return None
+    identity = await db.get(EmailIdentity, profile["email"])
+    if identity is None or await _has_yandex(db, identity.user_id):
+        return None
+    return await db.get(User, identity.user_id)
+
+
+async def _telegram_phone_match(db: AsyncSession, profile: dict) -> Optional[User]:
+    """A Telegram account (without Yandex yet) whose phone is the one Yandex confirmed, in any spelling."""
+    spellings = phone_spellings(profile.get("phone"))
+    if not spellings:
+        return None
+    for candidate in (await db.execute(select(User).where(User.telegram_id > 0, User.phone.in_(spellings))
+                                       .order_by(User.id))).scalars():
+        if not await _has_yandex(db, candidate.id):
+            return candidate
+    return None
+
+
+def _remember(identity: YandexIdentity, profile: dict) -> None:
+    identity.login = profile.get("login") or identity.login
+    identity.email = profile.get("email")
+    identity.phone = profile.get("phone")
+
+
+def _new_identity(profile: dict, user_id: int) -> YandexIdentity:
+    identity = YandexIdentity(yandex_id=profile["id"], user_id=user_id)
+    _remember(identity, profile)
+    return identity
+
+
+async def _finish(db: AsyncSession, ticket: YandexTicket, user: User, profile: dict) -> dict:
+    _fill_missing(user, profile, phone=False)
+    await _consume(ticket)
+    await db.commit()
+    return await _issue(db, user)
+
+
+async def _join(db: AsyncSession, ticket: YandexTicket, profile: dict, target: User, source: Optional[User]) -> dict:
+    """Put this Yandex login on target; an earlier Yandex-only account (source) moves in with its data."""
+    if source is None:
+        db.add(_new_identity(profile, target.id))
+    else:
+        try:
+            await merge_yandex_account(db, source.id, target.id)
+        except AccountLinkError as exc:
+            await db.rollback()
+            raise HTTPException(409, str(exc)) from None
+    return await _finish(db, ticket, target, profile)
+
+
+async def _phone_join(db: AsyncSession, body: "ExchangeIn", ticket: YandexTicket, profile: dict, signed_in: Optional[User],
+                      match: User, source: Optional[User], now) -> dict:
+    """Same phone as a Telegram account: join after a code sent to that Telegram (or at once if this
+    browser is already signed in to it)."""
+    account = "existing" if source is not None else "new"
+    if signed_in is not None and signed_in.id == match.id:
+        return await _join(db, ticket, profile, match, source)
+    if body.code:
+        if ticket.attempts >= MAX_ATTEMPTS:
+            await _consume(ticket); await db.commit()
+            raise HTTPException(400, "Слишком много неверных кодов. Начните вход заново")
+        ok = (ticket.code_hash and ticket.code_user_id == match.id and ticket.code_sent_at
+              and ticket.code_sent_at + timedelta(minutes=CODE_MINUTES) > now
+              and hmac.compare_digest(ticket.code_hash, _mac(ticket.id + body.code)))
+        if not ok:
+            ticket.attempts += 1
+            await db.commit()
+            raise HTTPException(400, "Неверный или просроченный код")
+        return await _join(db, ticket, profile, match, source)
+    recently = ticket.code_sent_at and ticket.code_sent_at + timedelta(seconds=RESEND_SECONDS) > now
+    if recently or ticket.sends >= MAX_SENDS:
+        await db.commit()
+        return {"status": "code_required", "account": account}
+    code = f"{secrets.randbelow(900000) + 100000}"
+    if not await _send_code(match, code):
+        await db.commit()
+        return {"status": "code_unavailable", "account": account}
+    ticket.code_hash, ticket.code_user_id, ticket.code_sent_at = _mac(ticket.id + code), match.id, now
+    ticket.sends += 1
+    await db.commit()
+    return {"status": "code_required", "account": account}
+
+
 @router.post("/yandex/exchange")
 async def exchange(body: ExchangeIn, request: Request, user: Optional[User] = Depends(deps.get_current_user_optional),
                    db: AsyncSession = Depends(get_db)):
@@ -271,8 +362,10 @@ async def exchange(body: ExchangeIn, request: Request, user: Optional[User] = De
         raise HTTPException(400, "Ссылка входа устарела. Нажмите «Войти через Яндекс» ещё раз")
     profile = json.loads(ticket.payload)
     existing = await db.scalar(select(YandexIdentity).where(YandexIdentity.yandex_id == profile["id"]))
+    if existing is not None:
+        _remember(existing, profile)
 
-    # --- attach Yandex to the account that is already signed in
+    # --- attach Yandex to the account that is already signed in (from the profile page)
     if ticket.link_user_id is not None:
         if user is None or user.id != ticket.link_user_id:
             raise HTTPException(401, "Войдите в аккаунт и повторите привязку")
@@ -282,70 +375,46 @@ async def exchange(body: ExchangeIn, request: Request, user: Optional[User] = De
             owner = await db.get(User, existing.user_id)
             if owner is None or not await yandex_only(db, owner):
                 raise HTTPException(409, "Этот Яндекс-аккаунт уже привязан к другому аккаунту ServGo")
-            # The person signed in here and has just proven the Yandex account: its earlier
-            # Yandex-only account (bookings, businesses) joins this one.
-            try:
-                await merge_yandex_account(db, owner.id, user.id)
-            except AccountLinkError as exc:
-                await db.rollback()
-                raise HTTPException(409, str(exc)) from None
-            _fill_missing(user, profile)
-            await _consume(ticket)
-            await db.commit()
-            return await _issue(db, user)
-        if await db.scalar(select(YandexIdentity).where(YandexIdentity.user_id == user.id)):
+            # An earlier Yandex-only account joins this one only when the data match.
+            email_identity = await db.scalar(select(EmailIdentity).where(EmailIdentity.user_id == user.id))
+            same_email = bool(profile.get("email")) and email_identity is not None and email_identity.email == profile["email"]
+            if not same_email and not phones_match(user.phone, profile.get("phone")):
+                raise HTTPException(409, "Этот Яндекс уже используется для входа в другой аккаунт ServGo. Объединяем "
+                                         "только при совпадении телефона или почты, а здесь они разные")
+            return await _join(db, ticket, profile, user, owner)
+        if await _has_yandex(db, user.id):
             raise HTTPException(409, "К вашему аккаунту уже привязан другой Яндекс")
-        db.add(YandexIdentity(yandex_id=profile["id"], user_id=user.id, login=profile["login"]))
+        db.add(_new_identity(profile, user.id))
         _fill_missing(user, profile)
         await _consume(ticket)
         await db.commit()
         return {"status": "linked"}
 
-    # --- the Yandex account is already known: sign in
+    # --- this Yandex is already known
     if existing is not None:
-        target = await db.get(User, existing.user_id)
-        if target is None:
+        owner = await db.get(User, existing.user_id)
+        if owner is None:
             raise HTTPException(400, "Аккаунт не найден")
-        _fill_missing(target, profile, phone=False)
-        await _consume(ticket)
-        await db.commit()
-        return await _issue(db, target)
+        if body.separate or not await yandex_only(db, owner):
+            return await _finish(db, ticket, owner, profile)
+        # A Yandex-only account meets an account with the same confirmed email or Telegram phone: join them.
+        target = await _email_match(db, profile)
+        if target is not None:
+            return await _join(db, ticket, profile, target, owner)
+        match = await _telegram_phone_match(db, profile)
+        if match is None:
+            return await _finish(db, ticket, owner, profile)
+        return await _phone_join(db, body, ticket, profile, user, match, owner, now)
 
-    # --- a Telegram account with the same phone: join only after a code from that Telegram
-    match = None
-    if profile.get("phone") and not body.separate:
-        candidate = await _user_by_phone(db, profile["phone"])
-        if candidate is not None and candidate.telegram_id and candidate.telegram_id > 0 \
-                and not await db.scalar(select(YandexIdentity).where(YandexIdentity.user_id == candidate.id)):
-            match = candidate
-    if match is not None:
-        if body.code:
-            if ticket.attempts >= MAX_ATTEMPTS:
-                await _consume(ticket); await db.commit()
-                raise HTTPException(400, "Слишком много неверных кодов. Начните вход заново")
-            ok = (ticket.code_hash and ticket.code_user_id == match.id and ticket.code_sent_at
-                  and ticket.code_sent_at + timedelta(minutes=CODE_MINUTES) > now
-                  and hmac.compare_digest(ticket.code_hash, _mac(ticket.id + body.code)))
-            if not ok:
-                ticket.attempts += 1
-                await db.commit()
-                raise HTTPException(400, "Неверный или просроченный код")
-            db.add(YandexIdentity(yandex_id=profile["id"], user_id=match.id, login=profile["login"]))
-            _fill_missing(match, profile, phone=False)
-            await _consume(ticket)
-            await db.commit()
-            return await _issue(db, match)
-        recently = ticket.code_sent_at and ticket.code_sent_at + timedelta(seconds=RESEND_SECONDS) > now
-        if recently or ticket.sends >= MAX_SENDS:
-            return {"status": "code_required"}
-        code = f"{secrets.randbelow(900000) + 100000}"
-        sent = await _send_code(match, code)
-        if not sent:
-            return {"status": "code_unavailable"}
-        ticket.code_hash, ticket.code_user_id, ticket.code_sent_at = _mac(ticket.id + code), match.id, now
-        ticket.sends += 1
-        await db.commit()
-        return {"status": "code_required"}
+    # --- a new Yandex: the same confirmed email as an email login -> that account
+    target = await _email_match(db, profile)
+    if target is not None:
+        return await _join(db, ticket, profile, target, None)
+    # --- the same phone as a Telegram account -> that account, after a code from its Telegram
+    if not body.separate:
+        match = await _telegram_phone_match(db, profile)
+        if match is not None:
+            return await _phone_join(db, body, ticket, profile, user, match, None, now)
 
     # --- a new person (or one who chose a separate account)
     phone_taken = bool(profile.get("phone")) and await _user_by_phone(db, profile["phone"]) is not None
@@ -354,7 +423,7 @@ async def exchange(body: ExchangeIn, request: Request, user: Optional[User] = De
                     birthday=profile.get("birthday"))
     db.add(new_user)
     await db.flush()
-    db.add(YandexIdentity(yandex_id=profile["id"], user_id=new_user.id, login=profile["login"]))
+    db.add(_new_identity(profile, new_user.id))
     await _consume(ticket)
     try:
         await db.commit()

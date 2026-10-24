@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS yandex_identities (
     yandex_id VARCHAR(32) PRIMARY KEY,
     user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
     login VARCHAR(255),
+    email VARCHAR(320),
+    phone VARCHAR(20),
     created_at TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
 );
 CREATE TABLE IF NOT EXISTS yandex_tickets (
@@ -20,5 +22,6 @@ CREATE TABLE IF NOT EXISTS yandex_tickets (
     expires_at TIMESTAMP NOT NULL,
     consumed BOOLEAN NOT NULL DEFAULT FALSE
 );
+CREATE INDEX IF NOT EXISTS ix_yandex_identities_email ON yandex_identities(email);
 CREATE INDEX IF NOT EXISTS ix_yandex_tickets_expires_at ON yandex_tickets(expires_at);
 COMMIT;

@@ -85,6 +85,9 @@ class YandexIdentity(Base):
     yandex_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
     login: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Email and phone confirmed by Yandex at the last Yandex sign-in: only these are trusted for joining accounts.
+    email: Mapped[Optional[str]] = mapped_column(String(320), nullable=True, index=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
