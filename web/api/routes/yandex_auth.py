@@ -300,7 +300,11 @@ def _new_identity(profile: dict, user_id: int) -> YandexIdentity:
 async def _finish(db: AsyncSession, ticket: YandexTicket, user: User, profile: dict) -> dict:
     _fill_missing(user, profile, phone=False)
     await _consume(ticket)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(409, "Вход уже выполняется. Нажмите «Войти через Яндекс» ещё раз") from None
     return await _issue(db, user)
 
 
