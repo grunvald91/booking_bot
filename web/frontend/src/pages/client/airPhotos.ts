@@ -5,6 +5,12 @@ export function photoSrc(photo: string): string {
   return `/api/telegram-photo/${encodeURIComponent(photo)}`
 }
 
+// Маленькая копия для списков и карточек: хранится на нашем сервере, Telegram не нужен.
+export function photoThumbSrc(photo: string): string {
+  const full = photoSrc(photo)
+  return full.startsWith('/api/telegram-photo/') ? `${full}?size=thumb` : full
+}
+
 export function parsePhotoList(raw?: string | null): string[] {
   if (!raw) return []
   try {

@@ -37,7 +37,7 @@ import { NotificationSetup } from '../../components/NotificationSetup'
 import { Logo } from '../../components/Logo'
 import { ApiError } from '../../api/client'
 import { HeroArt } from './AirFrame'
-import { photoSrc } from './airPhotos'
+import { photoSrc, photoThumbSrc } from './airPhotos'
 import './booking-flow.css'
 
 // ── Helpers ──
@@ -868,7 +868,7 @@ function BookingPageInner() {
     const cover = resourcePhotos(resource)[0]
     return (
       <span className={`bf-portrait ${isVenue ? 'is-venue' : ''}`} aria-hidden="true">
-        {cover ? <img src={photoSrc(cover)} alt="" loading="lazy" /> : (isVenue ? <DoorOpen size={17} /> : initials(resource.name))}
+        {cover ? <img src={photoThumbSrc(cover)} alt="" loading="lazy" decoding="async" /> : (isVenue ? <DoorOpen size={17} /> : initials(resource.name))}
       </span>
     )
   }

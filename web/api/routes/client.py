@@ -1224,10 +1224,7 @@ async def reschedule_booking(
 
 # ---------- GET /telegram-photo/{file_id:path} ----------
 
-@router.get("/telegram-photo/{file_id:path}")
-async def get_telegram_photo(file_id: str):
-    """Proxy a Telegram photo by file_id — streams through server to hide bot token."""
-    from fastapi.responses import StreamingResponse
+async def _telegram_file_url(file_id: str) -> str:
     bot_token = os.getenv("BOT_TOKEN")
     if not bot_token:
         raise HTTPException(status_code=500, detail="Bot token not configured")
@@ -1241,9 +1238,34 @@ async def get_telegram_photo(file_id: str):
 
     if not data.get("ok"):
         raise HTTPException(status_code=404, detail="Photo not found")
+    return f"https://api.telegram.org/file/bot{bot_token}/{data['result']['file_path']}"
 
-    file_path = data["result"]["file_path"]
-    url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
+
+@router.get("/telegram-photo/{file_id:path}")
+async def get_telegram_photo(file_id: str, size: Optional[str] = Query(None)):
+    """Proxy a Telegram photo by file_id — streams through server to hide bot token.
+
+    size=thumb returns a small copy kept on the server disk (no Telegram request after the first
+    one). Without it the full photo is streamed from Telegram, as before."""
+    from fastapi.responses import StreamingResponse, Response
+
+    if size == "thumb":
+        from ..photo_cache import get_thumbnail
+
+        async def _download():
+            # Reached only when no small copy exists yet: the single trip to Telegram.
+            async with create_photo_client() as client:
+                response = await client.get(await _telegram_file_url(file_id))
+                response.raise_for_status()
+                return response.content
+
+        small = await get_thumbnail(file_id, _download)
+        if small is not None:
+            # The same file_id is always the same picture: browsers may keep it for a year.
+            return Response(small, media_type="image/webp",
+                            headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+    url = await _telegram_file_url(file_id)
 
     # Stream the file through server instead of redirecting
     async def _stream():
@@ -1253,9 +1275,9 @@ async def get_telegram_photo(file_id: str):
                     yield chunk
 
     content_type = "image/jpeg"
-    if file_path.endswith(".png"):
+    if url.endswith(".png"):
         content_type = "image/png"
-    elif file_path.endswith(".webp"):
+    elif url.endswith(".webp"):
         content_type = "image/webp"
 
     return StreamingResponse(

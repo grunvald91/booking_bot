@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { MapPin, Phone, Clock, Navigation, DoorOpen, X, ChevronRight, ArrowRight, Sparkles } from 'lucide-react'
 import { api, type BusinessDetail, type EmployeeWithPricing } from '../../api/client'
 import { AirFrame, HeroArt } from './AirFrame'
-import { parsePhotoList, photoSrc } from './airPhotos'
+import { parsePhotoList, photoSrc, photoThumbSrc } from './airPhotos'
 import { applySeo, shortText } from '../../utils/seo'
 
 function linkifyText(text: string): ReactNode {
@@ -243,7 +243,7 @@ export function BusinessPage() {
                     return (
                       <button key={emp.id} type="button" className="bf-option" onClick={() => setSelectedEmp(emp)}>
                         <span className={`bf-portrait${isVenue ? ' is-venue' : ''}`} aria-hidden="true">
-                          {p ? <img src={photoSrc(p)} alt="" loading="lazy" /> : isVenue ? <DoorOpen size={18} /> : emp.name.charAt(0).toUpperCase()}
+                          {p ? <img src={photoThumbSrc(p)} alt="" loading="lazy" decoding="async" /> : isVenue ? <DoorOpen size={18} /> : emp.name.charAt(0).toUpperCase()}
                         </span>
                         <span className="bf-option-data">
                           <span className="bf-option-title">{emp.name}</span>
