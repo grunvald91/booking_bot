@@ -21,7 +21,7 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
     <link rel="manifest" href="/static/site.webmanifest?v=2">
     <link rel="stylesheet" href="/static/css/landing.css?v=12">
-    <link rel="stylesheet" href="/static/css/niche.css?v=4">
+    <link rel="stylesheet" href="/static/css/niche.css?v=5">
     <script type="application/ld+json">
     {
       "@context":"https://schema.org",
@@ -44,6 +44,7 @@
         <a href="#inside">Что уже есть</a>
         <a href="#pricing">Стоимость</a>
         <a href="#roadmap">Планы</a>
+        <a href="/roadmap">Дорожная карта</a>
         <a href="/blog">Блог</a>
     </nav>
     <button class="nav-cta" type="button" data-open-connect-form>Обсудить бизнес</button>
@@ -123,20 +124,31 @@
 
 <section class="section band-pricing" id="pricing">
     <div class="pricing-panel">
-        <div class="pricing-copy"><p class="eyebrow">{{ niche.pricing.eyebrow }}</p><h2>{{ niche.pricing.h2 }}</h2><p>{{ niche.pricing['copy'] }}</p></div>
-        <div class="pricing-card" aria-label="Стоимость ServGo">
+        <div class="pricing-copy">
+            <p class="eyebrow">{{ niche.pricing.eyebrow }}</p>
+            <h2>{{ niche.pricing.h2 }}</h2>
+            <p>{{ niche.pricing['copy'] }}</p>
+            <p class="seats-counter{% if niche.offer.seats_left == 0 %} seats-counter-empty{% endif %}" data-seats-left="{{ niche.offer.seats_left }}">
+                {% if niche.offer.seats_left > 0 %}{{ niche.pricing.seats_label }}{% else %}{{ niche.pricing.seats_empty }}{% endif %}
+            </p>
+            <div class="hero-actions"><button class="primary-action" type="button" data-open-connect-form>{% if niche.offer.seats_left > 0 %}Занять бесплатное место{% else %}Подключить бизнес{% endif %}</button></div>
+        </div>
+        <div class="pricing-card" aria-label="Условия ServGo">
             <span class="pricing-label">{{ niche.pricing.card_label }}</span>
-            <strong class="pricing-amount">{{ niche.pricing.card_amount }}</strong>
-            <span class="pricing-period">{{ niche.pricing.card_period }}</span>
-            <strong style="font-size:22px;margin-top:18px">{{ niche.pricing.setup_amount }}</strong>
+            <strong class="pricing-amount">{% if niche.offer.seats_left > 0 %}0 ₽{% else %}{{ niche.pricing.card_amount }}{% endif %}</strong>
+            <span class="pricing-period">{% if niche.offer.seats_left > 0 %}для первых трёх в нише; потом {{ niche.pricing.card_amount }} один раз{% else %}{{ niche.pricing.card_period }}{% endif %}</span>
+            <strong style="font-size:18px;margin-top:18px">{{ niche.pricing.setup_amount }}</strong>
             <span class="pricing-period">{{ niche.pricing.setup_note }}</span>
             <p>{{ niche.pricing.card_note }}</p>
+            <strong style="font-size:18px;margin-top:18px">{{ niche.pricing.studio_label }}</strong>
+            <span class="pricing-period">{{ niche.pricing.studio_paid_note }}</span>
+            {% if niche.offer.studio_free_left > 0 %}<p>{{ niche.pricing.studio_free_note }}</p>{% endif %}
         </div>
     </div>
 </section>
 
 <section class="section band-cream" id="roadmap">
-    <div class="section-heading"><p class="eyebrow">Ближайшее развитие</p><h2>{{ niche.roadmap.h2 }}</h2><p>{{ niche.roadmap['copy'] }}</p></div>
+    <div class="section-heading"><p class="eyebrow">Ближайшее развитие</p><h2>{{ niche.roadmap.h2 }}</h2><p>{{ niche.roadmap['copy'] }}</p>{% if niche.roadmap.link_url %}<p><a class="secondary-action" href="{{ niche.roadmap.link_url }}">{{ niche.roadmap.link_label }}</a></p>{% endif %}</div>
     <div class="feature-grid">
     {% for card in niche.roadmap.cards %}
         <article class="feature-card card-{{ card.color }}"><span class="feature-icon">{{ card.icon }}</span><h3>{{ card.title }}</h3><p>{{ card.text }}</p></article>
@@ -176,7 +188,7 @@
 
 <footer class="site-footer">
     <div class="site-footer-inner">
-        <div><p class="eyebrow">ServGo</p><h2>Цифровая платформа развития сервисного бизнеса</h2><p class="footer-brand-note">Маркетинг → клиент → запись → возврат → аналитика · <a href="/blog">Блог</a></p></div>
+        <div><p class="eyebrow">ServGo</p><h2>Цифровая платформа развития сервисного бизнеса</h2><p class="footer-brand-note">Маркетинг → клиент → запись → возврат → аналитика · <a href="/roadmap">Дорожная карта</a> · <a href="/blog">Блог</a></p></div>
         <div class="footer-contacts"><strong>Связаться</strong><div class="footer-contact-links"><a href="mailto:grunvaldlab@gmail.com">grunvaldlab@gmail.com</a><a href="tel:+79023911399">8 902 391-13-99</a></div></div>
     </div>
 </footer>

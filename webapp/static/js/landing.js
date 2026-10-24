@@ -184,3 +184,28 @@ connectForm?.addEventListener("submit", async (event) => {
         submitButton.disabled = false;
     }
 });
+
+
+// Калькулятор «Сколько стоит ваша база»: считает только из введённых цифр.
+(function () {
+    const calc = document.querySelector("[data-base-calc]");
+    if (!calc) return;
+    const total = calc.querySelector("[data-base-calc-total]");
+    const formula = calc.querySelector("[data-base-calc-formula]");
+    const fmt = (n) => Math.round(n).toLocaleString("ru-RU").replace(/\u00a0/g, " ");
+    const read = (name, max) => {
+        const v = parseFloat(calc.elements[name].value);
+        if (!isFinite(v) || v < 0) return 0;
+        return max ? Math.min(v, max) : v;
+    };
+    const update = () => {
+        const clients = read("clients");
+        const check = read("check");
+        const share = read("share", 100);
+        total.textContent = fmt(clients * (share / 100) * check) + " ₽";
+        formula.textContent = fmt(clients) + " клиентов × " + fmt(share) + "% × " + fmt(check) + " ₽, если каждый вернувшийся придёт один раз";
+    };
+    calc.addEventListener("input", update);
+    calc.addEventListener("submit", (e) => e.preventDefault());
+    update();
+})();

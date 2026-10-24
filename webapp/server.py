@@ -881,7 +881,7 @@ async def index_handler(request: web.Request) -> web.Response:
     """Публичная главная страница сервиса — рендерится Jinja2 чтобы
     подтянуть динамический список ниш для блока «выберите сегмент» и
     JSON-LD ItemList."""
-    from webapp.niches import get_niche, list_niches
+    from webapp.niches import get_niche, get_offer, list_niches
 
     niches = []
     for slug in list_niches():
@@ -889,10 +889,14 @@ async def index_handler(request: web.Request) -> web.Response:
         if not n:
             continue
         label = (n.get('meta') or {}).get('short_label') or slug
-        niches.append({'slug': slug, 'label': label})
+        niches.append({
+            'slug': slug,
+            'label': label,
+            'seats_left': n['offer']['seats_left'],
+        })
 
     template = _niche_jinja_env.get_template('landing.html')
-    html = template.render(BOT_USERNAME=BOT_USERNAME, niches=niches)
+    html = template.render(BOT_USERNAME=BOT_USERNAME, niches=niches, offer=get_offer())
     return web.Response(text=html, content_type='text/html')
 
 
@@ -976,6 +980,15 @@ _niche_jinja_env = jinja2.Environment(
 )
 
 
+async def serve_roadmap(request: web.Request) -> web.Response:
+    """Public roadmap: promo.servgo.ru/roadmap, data from webapp/roadmap.yaml."""
+    from webapp.roadmap import load_roadmap
+
+    template = _niche_jinja_env.get_template('roadmap.html')
+    html = template.render(**load_roadmap())
+    return web.Response(text=html, content_type='text/html', charset='utf-8')
+
+
 async def serve_niche_landing(request: web.Request) -> web.Response:
     """Render promo.servgo.ru/<slug> from a YAML config in webapp/niches/."""
     from webapp.niches import get_niche, list_niches
@@ -1022,6 +1035,10 @@ async def sitemap_handler(request: web.Request) -> web.Response:
             f'  <url><loc>{base}/{slug}</loc><lastmod>{today}</lastmod>'
             f'<changefreq>weekly</changefreq><priority>0.9</priority></url>'
         )
+    urls.append(
+        f'  <url><loc>{base}/roadmap</loc><lastmod>{today}</lastmod>'
+        f'<changefreq>weekly</changefreq><priority>0.6</priority></url>'
+    )
 
     # Sitemaps may list only canonical URLs belonging to this hostname.
     if BLOG_PUBLIC_ORIGIN == base:
@@ -3573,6 +3590,9 @@ def create_webapp() -> web.Application:
     # serve_niche_landing поймает /sitemap.xml и /robots.txt и вернёт 404.
     app.router.add_get('/sitemap.xml', sitemap_handler)
     app.router.add_get('/robots.txt', robots_handler)
+
+    # Публичная дорожная карта — до catch-all /{slug}.
+    app.router.add_get('/roadmap', serve_roadmap)
 
     # Нишевые лендинги promo.servgo.ru/<slug> — регистрируется последним,
     # чтобы конкретные роуты выше (/calendar, /book, /login и т.д.) ловили
