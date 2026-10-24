@@ -87,6 +87,31 @@ def _clean_landing_field(value, limit: int) -> str:
     return str(value or "").strip()[:limit]
 
 
+def _landing_niche_label(value) -> str:
+    """Known niche slug -> its label; 'other' -> 'Другое'; anything else -> ''."""
+    slug = _clean_landing_field(value, 60)
+    if slug == "other":
+        return "Другое"
+    if not slug:
+        return ""
+    from webapp.niches import get_niche
+
+    niche = get_niche(slug)
+    if not niche:
+        return ""
+    return (niche.get("meta") or {}).get("short_label") or slug
+
+
+def landing_request_tag(payload: dict) -> str:
+    """Short tag for the lead: '[Бесплатное место · Салоны красоты]'."""
+    parts = []
+    if payload.get("intent") == "free_seat":
+        parts.append("Бесплатное место")
+    if payload.get("niche"):
+        parts.append(payload["niche"])
+    return f"[{' · '.join(parts)}]" if parts else ""
+
+
 def validate_landing_request_payload(data: dict) -> dict:
     """Validate and normalize a public landing-page connection request."""
     name = _clean_landing_field(data.get("name"), 120)
@@ -116,6 +141,8 @@ def validate_landing_request_payload(data: dict) -> dict:
         "utm_term": _clean_landing_field(data.get("utm_term"), 255),
         "referrer": _clean_landing_field(data.get("referrer"), 2000),
         "landing_path": _clean_landing_field(data.get("landing_path"), 500),
+        "niche": _landing_niche_label(data.get("niche")),
+        "intent": "free_seat" if data.get("intent") == "free_seat" else "",
         "recipient": os.getenv("LANDING_REQUEST_EMAIL", LANDING_REQUEST_RECIPIENT),
         "created_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC"),
     }
@@ -123,8 +150,13 @@ def validate_landing_request_payload(data: dict) -> dict:
 
 def format_landing_request_message(payload: dict) -> str:
     lines = [
-        "Новая заявка на подключение бизнеса",
+        (
+            "Новая заявка: занять бесплатное место"
+            if payload.get("intent") == "free_seat"
+            else "Новая заявка на подключение бизнеса"
+        ),
         "",
+        f"Ниша: {payload.get('niche') or 'не указана'}",
         f"Имя: {payload['name']}",
         f"Телефон: {payload['phone'] or 'не указан'}",
         f"Email: {payload['email'] or 'не указан'}",
@@ -153,7 +185,10 @@ async def persist_landing_marketing_lead(payload: dict) -> int:
             name=payload["name"],
             phone=payload.get("phone") or None,
             email=payload.get("email") or None,
-            comment=payload.get("comment") or None,
+            comment=(
+                " ".join(x for x in (landing_request_tag(payload), payload.get("comment") or "") if x)
+                or None
+            ),
             experiment_id=payload.get("experiment_id") or None,
             utm_source=payload.get("utm_source") or None,
             utm_medium=payload.get("utm_medium") or None,
@@ -881,7 +916,7 @@ async def index_handler(request: web.Request) -> web.Response:
     """Публичная главная страница сервиса — рендерится Jinja2 чтобы
     подтянуть динамический список ниш для блока «выберите сегмент» и
     JSON-LD ItemList."""
-    from webapp.niches import get_niche, list_niches
+    from webapp.niches import get_niche, get_offer, list_niches
 
     niches = []
     for slug in list_niches():
@@ -889,10 +924,15 @@ async def index_handler(request: web.Request) -> web.Response:
         if not n:
             continue
         label = (n.get('meta') or {}).get('short_label') or slug
-        niches.append({'slug': slug, 'label': label})
+        niches.append({
+            'slug': slug,
+            'label': label,
+            'seats_left': n['offer']['seats_left'],
+            'studio_free_left': n['offer']['studio_free_left'],
+        })
 
     template = _niche_jinja_env.get_template('landing.html')
-    html = template.render(BOT_USERNAME=BOT_USERNAME, niches=niches)
+    html = template.render(BOT_USERNAME=BOT_USERNAME, niches=niches, offer=get_offer())
     return web.Response(text=html, content_type='text/html')
 
 
@@ -976,6 +1016,15 @@ _niche_jinja_env = jinja2.Environment(
 )
 
 
+async def serve_roadmap(request: web.Request) -> web.Response:
+    """Public roadmap: promo.servgo.ru/roadmap, data from webapp/roadmap.yaml."""
+    from webapp.roadmap import load_roadmap
+
+    template = _niche_jinja_env.get_template('roadmap.html')
+    html = template.render(**load_roadmap())
+    return web.Response(text=html, content_type='text/html', charset='utf-8')
+
+
 async def serve_niche_landing(request: web.Request) -> web.Response:
     """Render promo.servgo.ru/<slug> from a YAML config in webapp/niches/."""
     from webapp.niches import get_niche, list_niches
@@ -1022,6 +1071,10 @@ async def sitemap_handler(request: web.Request) -> web.Response:
             f'  <url><loc>{base}/{slug}</loc><lastmod>{today}</lastmod>'
             f'<changefreq>weekly</changefreq><priority>0.9</priority></url>'
         )
+    urls.append(
+        f'  <url><loc>{base}/roadmap</loc><lastmod>{today}</lastmod>'
+        f'<changefreq>weekly</changefreq><priority>0.6</priority></url>'
+    )
 
     # Sitemaps may list only canonical URLs belonging to this hostname.
     if BLOG_PUBLIC_ORIGIN == base:
@@ -3573,6 +3626,9 @@ def create_webapp() -> web.Application:
     # serve_niche_landing поймает /sitemap.xml и /robots.txt и вернёт 404.
     app.router.add_get('/sitemap.xml', sitemap_handler)
     app.router.add_get('/robots.txt', robots_handler)
+
+    # Публичная дорожная карта — до catch-all /{slug}.
+    app.router.add_get('/roadmap', serve_roadmap)
 
     # Нишевые лендинги promo.servgo.ru/<slug> — регистрируется последним,
     # чтобы конкретные роуты выше (/calendar, /book, /login и т.д.) ловили
