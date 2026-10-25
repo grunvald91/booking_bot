@@ -400,7 +400,92 @@ def inbox_run(client, sftp, local_dir):
             note(line)
         else:
             note("unexpected output line suppressed")
-    return code
+    checks_failed = 0
+    for path in sorted(p for p in directory.glob("*.chk") if p.is_file()):
+        checks_failed += login_check(client, sftp, path)
+    server_status(client)
+    return 1 if (code or checks_failed) else 0
+
+
+# ---------------------------------------------------------------- проверка входа и состояния (только чтение)
+
+# Выполняется на сервере от пользователя сервиса. Файл .chk зашифрован так же, как записи: {"check_users": {логин: пароль}}.
+# Пароли попадают в curl через stdin (-K -), не в аргументы процесса. Печатаются только коды ответа и да/нет.
+CHECK_SCRIPT = r'''
+import json, subprocess, sys
+key, path, host = sys.argv[1], sys.argv[2], sys.argv[3]
+out = subprocess.run(["openssl", "cms", "-decrypt", "-inform", "PEM", "-inkey", key, "-in", path], capture_output=True)
+if out.returncode != 0:
+    print("check decrypt: failed"); sys.exit(1)
+users = json.loads(out.stdout.decode("utf-8"))["check_users"]
+
+def get(url_path, user=None, password=None):
+    config = 'user = "%s:%s"\n' % (user, password) if user else ""
+    r = subprocess.run(["curl", "-sk", "--max-time", "10", "--resolve", host + ":443:127.0.0.1", "-K", "-",
+                        "-w", "\n%{http_code}", "https://" + host + url_path], input=config.encode(), capture_output=True)
+    body, _, status = r.stdout.decode("utf-8", "replace").rpartition("\n")
+    return status.strip() or "000", body
+
+bad = 0
+status, _ = get("/")
+print("check no_password: page=%s" % status); bad += status != "401"
+for index, (user, password) in enumerate(sorted(users.items()), 1):
+    page, html = get("/", user, password)
+    info, body = get("/api/info", user, password)
+    try:
+        same = json.loads(body).get("user") == user
+    except ValueError:
+        same = False
+    entries, _ = get("/api/entries?from=2026-01-01&to=2026-12-31", user, password)
+    wrong, _ = get("/", user, password + "x")
+    has_app = "Учёт СТО" in html
+    print("check login_%d: page=%s app=%s api=%s user_match=%s entries=%s wrong_password=%s" % (
+        index, page, "yes" if has_app else "no", info, "yes" if same else "no", entries, wrong))
+    bad += not (page == "200" and has_app and info == "200" and same and entries == "200" and wrong == "401")
+print("check result: %s" % ("ok" if not bad else "failed"))
+sys.exit(1 if bad else 0)
+'''
+CHECK_LINE = r"check [a-z_0-9]+: [a-z_0-9=/ ]+"
+
+
+def login_check(client, sftp, path):
+    """Вход через nginx каждым логином из зашифрованного .chk. Возвращает 0 (всё хорошо) или 1."""
+    done = ROOT + "/inbox/" + path.name + ".done"
+    if exists(client, done):
+        note("check %s: already done" % path.stem)
+        return 0
+    remote = ROOT + "/inbox/" + path.name
+    put(sftp, remote, path.read_bytes(), 0o640)
+    try:
+        run(client, "chown %s:%s %s" % (APP_USER, APP_USER, shlex.quote(remote)), "check permissions")
+        cmd = "runuser -u %s -- python3 - %s %s %s" % (APP_USER, shlex.quote(KEY_PATH), shlex.quote(remote), DOMAIN)
+        stdin, stdout, _ = client.exec_command(cmd + " 2>&1", timeout=120)
+        stdin.write(CHECK_SCRIPT)
+        stdin.channel.shutdown_write()
+        lines = [line for line in stdout.read().decode("utf-8", "replace").splitlines() if line.strip()]
+        code = stdout.channel.recv_exit_status()
+    finally:
+        run(client, "rm -f %s" % shlex.quote(remote), "remove check file", ok=(0, 1))
+    for line in lines:
+        note(line if re.fullmatch(CHECK_LINE, line) else "unexpected output line suppressed")
+    if code == 0:
+        run(client, "touch %s" % shlex.quote(done), "mark check done")
+    return 0 if code == 0 else 1
+
+
+def server_status(client):
+    """Факты о сервисе без данных: состояние, число логинов, копии базы, сертификат."""
+    def one(command, what):
+        return run(client, command + " || true", what).splitlines()[0:1] or [""]
+    service = one("systemctl is-active %s" % SERVICE, "service state")[0]
+    timer = one("systemctl is-active %s" % BACKUP_TIMER, "timer state")[0]
+    logins = one("grep -c ':' %s" % HTPASSWD, "login count")[0]
+    backups = one("ls %s/backups 2>/dev/null | grep -c '^sto-.*\\.db$'" % ROOT, "backup count")[0]
+    health = one("curl -sS --max-time 3 -o /dev/null -w '%%{http_code}' http://127.0.0.1:%d/health" % PORT, "health")[0]
+    cert = one("echo | openssl s_client -connect 127.0.0.1:443 -servername %s 2>/dev/null | openssl x509 -noout -enddate" % DOMAIN,
+               "certificate")[0]
+    note("status service=%s health=%s backup_timer=%s logins=%s db_backups=%s certificate_%s" % (
+        service, health, timer, logins, backups, cert or "unknown"))
 
 
 # ---------------------------------------------------------------- точка входа
