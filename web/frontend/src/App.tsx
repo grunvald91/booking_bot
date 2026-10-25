@@ -28,6 +28,7 @@ import { LegalPage } from './pages/client/LegalPage'
 import { applySeo } from './utils/seo'
 
 const BookingPage = lazy(() => import('./pages/client/BookingPage').then(module => ({ default: module.BookingPage })))
+const MasterPage = lazy(() => import('./pages/master/MasterPage').then(module => ({ default: module.MasterPage })))
 const SchedulePage = lazy(() => import('./pages/admin/SchedulePage').then(module => ({ default: module.SchedulePage })))
 const SettingsPage = lazy(() => import('./pages/admin/SettingsPage').then(module => ({ default: module.SettingsPage })))
 
@@ -146,6 +147,7 @@ function App() {
         <Route path="/login/yandex" element={<YandexLoginPage />} />
         <Route path="/mail" element={<OwnerMailPage />} />
         <Route path="/account" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
+        <Route path="/master" element={<ProtectedRoute><MasterPage /></ProtectedRoute>} />
         <Route path="/admin/prepayments" element={<AdminRoute><PrepaymentsPage /></AdminRoute>} />
 
         {/* Legacy redirects */}

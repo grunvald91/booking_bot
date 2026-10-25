@@ -353,6 +353,8 @@ class Employee(Base):
     name: Mapped[str] = mapped_column(String(255))
     specialization: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     telegram_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # Не unique - один человек может работать в нескольких бизнесах
+    # Подтверждённый email мастера для входа на сайт (email-пароль или Яндекс ID с этим адресом).
+    access_email: Mapped[Optional[str]] = mapped_column(String(320), nullable=True, index=True)
     booking_interval_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Индивидуальный шаг записи
     role: Mapped[str] = mapped_column(String(20), default="master")  # master или administrator
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

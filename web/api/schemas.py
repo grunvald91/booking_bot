@@ -97,6 +97,11 @@ class EmployeeOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class EmployeeAdminOut(EmployeeOut):
+    """Только для владельца: добавляет email для входа мастера (в публичный ответ не попадает)."""
+    access_email: Optional[str] = None
+
+
 class BusinessOut(BaseModel):
     id: int
     name: str
@@ -366,6 +371,7 @@ class EmployeeCreateIn(BaseModel):
     specialization: Optional[str] = None
     description: Optional[str] = None
     telegram_id: Optional[int] = None
+    access_email: Optional[str] = None
     booking_interval_minutes: Optional[int] = None
     capacity: Optional[int] = None
     area_sqm: Optional[int] = None
@@ -380,6 +386,7 @@ class EmployeeUpdateIn(BaseModel):
     description: Optional[str] = None
     is_active: Optional[bool] = None
     telegram_id: Optional[int] = None
+    access_email: Optional[str] = None
     booking_interval_minutes: Optional[int] = None
     capacity: Optional[int] = None
     area_sqm: Optional[int] = None

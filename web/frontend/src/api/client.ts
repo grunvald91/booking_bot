@@ -139,6 +139,8 @@ export interface Employee {
   photo_url?: string;
   is_active?: boolean;
   telegram_id?: number;
+  /** Email для входа мастера на сайт (виден только владельцу). */
+  access_email?: string | null;
   booking_interval_minutes?: number;
   capacity?: number;
   area_sqm?: number;
@@ -148,6 +150,37 @@ export interface Employee {
   primary_photo?: string;
   on_duty_date?: string;
   service_ids?: number[];
+}
+
+export interface MasterEmployee {
+  employee_id: number;
+  employee_name: string;
+  business_id: number;
+  business_name: string;
+}
+
+export interface MasterBooking {
+  id: number;
+  business_id: number;
+  business_name: string;
+  employee_id: number;
+  employee_name: string;
+  service_name: string;
+  duration_minutes?: number | null;
+  date: string;
+  time: string;
+  status: string;
+  client_name: string;
+  client_phone?: string | null;
+  notes?: string | null;
+}
+
+export interface MasterSchedule {
+  date_from: string;
+  date_to: string;
+  employees: MasterEmployee[];
+  bookings: MasterBooking[];
+  days_off: { employee_id: number; date: string }[];
 }
 
 export interface TimePricing {
@@ -863,6 +896,16 @@ export const api = {
     }),
 
   // Co-owners
+  // Кабинет мастера
+  masterMe: () => request<{ employees: MasterEmployee[] }>('/master/me'),
+  masterSchedule: (dateFrom?: string, dateTo?: string) => {
+    const params = new URLSearchParams()
+    if (dateFrom) params.set('date_from', dateFrom)
+    if (dateTo) params.set('date_to', dateTo)
+    const query = params.toString()
+    return request<MasterSchedule>(`/master/schedule${query ? `?${query}` : ''}`)
+  },
+
   getOwners: (bizId: number) =>
     request<OwnerInfo[]>(`/admin/businesses/${bizId}/owners`),
   addOwner: (bizId: number, data: { telegram_id?: number; username?: string; email?: string }) =>
