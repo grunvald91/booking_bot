@@ -11,10 +11,12 @@ merge only AFTER this rollout, otherwise the employee form would offer a field t
 """
 import os
 import shlex
+import sys
 import time
 from pathlib import Path
 
-from scripts.deploy_business_creation_and_reminders import (
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from scripts.deploy_business_creation_and_reminders import (  # noqa: E402
     ROOT, WEB_SERVICE, BOT_SERVICE, classify, connect, put, run, sha, server_now,
     wait_web_ready, bot_polling_healthy,
 )
