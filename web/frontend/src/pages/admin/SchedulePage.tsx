@@ -305,7 +305,7 @@ function BookingDetailSheet({
                 title="Время мастера освободится с этого момента">
                 {inProgress ? 'Завершить сейчас' : 'Завершить'}
               </button>
-              {!booking.is_rental && !awaitingPayment && (
+              {!booking.is_rental && (
                 <button onClick={() => setChanging((v) => !v)} disabled={updating}>Сменить услугу</button>
               )}
               <button className="danger" onClick={() => onStatusChange(booking.id, 'cancelled')} disabled={updating}>Отменить</button>
@@ -313,7 +313,7 @@ function BookingDetailSheet({
             {changing && (
               <div className="sched-detail-pay">
                 <div className="ds-eyebrow" style={{ margin: 0 }}>На какую услугу заменить</div>
-                <small>Используйте, если клиент выбрал не ту. Клиенту сообщение не уходит.</small>
+                <small>Используйте, если клиент выбрал не ту. Внесённая предоплата сохраняется, остаток считается от новой цены. Клиенту сообщение не уходит.</small>
                 <select className="ds-input" value={newServiceId} onChange={(e) => setNewServiceId(e.target.value)} style={{ marginTop: 6 }}>
                   <option value="">Выберите услугу</option>
                   {services
@@ -1268,7 +1268,7 @@ export function SchedulePage() {
           color={empColor(selectedBooking.employee_id)}
           onClose={() => setSelectedBooking(null)}
           services={services}
-          inProgress={selectedBooking.date === todayISO && ['pending', 'confirmed'].includes(selectedBooking.status) &&
+          inProgress={selectedBooking.date === todayISO && ['pending', 'confirmed', 'prepayment_confirmed'].includes(selectedBooking.status) &&
             timeToMin(selectedBooking.time) <= nowMin && nowMin < timeToMin(selectedBooking.time) + durationOf(selectedBooking)}
           onStatusChange={handleStatusChange}
           onChangeService={handleChangeService}

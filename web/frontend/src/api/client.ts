@@ -183,7 +183,7 @@ export interface MasterSchedule {
   employees: MasterEmployee[];
   bookings: MasterBooking[];
   days_off: { employee_id: number; date: string }[];
-  services?: { id: number; business_id: number; name: string; duration_minutes?: number | null }[];
+  services?: { id: number; business_id: number; name: string; duration_minutes?: number | null; is_additional?: boolean }[];
 }
 
 export interface TimePricing {

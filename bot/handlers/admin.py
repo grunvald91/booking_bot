@@ -3762,11 +3762,11 @@ async def admin_booking_detail(callback: CallbackQuery):
     if booking.status == "pending":
         builder.button(text="✅ Подтвердить", callback_data=f"admin_confirm_booking:{booking_id}", style="success")
         builder.button(text="❌ Отменить", callback_data=f"admin_cancel_booking:{booking_id}", style="danger")
-    elif booking.status == "confirmed":
+    elif booking.status in ("confirmed", "prepayment_confirmed"):
         builder.button(text="✔️ Завершить (освободить время)", callback_data=f"admin_complete_booking:{booking_id}", style="success")
         builder.button(text="❌ Отменить", callback_data=f"admin_cancel_booking:{booking_id}", style="danger")
 
-    if booking.status in ("pending", "confirmed") and booking.duration_minutes is None:
+    if booking.status not in ("cancelled", "completed") and booking.duration_minutes is None:
         builder.button(text="🔁 Сменить услугу", callback_data=f"admin_chsvc:{booking_id}")
     builder.button(text="📊 История клиента", callback_data=f"client_history:{booking.client_id}:{booking.business_id}")
     builder.button(text="◀️ Назад к записям", callback_data=f"view_bookings:{booking.business_id}")
@@ -3867,7 +3867,7 @@ async def admin_complete_booking(callback: CallbackQuery):
             await callback.answer("❌ У вас нет прав для управления этой записью", show_alert=True)
             return
 
-        if booking.status not in ["pending", "confirmed"]:
+        if booking.status not in ["pending", "confirmed", "prepayment_confirmed"]:
             await callback.answer("❌ Можно завершить только активные записи", show_alert=True)
             return
 
@@ -3900,15 +3900,17 @@ async def admin_change_service_menu(callback: CallbackQuery):
         if not await is_business_owner(session, booking.business_id, user.id):
             await callback.answer("❌ У вас нет прав для управления этой записью", show_alert=True)
             return
+        current = await session.get(ServiceModel, booking.service_id)
         services = (await session.execute(
             select(ServiceModel).where(
                 ServiceModel.business_id == booking.business_id,
                 ServiceModel.is_active.is_(True),
                 ServiceModel.id != booking.service_id,
+                ServiceModel.is_additional.is_(bool(current and current.is_additional)),
             ).order_by(ServiceModel.sort_order, ServiceModel.id)
         )).scalars().all()
     builder = InlineKeyboardBuilder()
-    for sv in services[:40]:
+    for sv in services:
         builder.button(text=f"{sv.name} · {sv.duration_minutes} мин · {sv.price} ₽", callback_data=f"admin_setsvc:{booking_id}:{sv.id}")
     builder.button(text="◀️ Назад", callback_data=f"admin_booking_detail:{booking_id}")
     builder.adjust(1)

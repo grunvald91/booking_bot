@@ -4,7 +4,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from typing import Iterable, Optional
 from zoneinfo import ZoneInfo
 
@@ -25,8 +25,12 @@ from datetime_utils import utc_now
 
 SCHEDULE_TZ = "Europe/Moscow"  # тот же пояс, что у расчёта свободного времени
 
-# Менять услугу можно у обычных записей; с предоплатой сумма привязана к услуге.
-CHANGEABLE_STATUSES = ("pending", "confirmed", "completed")
+# Менять услугу можно и у записей с предоплатой: внесённая сумма остаётся как есть,
+# остаток при визите считается уже от цены новой услуги. Отменённые не трогаем.
+CHANGEABLE_STATUSES = (
+    "pending", "confirmed", "completed",
+    "pending_prepayment", "prepayment_sent", "prepayment_confirmed",
+)
 
 
 class BookingChangeError(ValueError):
@@ -44,7 +48,7 @@ def local_now() -> datetime:
 
 
 def stamp_finished_now(items: Iterable[Booking], now_utc: Optional[datetime] = None) -> None:
-    """Запомнить момент завершения у записей визита, которые ещё не были завершены."""
+    """Запомнить момент завершения у записей визита."""
     moment = now_utc or utc_now()
     for item in items:
         item.finished_at = moment
@@ -75,14 +79,12 @@ async def change_booking_service(
     """Заменить услугу в записи (клиент выбрал не ту). Коммит делает вызывающий код.
 
     Правила: тот же бизнес, активная услуга того же вида (основная/дополнительная),
-    без аренды и предоплаты; если услуга длиннее, время мастера на это должно быть свободно.
+    без аренды; предоплата (если была) остаётся как есть; если услуга длиннее, время мастера на это должно быть свободно.
     """
     if booking.status not in CHANGEABLE_STATUSES:
-        raise BookingChangeError("У этой записи услугу изменить нельзя (отменена или ждёт предоплату)")
+        raise BookingChangeError("У отменённой записи услугу изменить нельзя")
     if booking.duration_minutes is not None:
         raise BookingChangeError("Для аренды услугу не меняют: создайте новую заявку")
-    if booking.prepayment_amount is not None or booking.prepayment_requested_at is not None:
-        raise BookingChangeError("По записи есть предоплата, услугу менять нельзя")
     if booking.service_id == new_service_id:
         raise BookingChangeError("В записи уже выбрана эта услуга", 400)
 
@@ -109,7 +111,13 @@ async def change_booking_service(
 
     if booking.status != "completed":
         visit = await contiguous_visit_bookings(
-            db, booking, statuses=("pending", "confirmed")
+            db,
+            booking,
+            statuses=(
+                ("prepayment_sent", "pending_prepayment")
+                if booking.status in ("prepayment_sent", "pending_prepayment")
+                else (booking.status,)
+            ),
         )
         if len(visit) > 1 and new_duration != old_duration:
             raise BookingChangeError(

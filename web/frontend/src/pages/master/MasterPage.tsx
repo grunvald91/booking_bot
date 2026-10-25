@@ -16,6 +16,11 @@ const STATUS_LABELS: Record<string, string> = {
   prepayment_confirmed: 'Предоплата подтверждена',
 }
 
+// Завершить можно подтверждённую запись (в т.ч. с подтверждённой предоплатой),
+// сменить услугу — у любой неотменённой и незавершённой, в т.ч. с предоплатой.
+const FINISHABLE = ['pending', 'confirmed', 'prepayment_confirmed']
+const CHANGEABLE = [...FINISHABLE, 'pending_prepayment', 'prepayment_sent']
+
 function pad(n: number) { return String(n).padStart(2, '0') }
 function toKey(d: Date) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` }
 function fromKey(key: string) {
@@ -169,12 +174,12 @@ export function MasterPage() {
                         </a>
                       )}
                       {b.notes && <div className="ds-sub">Комментарий: {b.notes}</div>}
-                      {['pending', 'confirmed'].includes(b.status) && (
+                      {CHANGEABLE.includes(b.status) && (
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
-                          <button className="ds-btn ds-btn--sm" disabled={busyId === b.id}
+                          {FINISHABLE.includes(b.status) && <button className="ds-btn ds-btn--sm" disabled={busyId === b.id}
                             onClick={() => void runAction(b.id, () => api.masterFinishBooking(b.id), 'Не удалось завершить')}>
                             {b.date === today && b.time <= nowHHMM ? 'Завершить сейчас' : 'Завершить'}
-                          </button>
+                          </button>}
                           <button className="ds-btn ds-btn--sm" disabled={busyId === b.id}
                             onClick={() => { setChangingId(changingId === b.id ? null : b.id); setNewServiceId(''); setActionError('') }}>
                             Сменить услугу
@@ -187,7 +192,7 @@ export function MasterPage() {
                           <select className="ds-input" value={newServiceId} onChange={(e) => setNewServiceId(e.target.value)}>
                             <option value="">Выберите услугу</option>
                             {(data.services || [])
-                              .filter((sv) => sv.business_id === b.business_id && sv.id !== b.service_id)
+                              .filter((sv) => sv.business_id === b.business_id && sv.id !== b.service_id && !sv.is_additional)
                               .map((sv) => <option key={sv.id} value={sv.id}>{sv.name}{sv.duration_minutes ? ` · ${sv.duration_minutes} мин` : ''}</option>)}
                           </select>
                           <button className="ds-btn ds-btn--primary ds-btn--sm" style={{ justifySelf: 'start' }}

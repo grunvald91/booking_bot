@@ -1079,9 +1079,15 @@ async def complete_booking(callback: CallbackQuery):
                 await callback.message.answer("❌ Запись не найдена или нет доступа")
                 return
 
-            from datetime_utils import utc_now
-            booking.status = "completed"
-            booking.finished_at = utc_now()  # в расписании время освободится с этого момента
+            # Раньше здесь можно было «завершить» даже отменённую запись; теперь общие правила:
+            # подтверждённая (в т.ч. с подтверждённой предоплатой) завершается целиком, время
+            # мастера освобождается с этого момента.
+            from database.booking_changes import BookingChangeError, finish_visit_now
+            try:
+                await finish_visit_now(session, booking)
+            except BookingChangeError as exc:
+                await callback.message.answer(f"❌ {exc.detail}")
+                return
             await session.commit()
 
 
@@ -1122,15 +1128,17 @@ async def master_change_service_menu(callback: CallbackQuery):
         if not employee or not booking or booking.employee_id != employee.id:
             await callback.message.answer("❌ Запись не найдена или нет доступа")
             return
+        current = await session.get(ServiceModel, booking.service_id)
         services = (await session.execute(
             sa_select(ServiceModel).where(
                 ServiceModel.business_id == booking.business_id,
                 ServiceModel.is_active.is_(True),
                 ServiceModel.id != booking.service_id,
+                ServiceModel.is_additional.is_(bool(current and current.is_additional)),
             ).order_by(ServiceModel.sort_order, ServiceModel.id)
         )).scalars().all()
     builder = InlineKeyboardBuilder()
-    for sv in services[:40]:
+    for sv in services:
         builder.button(text=f"{sv.name} · {sv.duration_minutes} мин", callback_data=f"master_setsvc:{booking_id}:{sv.id}")
     builder.button(text="◀️ Назад", callback_data=f"master_booking:{booking_id}")
     builder.adjust(1)

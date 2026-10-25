@@ -216,13 +216,24 @@ class BookingChangesTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(BookingChangeError):
                 await change_booking_service(db, booking, self.svc['s30'])
 
-    async def test_change_refuses_prepayment_rental_and_cancelled(self):
+    async def test_change_works_for_prepaid_booking_and_keeps_the_prepayment(self):
+        for status in ('prepayment_confirmed', 'prepayment_sent', 'pending_prepayment'):
+            async with self.sessions() as db:
+                booking = await db.get(Booking, self.c_id)
+                booking.status, booking.prepayment_amount = status, 500
+                booking.service_id = self.svc['s60']
+                booking.resource_duration_minutes = 60
+                await db.commit()
+            self.current_user_id = self.owner_id
+            res = self.client.patch(f'/admin/bookings/{self.c_id}/service', json={'service_id': self.svc['s90']})
+            self.assertEqual(res.status_code, 200, (status, res.text))
+            body = res.json()
+            self.assertEqual((body['service_name'], body['price'], body['prepayment_amount'], body['status']),
+                             ('Сход-развал перед+зад', 2500, 500, status))
+
+    async def test_change_refuses_rental_and_cancelled(self):
         async with self.sessions() as db:
             booking = await db.get(Booking, self.a_id)
-            booking.prepayment_amount = 500
-            with self.assertRaises(BookingChangeError):
-                await change_booking_service(db, booking, self.svc['s30'])
-            booking.prepayment_amount = None
             booking.duration_minutes = 60   # признак аренды
             with self.assertRaises(BookingChangeError):
                 await change_booking_service(db, booking, self.svc['s30'])
@@ -230,6 +241,14 @@ class BookingChangesTest(unittest.IsolatedAsyncioTestCase):
             booking.status = 'cancelled'
             with self.assertRaises(BookingChangeError):
                 await change_booking_service(db, booking, self.svc['s30'])
+
+    async def test_master_finishes_prepaid_booking(self):
+        async with self.sessions() as db:
+            (await db.get(Booking, self.a_id)).status = 'prepayment_confirmed'
+            await db.commit()
+        self.current_user_id = await self._make_master_user(5551)
+        self.assertEqual(self.client.post(f'/master/bookings/{self.a_id}/finish').status_code, 200)
+        self.assertEqual((await self._load(self.a_id)).status, 'completed')
 
     async def test_admin_endpoint_changes_service_and_checks_ownership(self):
         url = f'/admin/bookings/{self.a_id}/service'

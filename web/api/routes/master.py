@@ -73,6 +73,7 @@ class MasterServiceOut(BaseModel):
     business_id: int
     name: str
     duration_minutes: Optional[int] = None
+    is_additional: bool = False
 
 
 class ChangeServiceIn(BaseModel):
@@ -204,7 +205,8 @@ async def master_schedule(
         ],
         days_off=[MasterDayOffOut(employee_id=d.employee_id, date=d.date) for d in days_off],
         services=[
-            MasterServiceOut(id=sv.id, business_id=sv.business_id, name=sv.name, duration_minutes=sv.duration_minutes)
+            MasterServiceOut(id=sv.id, business_id=sv.business_id, name=sv.name, duration_minutes=sv.duration_minutes,
+                             is_additional=bool(sv.is_additional))
             for sv in (await db.execute(
                 select(Service)
                 .where(
