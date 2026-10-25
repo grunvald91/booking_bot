@@ -68,14 +68,15 @@ export function CreateBusinessSheet({ onClose }: { onClose: () => void }) {
         <div className="ds-field">
           <label htmlFor="new-biz-name">Название</label>
           <input id="new-biz-name" className="ds-input" value={name} maxLength={255}
-            onChange={(e) => setName(e.target.value)} placeholder="Например, Шиномонтаж на Мира" autoFocus />
+            onChange={(e) => setName(e.target.value)} placeholder="Например, Шиномонтаж на Мира" />
         </div>
 
         <div className="ds-field">
           <span className="ds-label">Тип бизнеса</span>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
             {BUSINESS_TYPES.map((t) => (
-              <button key={t.value} type="button" className={`ds-chip${type === t.value ? ' active' : ''}`}
+              <button key={t.value} type="button"
+                className={type === t.value ? 'ds-btn ds-btn--on choice-accent selected' : 'ds-btn'}
                 aria-pressed={type === t.value} onClick={() => setType(t.value)}>
                 {t.label}
               </button>
