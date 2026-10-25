@@ -113,3 +113,14 @@ def test_repo_contains_only_public_cert_no_private_key():
     pems = sorted(p.name for p in (ROOT / "keys").glob("*.pem"))
     assert pems == ["entry_cert.pem"]
     assert "PRIVATE KEY" not in (ROOT / "keys" / "entry_cert.pem").read_text()
+
+
+def test_login_check_script_compiles_and_output_filter_is_strict():
+    compile(d.CHECK_SCRIPT, "check", "exec")
+    for line in ("check no_password: page=401", "check result: ok",
+                 "check login_1: page=200 app=yes api=200 user_match=yes entries=200 wrong_password=401"):
+        assert re.fullmatch(d.CHECK_LINE, line)
+    for line in ("check login_1: artur Kp7mNx4Z", "Traceback (most recent call last):", "check x: 15 000 ₽"):
+        assert not re.fullmatch(d.CHECK_LINE, line)
+    # пароль уходит в curl только через stdin, не через аргументы
+    assert '"-K", "-"' in d.CHECK_SCRIPT and "-u" not in d.CHECK_SCRIPT.split("subprocess.run([\"curl\"")[1].split("]")[0]
