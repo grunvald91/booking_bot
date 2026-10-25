@@ -6,6 +6,13 @@ import type { Business } from '../api/client';
 let cachedBusinesses: Business[] | null = null;
 let fetchPromise: Promise<Business[]> | null = null;
 
+/** После создания бизнеса: выбрать его и сбросить кэш списка, чтобы он появился везде. */
+export function rememberCreatedBusiness(id: number) {
+  cachedBusinesses = null;
+  fetchPromise = null;
+  localStorage.setItem('adminBusinessId', String(id));
+}
+
 export function useAdminBusiness() {
   // Use cached businessId from localStorage immediately — no waiting for API
   const savedId = useRef((() => {

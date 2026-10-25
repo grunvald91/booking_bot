@@ -41,6 +41,7 @@ from ..deps import get_current_admin
 from ..booking_utils import compute_recurring_dates
 from ..schemas import (
     BusinessOut,
+    BusinessCreateIn,
     BusinessUpdateIn,
     BusinessAdminDetailOut,
     DashboardOut,
@@ -1105,6 +1106,73 @@ async def list_admin_businesses(
         )
         for b in businesses
     ]
+
+
+# ---------- POST /admin/businesses ----------
+
+@router.post("/businesses", response_model=BusinessAdminDetailOut)
+async def create_admin_business(
+    data: BusinessCreateIn,
+    user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create one more business for the current owner — same rules and defaults as the bot's
+    «Добавить бизнес»: subscription/limit check, working hours and booking step from the type template."""
+    from bot.utils.business_templates import BUSINESS_TEMPLATES, get_template
+    from bot.utils.business_types import is_venue_rental_type
+    from bot.utils.validators import validate_phone, format_phone
+    from database.crud import can_user_create_business, create_business, create_service
+
+    name = data.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Введите название бизнеса")
+    if data.business_type not in BUSINESS_TEMPLATES:
+        raise HTTPException(status_code=422, detail="Неизвестный тип бизнеса")
+
+    phone = (data.phone or "").strip() or None
+    if phone:
+        if not validate_phone(phone):
+            raise HTTPException(
+                status_code=422,
+                detail="Неверный формат телефона. Используйте +7XXXXXXXXXX или 8XXXXXXXXXX",
+            )
+        phone = format_phone(phone)
+
+    can_create, reason = await can_user_create_business(db, user.id)
+    if not can_create:
+        raise HTTPException(status_code=403, detail=reason or "Невозможно создать бизнес")
+
+    template = get_template(data.business_type)
+    business = await create_business(
+        db,
+        owner_id=user.id,
+        name=name,
+        business_type=data.business_type,
+        description=(data.description or "").strip() or template["description"] or None,
+        address=(data.address or "").strip() or None,
+        phone=phone,
+        working_hours_start=template["working_hours_start"],
+        working_hours_end=template["working_hours_end"],
+        break_start=template["break_start"],
+        break_end=template["break_end"],
+        booking_interval_minutes=template["booking_interval_minutes"],
+    )
+
+    # Для аренды помещений сразу создаём варианты времени аренды — как в боте.
+    if is_venue_rental_type(data.business_type):
+        for svc in template.get("default_services", []):
+            await create_service(
+                db, business_id=business.id, name=svc["name"],
+                duration_minutes=svc["duration_minutes"], price=svc.get("price"),
+            )
+        for svc in template.get("default_additional_services", []):
+            await create_service(
+                db, business_id=business.id, name=svc["name"],
+                duration_minutes=svc["duration_minutes"], price=svc.get("price"),
+                is_additional=True,
+            )
+
+    return _business_admin_out(business)
 
 
 # ---------- Service CRUD ----------
