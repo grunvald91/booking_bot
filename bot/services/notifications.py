@@ -212,7 +212,11 @@ async def send_grouped_24h_reminder(bot: Bot, bookings: list, session: AsyncSess
                 b.reminder_24h_sent = True
             await session.commit()
         else:
-            await session.rollback()
+            # Ничего не доставлено: флаг не ставим, через 5 минут попробуем снова.
+            # Не rollback: он сбрасывает из памяти все записи общей сессии, и проверка
+            # напоминаний падала на следующем визите (MissingGreenlet). Коммит сохранит
+            # только отключение «мёртвых» Web Push подписок.
+            await session.commit()
 
         booking_ids = [b.id for b in bookings]
         logger.info(
@@ -374,7 +378,11 @@ async def send_grouped_2h_reminder(bot: Bot, bookings: list, session: AsyncSessi
                 b.reminder_2h_sent = True
             await session.commit()
         else:
-            await session.rollback()
+            # Ничего не доставлено: флаг не ставим, через 5 минут попробуем снова.
+            # Не rollback: он сбрасывает из памяти все записи общей сессии, и проверка
+            # напоминаний падала на следующем визите (MissingGreenlet). Коммит сохранит
+            # только отключение «мёртвых» Web Push подписок.
+            await session.commit()
 
         booking_ids = [b.id for b in bookings]
         logger.info(
@@ -553,7 +561,8 @@ async def send_grouped_staff_reminder(
                 item.staff_reminder_2h_sent = True
         await session.commit()
     else:
-        await session.rollback()
+        # Без rollback по той же причине, что и у клиентских напоминаний.
+        await session.commit()
 
     logger.info(
         "Staff reminder audience=%s offset=%s bookings=%s telegram=%s/%s webpush=%s/%s target=%s",
