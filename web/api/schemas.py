@@ -449,6 +449,16 @@ class ClientSubscriptionOut(BaseModel):
 
 # ---------- Business Admin ----------
 
+class BusinessCreateIn(BaseModel):
+    """Создание бизнеса из админки: те же поля, что спрашивает бот. Часы работы, перерыв и
+    шаг записи берутся из шаблона выбранного типа, потом правятся в «Настройках»."""
+    name: str = Field(min_length=1, max_length=255)
+    business_type: str = Field(min_length=1, max_length=100)
+    description: Optional[str] = None  # пусто — описание из шаблона типа
+    address: Optional[str] = Field(default=None, max_length=500)
+    phone: Optional[str] = Field(default=None, max_length=30)
+
+
 class BusinessUpdateIn(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None

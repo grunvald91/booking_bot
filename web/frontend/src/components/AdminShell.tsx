@@ -4,8 +4,9 @@ import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   Wallet, LayoutDashboard, Clock, Scissors, Users, Settings, Moon, Sun, LogOut, MessageCircle,
-  MoreHorizontal, BarChart3, Repeat, Bot, Mail, Sparkles, X, ChevronRight,
+  MoreHorizontal, BarChart3, Repeat, Bot, Mail, Sparkles, X, ChevronRight, PlusCircle,
 } from 'lucide-react'
+import { CreateBusinessSheet } from './CreateBusinessSheet'
 import { useTheme } from '../hooks/useTheme'
 import { useAdminBusiness } from '../hooks/useAdminBusiness'
 import { useOpenStudio } from '../hooks/useOpenStudio'
@@ -98,6 +99,7 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
 }) {
   const { pathname } = useLocation()
   const [moreOpen, setMoreOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
   const moreActive = MORE.some(item => item.to === pathname)
   const handleLogout = onLogout
   const { selectedId } = useAdminBusiness()
@@ -123,6 +125,10 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
             <Sparkles size={21} />
             <span>AI Growth OS</span>
           </button>
+          <button type="button" className="ds-bn ds-desk-only" onClick={() => setCreateOpen(true)}>
+            <PlusCircle size={21} />
+            <span>Новый бизнес</span>
+          </button>
           <button type="button" className={`ds-bn ds-mobile-only${moreActive || moreOpen ? ' active' : ''}`}
             onClick={() => setMoreOpen(true)} aria-haspopup="dialog" aria-expanded={moreOpen}>
             <MoreHorizontal size={21} />
@@ -147,6 +153,9 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
                 <button type="button" className="ds-more-item" onClick={openStudio} disabled={studioBusy}>
                   <Sparkles size={20} /><span>Маркетинг — AI Growth OS</span><ChevronRight size={17} className="ds-more-chev" />
                 </button>
+                <button type="button" className="ds-more-item" onClick={() => { setMoreOpen(false); setCreateOpen(true) }}>
+                  <PlusCircle size={20} /><span>Новый бизнес</span><ChevronRight size={17} className="ds-more-chev" />
+                </button>
                 <button type="button" className="ds-more-item" onClick={toggleTheme}>
                   {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
                   <span>{theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}</span>
@@ -158,6 +167,7 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
             </div>
           </div>
         )}
+        {createOpen && <CreateBusinessSheet onClose={() => setCreateOpen(false)} />}
     </>
   )
 }

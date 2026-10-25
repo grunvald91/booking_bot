@@ -6,7 +6,7 @@ import asyncio
 import os
 import hashlib
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as _dt_time
 import httpx
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
@@ -85,6 +85,22 @@ def _cancel_room_photo_album_summaries(callback):
 
 
 SUPER_ADMIN_ID = 437862772
+
+
+def _time_to_state(value):
+    """Время для хранения в состоянии диалога: строка «ЧЧ:ММ» (состояние хранится как JSON)."""
+    return value.strftime("%H:%M") if value else None
+
+
+def _time_from_state(value):
+    """Обратно из состояния диалога в time; принимает и строку «ЧЧ:ММ», и готовый time."""
+    if not value:
+        return None
+    if isinstance(value, str):
+        hours, minutes = value.split(":")[:2]
+        return _dt_time(int(hours), int(minutes))
+    return value
+
 
 # Путь для кеша медиа-файлов webapp
 MEDIA_CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'webapp', 'static', 'media_cache')
@@ -389,14 +405,16 @@ async def business_type_chosen(callback: CallbackQuery, state: FSMContext):
     from bot.utils.business_templates import get_template
     template = get_template(business_type)
 
-    # Автоматически применяем шаблон
+    # Автоматически применяем шаблон.
+    # Время кладём в состояние строками "ЧЧ:ММ": в Redis состояние хранится как JSON,
+    # а объект time в JSON не превращается — раньше из-за этого кнопка типа молчала.
     await state.update_data(
         business_type=business_type,
         description=template["description"],
-        working_hours_start=template["working_hours_start"],
-        working_hours_end=template["working_hours_end"],
-        break_start=template["break_start"],
-        break_end=template["break_end"],
+        working_hours_start=_time_to_state(template["working_hours_start"]),
+        working_hours_end=_time_to_state(template["working_hours_end"]),
+        break_start=_time_to_state(template["break_start"]),
+        break_end=_time_to_state(template["break_end"]),
         booking_interval_minutes=template["booking_interval_minutes"]
     )
 
@@ -483,10 +501,10 @@ async def business_phone_entered(message: Message, state: FSMContext):
             description=data.get('description'),
             address=data.get('address'),
             phone=data.get('phone'),
-            working_hours_start=data.get('working_hours_start'),
-            working_hours_end=data.get('working_hours_end'),
-            break_start=data.get('break_start'),
-            break_end=data.get('break_end'),
+            working_hours_start=_time_from_state(data.get('working_hours_start')),
+            working_hours_end=_time_from_state(data.get('working_hours_end')),
+            break_start=_time_from_state(data.get('break_start')),
+            break_end=_time_from_state(data.get('break_end')),
             booking_interval_minutes=data.get('booking_interval_minutes', 30)
         )
 
@@ -575,8 +593,8 @@ async def business_working_hours_entered(message: Message, state: FSMContext):
             return
 
     await state.update_data(
-        working_hours_start=working_hours_start,
-        working_hours_end=working_hours_end
+        working_hours_start=_time_to_state(working_hours_start),
+        working_hours_end=_time_to_state(working_hours_end)
     )
 
     await message.answer(
@@ -612,7 +630,10 @@ async def business_break_time_entered(message: Message, state: FSMContext):
             )
             return
 
-    await state.update_data(break_start=break_start, break_end=break_end)
+    await state.update_data(
+        break_start=_time_to_state(break_start),
+        break_end=_time_to_state(break_end)
+    )
 
     await message.answer(
         "Введите шаг записи в минутах (интервал между записями):\n"
@@ -661,10 +682,10 @@ async def business_booking_interval_entered(message: Message, state: FSMContext)
             description=data.get('description'),
             address=data.get('address'),
             phone=data.get('phone'),
-            working_hours_start=data.get('working_hours_start'),
-            working_hours_end=data.get('working_hours_end'),
-            break_start=data.get('break_start'),
-            break_end=data.get('break_end'),
+            working_hours_start=_time_from_state(data.get('working_hours_start')),
+            working_hours_end=_time_from_state(data.get('working_hours_end')),
+            break_start=_time_from_state(data.get('break_start')),
+            break_end=_time_from_state(data.get('break_end')),
             booking_interval_minutes=booking_interval
         )
 
@@ -674,11 +695,11 @@ async def business_booking_interval_entered(message: Message, state: FSMContext)
 
 🏢 {business.name}
 """
-    if data.get('working_hours_start') and data.get('working_hours_end'):
-        info_text += f"⏰ Время работы: {data['working_hours_start'].strftime('%H:%M')}-{data['working_hours_end'].strftime('%H:%M')}\n"
+    if business.working_hours_start and business.working_hours_end:
+        info_text += f"⏰ Время работы: {business.working_hours_start.strftime('%H:%M')}-{business.working_hours_end.strftime('%H:%M')}\n"
 
-    if data.get('break_start') and data.get('break_end'):
-        info_text += f"🍽 Перерыв: {data['break_start'].strftime('%H:%M')}-{data['break_end'].strftime('%H:%M')}\n"
+    if business.break_start and business.break_end:
+        info_text += f"🍽 Перерыв: {business.break_start.strftime('%H:%M')}-{business.break_end.strftime('%H:%M')}\n"
 
     info_text += f"📊 Шаг записи: {booking_interval} минут\n"
     info_text += "\n💡 Теперь добавьте услуги и сотрудников."

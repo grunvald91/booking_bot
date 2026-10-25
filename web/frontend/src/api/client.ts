@@ -428,6 +428,14 @@ export interface BusinessAdminDetail {
   master_reminder_minutes: number[];
 }
 
+export interface BusinessCreateData {
+  name: string;
+  business_type: string;
+  description?: string;
+  address?: string;
+  phone?: string;
+}
+
 export interface BusinessUpdateData {
   name?: string;
   description?: string;
@@ -802,6 +810,11 @@ export const api = {
     request<AnalyticsOverview>(`/admin/analytics/${bizId}/overview?days=${days}`),
   getAdminBusinesses: () =>
     request<Business[]>('/admin/businesses'),
+  createBusiness: (data: BusinessCreateData) =>
+    request<BusinessAdminDetail>('/admin/businesses', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   getBusinessDetail: (bizId: number) =>
     request<BusinessAdminDetail>(`/admin/businesses/${bizId}/detail`),
   studioBusinesses: () => request<{ id: number; name: string; role: string }[]>('/studio/businesses'),
