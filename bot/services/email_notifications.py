@@ -33,6 +33,11 @@ def email_channel_configured() -> bool:
     return bool(os.getenv("SMTP_HOST") and os.getenv("SMTP_FROM_EMAIL"))
 
 
+def _is_loopback_host(host: str) -> bool:
+    value = (host or "").strip().lower()
+    return value in ("localhost", "::1") or value.startswith("127.")
+
+
 async def send_email(
     *,
     to_email: str,
@@ -51,7 +56,10 @@ async def send_email(
     password = os.getenv("SMTP_PASSWORD")
     from_name = os.getenv("SMTP_FROM_NAME", "ServGo")
     use_ssl = _truthy(os.getenv("SMTP_USE_SSL"), False)
-    starttls = _truthy(os.getenv("SMTP_STARTTLS"), not use_ssl)
+    # Почтовый сервер на этой же машине (127.0.0.1): трафик не покидает сервер, а сертификат выписан
+    # на имя (mail.servgo.ru), поэтому проверка при STARTTLS по IP всегда падала с «IP address mismatch».
+    # Для внешнего сервера шифрование с проверкой сертификата остаётся по умолчанию.
+    starttls = _truthy(os.getenv("SMTP_STARTTLS"), not use_ssl and not _is_loopback_host(host))
 
     message = EmailMessage()
     message["Subject"] = subject
