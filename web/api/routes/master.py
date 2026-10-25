@@ -6,7 +6,8 @@
     совпадает с «email для входа», который владелец указал в карточке сотрудника.
 Непроверенные адреса (контактный email профиля) доступа не дают.
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -25,6 +26,7 @@ from ..deps import get_current_user
 router = APIRouter()
 
 MAX_RANGE_DAYS = 62
+SCHEDULE_TZ = "Europe/Moscow"  # тот же пояс, что у расчёта свободного времени
 
 
 class MasterEmployeeOut(BaseModel):
@@ -127,7 +129,7 @@ async def master_schedule(
     if not employees:
         raise HTTPException(status_code=403, detail="Для вас не открыт кабинет мастера")
 
-    start = date_from or date.today()
+    start = date_from or datetime.now(ZoneInfo(SCHEDULE_TZ)).date()
     end = date_to or (start + timedelta(days=13))
     if end < start:
         raise HTTPException(status_code=422, detail="Конец периода раньше начала")

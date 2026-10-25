@@ -138,7 +138,7 @@ export interface Employee {
   description?: string;
   photo_url?: string;
   is_active?: boolean;
-  telegram_id?: number;
+  telegram_id?: number | null;
   /** Email для входа мастера на сайт (виден только владельцу). */
   access_email?: string | null;
   booking_interval_minutes?: number;

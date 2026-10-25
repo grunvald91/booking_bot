@@ -172,6 +172,14 @@ class MasterCabinetTest(unittest.IsolatedAsyncioTestCase):
         cleared = self.client.put(url, json={'access_email': ''})
         self.assertIsNone(cleared.json()['access_email'])
 
+    async def test_owner_can_revoke_telegram_access(self):
+        self.current_user_id = self.owner_id
+        url = f'/admin/businesses/{self.biz_id}/employees/{self.sosl_id}'
+        self.assertIsNone(self.client.put(url, json={'telegram_id': None}).json()['telegram_id'])
+        await self._login_as(telegram_id=5551)
+        names = [e['employee_name'] for e in self.client.get('/master/me').json()['employees']]
+        self.assertEqual(names, [])
+
     async def test_public_employee_schema_never_exposes_access_email(self):
         self.assertNotIn('access_email', EmployeeOut.model_fields)
 

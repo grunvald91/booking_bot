@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Plus, Pencil, Trash2, X, User, Shield, Clock, MapPin, Users as UsersIcon, Calendar, ChevronLeft, ChevronRight, ImagePlus, ImageIcon } from 'lucide-react'
 import { api, type Employee, type Service } from '../../api/client'
+import { errorMessage } from '../../authUtils'
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
 import { BusinessSelector } from '../../components/BusinessSelector'
 import { AdminShell } from '../../components/AdminShell'
@@ -229,7 +230,8 @@ export function EmployeesPage() {
       specialization: form.specialization,
       description: form.description || undefined,
       is_active: editingEmployee?.is_active ?? true,
-      telegram_id: form.telegram_id ? parseInt(form.telegram_id) : undefined,
+      // Пустое поле стирает Telegram ID (например, когда мастер больше не работает с вами).
+      telegram_id: form.telegram_id ? parseInt(form.telegram_id) : null,
       // Пустое значение стирает доступ мастера по email.
       access_email: form.access_email.trim(),
       booking_interval_minutes: form.booking_interval_minutes ? parseInt(form.booking_interval_minutes) : undefined,
@@ -265,7 +267,7 @@ export function EmployeesPage() {
 
       closeModal()
     } catch (e) {
-      alert('Ошибка при сохранении сотрудника: ' + (e instanceof Error ? e.message : String(e)))
+      alert('Ошибка при сохранении сотрудника: ' + errorMessage(e))
     }
   }
 
