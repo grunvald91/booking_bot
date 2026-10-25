@@ -39,7 +39,7 @@ const TABS = [
   { to: '/', label: 'Главная', Icon: Home },
   { to: '/my', label: 'Записи', Icon: ClipboardList },
   { to: '/subscriptions', label: 'Абонементы', Icon: Ticket },
-  { to: '/chat', label: 'AI-помощник', Icon: MessageCircle },
+  { to: '/chat', label: 'Чат', Icon: MessageCircle },
 ]
 
 export function AirFrame({

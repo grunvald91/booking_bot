@@ -266,8 +266,11 @@ class AdminBookingOut(BaseModel):
     client_name: str
     client_phone: Optional[str] = None
     client_email: Optional[str] = None
+    service_id: Optional[int] = None
     service_name: str
     service_duration: Optional[int] = None
+    # «ЧЧ:ММ», если запись завершили раньше плана (время после этого свободно)
+    actual_end_time: Optional[str] = None
     price: Optional[int] = None
     is_rental: bool = False
     price_requires_confirmation: bool = False
@@ -293,6 +296,10 @@ class ManualBookingIn(BaseModel):
     notes: Optional[str] = None
     # Повтор той же брони еженедельно на N недель (включая первую); None = без повтора.
     repeat_weeks: Optional[int] = Field(default=None, ge=2, le=8)
+
+
+class ChangeBookingServiceIn(BaseModel):
+    service_id: int
 
 
 class UpdateBookingStatusIn(BaseModel):

@@ -87,7 +87,12 @@ function minToTime(min: number) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 function durationOf(b: AdminBooking) {
-  return b.service_duration || 60
+  const planned = b.service_duration || 60
+  // Завершили раньше плана: показываем фактическое время, чтобы остаток был виден свободным.
+  if (b.status === 'completed' && b.actual_end_time) {
+    return Math.min(planned, Math.max(10, timeToMin(b.actual_end_time) - timeToMin(b.time)))
+  }
+  return planned
 }
 function endOf(b: AdminBooking) {
   return minToTime((timeToMin(b.time) + durationOf(b)) % (24 * 60))
@@ -192,12 +197,15 @@ function Sheet({ title, sub, onClose, children, z }: { title: string; sub?: stri
 
 // ── Карточка записи ──
 function BookingDetailSheet({
-  booking, color, onClose, onStatusChange, onReschedule, onQuote, error, updating,
+  booking, color, services, inProgress, onClose, onStatusChange, onChangeService, onReschedule, onQuote, error, updating,
 }: {
   booking: AdminBooking
   color: string
+  services: Service[]
+  inProgress: boolean
   onClose: () => void
   onStatusChange: (id: number, status: string) => void
+  onChangeService: (id: number, serviceId: number) => void
   onReschedule: (b: AdminBooking) => void
   onQuote: (id: number, price: number, prepayment: number) => void
   error: string
@@ -205,6 +213,8 @@ function BookingDetailSheet({
 }) {
   const [rentalPrice, setRentalPrice] = useState(String(booking.price ?? ''))
   const [deposit, setDeposit] = useState(String(booking.prepayment_amount ?? 0))
+  const [changing, setChanging] = useState(false)
+  const [newServiceId, setNewServiceId] = useState('')
   const open = booking.status !== 'cancelled' && booking.status !== 'completed'
   const awaitingPayment = booking.status === 'pending_prepayment' || booking.status === 'prepayment_sent'
   const price = booking.price ?? 0
@@ -291,9 +301,31 @@ function BookingDetailSheet({
                 </button>
               )}
               <button onClick={() => onReschedule(booking)} disabled={updating}><CalendarClock size={14} />Перенести</button>
-              <button onClick={() => onStatusChange(booking.id, 'completed')} disabled={updating || awaitingPayment}>Завершить</button>
+              <button onClick={() => onStatusChange(booking.id, 'completed')} disabled={updating || awaitingPayment}
+                title="Время мастера освободится с этого момента">
+                {inProgress ? 'Завершить сейчас' : 'Завершить'}
+              </button>
+              {!booking.is_rental && !awaitingPayment && (
+                <button onClick={() => setChanging((v) => !v)} disabled={updating}>Сменить услугу</button>
+              )}
               <button className="danger" onClick={() => onStatusChange(booking.id, 'cancelled')} disabled={updating}>Отменить</button>
             </div>
+            {changing && (
+              <div className="sched-detail-pay">
+                <div className="ds-eyebrow" style={{ margin: 0 }}>На какую услугу заменить</div>
+                <small>Используйте, если клиент выбрал не ту. Клиенту сообщение не уходит.</small>
+                <select className="ds-input" value={newServiceId} onChange={(e) => setNewServiceId(e.target.value)} style={{ marginTop: 6 }}>
+                  <option value="">Выберите услугу</option>
+                  {services
+                    .filter((s) => s.is_active && s.id !== booking.service_id && !s.is_additional)
+                    .map((s) => <option key={s.id} value={s.id}>{s.name} · {s.duration_minutes} мин · {money(s.price)}</option>)}
+                </select>
+                <button className="ds-btn ds-btn--ghost ds-btn--sm" style={{ marginTop: 8 }} disabled={updating || !newServiceId}
+                  onClick={() => onChangeService(booking.id, Number(newServiceId))}>
+                  Заменить услугу
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -681,6 +713,21 @@ export function SchedulePage() {
       fetchBookings()
     } catch (e) {
       setBookingError(parseError(e, 'Не удалось изменить статус'))
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const handleChangeService = async (bookingId: number, serviceId: number) => {
+    setUpdating(true)
+    setBookingError('')
+    try {
+      replaceBooking(await api.changeBookingService(bookingId, serviceId))
+      setSelectedBooking(null)
+      setToast('Услуга заменена')
+      fetchBookings()
+    } catch (e) {
+      setBookingError(parseError(e, 'Не удалось заменить услугу'))
     } finally {
       setUpdating(false)
     }
@@ -1116,7 +1163,13 @@ export function SchedulePage() {
             <button className="sched-zoom-reset" onClick={() => setHourPx(DEFAULT_HOUR_PX)} aria-label="Вернуть масштаб 100%" title="Сбросить масштаб"><RotateCcw size={18} /></button>
           )}
           {businessId && (
-            <button className="sched-fab" onClick={() => setManual({ date: viewMode === 'week' ? new Date() : dayDate, employeeId: selectedEmployeeId })} aria-label="Записать клиента">
+            <button className="sched-fab" onClick={() => {
+              // Сегодня — сразу подставляем ближайшее время от текущей минуты (округляем вверх до 5 минут).
+              const date = viewMode === 'week' ? new Date() : dayDate
+              const isToday = formatDateISO(date) === todayISO
+              const rounded = Math.ceil(nowMin / 5) * 5
+              setManual({ date, time: isToday ? minToTime(Math.min(rounded, 23 * 60 + 55)) : undefined, employeeId: selectedEmployeeId })
+            }} aria-label="Записать клиента">
               <Plus size={22} />
             </button>
           )}
@@ -1214,7 +1267,11 @@ export function SchedulePage() {
           booking={selectedBooking}
           color={empColor(selectedBooking.employee_id)}
           onClose={() => setSelectedBooking(null)}
+          services={services}
+          inProgress={selectedBooking.date === todayISO && ['pending', 'confirmed'].includes(selectedBooking.status) &&
+            timeToMin(selectedBooking.time) <= nowMin && nowMin < timeToMin(selectedBooking.time) + durationOf(selectedBooking)}
           onStatusChange={handleStatusChange}
+          onChangeService={handleChangeService}
           onQuote={handleRentalQuote}
           error={bookingError}
           onReschedule={(b) => { setRescheduleError(''); setRescheduleBooking(b) }}

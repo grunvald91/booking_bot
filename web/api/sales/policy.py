@@ -33,7 +33,7 @@ class SalesPolicy(BaseModel):
 
     def require(self, tool: str):
         if not self.allows(tool):
-            raise HTTPException(403, "Это действие запрещено настройками ИИ выбранной компании")
+            raise HTTPException(403, "Это действие запрещено настройками чата выбранной компании")
 
 
 def policy_for(business) -> SalesPolicy:

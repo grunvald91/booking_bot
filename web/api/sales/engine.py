@@ -46,7 +46,7 @@ async def chat(provider, tools, conversation, message: str):
         conversation.action, conversation.action_id = None, None
     if not policy.enabled:
         handoff(conversation, "ИИ отключён настройками компании")
-        reply = "ИИ-консультант отключён. Передал сообщение оператору."
+        reply = "Чат-помощник сейчас отключён. Передал сообщение оператору."
         conversation.messages = [*history, {"role": "assistant", "content": reply}]
         return response(conversation, reply)
     # The first request already knows which services this tenant actually offers.

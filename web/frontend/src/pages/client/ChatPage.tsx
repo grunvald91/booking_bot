@@ -292,7 +292,7 @@ function SalesThread({ business }: { business: Business }) {
         <span className="bf-chat-avatar" aria-hidden="true"><Sparkles /></span>
         <span className="bf-biz-body">
           <span className="bf-option-title">{business.name}</span>
-          <span className="bf-biz-line">{mode === 'human' ? 'Диалог у оператора — ответ появится здесь' : 'AI-помощник по записи'}</span>
+          <span className="bf-biz-line">{mode === 'human' ? 'Диалог у оператора — ответ появится здесь' : 'Помощник по записи'}</span>
         </span>
       </div>
       <div className="bf-inner bf-chat-log" aria-live="polite">
@@ -346,11 +346,11 @@ export function ChatPage() {
     api.getBusinesses().then(setBusinesses).catch(err => setError(errorText(err))).finally(() => setLoading(false))
   }, [])
   return (
-    <AirFrame label="AI-помощник ServGo" backTo={business ? `/business/${business.id}` : '/'} tabs={!business}>
+    <AirFrame label="Чат ServGo" backTo={business ? `/business/${business.id}` : '/'} tabs={!business}>
       {business ? <SalesThread key={business.id} business={business} /> : (
         <section className="bf-screen" aria-label="Выбор компании">
           <div className="bf-inner bf-page">
-            <h1 className="bf-h2">AI-помощник</h1>
+            <h1 className="bf-h2">Чат</h1>
             <p className="bf-intro">Подберёт услугу, подскажет цену и найдёт свободное время. Выберите место:</p>
             {error && <p className="bf-error" role="alert">{error}</p>}
             <div className="bf-kicker">{loading ? 'Загружаем…' : 'Места'}</div>

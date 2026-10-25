@@ -165,8 +165,10 @@ export interface MasterBooking {
   business_name: string;
   employee_id: number;
   employee_name: string;
+  service_id?: number | null;
   service_name: string;
   duration_minutes?: number | null;
+  actual_end_time?: string | null;
   date: string;
   time: string;
   status: string;
@@ -181,6 +183,7 @@ export interface MasterSchedule {
   employees: MasterEmployee[];
   bookings: MasterBooking[];
   days_off: { employee_id: number; date: string }[];
+  services?: { id: number; business_id: number; name: string; duration_minutes?: number | null }[];
 }
 
 export interface TimePricing {
@@ -351,8 +354,11 @@ export interface AdminBooking {
   client_name: string;
   client_phone?: string;
   client_email?: string;
+  service_id?: number;
   service_name: string;
   service_duration?: number;
+  /** «ЧЧ:ММ», если запись завершили раньше плана */
+  actual_end_time?: string | null;
   price?: number;
   is_rental?: boolean;
   price_requires_confirmation?: boolean;
@@ -804,6 +810,11 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ estimated_price: estimatedPrice, prepayment_amount: prepaymentAmount }),
     }),
+  changeBookingService: (bookingId: number, serviceId: number) =>
+    request<AdminBooking>(`/admin/bookings/${bookingId}/service`, {
+      method: 'PATCH',
+      body: JSON.stringify({ service_id: serviceId }),
+    }),
   adminReschedule: (bookingId: number, date: string, time: string, employeeId?: number) =>
     request<AdminBooking>(`/admin/bookings/${bookingId}/reschedule`, {
       method: 'POST',
@@ -905,6 +916,14 @@ export const api = {
     const query = params.toString()
     return request<MasterSchedule>(`/master/schedule${query ? `?${query}` : ''}`)
   },
+
+  masterFinishBooking: (bookingId: number) =>
+    request<{ ok: boolean }>(`/master/bookings/${bookingId}/finish`, { method: 'POST' }),
+  masterChangeService: (bookingId: number, serviceId: number) =>
+    request<{ ok: boolean }>(`/master/bookings/${bookingId}/service`, {
+      method: 'PATCH',
+      body: JSON.stringify({ service_id: serviceId }),
+    }),
 
   getOwners: (bizId: number) =>
     request<OwnerInfo[]>(`/admin/businesses/${bizId}/owners`),
