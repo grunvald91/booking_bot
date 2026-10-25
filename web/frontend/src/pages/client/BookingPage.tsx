@@ -38,6 +38,7 @@ import { Logo } from '../../components/Logo'
 import { ApiError } from '../../api/client'
 import { HeroArt } from './AirFrame'
 import { photoSrc, photoThumbSrc } from './airPhotos'
+import { ACCUSATIVE, choosePhrase } from '../../utils/bookingLabels'
 import './booking-flow.css'
 
 // ── Helpers ──
@@ -132,17 +133,6 @@ function ruDateLong(key: string) {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
-// Винительный падеж для стандартных названий шагов («Выберите услугу»).
-// Для кастомных названий бизнеса используем форму «Выберите: …».
-const ACCUSATIVE: Record<string, string> = {
-  'услуга': 'услугу', 'мастер': 'мастера', 'специалист': 'специалиста', 'зал': 'зал',
-  'дата': 'дату', 'время': 'время', 'доп. услуги': 'доп. услуги',
-}
-function choosePhrase(verb: string, label: string) {
-  const acc = ACCUSATIVE[label.trim().toLowerCase()]
-  return acc ? `${verb} ${acc}` : `${verb}: ${label.toLowerCase()}`
-}
-
 function plural(n: number, one: string, few: string, many: string) {
   const m10 = n % 10
   const m100 = n % 100
@@ -151,10 +141,18 @@ function plural(n: number, one: string, few: string, many: string) {
   return many
 }
 
-function resourceSupportsService(resource: EmployeeWithPricing | null | undefined, serviceId: number): boolean {
+// Кто выполняет услугу: если она явно отмечена хотя бы у одного сотрудника, её делают только
+// отмеченные. Сотрудники без единой привязки считаются «делают всё» только пока услуга
+// не отмечена ни у кого (так работали бизнесы, где привязки вообще не настраивали).
+function resourceSupportsService(
+  resource: EmployeeWithPricing | null | undefined,
+  serviceId: number,
+  all: EmployeeWithPricing[],
+): boolean {
   if (!resource) return true
-  const ids = resource.service_ids || []
-  return ids.length === 0 || ids.includes(serviceId)
+  const explicit = all.some((r) => (r.service_ids || []).includes(serviceId))
+  if (explicit) return (resource.service_ids || []).includes(serviceId)
+  return (resource.service_ids || []).length === 0
 }
 
 // ── Error boundaries ──
@@ -359,15 +357,29 @@ function BookingPageInner() {
 
   const availableServices = useMemo(() => {
     if (flowOrder !== 'resource_first' || !selectedResource) return services
-    return services.filter((service) => resourceSupportsService(selectedResource, service.id))
-  }, [flowOrder, selectedResource, services])
+    return services.filter((service) => resourceSupportsService(selectedResource, service.id, employees))
+  }, [flowOrder, selectedResource, services, employees])
 
   const availableResources = useMemo(() => {
     if (flowOrder !== 'service_first' || selectedServices.length === 0) return employees
     return employees.filter((resource) =>
-      selectedServices.every((service) => resourceSupportsService(resource, service.id))
+      selectedServices.every((service) => resourceSupportsService(resource, service.id, employees))
     )
   }, [flowOrder, employees, selectedServices])
+
+  // «Любой специалист» имеет смысл, только если из кого выбирать: когда выбранная услуга
+  // привязана ровно к одному мастеру, выбор «любого» не предлагаем.
+  const anyAllowedFor = (picked: Service[]) => {
+    if (!resourceOptional) return false
+    const suitable = picked.length === 0
+      ? employees.length
+      : employees.filter((resource) => picked.every((service) => resourceSupportsService(resource, service.id, employees))).length
+    return suitable !== 1
+  }
+  const anyAllowed = anyAllowedFor(selectedServices)
+  useEffect(() => {
+    if (anyResource && !anyAllowed) setAnyResource(false)
+  }, [anyResource, anyAllowed])
 
   // Load business data
   useEffect(() => {
@@ -386,7 +398,7 @@ function BookingPageInner() {
           ? (biz.employees || []).find((resource) => resource.id === preselectedEmployeeId)
           : undefined
         const order = biz.booking_flow_order === 'resource_first' ? 'resource_first' : 'service_first'
-        const compatible = !found || !emp || resourceSupportsService(emp, found.id)
+        const compatible = !found || !emp || resourceSupportsService(emp, found.id, biz.employees || [])
         if (emp && (compatible || order === 'resource_first')) setSelectedResource(emp)
         if (found && (compatible || order === 'service_first')) setSelectedServices([found])
       })
@@ -518,7 +530,7 @@ function BookingPageInner() {
   }, [flowOrder, hasResources, hasExtrasStep, prepaymentStep])
 
   const servicesDone = selectedServices.length > 0
-  const resourceDone = !hasResources || !!selectedResource || (resourceOptional && anyResource)
+  const resourceDone = !hasResources || !!selectedResource || (anyAllowed && anyResource)
   const dateDone = !!selectedDate && !!selectedTime
 
   function nextNeeded(): Screen {
@@ -574,7 +586,7 @@ function BookingPageInner() {
   const advanceAfter = (state: { services?: Service[]; resource?: EmployeeWithPricing | null; any?: boolean; date?: boolean }) => {
     const sDone = (state.services ?? selectedServices).length > 0
     const rRes = state.resource !== undefined ? state.resource : selectedResource
-    const rDone = !hasResources || !!rRes || (resourceOptional && (state.any ?? anyResource))
+    const rDone = !hasResources || !!rRes || (anyAllowedFor(state.services ?? selectedServices) && (state.any ?? anyResource))
     const dDone = state.date ?? dateDone
     for (const step of selectionSteps) {
       if (step === 'services' && !sDone) return go('services')
@@ -599,7 +611,7 @@ function BookingPageInner() {
           ? prev.filter((item) => item.id !== service.id)
           : [...prev, service]
       )
-      if (flowOrder === 'service_first' && selectedResource && !resourceSupportsService(selectedResource, service.id)) {
+      if (flowOrder === 'service_first' && selectedResource && !resourceSupportsService(selectedResource, service.id, employees)) {
         setSelectedResource(null)
       }
       resetDownstream()
@@ -608,9 +620,18 @@ function BookingPageInner() {
     const nextServices = [service]
     setSelectedServices(nextServices)
     let res = selectedResource
-    if (flowOrder === 'service_first' && res && !resourceSupportsService(res, service.id)) {
+    if (flowOrder === 'service_first' && res && !resourceSupportsService(res, service.id, employees)) {
       res = null
       setSelectedResource(null)
+    }
+    // Услугу делает один-единственный мастер — выбирать не из кого, берём его сразу
+    // и экран выбора мастера пропускаем.
+    if (flowOrder === 'service_first' && !res && !isVenue) {
+      const suitable = employees.filter((resource) => resourceSupportsService(resource, service.id, employees))
+      if (suitable.length === 1) {
+        res = suitable[0]
+        setSelectedResource(res)
+      }
     }
     resetDownstream()
     advanceAfter({ services: nextServices, resource: res, date: false })
@@ -621,7 +642,7 @@ function BookingPageInner() {
     setAnyResource(resource === null)
     let nextServices = selectedServices
     if (resource && flowOrder === 'resource_first') {
-      nextServices = selectedServices.filter((service) => resourceSupportsService(resource, service.id))
+      nextServices = selectedServices.filter((service) => resourceSupportsService(resource, service.id, employees))
       setSelectedServices(nextServices)
     }
     resetDownstream()
@@ -894,8 +915,8 @@ function BookingPageInner() {
       name: choosePhrase('Выбрать', labels.resource),
       details: selectedResource || anyResource
         ? resourceLabel
-        : resourceOptional ? 'Можно выбрать любого' : `${employees.length} ${plural(employees.length, 'вариант', 'варианта', 'вариантов')}`,
-      complete: !!selectedResource || anyResource,
+        : anyAllowed ? 'Можно выбрать любого' : `${availableResources.length} ${plural(availableResources.length, 'вариант', 'варианта', 'вариантов')}`,
+      complete: !!selectedResource || (anyAllowed && anyResource),
     }
     if (flowOrder === 'resource_first') {
       if (hasResources) choices.push(resourceChoice)
@@ -1062,7 +1083,7 @@ function BookingPageInner() {
         <div className="bf-inside-nav">{stepCount}</div>
         <div className="bf-inner">
           <h2 className="bf-h2">{choosePhrase('Выберите', labels.resource)}</h2>
-          <p className="bf-intro">{resourceOptional ? 'Можно выбрать любого — подберём подходящего' : 'Нажмите на вариант — сразу перейдём дальше'}</p>
+          <p className="bf-intro">{anyAllowed ? 'Можно выбрать любого — подберём подходящего' : 'Нажмите на вариант — сразу перейдём дальше'}</p>
           <div className="bf-stage" aria-live="polite">
             <div className="bf-stage-kicker">Ваш визит · {labels.resource}</div>
             <div className="bf-stage-feature">
@@ -1074,14 +1095,14 @@ function BookingPageInner() {
                 <div className="bf-stage-detail">
                   {selectedResource
                     ? (selectedResource.specialization || selectedResource.description || getRoomPriceRange(selectedResource) || '')
-                    : `${list.length} ${plural(list.length, 'вариант', 'варианта', 'вариантов')}${resourceOptional ? ' и выбор любого' : ''}`}
+                    : `${list.length} ${plural(list.length, 'вариант', 'варианта', 'вариантов')}${anyAllowed ? ' и выбор любого' : ''}`}
                 </div>
               </div>
             </div>
             {servicesDone && <div className="bf-stage-metrics"><span>{serviceLabel}{totalDuration > 0 ? ` · ${formatDuration(totalDuration)}` : ''}</span></div>}
           </div>
           <div className="bf-list">
-            {resourceOptional && (
+            {anyAllowed && (
               <button type="button" className={`bf-option ${anyResource && !selectedResource ? 'selected' : ''}`} aria-pressed={anyResource && !selectedResource} onClick={() => chooseResource(null)}>
                 {portrait(null)}
                 <span className="bf-option-data">
@@ -1093,9 +1114,9 @@ function BookingPageInner() {
             )}
             {list.length === 0 && (
               <div className="bf-empty">
-                {resourceOptional
+                {anyAllowed
                   ? 'Нет специалистов, связанных с выбранной услугой. Можно продолжить с любым специалистом.'
-                  : `Нет вариантов «${labels.resource.toLowerCase()}», совместимых со всеми выбранными услугами.`}
+                  : `Нет вариантов «${labels.resource}», совместимых со всеми выбранными услугами.`}
               </div>
             )}
             {list.map((r) => {
