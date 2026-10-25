@@ -1,0 +1,89 @@
+name: Diagnose ServGo outgoing mail (read-only)
+# Prints the SMTP settings the bot uses (no secrets) and the TLS certificate the mail server presents,
+# plus the real handshake error. Nothing on the server is changed.
+on:
+  workflow_dispatch:
+  push:
+    branches: [diag/smtp-tls]
+permissions:
+  contents: read
+concurrency:
+  group: servgo-smtp-diagnostics
+  cancel-in-progress: true
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Inspect SMTP settings and certificate without changing the server
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, shlex, time
+          import paramiko
+          EXPECTED='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,client,hostname,key):
+                  fingerprint=base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  if fingerprint!=EXPECTED:raise paramiko.SSHException('SSH host key mismatch')
+                  client.get_host_keys().add(hostname,key.get_name(),key)
+          if not os.environ.get('SERVER_PASSWORD'):raise RuntimeError('Missing SSH secret')
+          source=r'''
+          import os, re, socket, smtplib, ssl, sys
+          sys.path.insert(0, "/opt/booking_bot"); os.chdir("/opt/booking_bot")
+          import bot.config  # loads /opt/booking_bot/.env like the bot does
+          host=os.getenv("SMTP_HOST",""); port=int(os.getenv("SMTP_PORT","587"))
+          use_ssl=os.getenv("SMTP_USE_SSL","").lower() in ("1","true","yes","on")
+          starttls_env=os.getenv("SMTP_STARTTLS")
+          sender=os.getenv("SMTP_FROM_EMAIL","")
+          print("SMTP_HOST",host,"PORT",port,"USE_SSL",use_ssl,"STARTTLS_ENV",starttls_env)
+          print("FROM_DOMAIN",sender.split("@")[-1] if "@" in sender else "(unset)","USERNAME_SET",bool(os.getenv("SMTP_USERNAME")),"PASSWORD_SET",bool(os.getenv("SMTP_PASSWORD")))
+          try: print("RESOLVES_TO",sorted({a[4][0] for a in socket.getaddrinfo(host,port,proto=socket.IPPROTO_TCP)}))
+          except Exception as e: print("RESOLVE_ERROR",type(e).__name__)
+          def connect(context):
+              if use_ssl:
+                  s=smtplib.SMTP_SSL(host,port,timeout=12,context=context); s.ehlo(); return s
+              s=smtplib.SMTP(host,port,timeout=12); s.ehlo(); s.starttls(context=context); s.ehlo(); return s
+          try:
+              s=connect(ssl.create_default_context()); s.quit(); print("VERIFIED_HANDSHAKE ok")
+          except Exception as e:
+              print("VERIFIED_HANDSHAKE_ERROR",type(e).__name__,str(e)[:300])
+          try:
+              ctx=ssl.create_default_context(); ctx.check_hostname=False; ctx.verify_mode=ssl.CERT_NONE
+              s=connect(ctx)
+              der=(s.sock.getpeercert(binary_form=True)); s.quit()
+              from cryptography import x509
+              c=x509.load_der_x509_certificate(der)
+              try: san=c.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName)
+              except Exception: san=[]
+              print("CERT_SUBJECT",c.subject.rfc4514_string()); print("CERT_ISSUER",c.issuer.rfc4514_string())
+              print("CERT_SAN",san); print("CERT_VALID",c.not_valid_before_utc.isoformat(),"->",c.not_valid_after_utc.isoformat())
+              print("CERT_SELF_SIGNED",c.subject==c.issuer)
+          except Exception as e:
+              print("CERT_PROBE_ERROR",type(e).__name__,str(e)[:300])
+          '''
+          encoded=base64.b64encode(source.encode()).decode()
+          remote="/opt/booking_bot/venv/bin/python -c "+shlex.quote("import base64;exec(base64.b64decode('"+encoded+"'))")
+          ssh=None
+          for attempt in range(3):
+              conn=paramiko.SSHClient();conn.set_missing_host_key_policy(Pinned())
+              try:
+                  conn.connect('155.212.162.47',username='root',password=os.environ['SERVER_PASSWORD'],port=22,
+                               look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  ssh=conn;break
+              except (paramiko.SSHException,OSError,EOFError):
+                  conn.close()
+                  if attempt==2:raise
+                  time.sleep(3)
+          try:
+              _,stdout,stderr=ssh.exec_command(remote,timeout=60)
+              result=stdout.read().decode('utf-8','replace')
+              status=stdout.channel.recv_exit_status()
+              print(result)
+              if status:raise RuntimeError('Remote diagnostic failed (details withheld)')
+          finally:ssh.close()
+          PY
