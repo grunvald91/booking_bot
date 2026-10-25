@@ -98,11 +98,16 @@ def wait_web_ready(client):
     raise RuntimeError("Web API did not become ready")
 
 
-def bot_polling_healthy(client) -> bool:
+def server_now(client) -> str:
+    return run(client, "date '+%Y-%m-%d %H:%M:%S'")
+
+
+def bot_polling_healthy(client, since: str) -> bool:
+    """Look only at log lines written after `since` (server time taken right before the restart)."""
     for _ in range(20):
         if run(client, "systemctl is-active " + BOT_SERVICE) != "active":
             raise RuntimeError("Bot service is not active after restart")
-        log = run(client, "journalctl -u " + BOT_SERVICE + " --since '90 seconds ago' --no-pager -o cat || true", 15)
+        log = run(client, "journalctl -u " + BOT_SERVICE + " --since " + shlex.quote(since) + " --no-pager -o cat || true", 15)
         if "Run polling for bot" in log:
             return "TelegramNetworkError" not in log
         time.sleep(3)
@@ -146,8 +151,9 @@ def main():
         stamp = str(int(time.time()))
         for path in todo:
             target = ROOT + "/" + path
-            backups[path] = target + ".bak.bizrem." + stamp
-            run(client, "cp -p " + shlex.quote(target) + " " + shlex.quote(backups[path]))
+            backup = target + ".bak.bizrem." + stamp
+            run(client, "cp -p " + shlex.quote(target) + " " + shlex.quote(backup))
+            backups[path] = backup  # only once the copy exists, so a rollback never restores a missing file
         for path in todo:
             target = ROOT + "/" + path
             put(sftp, target, new[path], sftp.stat(target).st_mode & 0o777)
@@ -157,8 +163,9 @@ def main():
 
         run(client, "systemctl restart " + WEB_SERVICE, timeout=60)
         wait_web_ready(client)
+        since = server_now(client)
         run(client, "systemctl restart " + BOT_SERVICE, timeout=60)
-        if not bot_polling_healthy(client):
+        if not bot_polling_healthy(client, since):
             raise RuntimeError("Bot did not start polling cleanly")
         if run(client, "systemctl is-active " + WEB_SERVICE) != "active":
             raise RuntimeError("Web API failed after rollout")

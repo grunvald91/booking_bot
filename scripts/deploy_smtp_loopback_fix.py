@@ -13,7 +13,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scripts.deploy_business_creation_and_reminders import (  # noqa: E402
-    BOT_SERVICE, ROOT, WEB_SERVICE, bot_polling_healthy, classify, connect, put, run, sha, wait_web_ready,
+    BOT_SERVICE, ROOT, WEB_SERVICE, bot_polling_healthy, classify, connect, put, run, server_now, sha,
+    wait_web_ready,
 )
 
 PATH = "bot/services/email_notifications.py"
@@ -58,15 +59,17 @@ def main():
         elif not apply:
             print("preflight_ok=yes; would_deploy=1; production_untouched=yes")
         else:
-            backup = target + ".bak.smtp." + str(int(time.time()))
-            run(client, "cp -p " + shlex.quote(target) + " " + shlex.quote(backup))
+            copy = target + ".bak.smtp." + str(int(time.time()))
+            run(client, "cp -p " + shlex.quote(target) + " " + shlex.quote(copy))
+            backup = copy  # only once the copy exists, so a rollback never restores a missing file
             put(sftp, target, new, sftp.stat(target).st_mode & 0o777)
             run(client, "cd " + ROOT + " && ./venv/bin/python -m py_compile " + PATH)
             run(client, "cd " + ROOT + " && ./venv/bin/python -c 'import bot.services.email_notifications'", 60)
             run(client, "systemctl restart " + WEB_SERVICE, timeout=60)
             wait_web_ready(client)
+            since = server_now(client)
             run(client, "systemctl restart " + BOT_SERVICE, timeout=60)
-            if not bot_polling_healthy(client):
+            if not bot_polling_healthy(client, since):
                 raise RuntimeError("Bot did not start polling cleanly")
             print("backup=" + backup)
             print("smtp_loopback_deployed=yes; web_api_health=200; bot_polling=yes")
