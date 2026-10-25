@@ -242,6 +242,16 @@ class BookingChangesTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(BookingChangeError):
                 await change_booking_service(db, booking, self.svc['s30'])
 
+    async def test_change_works_for_venue_rental_packages(self):
+        async with self.sessions() as db:
+            biz = await db.get(Business, self.biz_id)
+            biz.business_type = 'venue_rental'
+            await db.commit()
+        self.current_user_id = self.owner_id
+        res = self.client.patch(f'/admin/bookings/{self.c_id}/service', json={'service_id': self.svc['s90']})
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual((await self._load(self.c_id)).resource_duration_minutes, 90)
+
     async def test_master_finishes_prepaid_booking(self):
         async with self.sessions() as db:
             (await db.get(Booking, self.a_id)).status = 'prepayment_confirmed'

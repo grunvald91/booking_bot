@@ -20,7 +20,7 @@ from database.booking_safety import (
     service_occupies_resource,
     service_resource_duration,
 )
-from database.models import Booking, Business, Service
+from database.models import Booking, Service
 from datetime_utils import utc_now
 
 SCHEDULE_TZ = "Europe/Moscow"  # тот же пояс, что у расчёта свободного времени
@@ -79,18 +79,17 @@ async def change_booking_service(
     """Заменить услугу в записи (клиент выбрал не ту). Коммит делает вызывающий код.
 
     Правила: тот же бизнес, активная услуга того же вида (основная/дополнительная),
-    без аренды; предоплата (если была) остаётся как есть; если услуга длиннее, время мастера на это должно быть свободно.
+    в т.ч. пакеты аренды залов (кроме почасовых заявок); предоплата (если была) остаётся как есть; если услуга длиннее, время мастера на это должно быть свободно.
     """
     if booking.status not in CHANGEABLE_STATUSES:
         raise BookingChangeError("У отменённой записи услугу изменить нельзя")
+    # Почасовая заявка (длительность и цену задаёт владелец вручную) устроена иначе:
+    # в ней одна общая услуга, менять там нечего — меняется длительность/цена в карточке.
+    # Аренда залов (площадки) — обычные записи на услуги-пакеты, для них замена работает.
     if booking.duration_minutes is not None:
-        raise BookingChangeError("Для аренды услугу не меняют: создайте новую заявку")
+        raise BookingChangeError("В почасовой заявке услуга одна: измените длительность или цену в карточке")
     if booking.service_id == new_service_id:
         raise BookingChangeError("В записи уже выбрана эта услуга", 400)
-
-    business = await db.get(Business, booking.business_id)
-    if business is not None and business.business_type == "venue_rental":
-        raise BookingChangeError("Для аренды услугу не меняют: создайте новую заявку")
 
     new_service = (await db.execute(
         select(Service).where(
