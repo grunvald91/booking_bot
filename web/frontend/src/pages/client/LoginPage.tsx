@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Phone, Send } from 'lucide-react'
+import { postLoginPath } from '../../utils/postLogin'
 import { api, type TelegramLoginPayload } from '../../api/client'
 import { errorMessage, saveLogin } from '../../authUtils'
 import { ClientShell } from '../../components/ClientShell'
@@ -64,10 +65,11 @@ export function LoginPage() {
       setLoading(true)
       setError('')
       void api.telegramLogin(data)
-        .then(result => {
+        .then(async result => {
           if (!active) return
           saveLogin(result)
-          navigate(result.role === 'client' ? '/my' : '/admin', { replace: true })
+          const path = await postLoginPath(result.role)
+          if (active) navigate(path, { replace: true })
         })
         .catch(err => { if (active) setError(errorMessage(err)) })
         .finally(() => { if (active) setLoading(false) })

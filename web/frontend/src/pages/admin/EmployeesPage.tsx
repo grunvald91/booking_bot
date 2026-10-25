@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Plus, Pencil, Trash2, X, User, Shield, Clock, MapPin, Users as UsersIcon, Calendar, ChevronLeft, ChevronRight, ImagePlus, ImageIcon } from 'lucide-react'
 import { api, type Employee, type Service } from '../../api/client'
+import { errorMessage } from '../../authUtils'
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
 import { BusinessSelector } from '../../components/BusinessSelector'
 import { AdminShell } from '../../components/AdminShell'
@@ -43,6 +44,7 @@ interface EmployeeForm {
   specialization: string
   description: string
   telegram_id: string
+  access_email: string
   booking_interval_minutes: string
   capacity: string
   area_sqm: string
@@ -56,6 +58,7 @@ const emptyForm: EmployeeForm = {
   specialization: '',
   description: '',
   telegram_id: '',
+  access_email: '',
   booking_interval_minutes: '',
   capacity: '',
   area_sqm: '',
@@ -159,6 +162,7 @@ export function EmployeesPage() {
       specialization: emp.specialization || '',
       description: emp.description || '',
       telegram_id: emp.telegram_id ? String(emp.telegram_id) : '',
+      access_email: emp.access_email || '',
       booking_interval_minutes: emp.booking_interval_minutes ? String(emp.booking_interval_minutes) : '',
       capacity: emp.capacity ? String(emp.capacity) : '',
       area_sqm: emp.area_sqm ? String(emp.area_sqm) : '',
@@ -226,7 +230,10 @@ export function EmployeesPage() {
       specialization: form.specialization,
       description: form.description || undefined,
       is_active: editingEmployee?.is_active ?? true,
-      telegram_id: form.telegram_id ? parseInt(form.telegram_id) : undefined,
+      // Пустое поле стирает Telegram ID (например, когда мастер больше не работает с вами).
+      telegram_id: form.telegram_id ? parseInt(form.telegram_id) : null,
+      // Пустое значение стирает доступ мастера по email.
+      access_email: form.access_email.trim(),
       booking_interval_minutes: form.booking_interval_minutes ? parseInt(form.booking_interval_minutes) : undefined,
     }
 
@@ -260,7 +267,7 @@ export function EmployeesPage() {
 
       closeModal()
     } catch (e) {
-      alert('Ошибка при сохранении сотрудника: ' + (e instanceof Error ? e.message : String(e)))
+      alert('Ошибка при сохранении сотрудника: ' + errorMessage(e))
     }
   }
 
@@ -432,6 +439,11 @@ export function EmployeesPage() {
                         TG ID: {emp.telegram_id}
                       </div>
                     )}
+                    {emp.access_email && (
+                      <div className="ds-caption" style={{ marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        Вход: {emp.access_email}
+                      </div>
+                    )}
                   </div>
 
                   {/* Action controls */}
@@ -594,16 +606,43 @@ export function EmployeesPage() {
               />
             </div>
 
+            {/* Вход мастера на сайт */}
+            {!isVenueRental && (
+              <div className="ds-field">
+                <label className="ds-label" htmlFor="employee-access-email">Email для входа мастера на сайт</label>
+                <input
+                  id="employee-access-email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="off"
+                  className="ds-input"
+                  value={form.access_email}
+                  onChange={(e) => setForm({ ...form, access_email: e.target.value })}
+                  placeholder="master@example.com"
+                />
+                <p className="ds-hint">
+                  Мастер входит на сайт по этому email (с паролем или через Яндекс ID с этим же адресом) и видит только
+                  свои записи: время, услугу, имя и телефон клиента. Цен, аналитики и настроек у него нет.
+                  Оставьте пустым, если вход на сайт не нужен.
+                </p>
+              </div>
+            )}
+
             {/* Telegram ID */}
             <div className="ds-field">
-              <label className="ds-label">Telegram ID</label>
+              <label className="ds-label" htmlFor="employee-telegram-id">Telegram ID (для входа через Telegram)</label>
               <input
+                id="employee-telegram-id"
                 type="number"
                 className="ds-input"
                 value={form.telegram_id}
                 onChange={(e) => setForm({ ...form, telegram_id: e.target.value })}
                 placeholder="123456789"
               />
+              <p className="ds-hint">
+                Это число, а не @имя. Сотрудник узнаёт его у бота @userinfobot. По нему он входит на сайт через
+                Telegram и получает режим мастера в боте. Можно указать и email, и Telegram ID, подойдёт любой способ входа.
+              </p>
             </div>
 
             {/* Booking interval */}

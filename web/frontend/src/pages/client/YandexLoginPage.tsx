@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { postLoginPath } from '../../utils/postLogin'
 import { api } from '../../api/client'
 import { errorMessage, saveLogin } from '../../authUtils'
 import { ClientShell } from '../../components/ClientShell'
@@ -24,7 +25,7 @@ export function YandexLoginPage() {
       const result = await api.yandexExchange({ ticket: ticket.current, ...extra })
       if (result.status === 'ok') {
         saveLogin(result)
-        navigate(result.role === 'client' ? '/my' : '/admin', { replace: true })
+        navigate(await postLoginPath(result.role), { replace: true })
       } else if (result.status === 'linked') {
         navigate('/account', { replace: true })
       } else {

@@ -51,6 +51,7 @@ from ..schemas import (
     ServiceUpdateIn,
     ServiceReorderIn,
     EmployeeOut,
+    EmployeeAdminOut,
     EmployeeCreateIn,
     EmployeeUpdateIn,
     EmployeeServiceLinkIn,
@@ -305,9 +306,18 @@ async def list_services(
     return [_service_out(s) for s in result.scalars().all()]
 
 
+def _clean_access_email(value: Optional[str]) -> Optional[str]:
+    """Email мастера для входа: приводим к нижнему регистру, пустое значение = доступа нет."""
+    from email_utils import normalize_optional_email
+    try:
+        return normalize_optional_email(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
 # ---------- GET /admin/businesses/{id}/employees ----------
 
-@router.get("/businesses/{business_id}/employees", response_model=List[EmployeeOut])
+@router.get("/businesses/{business_id}/employees", response_model=List[EmployeeAdminOut])
 async def list_employees(
     business_id: int,
     include_inactive: bool = Query(False),
@@ -331,7 +341,7 @@ async def list_employees(
     employees = result.scalars().all()
     out = []
     for e in employees:
-        d = EmployeeOut.model_validate(e)
+        d = EmployeeAdminOut.model_validate(e)
         d.service_ids = [es.service_id for es in e.employee_services]
         out.append(d)
     return out
@@ -1261,7 +1271,7 @@ async def delete_service(
 
 # ---------- Employee CRUD ----------
 
-@router.post("/businesses/{business_id}/employees", response_model=EmployeeOut)
+@router.post("/businesses/{business_id}/employees", response_model=EmployeeAdminOut)
 async def create_employee(
     business_id: int,
     data: EmployeeCreateIn,
@@ -1279,6 +1289,7 @@ async def create_employee(
         specialization=data.specialization,
         description=data.description,
         telegram_id=data.telegram_id,
+        access_email=_clean_access_email(data.access_email),
         booking_interval_minutes=data.booking_interval_minutes,
         capacity=data.capacity,
         area_sqm=data.area_sqm,
@@ -1289,10 +1300,10 @@ async def create_employee(
     db.add(employee)
     await db.commit()
     await db.refresh(employee)
-    return EmployeeOut.model_validate(employee)
+    return EmployeeAdminOut.model_validate(employee)
 
 
-@router.put("/businesses/{business_id}/employees/{employee_id}", response_model=EmployeeOut)
+@router.put("/businesses/{business_id}/employees/{employee_id}", response_model=EmployeeAdminOut)
 async def update_employee(
     business_id: int,
     employee_id: int,
@@ -1311,12 +1322,15 @@ async def update_employee(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    if "access_email" in updates:
+        updates["access_email"] = _clean_access_email(updates["access_email"])
+    for field, value in updates.items():
         setattr(employee, field, value)
 
     await db.commit()
     await db.refresh(employee)
-    return EmployeeOut.model_validate(employee)
+    return EmployeeAdminOut.model_validate(employee)
 
 
 @router.delete("/businesses/{business_id}/employees/{employee_id}")

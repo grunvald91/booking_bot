@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useEffect } from 'react'
-import { Routes, Route, Navigate, useSearchParams, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate, useSearchParams, useLocation, useNavigate } from 'react-router-dom'
 import { api, ApiError } from './api/client'
 import { clearLogin, saveLogin } from './authUtils'
 import { Layout } from './components/Layout'
@@ -26,8 +26,10 @@ import { SalesSettingsPage } from './pages/admin/SalesSettingsPage'
 import { RentalBookingStatusPage } from './pages/client/RentalBookingStatusPage'
 import { LegalPage } from './pages/client/LegalPage'
 import { applySeo } from './utils/seo'
+import { postLoginPath } from './utils/postLogin'
 
 const BookingPage = lazy(() => import('./pages/client/BookingPage').then(module => ({ default: module.BookingPage })))
+const MasterPage = lazy(() => import('./pages/master/MasterPage').then(module => ({ default: module.MasterPage })))
 const SchedulePage = lazy(() => import('./pages/admin/SchedulePage').then(module => ({ default: module.SchedulePage })))
 const SettingsPage = lazy(() => import('./pages/admin/SettingsPage').then(module => ({ default: module.SettingsPage })))
 
@@ -72,6 +74,7 @@ function RouteSeo() {
 
 function App() {
   const [authReady, setAuthReady] = useState(false)
+  const navigate = useNavigate()
 
   useEffect(() => {
     let active = true
@@ -81,7 +84,14 @@ function App() {
         const initData = window.Telegram?.WebApp?.initData
         if (initData) {
           try {
-            saveLogin(await api.telegramAuth(initData))
+            const login = await api.telegramAuth(initData)
+            saveLogin(login)
+            // Мастера, открывшего сайт из Telegram, один раз за сеанс ведём сразу в его расписание.
+            if (window.location.pathname === '/' && !sessionStorage.getItem('servgoMasterRedirect')) {
+              sessionStorage.setItem('servgoMasterRedirect', '1')
+              const path = await postLoginPath(login.role)
+              if (path === '/master') navigate(path, { replace: true })
+            }
             return
           } catch (error) {
             console.warn('Telegram auto-login failed:', error)
@@ -116,7 +126,7 @@ function App() {
     const patience = inTelegram ? 0 : window.setTimeout(() => { if (active) setAuthReady(true) }, 3000)
     void restoreAuth()
     return () => { active = false; window.clearTimeout(patience) }
-  }, [])
+  }, [navigate])
 
   if (!authReady) {
     return <div role="status" style={{ padding: 24 }}>Проверяем вход…</div>
@@ -146,6 +156,7 @@ function App() {
         <Route path="/login/yandex" element={<YandexLoginPage />} />
         <Route path="/mail" element={<OwnerMailPage />} />
         <Route path="/account" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
+        <Route path="/master" element={<ProtectedRoute><MasterPage /></ProtectedRoute>} />
         <Route path="/admin/prepayments" element={<AdminRoute><PrepaymentsPage /></AdminRoute>} />
 
         {/* Legacy redirects */}

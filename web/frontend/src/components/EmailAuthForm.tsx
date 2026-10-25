@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { postLoginPath } from '../utils/postLogin'
 import { api } from '../api/client'
 import { errorMessage, saveLogin } from '../authUtils'
 
@@ -23,7 +24,7 @@ export function EmailAuthForm({ link = false }: { link?: boolean }) {
       if (challenge || mode === 'login') {
         const result = challenge ? await api.emailVerify(challenge, code) : await api.emailLogin(email, password)
         saveLogin(result)
-        navigate(result.role === 'client' ? '/my' : '/admin', { replace: true })
+        navigate(await postLoginPath(result.role), { replace: true })
       } else {
         const result = await api.emailStart({ email, password, full_name: name, purpose: mode })
         setChallenge(result.challenge_id)

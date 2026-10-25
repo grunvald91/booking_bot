@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { LayoutDashboard, LogOut } from 'lucide-react'
+import { CalendarDays, LayoutDashboard, LogOut } from 'lucide-react'
 import { api } from '../../api/client'
 import { EmailAuthForm } from '../../components/EmailAuthForm'
 import { clearLogin, errorMessage } from '../../authUtils'
@@ -12,6 +12,8 @@ import { YandexAccountLink } from '../../components/YandexAccountLink'
 export function AccountPage() {
   const [account, setAccount] = useState<Awaited<ReturnType<typeof api.emailAccount>> | null>(null)
   const [error, setError] = useState('')
+  const [isMaster, setIsMaster] = useState(false)
+  useEffect(() => { api.masterMe().then(r => setIsMaster(r.employees.length > 0)).catch(() => setIsMaster(false)) }, [])
   useEffect(() => { api.emailAccount().then(setAccount).catch(e => setError(errorMessage(e))) }, [])
   const role = localStorage.getItem('userRole')
   const isAdmin = role === 'admin' || role === 'owner'
@@ -35,6 +37,7 @@ export function AccountPage() {
       <YandexAccountLink />
       <div className="bf-account-actions">
         <StudioEntry />
+        {isMaster && <Link to="/master" className="bf-account-row"><CalendarDays /><span>Моё расписание мастера</span></Link>}
         {isAdmin && <Link to="/admin" className="bf-account-row"><LayoutDashboard /><span>Кабинет бизнеса</span></Link>}
         <button type="button" className="bf-account-row danger" onClick={logout}><LogOut /><span>Выйти</span></button>
       </div>

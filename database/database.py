@@ -55,6 +55,8 @@ async def init_db():
         "ALTER TABLE services ADD COLUMN sort_order INTEGER DEFAULT 0",
         "ALTER TABLE bookings ADD COLUMN notify_token VARCHAR(64)",
         "CREATE INDEX IF NOT EXISTS ix_bookings_notify_token ON bookings (notify_token)",
+        "ALTER TABLE employees ADD COLUMN access_email VARCHAR(320)",
+        "CREATE INDEX IF NOT EXISTS ix_employees_access_email ON employees (access_email)",
     ]
 
     for migration in migrations:
