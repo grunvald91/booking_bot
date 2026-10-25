@@ -125,7 +125,8 @@ def get_master_booking_actions_keyboard(booking_id: int) -> InlineKeyboardMarkup
     """Клавиатура действий мастера с записью"""
     builder = InlineKeyboardBuilder()
 
-    builder.button(text="✔️ Завершить", callback_data=f"master_complete:{booking_id}", style="success")
+    builder.button(text="✔️ Завершить (освободить время)", callback_data=f"master_complete:{booking_id}", style="success")
+    builder.button(text="🔁 Сменить услугу", callback_data=f"master_chsvc:{booking_id}")
     builder.button(text="❌ Отменить", callback_data=f"master_cancel:{booking_id}", style="danger")
     builder.button(text="👤 История клиента", callback_data=f"master_client_history:{booking_id}")
     builder.button(text="◀️ Назад", callback_data="master_schedule:today")

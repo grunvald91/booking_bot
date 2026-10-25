@@ -3762,10 +3762,12 @@ async def admin_booking_detail(callback: CallbackQuery):
     if booking.status == "pending":
         builder.button(text="✅ Подтвердить", callback_data=f"admin_confirm_booking:{booking_id}", style="success")
         builder.button(text="❌ Отменить", callback_data=f"admin_cancel_booking:{booking_id}", style="danger")
-    elif booking.status == "confirmed":
-        builder.button(text="✔️ Завершить", callback_data=f"admin_complete_booking:{booking_id}", style="success")
+    elif booking.status in ("confirmed", "prepayment_confirmed"):
+        builder.button(text="✔️ Завершить (освободить время)", callback_data=f"admin_complete_booking:{booking_id}", style="success")
         builder.button(text="❌ Отменить", callback_data=f"admin_cancel_booking:{booking_id}", style="danger")
 
+    if booking.status not in ("cancelled", "completed") and booking.duration_minutes is None:
+        builder.button(text="🔁 Сменить услугу", callback_data=f"admin_chsvc:{booking_id}")
     builder.button(text="📊 История клиента", callback_data=f"client_history:{booking.client_id}:{booking.business_id}")
     builder.button(text="◀️ Назад к записям", callback_data=f"view_bookings:{booking.business_id}")
     builder.button(text="🏠 Главное меню", callback_data="main_menu")
@@ -3865,16 +3867,92 @@ async def admin_complete_booking(callback: CallbackQuery):
             await callback.answer("❌ У вас нет прав для управления этой записью", show_alert=True)
             return
 
-        if booking.status not in ["pending", "confirmed"]:
+        if booking.status not in ["pending", "confirmed", "prepayment_confirmed"]:
             await callback.answer("❌ Можно завершить только активные записи", show_alert=True)
             return
 
-        # Завершаем запись
+        # Завершаем запись; момент нужен, чтобы в расписании время освободилось с него
+        from datetime_utils import utc_now
         booking.status = "completed"
+        booking.finished_at = utc_now()
         await session.commit()
 
     await callback.answer("✔️ Запись завершена")
     # Перенаправляем обратно на детали записи
+    await admin_booking_detail(callback)
+
+
+@router.callback_query(F.data.startswith("admin_chsvc:"))
+async def admin_change_service_menu(callback: CallbackQuery):
+    """Список услуг, на которые можно заменить услугу в записи"""
+    booking_id = int(callback.data.split(":")[1])
+    from database import is_business_owner
+    from database.models import Service as ServiceModel
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    async with async_session_maker() as session:
+        booking = await session.get(Booking, booking_id)
+        if not booking:
+            await callback.answer("❌ Запись не найдена", show_alert=True)
+            return
+        user = await get_or_create_user(
+            session, callback.from_user.id, callback.from_user.username, callback.from_user.full_name
+        )
+        if not await is_business_owner(session, booking.business_id, user.id):
+            await callback.answer("❌ У вас нет прав для управления этой записью", show_alert=True)
+            return
+        current = await session.get(ServiceModel, booking.service_id)
+        services = (await session.execute(
+            select(ServiceModel).where(
+                ServiceModel.business_id == booking.business_id,
+                ServiceModel.is_active.is_(True),
+                ServiceModel.id != booking.service_id,
+                ServiceModel.is_additional.is_(bool(current and current.is_additional)),
+            ).order_by(ServiceModel.sort_order, ServiceModel.id)
+        )).scalars().all()
+    builder = InlineKeyboardBuilder()
+    for sv in services:
+        builder.button(text=f"{sv.name} · {sv.duration_minutes} мин · {sv.price} ₽", callback_data=f"admin_setsvc:{booking_id}:{sv.id}")
+    builder.button(text="◀️ Назад", callback_data=f"admin_booking_detail:{booking_id}")
+    builder.adjust(1)
+    await callback.message.edit_text(
+        "🔁 <b>На какую услугу заменить?</b>\nИспользуйте, если клиент выбрал не ту.",
+        parse_mode="HTML", reply_markup=builder.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_setsvc:"))
+async def admin_change_service_apply(callback: CallbackQuery):
+    """Заменить услугу в записи"""
+    try:
+        _, booking_id, service_id = callback.data.split(":")
+        booking_id, service_id = int(booking_id), int(service_id)
+    except ValueError:
+        await callback.answer("❌ Ошибка данных", show_alert=True)
+        return
+    from database import is_business_owner
+    from database.booking_changes import BookingChangeError, change_booking_service
+    async with async_session_maker() as session:
+        booking = (await session.execute(
+            select(Booking).options(selectinload(Booking.service)).where(Booking.id == booking_id).with_for_update()
+        )).scalar_one_or_none()
+        if not booking:
+            await callback.answer("❌ Запись не найдена", show_alert=True)
+            return
+        user = await get_or_create_user(
+            session, callback.from_user.id, callback.from_user.username, callback.from_user.full_name
+        )
+        if not await is_business_owner(session, booking.business_id, user.id):
+            await callback.answer("❌ У вас нет прав для управления этой записью", show_alert=True)
+            return
+        try:
+            await change_booking_service(session, booking, service_id)
+            await session.commit()
+        except BookingChangeError as exc:
+            await session.rollback()
+            await callback.answer(f"❌ {exc.detail}", show_alert=True)
+            return
+    await callback.answer("✅ Услуга заменена")
     await admin_booking_detail(callback)
 
 

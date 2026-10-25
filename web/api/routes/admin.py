@@ -38,6 +38,7 @@ from database.booking_safety import (
     contiguous_visit_bookings,
 )
 from ..deps import get_current_admin
+from database.booking_changes import BookingChangeError, actual_end_time, change_booking_service
 from ..booking_utils import compute_recurring_dates
 from ..schemas import (
     BusinessOut,
@@ -65,6 +66,7 @@ from ..schemas import (
     AnalyticsOverviewOut,
     ManualBookingIn,
     UpdateBookingStatusIn,
+    ChangeBookingServiceIn,
     AdminRescheduleIn,
     OwnerOut,
     OwnerAddIn,
@@ -154,8 +156,10 @@ def _admin_booking_out(b: Booking) -> AdminBookingOut:
         client_name=b.client.full_name if b.client else "Unknown",
         client_phone=b.client.phone if b.client else None,
         client_email=b.client.email if b.client else None,
+        service_id=b.service_id,
         service_name=b.service.name if b.service else "",
         service_duration=b.duration_minutes or (b.service.duration_minutes if b.service else None),
+        actual_end_time=actual_end_time(b),
         price=b.estimated_price if b.duration_minutes is not None else (b.service.price if b.service else None),
         is_rental=b.duration_minutes is not None,
         price_requires_confirmation=b.price_requires_confirmation,
@@ -861,6 +865,8 @@ async def update_booking_status(
                     decision="cancel", booking_version=item.version))
             item.status = data.status
             item.version += 1
+        # Запоминаем момент завершения: в расписании время освободится именно с него.
+        item.finished_at = confirmed_at if data.status == "completed" else None
         if (
             data.status == "confirmed"
             and old_status in ("prepayment_sent", "pending_prepayment")
@@ -920,6 +926,50 @@ async def update_booking_status(
             )
         )
     ).scalar_one()
+    return _admin_booking_out(refreshed)
+
+
+# ---------- PATCH /admin/bookings/{id}/service ----------
+
+@router.patch("/bookings/{booking_id}/service", response_model=AdminBookingOut)
+async def change_booking_service_route(
+    booking_id: int,
+    data: ChangeBookingServiceIn,
+    user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Заменить услугу в записи, если клиент выбрал не ту."""
+    biz_ids = await _get_owner_business_ids(db, user)
+    booking = (await db.execute(
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(
+            selectinload(Booking.client),
+            selectinload(Booking.business),
+            selectinload(Booking.service),
+            selectinload(Booking.employee),
+        )
+        .with_for_update()
+    )).scalar_one_or_none()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.business_id not in biz_ids:
+        raise HTTPException(status_code=403, detail="Not your business")
+    try:
+        await change_booking_service(db, booking, data.service_id)
+        await db.commit()
+    except BookingChangeError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Это время уже занято") from exc
+    refreshed = (await db.execute(
+        select(Booking).where(Booking.id == booking_id).options(
+            selectinload(Booking.client), selectinload(Booking.business),
+            selectinload(Booking.service), selectinload(Booking.employee),
+        ).execution_options(populate_existing=True)
+    )).scalar_one()
     return _admin_booking_out(refreshed)
 
 

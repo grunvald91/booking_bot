@@ -434,6 +434,10 @@ class Booking(Base):
     booking_terms_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     booking_terms_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    # Когда запись реально закончили (раньше плановой длительности). Нужен только для показа
+    # в расписании; освобождает время сам статус completed. UTC, без часового пояса.
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     reminder_sent: Mapped[bool] = mapped_column(Boolean, default=False)  # Deprecated, используем reminder_24h/2h
     reminder_24h_sent: Mapped[bool] = mapped_column(Boolean, default=False)  # Клиенту за 24ч
     reminder_2h_sent: Mapped[bool] = mapped_column(Boolean, default=False)  # Клиенту за 2ч

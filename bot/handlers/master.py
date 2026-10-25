@@ -1079,7 +1079,15 @@ async def complete_booking(callback: CallbackQuery):
                 await callback.message.answer("❌ Запись не найдена или нет доступа")
                 return
 
-            booking.status = "completed"
+            # Раньше здесь можно было «завершить» даже отменённую запись; теперь общие правила:
+            # подтверждённая (в т.ч. с подтверждённой предоплатой) завершается целиком, время
+            # мастера освобождается с этого момента.
+            from database.booking_changes import BookingChangeError, finish_visit_now
+            try:
+                await finish_visit_now(session, booking)
+            except BookingChangeError as exc:
+                await callback.message.answer(f"❌ {exc.detail}")
+                return
             await session.commit()
 
 
@@ -1099,6 +1107,84 @@ async def complete_booking(callback: CallbackQuery):
                 f"❌ Ошибка: {str(e)}",
                 reply_markup=builder.as_markup()
             )
+
+
+@router.callback_query(F.data.startswith("master_chsvc:"))
+async def master_change_service_menu(callback: CallbackQuery):
+    """Показать услуги бизнеса, на которые можно заменить услугу в записи"""
+    await callback.answer()
+    try:
+        booking_id = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        await callback.message.answer("❌ Ошибка данных")
+        return
+
+    from sqlalchemy import select as sa_select
+    from database.models import Booking as BookingModel, Service as ServiceModel
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    async with async_session_maker() as session:
+        employee = await get_employee_by_telegram_id(session, callback.from_user.id)
+        booking = await session.get(BookingModel, booking_id) if employee else None
+        if not employee or not booking or booking.employee_id != employee.id:
+            await callback.message.answer("❌ Запись не найдена или нет доступа")
+            return
+        current = await session.get(ServiceModel, booking.service_id)
+        services = (await session.execute(
+            sa_select(ServiceModel).where(
+                ServiceModel.business_id == booking.business_id,
+                ServiceModel.is_active.is_(True),
+                ServiceModel.id != booking.service_id,
+                ServiceModel.is_additional.is_(bool(current and current.is_additional)),
+            ).order_by(ServiceModel.sort_order, ServiceModel.id)
+        )).scalars().all()
+    builder = InlineKeyboardBuilder()
+    for sv in services:
+        builder.button(text=f"{sv.name} · {sv.duration_minutes} мин", callback_data=f"master_setsvc:{booking_id}:{sv.id}")
+    builder.button(text="◀️ Назад", callback_data=f"master_booking:{booking_id}")
+    builder.adjust(1)
+    await callback.message.edit_text(
+        "🔁 <b>На какую услугу заменить?</b>\nИспользуйте, если клиент выбрал не ту.",
+        parse_mode="HTML", reply_markup=builder.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("master_setsvc:"))
+async def master_change_service_apply(callback: CallbackQuery):
+    """Заменить услугу в записи"""
+    await callback.answer()
+    try:
+        _, booking_id, service_id = callback.data.split(":")
+        booking_id, service_id = int(booking_id), int(service_id)
+    except ValueError:
+        await callback.message.answer("❌ Ошибка данных")
+        return
+
+    from sqlalchemy.orm import selectinload
+    from database.models import Booking as BookingModel
+    from database.booking_changes import BookingChangeError, change_booking_service
+    from sqlalchemy import select as sa_select
+    async with async_session_maker() as session:
+        employee = await get_employee_by_telegram_id(session, callback.from_user.id)
+        booking = None
+        if employee:
+            booking = (await session.execute(
+                sa_select(BookingModel).options(selectinload(BookingModel.service))
+                .where(BookingModel.id == booking_id, BookingModel.employee_id == employee.id)
+                .with_for_update()
+            )).scalar_one_or_none()
+        if not booking:
+            await callback.message.answer("❌ Запись не найдена или нет доступа")
+            return
+        try:
+            await change_booking_service(session, booking, service_id)
+            await session.commit()
+        except BookingChangeError as exc:
+            await session.rollback()
+            await callback.message.answer(f"❌ {exc.detail}")
+            return
+        name = booking.service.name
+    await callback.message.answer(f"✅ Услуга в записи #{booking_id} заменена на «{name}».")
+    await show_booking_details(callback)
 
 
 @router.callback_query(F.data.startswith("master_cancel:"))

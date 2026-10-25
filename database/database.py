@@ -57,6 +57,7 @@ async def init_db():
         "CREATE INDEX IF NOT EXISTS ix_bookings_notify_token ON bookings (notify_token)",
         "ALTER TABLE employees ADD COLUMN access_email VARCHAR(320)",
         "CREATE INDEX IF NOT EXISTS ix_employees_access_email ON employees (access_email)",
+        "ALTER TABLE bookings ADD COLUMN finished_at TIMESTAMP",
     ]
 
     for migration in migrations:

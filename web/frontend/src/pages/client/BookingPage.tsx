@@ -23,6 +23,8 @@ import {
   X,
   Bell,
   Send,
+  Phone,
+  MessageCircle,
 } from 'lucide-react'
 import {
   api,
@@ -998,12 +1000,26 @@ function BookingPageInner() {
     )
   }
 
+  // Телефон бизнеса для звонка одним касанием (только цифры и ведущий +).
+  const callHref = (() => {
+    const raw = (business?.phone || '').trim()
+    const digits = raw.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, '')
+    return digits.replace(/\D/g, '').length >= 5 ? `tel:${digits}` : ''
+  })()
+
   function renderServices() {
     const total = selectedServices.reduce((sum, s) => sum + (s.price ?? 0), 0)
     const first = selectedServices[0]
     return (
       <section className="bf-screen" aria-label="Выбор услуги">
-        <div className="bf-inside-nav">{stepCount}</div>
+        <div className="bf-inside-nav bf-inside-nav--call">
+          {callHref && (
+            <a className="bf-call" href={callHref} aria-label={`Позвонить: ${business?.phone}`}>
+              <Phone /><span>Не знаете, что выбрать? <strong>{business?.phone}</strong></span>
+            </a>
+          )}
+          {stepCount}
+        </div>
         <div className="bf-inner">
           <h2 className="bf-h2">{choosePhrase('Выберите', labels.service)}</h2>
           <p className="bf-intro">{multiService ? 'Можно выбрать несколько — затем продолжите' : 'Нажмите на вариант — сразу перейдём дальше'}</p>
@@ -1662,7 +1678,7 @@ function BookingPageInner() {
 
   return createPortal(
     <div className="bf-root">
-      <main className="bf-device" aria-label="Онлайн-запись ServGo">
+      <main className={`bf-device${business && !loadError ? ' bf-has-fab' : ''}`} aria-label="Онлайн-запись ServGo">
         <header className="bf-topbar">
           <Link to="/" className="bf-brand" aria-label="ServGo"><Logo size={28} /></Link>
           <div className="bf-spacer" />
@@ -1670,6 +1686,11 @@ function BookingPageInner() {
         </header>
         <div key={screen} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{content}</div>
       </main>
+      {business && !loadError && (
+        <Link to={`/chat?business_id=${business.id}`} className="bf-chat-fab" aria-label="Открыть чат с помощником">
+          <MessageCircle /><span>Чат</span>
+        </Link>
+      )}
       {toast && <div className="bf-toast" role="status">{toast}</div>}
       {infoModal && <InfoSheet data={infoModal} onClose={() => setInfoModal(null)} />}
     </div>,

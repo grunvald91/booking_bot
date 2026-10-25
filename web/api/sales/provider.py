@@ -40,9 +40,9 @@ class LLMConfig:
             api_format,
         )
         if not all((config.base_url, config.api_key, config.model)):
-            raise ProviderError("ИИ-консультант пока не подключён. Используйте обычную форму записи.")
+            raise ProviderError("Чат-помощник пока не подключён. Используйте обычную форму записи.")
         if config.api_format not in {"openai", "anthropic"}:
-            raise ProviderError("Неверная настройка формата API ИИ-консультанта.")
+            raise ProviderError("Неверная настройка формата API чат-помощника.")
         if config.model == "gpt-6-luna" and config.api_format != "openai":
             raise ProviderError("GPT-6 Luna требует OpenAI-совместимый формат API.")
         return config
@@ -154,4 +154,4 @@ class ClaudeHubClient:
                 result["tool_calls"] = normalized
             return result
         except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
-            raise ProviderError("ИИ-консультант временно недоступен. Попробуйте позже или откройте форму записи.") from exc
+            raise ProviderError("Чат-помощник временно недоступен. Попробуйте позже или откройте форму записи.") from exc

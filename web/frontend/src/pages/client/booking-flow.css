@@ -505,3 +505,24 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
   .bf-screen--business .bf-bottombar .bf-secondary { flex: 0 0 auto; }
   .bf-biz:hover, .bf-option--link:hover, button.bf-option:hover { background: #f8fbff; }
 }
+
+/* ── Звонок в бизнес одним касанием (шаг выбора услуги) ── */
+.bf-inside-nav--call { justify-content: space-between; gap: 10px; }
+.bf-call { display: inline-flex; align-items: center; gap: 7px; min-width: 0; min-height: 36px; padding: 6px 12px; border-radius: 18px; background: #eef5fd; color: #1e4f94; font-size: 12px; line-height: 1.2; text-decoration: none; }
+.bf-call svg { width: 15px; height: 15px; color: #2f6fd1; }
+.bf-call span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bf-call strong { font-weight: 650; }
+@media (max-width: 380px) { .bf-call span { font-size: 11.5px; } }
+
+/* ── Плавающая кнопка «Чат» на шагах записи ── */
+.bf-chat-fab {
+  position: fixed; z-index: 40; right: max(14px, env(safe-area-inset-right));
+  bottom: calc(86px + env(safe-area-inset-bottom));
+  display: inline-flex; align-items: center; gap: 7px; height: 46px; padding: 0 16px 0 13px;
+  border-radius: 23px; background: #20354e; color: #fff; font-size: 14px; font-weight: 560; text-decoration: none;
+  box-shadow: 0 8px 24px #0b203a40;
+}
+.bf-chat-fab svg { width: 19px; height: 19px; }
+@media (min-width: 700px) { .bf-chat-fab { right: calc(50% - 230px + 16px); bottom: 110px; } }
+/* Место под плавающую кнопку, чтобы она не перекрывала последние элементы списка */
+.bf-has-fab .bf-inner { padding-bottom: 60px; }

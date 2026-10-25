@@ -23,7 +23,7 @@ const clientNav = [
   { to: '/', label: 'Главная', icon: Home },
   { to: '/my', label: 'Мои записи', icon: ClipboardList },
   { to: '/subscriptions', label: 'Абонементы', icon: Ticket },
-  { to: '/chat', label: 'AI Помощник', icon: MessageCircle },
+  { to: '/chat', label: 'Чат', icon: MessageCircle },
 ]
 
 const adminNav = [
@@ -42,7 +42,7 @@ const mobileBottomNav = [
   { to: '/', label: 'Главная', icon: Home },
   { to: '/my', label: 'Записи', icon: ClipboardList },
   { to: '/subscriptions', label: 'Абонементы', icon: Ticket },
-  { to: '/chat', label: 'AI', icon: MessageCircle },
+  { to: '/chat', label: 'Чат', icon: MessageCircle },
   { to: '/login', label: 'Профиль', icon: User, authAware: true },
 ]
 
