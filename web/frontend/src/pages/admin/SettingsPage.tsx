@@ -105,6 +105,8 @@ export function SettingsPage() {
 
   // Business profile form
   const [form, setForm] = useState<BusinessUpdateData>({})
+  // Перерыв включается отдельным переключателем: выключен — перерыва нет совсем (поля очищаются).
+  const [breakEnabled, setBreakEnabled] = useState(false)
   const [ownerCustomMinutes, setOwnerCustomMinutes] = useState('')
   const [masterCustomMinutes, setMasterCustomMinutes] = useState('')
   const [photos, setPhotos] = useState<string[]>([])
@@ -183,6 +185,7 @@ export function SettingsPage() {
       api.getOwners(businessId).catch(() => [] as OwnerInfo[]),
     ])
       .then(async ([biz, ownersList]) => {
+        setBreakEnabled(!!(biz.break_start && biz.break_end && biz.break_start !== biz.break_end))
         setForm({
           name: biz.name || '',
           description: biz.description || '',
@@ -244,6 +247,12 @@ export function SettingsPage() {
   // Save business profile
   const handleSaveProfile = async () => {
     if (!businessId) return
+    if (breakEnabled) {
+      const from = (form.break_start || '').slice(0, 5)
+      const to = (form.break_end || '').slice(0, 5)
+      if (!from || !to) { alert('Укажите, с какого и до какого времени перерыв, или выключите переключатель «Есть перерыв».'); return }
+      if (to <= from) { alert('Конец перерыва должен быть позже начала. Если перерыва нет, выключите переключатель «Есть перерыв».'); return }
+    }
     setSaving(true)
     try {
       const updated = await api.updateBusiness(businessId, {
@@ -253,12 +262,17 @@ export function SettingsPage() {
         phone: form.phone,
         working_hours_start: form.working_hours_start,
         working_hours_end: form.working_hours_end,
-        break_start: form.break_start,
-        break_end: form.break_end,
+        break_start: breakEnabled ? form.break_start : '',
+        break_end: breakEnabled ? form.break_end : '',
         booking_interval_minutes: form.booking_interval_minutes,
         directions: form.directions,
       })
-      setForm((prev) => ({ ...prev, name: updated.name }))
+      setForm((prev) => ({
+        ...prev,
+        name: updated.name,
+        break_start: breakEnabled ? prev.break_start : '',
+        break_end: breakEnabled ? prev.break_end : '',
+      }))
       showToast('Профиль сохранён')
     } catch (e) {
       alert('Ошибка при сохранении: ' + (e instanceof Error ? e.message : String(e)))
@@ -740,25 +754,41 @@ export function SettingsPage() {
             </div>
           </div>
 
-          <div className="ds-field">
-            <label className="ds-label">Перерыв</label>
-            <div className="ds-field-row" style={{ alignItems: 'center' }}>
-              <span className="ds-sub" style={{ flex: 'none' }}>с</span>
-              <input
-                type="time"
-                value={form.break_start || ''}
-                onChange={(e) => updateField('break_start', e.target.value)}
-                className="ds-input"
-              />
-              <span className="ds-sub" style={{ flex: 'none' }}>до</span>
-              <input
-                type="time"
-                value={form.break_end || ''}
-                onChange={(e) => updateField('break_end', e.target.value)}
-                className="ds-input"
-              />
+          <div className="ds-toggle-row">
+            <div>
+              <div className="t1">Есть перерыв</div>
+              <div className="t2">{breakEnabled ? 'В это время клиенты записаться не смогут' : 'Выключено: записаться можно в любое рабочее время'}</div>
             </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={breakEnabled}
+              aria-label="Есть перерыв"
+              className={`ds-toggle ${breakEnabled ? 'on' : ''}`}
+              onClick={() => setBreakEnabled((v) => !v)}
+            />
           </div>
+          {breakEnabled && (
+            <div className="ds-field">
+              <label className="ds-label">Время перерыва</label>
+              <div className="ds-field-row" style={{ alignItems: 'center' }}>
+                <span className="ds-sub" style={{ flex: 'none' }}>с</span>
+                <input
+                  type="time"
+                  value={form.break_start || ''}
+                  onChange={(e) => updateField('break_start', e.target.value)}
+                  className="ds-input"
+                />
+                <span className="ds-sub" style={{ flex: 'none' }}>до</span>
+                <input
+                  type="time"
+                  value={form.break_end || ''}
+                  onChange={(e) => updateField('break_end', e.target.value)}
+                  className="ds-input"
+                />
+              </div>
+            </div>
+          )}
 
           <div className="ds-field">
             <label className="ds-label">Интервал записи</label>
