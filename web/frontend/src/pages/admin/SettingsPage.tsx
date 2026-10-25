@@ -48,6 +48,7 @@ import { useAdminBusiness } from '../../hooks/useAdminBusiness'
 import { BusinessSelector } from '../../components/BusinessSelector'
 import { AdminShell } from '../../components/AdminShell'
 import { NotificationSetup } from '../../components/NotificationSetup'
+import { choosePhrase } from '../../utils/bookingLabels'
 
 const REMINDER_PRESETS = [1440, 720, 360, 180, 120, 60, 30]
 
@@ -803,31 +804,69 @@ export function SettingsPage() {
             Сценарий записи
           </h2>
           <p className="ds-sub" style={{ marginBottom: 14 }}>
-            Названия увидит клиент. Можно использовать свои термины: «яхта», «зал», «мастер», «процедура» и т.д.
+            Здесь настраиваются только названия шагов записи на сайте. Имена мастеров и названия услуг сюда
+            писать не нужно: их вы добавляете в разделах «Сотрудники» и «Услуги». Оставьте поле пустым,
+            и клиент увидит стандартное название.
           </p>
 
           {([
-            ['resource', isVenueRental ? 'Зал' : 'Мастер', 'Ресурс / сотрудник'],
-            ['service', 'Услуга', 'Услуги'],
-            ['additional_services', 'Доп. услуги', 'Дополнительные услуги'],
-            ['date', 'Дата', 'Дата'],
-            ['time', 'Время', 'Время'],
-          ] as const).map(([key, placeholder, label]) => (
-            <div className="ds-field" key={key}>
-              <label className="ds-label">{label}</label>
+            {
+              key: 'resource',
+              placeholder: isVenueRental ? 'Зал' : 'Мастер',
+              label: isVenueRental ? 'Как называется зал или помещение' : 'Как называется мастер (сотрудник)',
+              hint: isVenueRental
+                ? 'Одно слово: «Зал», «Яхта», «Кабинет». Клиент увидит его на кнопке выбора и в заголовке шага.'
+                : 'Одно слово: «Мастер», «Специалист», «Врач». Клиент увидит его на кнопке выбора и в заголовке шага. Это не имя человека.',
+              preview: (v: string) => choosePhrase('Выбрать', v || (isVenueRental ? 'Зал' : 'Мастер')),
+            },
+            {
+              key: 'service',
+              placeholder: 'Услуга',
+              label: 'Как называется услуга',
+              hint: 'Одно слово: «Услуга», «Процедура», «Занятие». Клиент увидит его на кнопке выбора и в заголовке шага. Это не название конкретной услуги.',
+              preview: (v: string) => choosePhrase('Выбрать', v || 'Услуга'),
+            },
+            {
+              key: 'additional_services',
+              placeholder: 'Доп. услуги',
+              label: 'Как называются дополнительные услуги',
+              hint: 'Заголовок шага с допами после выбора времени. Показывается, только если у вас есть дополнительные услуги.',
+            },
+            {
+              key: 'date',
+              placeholder: 'Дата',
+              label: 'Как называется дата',
+              hint: 'Первое слово заголовка шага с календарём: «Дата и время».',
+            },
+            {
+              key: 'time',
+              placeholder: 'Время',
+              label: 'Как называется время',
+              hint: 'Второе слово заголовка шага с календарём и подпись над кнопками времени.',
+            },
+          ] as const).map((field) => (
+            <div className="ds-field" key={field.key}>
+              <label className="ds-label" htmlFor={`booking-label-${field.key}`}>{field.label}</label>
               <input
+                id={`booking-label-${field.key}`}
                 type="text"
                 maxLength={80}
-                value={form.booking_labels?.[key] || ''}
-                placeholder={placeholder}
+                value={form.booking_labels?.[field.key] || ''}
+                placeholder={field.placeholder}
                 onChange={(e) =>
                   updateField('booking_labels', {
                     ...(form.booking_labels || {}),
-                    [key]: e.target.value,
+                    [field.key]: e.target.value,
                   })
                 }
                 className="ds-input"
               />
+              <p className="ds-hint">{field.hint}</p>
+              {'preview' in field && (
+                <p className="ds-hint">
+                  Клиент увидит: <strong>{field.preview(form.booking_labels?.[field.key]?.trim() || '')}</strong>
+                </p>
+              )}
             </div>
           ))}
 
@@ -853,6 +892,11 @@ export function SettingsPage() {
                 )
               })}
             </div>
+            <p className="ds-hint">
+              {isVenueRental
+                ? 'Порядок шагов у клиента: сначала услуга, потом зал, либо наоборот.'
+                : 'Порядок шагов у клиента. «Сначала услугу»: клиент выбирает услугу, а мастер подставляется сам, если её делает один человек. «Сначала мастера»: клиент выбирает мастера и видит только его услуги.'}
+            </p>
           </div>
 
           <button

@@ -38,6 +38,7 @@ import { Logo } from '../../components/Logo'
 import { ApiError } from '../../api/client'
 import { HeroArt } from './AirFrame'
 import { photoSrc, photoThumbSrc } from './airPhotos'
+import { ACCUSATIVE, choosePhrase } from '../../utils/bookingLabels'
 import './booking-flow.css'
 
 // ── Helpers ──
@@ -132,19 +133,6 @@ function ruDateLong(key: string) {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
-// Винительный падеж для стандартных названий шагов («Выберите услугу»).
-// Для кастомных названий бизнеса используем форму «Выберите: …».
-const ACCUSATIVE: Record<string, string> = {
-  'услуга': 'услугу', 'мастер': 'мастера', 'специалист': 'специалиста', 'зал': 'зал',
-  'дата': 'дату', 'время': 'время', 'доп. услуги': 'доп. услуги',
-}
-function choosePhrase(verb: string, label: string) {
-  const acc = ACCUSATIVE[label.trim().toLowerCase()]
-  // Своё название шага (например, имя мастера) оставляем как есть, только с заглавной буквы.
-  const custom = label.trim()
-  return acc ? `${verb} ${acc}` : `${verb}: ${custom.charAt(0).toUpperCase()}${custom.slice(1)}`
-}
-
 function plural(n: number, one: string, few: string, many: string) {
   const m10 = n % 10
   const m100 = n % 100
@@ -153,10 +141,18 @@ function plural(n: number, one: string, few: string, many: string) {
   return many
 }
 
-function resourceSupportsService(resource: EmployeeWithPricing | null | undefined, serviceId: number): boolean {
+// Кто выполняет услугу: если она явно отмечена хотя бы у одного сотрудника, её делают только
+// отмеченные. Сотрудники без единой привязки считаются «делают всё» только пока услуга
+// не отмечена ни у кого (так работали бизнесы, где привязки вообще не настраивали).
+function resourceSupportsService(
+  resource: EmployeeWithPricing | null | undefined,
+  serviceId: number,
+  all: EmployeeWithPricing[],
+): boolean {
   if (!resource) return true
-  const ids = resource.service_ids || []
-  return ids.length === 0 || ids.includes(serviceId)
+  const explicit = all.some((r) => (r.service_ids || []).includes(serviceId))
+  if (explicit) return (resource.service_ids || []).includes(serviceId)
+  return (resource.service_ids || []).length === 0
 }
 
 // ── Error boundaries ──
@@ -361,13 +357,13 @@ function BookingPageInner() {
 
   const availableServices = useMemo(() => {
     if (flowOrder !== 'resource_first' || !selectedResource) return services
-    return services.filter((service) => resourceSupportsService(selectedResource, service.id))
-  }, [flowOrder, selectedResource, services])
+    return services.filter((service) => resourceSupportsService(selectedResource, service.id, employees))
+  }, [flowOrder, selectedResource, services, employees])
 
   const availableResources = useMemo(() => {
     if (flowOrder !== 'service_first' || selectedServices.length === 0) return employees
     return employees.filter((resource) =>
-      selectedServices.every((service) => resourceSupportsService(resource, service.id))
+      selectedServices.every((service) => resourceSupportsService(resource, service.id, employees))
     )
   }, [flowOrder, employees, selectedServices])
 
@@ -377,7 +373,7 @@ function BookingPageInner() {
     if (!resourceOptional) return false
     const suitable = picked.length === 0
       ? employees.length
-      : employees.filter((resource) => picked.every((service) => resourceSupportsService(resource, service.id))).length
+      : employees.filter((resource) => picked.every((service) => resourceSupportsService(resource, service.id, employees))).length
     return suitable !== 1
   }
   const anyAllowed = anyAllowedFor(selectedServices)
@@ -402,7 +398,7 @@ function BookingPageInner() {
           ? (biz.employees || []).find((resource) => resource.id === preselectedEmployeeId)
           : undefined
         const order = biz.booking_flow_order === 'resource_first' ? 'resource_first' : 'service_first'
-        const compatible = !found || !emp || resourceSupportsService(emp, found.id)
+        const compatible = !found || !emp || resourceSupportsService(emp, found.id, biz.employees || [])
         if (emp && (compatible || order === 'resource_first')) setSelectedResource(emp)
         if (found && (compatible || order === 'service_first')) setSelectedServices([found])
       })
@@ -615,7 +611,7 @@ function BookingPageInner() {
           ? prev.filter((item) => item.id !== service.id)
           : [...prev, service]
       )
-      if (flowOrder === 'service_first' && selectedResource && !resourceSupportsService(selectedResource, service.id)) {
+      if (flowOrder === 'service_first' && selectedResource && !resourceSupportsService(selectedResource, service.id, employees)) {
         setSelectedResource(null)
       }
       resetDownstream()
@@ -624,9 +620,18 @@ function BookingPageInner() {
     const nextServices = [service]
     setSelectedServices(nextServices)
     let res = selectedResource
-    if (flowOrder === 'service_first' && res && !resourceSupportsService(res, service.id)) {
+    if (flowOrder === 'service_first' && res && !resourceSupportsService(res, service.id, employees)) {
       res = null
       setSelectedResource(null)
+    }
+    // Услугу делает один-единственный мастер — выбирать не из кого, берём его сразу
+    // и экран выбора мастера пропускаем.
+    if (flowOrder === 'service_first' && !res && !isVenue) {
+      const suitable = employees.filter((resource) => resourceSupportsService(resource, service.id, employees))
+      if (suitable.length === 1) {
+        res = suitable[0]
+        setSelectedResource(res)
+      }
     }
     resetDownstream()
     advanceAfter({ services: nextServices, resource: res, date: false })
@@ -637,7 +642,7 @@ function BookingPageInner() {
     setAnyResource(resource === null)
     let nextServices = selectedServices
     if (resource && flowOrder === 'resource_first') {
-      nextServices = selectedServices.filter((service) => resourceSupportsService(resource, service.id))
+      nextServices = selectedServices.filter((service) => resourceSupportsService(resource, service.id, employees))
       setSelectedServices(nextServices)
     }
     resetDownstream()
