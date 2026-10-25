@@ -78,6 +78,8 @@ main { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; paddi
 .day.warn::after { content:""; position:absolute; top:5px; right:5px; width:6px; height:6px; border-radius:50%; background:var(--warn); }
 .day.today .n { font-weight:700; color:var(--accent); }
 .day.today .n::after { content:""; display:block; width:4px; height:4px; border-radius:50%; background:var(--accent); margin:2px auto 0; }
+.day .bx { display:none; }
+.wk small { display:none; }
 .wk { font-size:11px; color:var(--muted); display:flex; align-items:center; justify-content:center; text-align:center; line-height:1.2; }
 .wk b { font-weight:500; color:var(--text2); }
 
@@ -160,10 +162,117 @@ details.log summary { cursor:pointer; font-size:14px; font-weight:500; }
 .toast {
   position:fixed; left:50%; top:max(10px, env(safe-area-inset-top)); transform:translate(-50%, -140%); z-index:40;
   background:var(--text); color:var(--bg); border-radius:14px; padding:10px 16px; font-size:14px; max-width:calc(100% - 32px);
-  transition:transform .23s cubic-bezier(.2,.8,.2,1);
+  transition:transform .23s cubic-bezier(.2,.8,.2,1), opacity .2s; opacity:0; pointer-events:none;
 }
-.toast.on { transform:translate(-50%, 0); }
-@media (min-width:700px) { .sheet { left:50%; right:auto; width:560px; transform:translate(-50%, 105%); } .sheet.on { transform:translate(-50%, 0); } }
+.toast.on { transform:translate(-50%, 0); opacity:1; }
+
+/* ================= ДЕСКТОП: от 900px окно занято целиком ================= */
+@media (min-width:900px) {
+  :root { --side-w:clamp(300px, 22vw, 380px); }
+  body { display:grid; grid-template-columns:var(--side-w) minmax(0,1fr); grid-template-rows:auto auto 1fr; }
+  body::before { content:""; grid-column:1; grid-row:1 / -1; background:var(--s2); }
+  .context { grid-column:1; grid-row:1; padding-top:28px; padding-bottom:8px; }
+  .dock { grid-column:1; grid-row:2; background:transparent; border-top:0; padding-bottom:20px; }
+  main { grid-column:2; grid-row:1 / -1; padding:24px 0 24px; }
+  .context .wrap, .dock .wrap { max-width:none; padding-left:24px; padding-right:24px; }
+  main .wrap { max-width:none; padding-left:32px; padding-right:32px; height:100%; display:flex; flex-direction:column; }
+  .eyebrow { font-size:12px; }
+  h1 { font-size:28px; margin:6px 0 4px; }
+  .big { font-size:40px; margin:10px 0 14px; }
+  .tiles { grid-template-columns:1fr; gap:8px; }
+  .tile { background:var(--bg); display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; border-radius:14px; }
+  .tile b { order:2; font-size:16px; overflow:visible; }
+  .tile span { order:1; margin:0; font-size:13.5px; }
+  .note { font-size:13px; }
+  .dock .wrap { gap:10px; padding-top:12px; }
+  .dock .line:last-child { flex-wrap:wrap; }
+  .dock .line:last-child .seg { order:-1; flex:1 1 100%; }
+  .dock .arrow { background:var(--bg); }
+  .seg { background:var(--bg); }
+  .seg button { min-height:46px; font-size:15px; }
+  .seg button[aria-pressed="true"] { background:var(--s3); }
+  .seg.small button { min-height:40px; font-size:14px; }
+  .dock .line:last-child .arrow { flex:1; width:auto; height:44px; border-radius:14px; }
+
+  /* календарь на всё окно */
+  .cal { flex:1; min-height:0; gap:8px; grid-template-columns:repeat(7, minmax(0,1fr)) minmax(70px,.45fr); }
+  .wd { font-size:13px; padding:2px 0 6px; text-align:left; padding-left:6px; }
+  .day {
+    display:grid; grid-template-columns:1fr auto; grid-template-rows:auto 1fr; align-content:start; align-items:start;
+    min-height:0; padding:10px 12px 8px; border-radius:16px; text-align:left; gap:2px 6px;
+    transition:background .15s, transform .15s;
+  }
+  button.day:hover { background:var(--s3); transform:translateY(-1px); }
+  .day .n { font-size:15px; grid-column:1; grid-row:1; }
+  .day .v { font-size:15px; grid-column:2; grid-row:1; text-align:right; }
+  .day.today .n::after { display:inline-block; vertical-align:middle; margin:0 0 0 6px; width:6px; height:6px; }
+  .day.warn::after { top:auto; bottom:9px; right:11px; width:8px; height:8px; }
+  .day .bx { display:grid; grid-column:1 / -1; grid-row:2; gap:3px; align-content:start; margin-top:6px; overflow:hidden; }
+  .day .bx span { display:flex; justify-content:space-between; gap:8px; font-size:12.5px; color:var(--text2); min-width:0; line-height:1.25; }
+  .day .bx span em { font-style:normal; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); }
+  .day .bx span b { font-weight:500; white-space:nowrap; }
+  .day .bx span.none b { color:var(--muted2); font-weight:400; }
+  .day .bx em i { font-style:normal; }
+  .day .bx em .s { display:none; font-weight:500; }
+  .wk { flex-direction:column; gap:4px; font-size:12.5px; border-radius:16px; background:var(--s2); }
+  .wk b { font-size:16px; }
+  .wk small { display:block; font-size:11.5px; color:var(--muted2); }
+  .cal-hint { margin:14px 2px 0 !important; font-size:13px !important; }
+
+  /* день — панель справа вместо шторки снизу */
+  .scrim { background:rgba(15,27,44,.28); }
+  .sheet {
+    left:auto; right:0; top:0; bottom:0; width:min(640px, 100vw); max-height:none; height:100dvh;
+    border-radius:var(--r-sheet) 0 0 var(--r-sheet); box-shadow:-12px 0 48px rgba(20,40,70,.18);
+    transform:translateX(105%);
+  }
+  .sheet.on { transform:none; }
+  .sheet .inner { max-width:none; padding:0 28px; flex:1; }
+  .grab { display:none; }
+  .sheet h2 { margin-top:28px; font-size:24px; }
+  .sheet .sub { font-size:15px; margin-bottom:18px; }
+  .sheet .scroll { flex:1; }
+  .grid { grid-template-columns:96px repeat(4, minmax(0,1fr)); gap:10px; }
+  .grid .h { font-size:12px; }
+  .grid .who { font-size:15px; }
+  .grid input { height:52px; font-size:17px; }
+  .grid .diff { margin-left:106px; font-size:13px; }
+  .actions { padding:16px 0 24px; }
+  .btn { min-height:52px; }
+
+  /* аналитика колонками */
+  .stats { display:grid; grid-template-columns:repeat(12, minmax(0,1fr)); gap:14px; align-content:start; overflow-y:auto; padding-bottom:8px; }
+  .stats > * { margin:0 !important; }
+  .stats .facts { grid-column:1 / -1; grid-template-columns:repeat(4, minmax(0,1fr)); gap:14px; }
+  .stats .fact { padding:18px 20px; border-radius:18px; }
+  .stats .fact b { font-size:26px; }
+  .stats .fact span { font-size:13.5px; }
+  .stats .pay { grid-column:span 5; }
+  .stats .boxc { grid-column:span 7; }
+  .stats .chartc, .stats details.log, .stats .empty-state { grid-column:1 / -1; }
+  .card { padding:22px 24px; border-radius:20px; }
+  .card h2 { font-size:17px; margin-bottom:16px; }
+  .stack { height:18px; border-radius:9px; }
+  .legend div { font-size:15px; }
+  .rank { gap:18px; }
+  .rank .head { font-size:16px; }
+  .bar { height:10px; margin:8px 0 5px; }
+  .muted { font-size:13.5px; }
+  details.log { padding:16px 20px; }
+  .log ul { font-size:13.5px; grid-template-columns:repeat(2, minmax(0,1fr)); gap:12px 28px; }
+}
+@media (min-width:900px) and (max-width:1199.98px) {
+  :root { --side-w:260px; }
+  .day .bx em .f { display:none; }
+  .day .bx em .s { display:inline; }
+  .day { padding:9px 9px 8px; }
+}
+@media (min-width:1500px) {
+  .day .bx span { font-size:13.5px; }
+  .day .n, .day .v { font-size:16px; }
+}
+
+@media (min-width:700px) and (max-width:899.98px) { .sheet { left:50%; right:auto; width:560px; transform:translate(-50%, 105%); } .sheet.on { transform:translate(-50%, 0); } }
 @media (prefers-reduced-motion: reduce) {
   .seg button[aria-pressed="true"]::after { animation:none; }
   .sheet, .scrim, .toast { transition:none; }
@@ -385,12 +494,21 @@ details.log summary { cursor:pointer; font-size:14px; font-weight:500; }
         var cls = 'day' + (info.has ? ' has' : '') + (info.warn ? ' warn' : '') + (key === today ? ' today' : '');
         var label = d + ' ' + MONTHS_GEN[m] + (info.has ? ', ' + money(info.total) : ', нет записей') + (info.warn ? ', разбивка не сходится' : '');
         html += '<button type="button" class="' + cls + '" data-date="' + key + '" aria-label="' + esc(label) + '">' +
-          '<span class="n">' + d + '</span><span class="v">' + (info.has ? esc(short(info.total)) : '·') + '</span></button>';
+          '<span class="n">' + d + '</span><span class="v">' + (info.has ? esc(short(info.total)) : '·') + '</span>' + boxLines(map[key]) + '</button>';
       }
-      html += '<div class="wk">' + (weekHas ? '<b>' + esc(short(weekSum)) + '</b>' : '') + '</div>';
+      html += '<div class="wk">' + (weekHas ? '<b>' + esc(short(weekSum)) + '</b><small>неделя</small>' : '') + '</div>';
     }
-    html += '</div><p class="muted" style="margin:12px 2px 0">Нажмите на день, чтобы внести или поправить суммы. Справа — итог недели в этом месяце.</p>';
+    html += '</div><p class="muted cal-hint" style="margin:12px 2px 0">Нажмите на день, чтобы внести или поправить суммы. Справа — итог недели в этом месяце.</p>';
     $('content').innerHTML = html;
+    $('content').querySelector('.cal').style.gridTemplateRows = 'auto repeat(' + (cells.length / 7) + ', minmax(' + (window.innerWidth >= 900 ? 92 : 56) + 'px, 1fr))';
+  }
+
+  function boxLines(rows) {
+    if (!rows || !Object.keys(rows).length) return '';
+    return '<span class="bx">' + BOXES.map(function (b) {
+      var e = rows[b];
+      return '<span' + (e ? '' : ' class="none"') + '><em><i class="f">' + esc(b) + '</i><i class="s">' + esc(b.charAt(0)) + '</i></em><b>' + (e ? esc(short(e.total)) : '—') + '</b></span>';
+    }).join('') + '</span>';
   }
 
   /* ---------------- шторка дня ---------------- */
@@ -506,7 +624,7 @@ details.log summary { cursor:pointer; font-size:14px; font-weight:500; }
   function renderStats() {
     var t = totals(state.entries), list = state.entries;
     if (!list.length) {
-      $('content').innerHTML = '<div class="empty-state">За этот период записей нет. Внесите суммы на вкладке «Дни».</div>' + logBlock();
+      $('content').innerHTML = '<div class="stats"><div class="empty-state">За этот период записей нет. Внесите суммы на вкладке «Дни».</div>' + logBlock() + '</div>';
       bindLog(); return;
     }
     var html = '', prev = totals(state.prev), fourth;
@@ -525,7 +643,7 @@ details.log summary { cursor:pointer; font-size:14px; font-weight:500; }
       fact(best ? money(best.v) : '—', best ? 'Лучший день · ' + prettyDate(best.d) : 'Лучший день') +
       fact(String(days), 'Дней с записями') + fourth + '</div>';
     html += paymentsCard(t) + boxesCard(list, t) + chartCard(list, t) + logBlock();
-    $('content').innerHTML = html;
+    $('content').innerHTML = '<div class="stats">' + html + '</div>';
     bindLog();
   }
   function fact(big, label) {
@@ -539,7 +657,7 @@ details.log summary { cursor:pointer; font-size:14px; font-weight:500; }
     function leg(label, v, color) {
       return '<div><i class="dot" style="background:' + color + '"></i>' + esc(label) + '<span class="sum">' + esc(money(v)) + '</span><span class="pct">' + pct(v) + '%</span></div>';
     }
-    var html = '<section class="card"><h2>Как платили</h2><div class="stack" role="img" aria-label="Доли способов оплаты">' +
+    var html = '<section class="card pay"><h2>Как платили</h2><div class="stack" role="img" aria-label="Доли способов оплаты">' +
       seg(t.cash, 'var(--pay-cash)') + seg(t.card, 'var(--pay-card)') + seg(t.terminal, 'var(--pay-term)') + seg(none, 'var(--pay-none)') + '</div><div class="legend">' +
       leg('Наличные', t.cash, 'var(--pay-cash)') + leg('На карту', t.card, 'var(--pay-card)') + leg('Терминал', t.terminal, 'var(--pay-term)') +
       (none > 0 ? leg('Не разбито', none, 'var(--pay-none)') : '') + '</div>';
@@ -551,7 +669,7 @@ details.log summary { cursor:pointer; font-size:14px; font-weight:500; }
     BOXES.forEach(function (b) { per[b] = { sum: 0, n: 0 }; });
     list.forEach(function (e) { per[e.box].sum += e.total; per[e.box].n++; });
     var order = BOXES.slice().sort(function (a, b) { return per[b].sum - per[a].sum; }), max = Math.max.apply(null, order.map(function (b) { return Math.abs(per[b].sum); })) || 1;
-    var html = '<section class="card"><h2>Боксы</h2><div class="rank">';
+    var html = '<section class="card boxc"><h2>Боксы</h2><div class="rank">';
     order.forEach(function (b) {
       var p = per[b], share = t.total ? Math.round(p.sum / t.total * 100) : 0;
       html += '<div><div class="head"><b>' + esc(b) + '</b><span>' + esc(money(p.sum)) + ' · ' + share + '%</span></div>' +
@@ -570,18 +688,21 @@ details.log summary { cursor:pointer; font-size:14px; font-weight:500; }
       var r = rangeFor(), from = r.from.split('-'), to = r.to.split('-'), d = new Date(+from[0], +from[1] - 1, +from[2]), end = new Date(+to[0], +to[1] - 1, +to[2]);
       for (; d <= end; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) bars.push({ label: String(d.getDate()), v: t.days[isoOf(d)] || 0 });
     }
-    var W = 340, H = 150, top = 8, bottom = 22, n = bars.length, gap = n > 20 ? 2 : 4, bw = Math.max(2, (W - gap * (n - 1)) / n);
+    var wide = window.innerWidth >= 900, W = wide ? Math.max(560, $('content').clientWidth - 52) : 340, H = wide ? 260 : 150;
+    var top = 20, bottom = 24, n = bars.length, gap = n > 20 ? (wide ? 6 : 2) : (wide ? 10 : 4), bw = Math.max(2, (W - gap * (n - 1)) / n);
+    if (bw > 64) { bw = 64; gap = n > 1 ? (W - n * bw) / (n - 1) : 0; }
     var max = Math.max.apply(null, bars.map(function (b) { return Math.abs(b.v); })) || 1, best = 0;
     bars.forEach(function (b, i) { if (b.v > bars[best].v) best = i; });
     var svg = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + title + '">';
     bars.forEach(function (b, i) {
-      var h = Math.max(b.v ? 2 : 0, Math.abs(b.v) / max * (H - top - bottom)), x = i * (bw + gap), y = H - bottom - h;
+      var h = Math.max(b.v ? 2 : 0, Math.abs(b.v) / max * (H - top - bottom)), x = n === 1 ? (W - bw) / 2 : i * (bw + gap), y = H - bottom - h;
       svg += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="3" fill="var(--accent)"' + (i === best ? '' : ' opacity=".5"') + '/>';
-      var showLabel = n <= 12 || i === 0 || (i + 1) % 5 === 0;
-      if (showLabel) svg += '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="10" fill="var(--muted2)">' + esc(b.label) + '</text>';
+      var showLabel = n <= 12 || i === 0 || (i + 1) % 5 === 0, fs = wide ? 12 : 10;
+      if (showLabel) svg += '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="' + fs + '" fill="var(--muted2)">' + esc(b.label) + '</text>';
+      if (b.v && (n <= 14 || (wide && i === best))) svg += '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (y - 5).toFixed(1) + '" text-anchor="middle" font-size="' + fs + '" fill="var(--text2)">' + esc(short(b.v)) + '</text>';
     });
     svg += '</svg>';
-    return '<section class="card"><h2>' + title + '</h2>' + svg + '</section>';
+    return '<section class="card chartc"><h2>' + title + '</h2>' + svg + '</section>';
   }
 
   /* ---------------- журнал изменений ---------------- */
@@ -628,6 +749,12 @@ details.log summary { cursor:pointer; font-size:14px; font-weight:500; }
   $('scrim').addEventListener('click', closeDay);
   $('save').addEventListener('click', saveDay);
   document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') closeDay(); });
+
+  var resizeTimer;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () { if (!state.loading && !state.error && !sheetState) render(); }, 150);
+  });
 
   render();
   load();
