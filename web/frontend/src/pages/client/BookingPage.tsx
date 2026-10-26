@@ -1085,8 +1085,8 @@ function BookingPageInner() {
             <div className="bf-stage-feature">
               <span className="bf-stage-symbol"><Sparkles /></span>
               <div className="bf-stage-main">
-                <div className="bf-stage-big">{first ? (selectedServices.length > 1 ? `${selectedServices.length} ${plural(selectedServices.length, 'услуга', 'услуги', 'услуг')}` : first.name) : 'С чего начнём?'}</div>
-                <div className="bf-stage-detail">{first ? (selectedServices.length > 1 ? serviceLabel : (first.description || 'Цена и длительность — ниже')) : 'Выберите вариант — мы покажем цену и длительность'}</div>
+                <div className="bf-stage-big">{first ? (selectedServices.length > 1 ? `${selectedServices.length} ${plural(selectedServices.length, 'услуга', 'услуги', 'услуг')}` : first.name) : 'Не уверены, что выбрать?'}</div>
+                <div className="bf-stage-detail">{first ? (selectedServices.length > 1 ? serviceLabel : (first.description || 'Цена и длительность — ниже')) : <>Нажмите на значок <Info size={14} style={{ display: 'inline', verticalAlign: '-2px' }} /> справа от услуги — там подробности: что входит и для кого</>}</div>
               </div>
             </div>
             <div className="bf-stage-metrics">
