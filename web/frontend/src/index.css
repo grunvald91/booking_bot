@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 @import "./styles/design-system.css";
 
@@ -24,7 +23,7 @@
   --color-servgo-gray-lt: #9AA3B2;
   --color-servgo-line-dk: #D7DCE6;
 
-  --font-sans: 'Montserrat', system-ui, sans-serif;
+  --font-sans: 'Montserrat Variable', 'Montserrat', system-ui, sans-serif;
 }
 
 /* ServGo brand gradient — use as `background: var(--servgo-grad)` */
