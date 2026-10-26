@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, Component, type ReactNode } from 'react'
+import { useState, useEffect, useMemo, useRef, lazy, Suspense, Component, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
 import {
@@ -232,6 +232,29 @@ function InfoSheet({ data, onClose }: { data: InfoModalData; onClose: () => void
   )
 }
 
+// Чат-помощник подгружается только когда нужен (на компьютере — окошком поверх записи).
+const ChatThread = lazy(() => import('./ChatPage').then((m) => ({ default: m.SalesThread })))
+
+// «Компьютер» = ширина от 1024px: там вместо перехода на страницу чата открывается небольшое окошко.
+function useIsDesktop() {
+  const query = '(min-width: 1024px)'
+  const [matches, setMatches] = useState(() => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia(query).matches)
+  useEffect(() => {
+    if (!window.matchMedia) return
+    const mql = window.matchMedia(query)
+    const onChange = () => setMatches(mql.matches)
+    onChange()
+    // Старый Safari (до 14) знает только addListener.
+    if (mql.addEventListener) mql.addEventListener('change', onChange)
+    else mql.addListener(onChange)
+    return () => {
+      if (mql.removeEventListener) mql.removeEventListener('change', onChange)
+      else mql.removeListener(onChange)
+    }
+  }, [])
+  return matches
+}
+
 type Screen = 'home' | 'services' | 'resource' | 'calendar' | 'extras' | 'review' | 'prepay' | 'done'
 
 // ── Main Component ──
@@ -251,6 +274,16 @@ function BookingPageInner() {
   const [additionalServices, setAdditionalServices] = useState<Service[]>([])
   const [employees, setEmployees] = useState<EmployeeWithPricing[]>([])
   const [infoModal, setInfoModal] = useState<InfoModalData | null>(null)
+  const isDesktop = useIsDesktop()
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatEverOpened, setChatEverOpened] = useState(false)
+  const openChat = () => { setChatOpen(true); setChatEverOpened(true) }
+  useEffect(() => {
+    if (!chatOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setChatOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [chatOpen])
 
   // Navigation
   const [screen, setScreen] = useState<Screen>('home')
@@ -551,13 +584,16 @@ function BookingPageInner() {
     if (target === 'calendar' && (!servicesDone || !resourceDone)) target = nextNeeded()
     if ((target === 'extras' || target === 'review') && (!servicesDone || !resourceDone || !dateDone)) target = nextNeeded()
     if (target === screen) return
-    if (record) {
-      historyRef.current.push(screen)
-      // Отдельная запись в истории на каждый шаг: системный «назад»
-      // (Android, свайп iOS, Telegram) возвращает на прошлый шаг, а не уходит со страницы.
-      window.history.pushState({ ...(window.history.state ?? {}), bfStep: historyRef.current.length }, '')
-    }
+    if (record) pushStep()
     setScreen(target)
+  }
+
+  // Каждый шаг — отдельная запись и во внутренней истории, и в истории браузера: системный «назад»
+  // (Android, свайп iOS, Telegram) и кнопка «Назад» возвращают на прошлый шаг, а не уходят со страницы.
+  // Обе истории должны совпадать по длине — иначе «Назад» в какой-то момент уводит со страницы записи.
+  function pushStep() {
+    historyRef.current.push(screen)
+    window.history.pushState({ ...(window.history.state ?? {}), bfStep: historyRef.current.length }, '')
   }
 
   function back() {
@@ -594,15 +630,15 @@ function BookingPageInner() {
       if (step === 'services' && !sDone) return go('services')
       if (step === 'resource' && !rDone) return go('resource')
       if (step === 'calendar' && !dDone) {
-        historyRef.current.push(screen)
+        pushStep()
         return setScreen('calendar')
       }
       if (step === 'extras' && !extrasSeen) {
-        historyRef.current.push(screen)
+        pushStep()
         return setScreen('extras')
       }
     }
-    historyRef.current.push(screen)
+    pushStep()
     setScreen('review')
   }
 
@@ -811,8 +847,7 @@ function BookingPageInner() {
         setBookingError('Это время уже занято. Выберите другое время.')
         setSelectedTime(null)
         setSlotsKey('')
-        historyRef.current.push(screen)
-        window.history.pushState({ ...(window.history.state ?? {}), bfStep: historyRef.current.length }, '')
+        pushStep()
         setScreen('calendar')
       } else {
         setBookingError('Не удалось создать запись. Попробуйте ещё раз.')
@@ -937,7 +972,7 @@ function BookingPageInner() {
     const ready = nextNeeded() === 'review'
     const hasAbout = !!(business?.description || business?.directions || businessPhotos.length > 1)
     return (
-      <section className="bf-screen" aria-label="Главная страница записи">
+      <section className="bf-screen bf-screen--bhome" aria-label="Главная страница записи">
         <div className="bf-hero">
           {businessCover ? <img src={photoSrc(businessCover)} alt={business?.name || ''} /> : <HeroArt />}
           <div className="bf-hero-fade" />
@@ -984,6 +1019,10 @@ function BookingPageInner() {
               </button>
             ))}
           </nav>
+          {/* На компьютере на первом экране — тот же заметный «Напишите» вместо плавающей кнопки */}
+          {isDesktop && business && (
+            <button type="button" className="bf-help bf-help--home" onClick={openChat}>{helpInner}</button>
+          )}
         </div>
         {ready ? (
           <div className="bf-bottombar">
@@ -1007,15 +1046,30 @@ function BookingPageInner() {
     return digits.replace(/\D/g, '').length >= 5 ? `tel:${digits}` : ''
   })()
 
+  // Подсказка на шаге услуг: не можете выбрать — напишите в чат.
+  const helpInner = (
+    <>
+      <span className="bf-help-icon" aria-hidden="true"><MessageCircle /></span>
+      <span className="bf-help-text">
+        <strong>Не можете выбрать? Напишите</strong>
+        <span>Подскажем в чате, какая услуга вам подходит</span>
+      </span>
+      <ArrowRight className="bf-help-arrow" aria-hidden="true" />
+    </>
+  )
+
   function renderServices() {
     const total = selectedServices.reduce((sum, s) => sum + (s.price ?? 0), 0)
     const first = selectedServices[0]
     return (
       <section className="bf-screen" aria-label="Выбор услуги">
         <div className="bf-inside-nav bf-inside-nav--call">
-          {callHref && (
+          {/* На компьютере сверху — «Напишите в чат» (телефон есть в карточке справа), на телефоне — звонок */}
+          {isDesktop && business ? (
+            <button type="button" className="bf-help" onClick={openChat}>{helpInner}</button>
+          ) : callHref && (
             <a className="bf-call" href={callHref} aria-label={`Позвонить: ${business?.phone}`}>
-              <Phone /><span>Не знаете, что выбрать? <strong>{business?.phone}</strong></span>
+              <Phone /><span>Позвонить <strong>{business?.phone}</strong></span>
             </a>
           )}
           {stepCount}
@@ -1023,6 +1077,9 @@ function BookingPageInner() {
         <div className="bf-inner">
           <h2 className="bf-h2">{choosePhrase('Выберите', labels.service)}</h2>
           <p className="bf-intro">{multiService ? 'Можно выбрать несколько — затем продолжите' : 'Нажмите на вариант — сразу перейдём дальше'}</p>
+          {business && !isDesktop && (
+            <Link to={`/chat?business_id=${business.id}`} className="bf-help">{helpInner}</Link>
+          )}
           <div className="bf-stage" aria-live="polite">
             <div className="bf-stage-kicker">{business?.name} · {labels.service}</div>
             <div className="bf-stage-feature">
@@ -1173,7 +1230,7 @@ function BookingPageInner() {
     const monthTitle = month.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })
     const todayKey = dateKey(today)
     return (
-      <section className="bf-screen" aria-label="Выбор даты и времени">
+      <section className="bf-screen bf-screen--calendar" aria-label="Выбор даты и времени">
         <div className="bf-inside-nav">{stepCount}</div>
         <div className="bf-inner">
           <h2 className="bf-h2">{labels.date} и {labels.time.toLowerCase()}</h2>
@@ -1323,7 +1380,7 @@ function BookingPageInner() {
         <div className="bf-bottombar">
           <div className="bf-summary">{selectedAddons.size > 0 ? `Добавлено: ${selectedAddons.size}` : 'Можно пропустить'}{totalPrice > 0 ? ` · итого ${formatPrice(totalPrice)}` : ''}</div>
           {backButton}
-          <button type="button" className="bf-primary" onClick={() => { setExtrasSeen(true); historyRef.current.push(screen); setScreen('review') }}>Продолжить <ArrowRight /></button>
+          <button type="button" className="bf-primary" onClick={() => { setExtrasSeen(true); pushStep(); setScreen('review') }}>Продолжить <ArrowRight /></button>
         </div>
       </section>
     )
@@ -1355,11 +1412,12 @@ function BookingPageInner() {
     if (business?.legal_documents_enabled && !personalDataConsent) missing.push('согласие на обработку данных')
     if (business?.legal_documents_enabled && !bookingTermsAccepted) missing.push('принятие условий')
     return (
-      <section className="bf-screen" aria-label="Проверка записи">
+      <section className="bf-screen bf-screen--review" aria-label="Проверка записи">
         <div className="bf-inside-nav">{stepCount}</div>
         <div className="bf-inner">
           <h2 className="bf-h2">Проверьте запись</h2>
           <p className="bf-intro">Убедитесь, что всё верно</p>
+          <div className="bf-col bf-col--main">
           <div className="bf-review">
             {rows.map((r) => (
               <div key={r.label} className="bf-review-row">
@@ -1388,6 +1446,8 @@ function BookingPageInner() {
               После оформления переведите предоплату по реквизитам бизнеса и прикрепите чек — владелец проверит поступление и подтвердит запись.
             </div>
           )}
+          </div>
+          <div className="bf-col bf-col--side">
           {(business?.cancellation_policy_text || business?.cancellation_policy_photo) && (
             <div className="bf-note is-warn">
               <strong>Условия отмены</strong>
@@ -1466,7 +1526,7 @@ function BookingPageInner() {
           </div>
 
           {business?.legal_documents_enabled && (
-            <div style={{ marginTop: 8 }}>
+            <div className="bf-legal-box" style={{ marginTop: 8 }}>
               <label className="bf-legal">
                 <input type="checkbox" checked={personalDataConsent} onChange={(e) => { setPersonalDataConsent(e.target.checked); setBookingError(null) }} />
                 <span>Даю отдельное согласие на обработку персональных данных. <Link to={`/legal/consent/${business.id}`} target="_blank">Открыть согласие</Link></span>
@@ -1477,6 +1537,7 @@ function BookingPageInner() {
               </label>
             </div>
           )}
+          </div>
         </div>
         <div className="bf-bottombar">
           {bookingError && <p className="bf-error bf-error--bar" role="alert">{bookingError}</p>}
@@ -1495,11 +1556,12 @@ function BookingPageInner() {
     const paymentDetails = cleanPaymentDetails(business?.payment_details)
     const done = paymentSent || receiptUploaded
     return (
-      <section className="bf-screen" aria-label="Предоплата записи">
+      <section className="bf-screen bf-screen--prepay" aria-label="Предоплата записи">
         <div className="bf-inside-nav">{stepCount}</div>
         <div className="bf-inner">
           <h2 className="bf-h2">Предоплата</h2>
           <p className="bf-intro">Запись создана. Чтобы закрепить время за вами, внесите предоплату.</p>
+          <div className="bf-col bf-col--main">
           <div className="bf-pay-hero">
             <span className="bf-pay-hero-icon" aria-hidden="true"><CreditCard /></span>
             <div>
@@ -1518,6 +1580,8 @@ function BookingPageInner() {
             {paymentPhone && <span className="bf-method-chip">Телефон для перевода: {paymentPhone}</span>}
             {paymentDetails && <div><span className="bf-method-chip">{paymentDetails}</span></div>}
           </div>
+          </div>
+          <div className="bf-col bf-col--side">
           {(business?.cancellation_policy_text || business?.cancellation_policy_photo) && (
             <div className="bf-note is-warn">
               <strong>Условия отмены</strong>
@@ -1563,6 +1627,7 @@ function BookingPageInner() {
             {paymentError && <p className="bf-error" role="alert">{paymentError}</p>}
             <p className="bf-policy">Оплата поступает напрямую бизнесу, ServGo её не принимает. После отправки подтверждения владелец проверит поступление — статус записи обновится после проверки.</p>
           </div>
+          </div>
         </div>
         <div className="bf-bottombar">
           {done ? (
@@ -1587,7 +1652,7 @@ function BookingPageInner() {
   function renderDone() {
     const publicUrl = createdNotifyToken ? `${window.location.origin}/b/${createdNotifyToken}` : null
     return (
-      <section className="bf-screen" aria-label="Запись создана">
+      <section className="bf-screen bf-screen--done" aria-label="Запись создана">
         <SuccessErrorBoundary bookingId={createdBookingId} notifyToken={createdNotifyToken}>
           <div className="bf-inner bf-result">
             <div className="bf-orb"><Check /></div>
@@ -1676,20 +1741,86 @@ function BookingPageInner() {
     } as Record<Screen, () => ReactNode>)[screen]()
   }
 
+  // Карточка «Ваша запись» справа — только на компьютере (на телефоне скрыта стилями).
+  const asideScreens: Screen[] = ['services', 'resource', 'calendar', 'extras']
+  const showAside = !!business && !loadError && asideScreens.includes(screen)
+  function renderAside() {
+    const when = dateDone ? `${ruDate(selectedDate!)} · ${selectedTime}` : selectedDate ? ruDate(selectedDate) : ''
+    const rowsAside: Array<{ label: string; value: string; target: Screen; empty: string }> = []
+    const serviceRow = { label: labels.service, value: serviceLabel, target: 'services' as Screen, empty: 'Не выбрано' }
+    const resourceRow = { label: labels.resource, value: resourceLabel, target: 'resource' as Screen, empty: 'Не выбрано' }
+    if (flowOrder === 'resource_first') {
+      if (hasResources) rowsAside.push(resourceRow)
+      rowsAside.push(serviceRow)
+    } else {
+      rowsAside.push(serviceRow)
+      if (hasResources) rowsAside.push(resourceRow)
+    }
+    rowsAside.push({ label: `${labels.date} и ${labels.time.toLowerCase()}`, value: when, target: 'calendar', empty: 'Не выбрано' })
+    return (
+      <aside className="bf-aside" aria-label="Ваша запись">
+        <div className="bf-aside-kicker">Ваша запись</div>
+        <div className="bf-aside-biz">{business?.name}</div>
+        {business?.address && <div className="bf-aside-addr">{business.address}</div>}
+        <div className="bf-aside-rows">
+          {rowsAside.map((r) => (
+            <div key={r.label} className={`bf-aside-row${r.value ? ' is-set' : ''}`}>
+              <div className="bf-aside-text">
+                <div className="bf-aside-label">{r.label}</div>
+                <div className="bf-aside-value">{r.value || r.empty}</div>
+              </div>
+              {r.value && r.target !== screen && (
+                <button type="button" className="bf-review-edit" onClick={() => go(r.target)}>Изменить</button>
+              )}
+            </div>
+          ))}
+        </div>
+        {(totalDuration > 0 || totalPrice > 0 || priceLoading) && (
+          <div className="bf-aside-total">
+            {totalDuration > 0 && <div className="bf-aside-line"><span>Длительность</span><strong>{formatDuration(totalDuration)}</strong></div>}
+            {(totalPrice > 0 || priceLoading) && <div className="bf-aside-line is-big"><span>Стоимость</span><strong>{priceLoading ? '…' : formatPrice(totalPrice)}</strong></div>}
+            {prepaymentNeeded && <div className="bf-aside-line"><span>Предоплата{prepaymentPercent < 100 ? ` ${prepaymentPercent}%` : ''}</span><strong>{formatPrice(estimatedPrepayment)}</strong></div>}
+          </div>
+        )}
+        {callHref && (
+          <a className="bf-aside-call" href={callHref}><Phone /><span>{business?.phone}</span></a>
+        )}
+      </aside>
+    )
+  }
+
+  const chatReady = !!business && !loadError
+
   return createPortal(
     <div className="bf-root">
-      <main className={`bf-device${business && !loadError ? ' bf-has-fab' : ''}`} aria-label="Онлайн-запись ServGo">
+      <main className={`bf-device bf-on-${screen}${chatReady && !isDesktop ? ' bf-has-fab' : ''}${showAside ? ' bf-aside-on' : ''}`} aria-label="Онлайн-запись ServGo">
         <header className="bf-topbar">
           <Link to="/" className="bf-brand" aria-label="ServGo"><Logo size={28} /></Link>
           <div className="bf-spacer" />
           <Link to={profileHref} className="bf-user" title="Личный кабинет" aria-label="Личный кабинет"><User /></Link>
         </header>
-        <div key={screen} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{content}</div>
+        <div className={`bf-body${showAside ? ' has-aside' : ''}`}>
+          <div key={screen} className="bf-body-main" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{content}</div>
+          {showAside && renderAside()}
+        </div>
+        {/* Плавающая кнопка «Чат»: на телефоне — полноэкранный чат, на компьютере — небольшое окошко. */}
+        {chatReady && !isDesktop && (
+          <Link to={`/chat?business_id=${business!.id}`} className="bf-chat-fab" aria-label="Открыть чат с помощником">
+            <MessageCircle /><span>Чат</span>
+          </Link>
+        )}
+        {chatReady && isDesktop && !chatOpen && (
+          <button type="button" className="bf-chat-fab" onClick={openChat} aria-label="Открыть чат с помощником">
+            <MessageCircle /><span>Чат</span>
+          </button>
+        )}
       </main>
-      {business && !loadError && (
-        <Link to={`/chat?business_id=${business.id}`} className="bf-chat-fab" aria-label="Открыть чат с помощником">
-          <MessageCircle /><span>Чат</span>
-        </Link>
+      {chatReady && isDesktop && chatEverOpened && (
+        <div className="bf-chat-widget" role="dialog" aria-label="Чат с помощником" hidden={!chatOpen}>
+          <Suspense fallback={<div className="bf-loading"><span className="bf-spinner" style={{ borderColor: '#d7e3f2', borderTopColor: '#346fda' }} /></div>}>
+            <ChatThread business={business!} embedded onClose={() => setChatOpen(false)} />
+          </Suspense>
+        </div>
       )}
       {toast && <div className="bf-toast" role="status">{toast}</div>}
       {infoModal && <InfoSheet data={infoModal} onClose={() => setInfoModal(null)} />}
