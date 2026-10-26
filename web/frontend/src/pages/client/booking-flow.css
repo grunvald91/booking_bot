@@ -532,13 +532,15 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
 
 /* ═════ Обёртка экрана записи: колонка контента (+ карточка «Ваша запись» на компьютере) ═════ */
 .bf-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Колонки проверки/предоплаты: на телефоне «прозрачные», раскладка как раньше */
+.bf-col { display: contents; }
 .bf-aside { display: none; }
 .bf-chat-close { margin-left: auto; width: 34px; height: 34px; flex-shrink: 0; border: 0; border-radius: 50%; background: #f5f8fc; display: grid; place-items: center; color: #5b6f86; cursor: pointer; }
 .bf-chat-close svg { width: 17px; height: 17px; }
 
 /* ═════ Окошко чата на компьютере: небольшое, поверх страницы записи ═════ */
 .bf-chat-widget {
-  position: fixed; z-index: 90; right: 28px; bottom: 28px; width: 392px; height: min(640px, calc(100vh - 56px)); height: min(640px, calc(100dvh - 56px));
+  position: fixed; z-index: 90; top: 72px; right: max(24px, calc((100vw - 1180px) / 2)); width: 400px; height: min(640px, calc(100vh - 96px)); height: min(640px, calc(100dvh - 96px));
   display: flex; flex-direction: column; background: #fff; border-radius: 22px; overflow: hidden;
   box-shadow: 0 24px 80px #0b203a40, 0 0 0 1px var(--bf-line);
   animation: bfAppear 0.2s ease-out;
@@ -547,20 +549,37 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
 .bf-chat-widget .bf-screen { animation: none; }
 .bf-chat-widget .bf-chat-head { padding: 14px 16px; }
 .bf-chat-widget .bf-inner, .bf-chat-widget .bf-chat-bar { padding-left: 16px; padding-right: 16px; }
-.bf-chat-widget .bf-primary { min-height: 42px; font-size: 13px; }
-.bf-chat-widget .bf-option-title { font-size: 14px; }
-.bf-chat-widget .bf-msg-bubble { font-size: 14px; }
+.bf-chat-widget .bf-primary { min-height: 44px; font-size: 15px; }
+.bf-chat-widget .bf-option-title { font-size: 16px; }
+.bf-chat-widget .bf-biz-line { font-size: 14px; }
+.bf-chat-widget .bf-msg-bubble { font-size: 15px; }
+.bf-chat-widget .bf-msg-state, .bf-chat-widget .bf-chat-note, .bf-chat-widget .bf-chat-card-head span, .bf-chat-widget .bf-field-label,
+.bf-chat-widget .bf-legal, .bf-chat-widget .bf-receipt > div, .bf-chat-widget .bf-chat-text, .bf-chat-widget .bf-about { font-size: 14px; }
+.bf-chat-widget .bf-chat-links { font-size: 14px; }
+.bf-chat-widget .bf-chip, .bf-chat-widget button.bf-chip { font-size: 14px; min-height: 36px; }
+.bf-chat-widget .bf-chat-card-head strong, .bf-chat-widget .bf-receipt strong { font-size: 15px; }
+.bf-chat-widget .bf-chat-card .bf-time { font-size: 15px; min-height: 42px; }
+.bf-chat-widget .bf-chat-input input { font-size: 15px; }
+.bf-chat-widget .bf-input { font-size: 15px; height: 42px; }
+/* Кнопка чата в шапке (компьютер) */
+.bf-chat-top { display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 18px 0 15px; border: 0; border-radius: 21px; background: #20354e; color: #fff; font: inherit; font-size: 15px; font-weight: 550; cursor: pointer; }
+.bf-chat-top svg { width: 18px; height: 18px; }
+.bf-chat-top:hover { background: #2a4565; }
+.bf-chat-top.is-open { background: var(--bf-tint); color: var(--bf-blue-deep); }
 
 @media (min-width: 1024px) {
-  .bf-chat-fab { right: 28px; bottom: 104px; }
-  .bf-chat-fab:hover { background: #2a4565; }
-  .bf-has-fab .bf-inner { padding-bottom: 24px; }
+  .bf-body .bf-inner { padding-bottom: 16px; }
 
   /* Заголовки шагов крупнее */
-  .bf-body .bf-h2 { font-size: 34px; letter-spacing: -0.05em; margin-top: 12px; }
-  .bf-body .bf-intro { margin: 8px 0 24px; }
-  .bf-body .bf-stepcount { font-size: 13px; }
-  .bf-body .bf-inside-nav { min-height: 44px; padding-top: 14px; }
+  .bf-topbar { height: 64px; flex-basis: 64px; }
+  .bf-body .bf-h2 { font-size: 34px; letter-spacing: -0.05em; margin-top: 6px; }
+  .bf-body .bf-intro { margin: 6px 0 20px; font-size: 16px; }
+  .bf-body .bf-stepcount { font-size: 14px; }
+  .bf-body .bf-inside-nav { min-height: 42px; padding-top: 10px; }
+  .bf-body .bf-back { font-size: 15px; min-height: 48px; }
+  .bf-body .bf-back svg { width: 18px; height: 18px; }
+  .bf-body .bf-review-edit { font-size: 14px; }
+  .bf-body .bf-error { font-size: 14px; }
 
   /* ── Шаги выбора: колонка контента + липкая карточка справа ── */
   .bf-body.has-aside { flex-direction: row; gap: 56px; padding: 0 max(32px, calc((100% - 1180px) / 2)); }
@@ -568,20 +587,26 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
   .bf-body.has-aside .bf-inner, .bf-body.has-aside .bf-inside-nav, .bf-body.has-aside .bf-bottombar { padding-left: 0; padding-right: 0; }
   .bf-body.has-aside .bf-inner { padding-bottom: 24px; }
   .bf-body.has-aside .bf-stage { display: none; }
-  .bf-body.has-aside .bf-bottombar { gap: 12px; padding-top: 16px; padding-bottom: 22px; border-top: 1px solid var(--bf-line); }
+  .bf-body.has-aside .bf-bottombar { gap: 12px; padding-top: 14px; padding-bottom: 18px; border-top: 1px solid var(--bf-line); }
   .bf-body.has-aside .bf-bottombar .bf-summary { display: none; }
   .bf-body.has-aside .bf-bottombar .bf-primary { flex: 0 0 auto; min-width: 240px; margin-left: auto; }
 
   /* Варианты — карточки в сетке */
-  .bf-body.has-aside .bf-list { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; padding-bottom: 8px; }
-  .bf-body.has-aside .bf-option { min-height: 88px; padding: 14px 16px; border: 1px solid var(--bf-line); border-radius: 16px; background: #fff; transition: background 0.15s, border-color 0.15s, box-shadow 0.15s; }
+  .bf-body.has-aside .bf-list { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; padding-bottom: 8px; }
+  .bf-body.has-aside .bf-option { min-height: 80px; padding: 12px 16px; border: 1px solid var(--bf-line); border-radius: 16px; background: #fff; transition: background 0.15s, border-color 0.15s, box-shadow 0.15s; }
   .bf-body.has-aside .bf-option.has-info { padding-right: 52px; }
+  .bf-body.has-aside .bf-option-row > .bf-option { height: 100%; }
   .bf-body.has-aside .bf-option:hover { background: #f8fbff; border-color: #d3e2f4; }
   .bf-body.has-aside .bf-option.selected { background: var(--bf-tint); border-color: #3c7fdf; box-shadow: 0 0 0 3px #3c7fdf1c; }
   .bf-body.has-aside .bf-option.selected::after { display: none; }
+  /* Выбор виден по рамке карточки — кружок-радио не нужен и только отнимает ширину */
+  .bf-body.has-aside .bf-option .bf-radio { display: none; }
   .bf-body.has-aside .bf-info-btn { right: 12px; }
   .bf-body.has-aside .bf-info-btn:hover { background: #e6effa; }
-  .bf-body.has-aside .bf-option-price { font-size: 14px; margin-top: 4px; }
+  .bf-body.has-aside .bf-option-title { font-size: 16px; }
+  .bf-body.has-aside .bf-option-meta { font-size: 14px; margin-top: 3px; }
+  .bf-body.has-aside .bf-option-price { font-size: 15px; margin-top: 3px; }
+  .bf-body.has-aside .bf-repeat, .bf-body.has-aside .bf-stepper span { font-size: 15px; }
   .bf-body.has-aside .bf-mini-icon, .bf-body.has-aside .bf-portrait { width: 46px; height: 46px; font-size: 14px; }
   .bf-body.has-aside .bf-portrait.is-venue { width: 58px; height: 46px; }
   .bf-body.has-aside .bf-empty { grid-column: 1 / -1; font-size: 15px; }
@@ -594,67 +619,80 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
   .bf-body.has-aside .bf-monthtitle { font-size: 18px; }
   .bf-body.has-aside .bf-monthnav button { width: 36px; height: 36px; }
   .bf-body.has-aside .bf-monthnav button:not(:disabled):hover { background: #f1f6fc; }
-  .bf-body.has-aside .bf-dayname { font-size: 12px; line-height: 24px; }
+  .bf-body.has-aside .bf-dayname { font-size: 14px; line-height: 24px; }
   .bf-body.has-aside .bf-day { width: 46px; height: 46px; font-size: 15px; }
   .bf-body.has-aside .bf-day:not(:disabled):not(.selected):hover { background: radial-gradient(circle, #e4f0ff, #f7fbff 70%, transparent); }
   .bf-body.has-aside .bf-times-heading { font-size: 18px; font-weight: 550; letter-spacing: -0.03em; }
-  .bf-body.has-aside .bf-times-sub { font-size: 14px; margin: 3px 0 14px; }
+  .bf-body.has-aside .bf-times-sub { font-size: 15px; margin: 3px 0 14px; }
   .bf-body.has-aside .bf-time-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 10px; }
-  .bf-body.has-aside .bf-time { min-height: 46px; font-size: 15px; border: 1px solid var(--bf-line); border-radius: 12px; background: #fff; transition: background 0.15s, border-color 0.15s; }
+  .bf-body.has-aside .bf-time { min-height: 46px; font-size: 16px; border: 1px solid var(--bf-line); border-radius: 12px; background: #fff; transition: background 0.15s, border-color 0.15s; }
   .bf-body.has-aside .bf-time::before, .bf-body.has-aside .bf-time.selected::after { display: none; }
   .bf-body.has-aside .bf-time:hover { background: #f8fbff; border-color: #d3e2f4; }
   .bf-body.has-aside .bf-time.selected { background: var(--bf-tint); border-color: #3c7fdf; color: #1f56b3; box-shadow: 0 0 0 3px #3c7fdf1c; }
   .bf-body.has-aside .bf-time-skel { height: 46px; border-radius: 12px; }
-  .bf-body.has-aside .bf-placeholder { font-size: 14px; padding: 18px 0; text-align: left; }
-  .bf-body.has-aside .bf-call { font-size: 14px; min-height: 40px; }
+  .bf-body.has-aside .bf-placeholder { font-size: 15px; padding: 18px 0; text-align: left; }
+  .bf-body.has-aside .bf-call { font-size: 15px; min-height: 40px; }
 
   /* Карточка «Ваша запись» */
   .bf-aside { display: block; flex: 0 0 360px; align-self: flex-start; margin: 28px 0; padding: 26px 26px 22px; border-radius: 24px; background: #fff; border: 1px solid var(--bf-line); box-shadow: 0 14px 44px #18385814; max-height: calc(100% - 56px); overflow-y: auto; scrollbar-width: none; }
   .bf-aside::-webkit-scrollbar { display: none; }
-  .bf-aside-kicker { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--bf-muted); }
+  .bf-aside-kicker { font-size: 14px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--bf-muted); }
   .bf-aside-biz { margin-top: 8px; font-size: 22px; font-weight: 520; letter-spacing: -0.04em; line-height: 1.15; overflow-wrap: anywhere; }
-  .bf-aside-addr { margin-top: 4px; font-size: 13px; color: #92a0af; }
+  .bf-aside-addr { margin-top: 4px; font-size: 14px; color: #7f8fa0; }
   .bf-aside-rows { margin-top: 18px; border-top: 1px solid var(--bf-line); }
-  .bf-aside-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--bf-line); }
+  .bf-aside-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--bf-line); }
   .bf-aside-text { min-width: 0; }
-  .bf-aside-label { font-size: 12px; color: #8999a9; }
-  .bf-aside-value { margin-top: 3px; font-size: 15px; line-height: 1.35; color: #a9b5c2; overflow-wrap: anywhere; }
+  .bf-aside-label { font-size: 14px; color: #7f8fa0; }
+  .bf-aside-value { margin-top: 3px; font-size: 16px; line-height: 1.35; color: #a9b5c2; overflow-wrap: anywhere; }
   .bf-aside-row.is-set .bf-aside-value { color: var(--bf-ink); font-weight: 480; }
   .bf-aside-total { padding-top: 14px; display: grid; gap: 8px; }
-  .bf-aside-line { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13.5px; color: #7e8d9e; }
+  .bf-aside-line { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 15px; color: #6f8195; }
   .bf-aside-line strong { font-weight: 520; color: #27425f; }
-  .bf-aside-line.is-big { font-size: 15px; color: var(--bf-ink); margin-top: 2px; }
+  .bf-aside-line.is-big { font-size: 16px; color: var(--bf-ink); margin-top: 2px; }
   .bf-aside-line.is-big strong { font-size: 26px; font-weight: 550; letter-spacing: -0.04em; color: var(--bf-ink); }
-  .bf-aside-call { display: flex; align-items: center; gap: 8px; margin-top: 18px; padding: 11px 14px; border-radius: 14px; background: #eef5fd; color: #1e4f94; font-size: 14px; font-weight: 520; text-decoration: none; }
+  .bf-aside-call { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding: 11px 14px; border-radius: 14px; background: #eef5fd; color: #1e4f94; font-size: 15px; font-weight: 520; text-decoration: none; }
   .bf-aside-call svg { width: 16px; height: 16px; color: #2f6fd1; }
   .bf-aside-call:hover { background: #e3effc; }
 
   /* ── Проверка записи: слева итог, справа контакты ── */
-  .bf-screen--review { --bf-w: 1040px; }
-  .bf-screen--review .bf-inner { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 56px; align-content: start; grid-auto-flow: row dense; }
-  .bf-screen--review .bf-h2, .bf-screen--review .bf-intro { grid-column: 1 / -1; }
-  .bf-screen--review .bf-review, .bf-screen--review .bf-note { grid-column: 1; margin-top: 0; }
-  .bf-screen--review .bf-note + .bf-note { margin-top: 12px; }
-  .bf-screen--review .bf-fields, .bf-screen--review .bf-legal-box { grid-column: 2; margin-top: 0; padding-top: 0; }
-  .bf-screen--review .bf-review-row { padding: 14px 0; border-bottom: 1px solid var(--bf-line); }
-  .bf-screen--review .bf-review-label { font-size: 12px; }
-  .bf-screen--review .bf-review-value { font-size: 16px; }
-  .bf-screen--review .bf-review-edit { font-size: 13px; }
-  .bf-screen--review .bf-total { font-size: 14px; margin-top: 14px; }
+  .bf-screen--review, .bf-screen--prepay { --bf-w: 1040px; }
+  .bf-screen--review .bf-inner, .bf-screen--prepay .bf-inner { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 56px; align-content: start; align-items: start; }
+  .bf-screen--review .bf-h2, .bf-screen--prepay .bf-h2, .bf-screen--prepay .bf-intro { grid-column: 1 / -1; }
+  .bf-screen--review .bf-col, .bf-screen--prepay .bf-col { display: flex; flex-direction: column; min-width: 0; }
+  /* Справа: сначала контакты, потом согласия, условия отмены — в конце */
+  .bf-screen--review .bf-col--side .bf-fields { order: 1; }
+  .bf-screen--review .bf-col--side .bf-legal-box { order: 2; }
+  .bf-screen--review .bf-col--side .bf-note.is-warn { order: 3; margin-top: 12px; }
+  /* «Убедитесь, что всё верно» на большом экране лишнее — экономим высоту */
+  .bf-screen--review .bf-intro { display: none; }
+  .bf-screen--review .bf-h2 { margin-bottom: 18px; }
+  .bf-screen--review .bf-review { margin-top: 0; }
+  .bf-screen--review .bf-fields { margin-top: 0; padding-top: 0; }
+  .bf-screen--review .bf-review-row { padding: 11px 0; border-bottom: 1px solid var(--bf-line); }
+  .bf-screen--review .bf-review-label { font-size: 14px; }
+  .bf-screen--review .bf-review-value { font-size: 17px; }
+  .bf-screen--review .bf-total { font-size: 16px; margin-top: 10px; }
   .bf-screen--review .bf-total strong { font-size: 28px; }
-  .bf-screen--review .bf-note { font-size: 13px; padding: 12px 14px; border-radius: 14px; background: #f3f8ff; margin-top: 18px; }
-  .bf-screen--review .bf-note strong { font-size: 14px; }
-  .bf-screen--review .bf-fields h3 { font-size: 16px; margin-bottom: 10px; }
-  .bf-screen--review .bf-input { height: 46px; font-size: 16px; }
-  .bf-screen--review .bf-field-label { font-size: 12.5px; margin-top: 10px; }
-  .bf-screen--review .bf-legal { font-size: 13px; }
-  .bf-screen--review .bf-bottombar { border-top: 1px solid var(--bf-line); gap: 12px; padding-top: 16px; padding-bottom: 22px; }
+  .bf-screen--review .bf-breakdown { font-size: 14px; }
+  .bf-screen--review .bf-note { font-size: 15px; line-height: 1.45; padding: 12px 14px; border-radius: 14px; background: #f3f8ff; margin-top: 14px; }
+  .bf-screen--review .bf-note.is-warn { background: #fdf6ea; }
+  .bf-screen--review .bf-note strong { font-size: 16px; }
+  .bf-screen--review .bf-fields h3 { font-size: 17px; margin-bottom: 4px; }
+  .bf-screen--review .bf-input { height: 44px; font-size: 17px; }
+  .bf-screen--review .bf-field-label { font-size: 14px; margin-top: 8px; }
+  .bf-screen--review .bf-field-error, .bf-screen--review .bf-policy { font-size: 14px; }
+  .bf-screen--review .bf-more { font-size: 15px; padding-top: 10px; }
+  .bf-screen--review .bf-repeat { font-size: 15px; }
+  .bf-screen--review .bf-stepper span { font-size: 15px; }
+  .bf-screen--review .bf-legal { font-size: 14px; padding: 5px 0; }
+  .bf-screen--review .bf-legal input { width: 19px; height: 19px; }
+  .bf-screen--review .bf-bottombar { border-top: 1px solid var(--bf-line); gap: 12px; padding-top: 14px; padding-bottom: 18px; }
   .bf-screen--review .bf-bottombar .bf-summary { display: none; }
   .bf-screen--review .bf-bottombar .bf-primary { flex: 0 0 auto; min-width: 260px; margin-left: auto; }
 
   /* ── Главная страницы записи: обложка слева, выбор справа ── */
   .bf-body .bf-screen--bhome { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); column-gap: 56px; align-content: center; align-items: center; padding: 24px max(32px, calc((100% - 1180px) / 2)); overflow-y: auto; }
-  .bf-body .bf-screen--bhome > .bf-hero { grid-column: 1; grid-row: 1; flex: none; width: auto; margin: 0; height: min(560px, calc(100vh - 190px)); height: min(560px, calc(100dvh - 190px)); border-radius: 28px; }
+  .bf-body .bf-screen--bhome > .bf-hero { grid-column: 1; grid-row: 1; flex: none; width: auto; margin: 0; height: min(560px, calc(100vh - 150px)); height: min(560px, calc(100dvh - 150px)); border-radius: 28px; }
   .bf-body .bf-screen--bhome > .bf-panel { grid-column: 2; grid-row: 1; margin: 0; padding: 0; border-radius: 0; }
   .bf-body .bf-screen--bhome .bf-logo { position: static; width: 76px; height: 76px; margin: 0 0 16px; }
   .bf-body .bf-screen--bhome .bf-h1 { font-size: 36px; margin-top: 0; letter-spacing: -0.05em; }
@@ -667,8 +705,113 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
   .bf-body .bf-screen--bhome .bf-choice.is-complete::after { display: none; }
   .bf-body .bf-screen--bhome .bf-choice-icon { width: 46px; height: 46px; }
   .bf-body .bf-screen--bhome .bf-choice-name { font-size: 17px; }
-  .bf-body .bf-screen--bhome .bf-choice-details { font-size: 13.5px; margin-top: 2px; }
+  .bf-body .bf-screen--bhome .bf-choice-details { font-size: 15px; margin-top: 2px; }
+  .bf-body .bf-screen--bhome .bf-powered { font-size: 14px; }
   .bf-body .bf-screen--bhome > .bf-bottombar { grid-column: 2; grid-row: 2; padding: 18px 0 0; }
   .bf-body .bf-screen--bhome > .bf-bottombar .bf-primary { flex: 1 1 auto; }
   .bf-body .bf-screen--bhome > .bf-home-footer { grid-column: 1 / -1; grid-row: 2; padding-top: 22px; }
+
+  /* ── Предоплата: слева сумма и реквизиты, справа чек ── */
+  .bf-screen--prepay .bf-intro { margin-bottom: 16px; }
+  .bf-screen--prepay .bf-pay-hero { margin-top: 0; }
+  .bf-screen--prepay .bf-pay-big { font-size: 38px; }
+  .bf-screen--prepay .bf-method { margin: 8px 0 0; padding: 14px 16px; }
+  .bf-screen--prepay .bf-col--side .bf-note.is-warn { margin-top: 0; border-radius: 14px; background: #fdf6ea; padding: 12px 14px; }
+  .bf-screen--prepay .bf-upload { margin-top: 12px; padding-top: 0; }
+  .bf-screen--prepay .bf-bottombar { border-top: 1px solid var(--bf-line); gap: 16px; padding-top: 14px; padding-bottom: 18px; justify-content: flex-end; }
+  .bf-screen--prepay .bf-bottombar .bf-primary { flex: 0 0 auto; min-width: 260px; }
+  .bf-screen--prepay .bf-bottombar .bf-text-alt { width: auto; order: -1; margin-right: auto; padding: 8px 0; }
+
+  /* ── Запись создана: слева итог, справа действия ── */
+  .bf-body .bf-screen--done .bf-inner.bf-result { --bf-w: 1040px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 56px; align-content: center; align-items: start; grid-template-rows: auto auto auto 1fr; }
+  .bf-body .bf-screen--done .bf-result > :not(.bf-result-actions) { grid-column: 1; }
+  .bf-body .bf-screen--done .bf-result .bf-orb { margin: 0 0 10px; }
+  .bf-body .bf-screen--done .bf-result .bf-h2, .bf-body .bf-screen--done .bf-result .bf-intro { text-align: left; }
+  .bf-body .bf-screen--done .bf-result-actions { grid-column: 2; grid-row: 1 / span 4; align-self: center; margin-top: 0; padding-top: 0; gap: 10px; }
+  .bf-body .bf-screen--done .bf-result-actions .ds-card { margin-top: 0 !important; }
+  .bf-body .bf-screen--done .ds-text { font-size: 16px; }
+  .bf-body .bf-screen--done .ds-sub { font-size: 14px; }
+  .bf-body .bf-screen--done .bf-note { margin-top: 0; border-radius: 14px; }
+  .bf-body .bf-screen--done .bf-total { font-size: 16px; }
+  .bf-body .bf-screen--done .bf-total strong { font-size: 26px; }
+  .bf-screen--done { --bf-w: 1040px; }
+  .bf-screen--done .bf-bottombar { justify-content: flex-end; border-top: 1px solid var(--bf-line); padding-top: 14px; padding-bottom: 18px; }
+  .bf-screen--done .bf-bottombar .bf-primary { flex: 0 0 auto; min-width: 260px; }
+
+  /* ── Предоплата и итог: крупнее текст ── */
+  .bf-body .bf-pay-caption, .bf-body .bf-receipt > div, .bf-body .bf-method p, .bf-body .bf-method-chip, .bf-body .bf-upload-hint,
+  .bf-body .bf-policy, .bf-body .bf-chosen, .bf-body .bf-text-alt, .bf-body .bf-flow-status, .bf-body .bf-save-url, .bf-body .bf-note { font-size: 15px; }
+  .bf-body .bf-receipt strong, .bf-body .bf-method-title, .bf-body .bf-upload-btn, .bf-body .bf-link-btn { font-size: 16px; }
+  .bf-body .bf-note strong { font-size: 16px; }
+  .bf-body .bf-result .bf-intro { font-size: 16px; }
+  .bf-body .bf-result .bf-review-label { font-size: 14px; }
+  .bf-body .bf-result .bf-review-value { font-size: 16px; }
+  .bf-body .bf-link-btn { min-height: 48px; }
+}
+
+/* Невысокий экран ноутбука (браузер съедает часть высоты): компактнее по вертикали,
+   но шрифты остаются крупными — чтобы всё помещалось без прокрутки. */
+@media (min-width: 1024px) and (max-height: 760px) {
+  .bf-topbar { height: 56px; flex-basis: 56px; }
+  .bf-chat-widget { top: 64px; height: min(620px, calc(100vh - 80px)); height: min(620px, calc(100dvh - 80px)); }
+  .bf-body .bf-inside-nav { min-height: 34px; padding-top: 6px; }
+  .bf-body .bf-h2 { font-size: 30px; margin-top: 0; }
+  .bf-body .bf-intro { margin: 4px 0 14px; }
+  /* На невысоком экране — три колонки карточек, чтобы длинный список влез без прокрутки */
+  .bf-body.has-aside { gap: 36px; }
+  .bf-aside { flex-basis: 300px; }
+  .bf-body.has-aside .bf-list { gap: 10px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .bf-body.has-aside .bf-option.has-info { padding-right: 46px; }
+  .bf-body.has-aside .bf-info-btn { right: 8px; }
+  /* Описание — одной строкой; полностью — по кнопке ⓘ */
+  .bf-body.has-aside .bf-option-meta { -webkit-line-clamp: 1; }
+  .bf-body.has-aside .bf-option { min-height: 70px; padding: 9px 14px; }
+  .bf-body.has-aside .bf-mini-icon, .bf-body.has-aside .bf-portrait { width: 40px; height: 40px; }
+  .bf-body.has-aside .bf-day { width: 40px; height: 40px; }
+  .bf-body.has-aside .bf-dayname { line-height: 20px; }
+  .bf-body.has-aside .bf-time, .bf-body.has-aside .bf-time-skel { min-height: 42px; height: auto; }
+  .bf-body.has-aside .bf-time-grid { gap: 8px; }
+  .bf-body.has-aside .bf-times-sub { margin-bottom: 10px; }
+  .bf-body .bf-bottombar, .bf-body.has-aside .bf-bottombar, .bf-screen--review .bf-bottombar { padding-top: 10px; padding-bottom: 12px; }
+  .bf-body .bf-primary { min-height: 46px; }
+  .bf-aside { margin: 14px 0; padding: 18px 22px 16px; max-height: calc(100% - 28px); }
+  .bf-aside-biz { font-size: 20px; margin-top: 4px; }
+  .bf-aside-rows { margin-top: 12px; }
+  .bf-aside-row { padding: 9px 0; }
+  .bf-aside-total { padding-top: 10px; gap: 6px; }
+  .bf-aside-line.is-big strong { font-size: 24px; }
+  .bf-aside-call { margin-top: 12px; padding: 9px 14px; }
+  .bf-screen--review .bf-h2 { margin-bottom: 10px; }
+  .bf-screen--prepay .bf-pay-hero { min-height: 60px; }
+  .bf-screen--prepay .bf-pay-hero-icon { width: 46px; height: 46px; }
+  .bf-screen--prepay .bf-pay-big { font-size: 32px; }
+  .bf-screen--prepay .bf-bottombar { padding-top: 10px; padding-bottom: 12px; }
+  .bf-screen--review .bf-review-row { padding: 8px 0; }
+  .bf-screen--review .bf-note { padding: 10px 12px; margin-top: 10px; }
+  .bf-screen--review .bf-input { height: 40px; }
+  .bf-screen--review .bf-field-label { margin-top: 4px; }
+  .bf-body .bf-screen--bhome { padding-top: 14px; padding-bottom: 14px; }
+  .bf-body .bf-screen--bhome > .bf-hero { height: calc(100vh - 130px); height: calc(100dvh - 130px); }
+  .bf-body .bf-screen--bhome .bf-logo { width: 60px; height: 60px; margin-bottom: 10px; }
+  .bf-body .bf-screen--bhome .bf-h1 { font-size: 32px; }
+  .bf-body .bf-screen--bhome .bf-choices { margin-top: 14px; gap: 8px; }
+  .bf-body .bf-screen--bhome .bf-choice { min-height: 68px; }
+  .bf-body .bf-orb { width: 60px; height: 60px; margin: 4px auto 6px; }
+}
+
+/* Узкий компьютер (1024–1199px): карточка справа поуже, чтобы карточкам вариантов хватало места */
+@media (min-width: 1024px) and (max-width: 1199px) {
+  .bf-aside { flex-basis: 300px; padding-left: 20px; padding-right: 20px; }
+  .bf-body.has-aside { gap: 32px; }
+  .bf-body.has-aside .bf-screen--calendar .bf-inner { grid-template-columns: minmax(0, 310px) minmax(0, 1fr); column-gap: 28px; }
+  .bf-body.has-aside .bf-day { width: 40px; height: 40px; }
+  .bf-body.has-aside .bf-time-grid { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; }
+}
+@media (min-width: 1024px) and (max-width: 1199px) and (max-height: 760px) {
+  .bf-body.has-aside .bf-option { min-height: 62px; }
+  /* Совсем маленький экран компьютера: подсказку под заголовком убираем ради места */
+  .bf-body.has-aside .bf-intro { display: none; }
+  .bf-body.has-aside .bf-h2 { margin-bottom: 12px; }
+  .bf-body.has-aside .bf-list { gap: 8px; }
+  .bf-body.has-aside .bf-time, .bf-body.has-aside .bf-time-skel { min-height: 40px; }
 }

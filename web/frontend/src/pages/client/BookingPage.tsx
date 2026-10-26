@@ -244,8 +244,13 @@ function useIsDesktop() {
     const mql = window.matchMedia(query)
     const onChange = () => setMatches(mql.matches)
     onChange()
-    mql.addEventListener('change', onChange)
-    return () => mql.removeEventListener('change', onChange)
+    // Старый Safari (до 14) знает только addListener.
+    if (mql.addEventListener) mql.addEventListener('change', onChange)
+    else mql.addListener(onChange)
+    return () => {
+      if (mql.removeEventListener) mql.removeEventListener('change', onChange)
+      else mql.removeListener(onChange)
+    }
   }, [])
   return matches
 }
@@ -1388,6 +1393,7 @@ function BookingPageInner() {
         <div className="bf-inner">
           <h2 className="bf-h2">Проверьте запись</h2>
           <p className="bf-intro">Убедитесь, что всё верно</p>
+          <div className="bf-col bf-col--main">
           <div className="bf-review">
             {rows.map((r) => (
               <div key={r.label} className="bf-review-row">
@@ -1416,6 +1422,8 @@ function BookingPageInner() {
               После оформления переведите предоплату по реквизитам бизнеса и прикрепите чек — владелец проверит поступление и подтвердит запись.
             </div>
           )}
+          </div>
+          <div className="bf-col bf-col--side">
           {(business?.cancellation_policy_text || business?.cancellation_policy_photo) && (
             <div className="bf-note is-warn">
               <strong>Условия отмены</strong>
@@ -1505,6 +1513,7 @@ function BookingPageInner() {
               </label>
             </div>
           )}
+          </div>
         </div>
         <div className="bf-bottombar">
           {bookingError && <p className="bf-error bf-error--bar" role="alert">{bookingError}</p>}
@@ -1523,11 +1532,12 @@ function BookingPageInner() {
     const paymentDetails = cleanPaymentDetails(business?.payment_details)
     const done = paymentSent || receiptUploaded
     return (
-      <section className="bf-screen" aria-label="Предоплата записи">
+      <section className="bf-screen bf-screen--prepay" aria-label="Предоплата записи">
         <div className="bf-inside-nav">{stepCount}</div>
         <div className="bf-inner">
           <h2 className="bf-h2">Предоплата</h2>
           <p className="bf-intro">Запись создана. Чтобы закрепить время за вами, внесите предоплату.</p>
+          <div className="bf-col bf-col--main">
           <div className="bf-pay-hero">
             <span className="bf-pay-hero-icon" aria-hidden="true"><CreditCard /></span>
             <div>
@@ -1546,6 +1556,8 @@ function BookingPageInner() {
             {paymentPhone && <span className="bf-method-chip">Телефон для перевода: {paymentPhone}</span>}
             {paymentDetails && <div><span className="bf-method-chip">{paymentDetails}</span></div>}
           </div>
+          </div>
+          <div className="bf-col bf-col--side">
           {(business?.cancellation_policy_text || business?.cancellation_policy_photo) && (
             <div className="bf-note is-warn">
               <strong>Условия отмены</strong>
@@ -1591,6 +1603,7 @@ function BookingPageInner() {
             {paymentError && <p className="bf-error" role="alert">{paymentError}</p>}
             <p className="bf-policy">Оплата поступает напрямую бизнесу, ServGo её не принимает. После отправки подтверждения владелец проверит поступление — статус записи обновится после проверки.</p>
           </div>
+          </div>
         </div>
         <div className="bf-bottombar">
           {done ? (
@@ -1615,7 +1628,7 @@ function BookingPageInner() {
   function renderDone() {
     const publicUrl = createdNotifyToken ? `${window.location.origin}/b/${createdNotifyToken}` : null
     return (
-      <section className="bf-screen" aria-label="Запись создана">
+      <section className="bf-screen bf-screen--done" aria-label="Запись создана">
         <SuccessErrorBoundary bookingId={createdBookingId} notifyToken={createdNotifyToken}>
           <div className="bf-inner bf-result">
             <div className="bf-orb"><Check /></div>
@@ -1756,32 +1769,32 @@ function BookingPageInner() {
 
   return createPortal(
     <div className="bf-root">
-      <main className={`bf-device${chatReady ? ' bf-has-fab' : ''}`} aria-label="Онлайн-запись ServGo">
+      <main className={`bf-device${chatReady && !isDesktop ? ' bf-has-fab' : ''}`} aria-label="Онлайн-запись ServGo">
         <header className="bf-topbar">
           <Link to="/" className="bf-brand" aria-label="ServGo"><Logo size={28} /></Link>
           <div className="bf-spacer" />
+          {chatReady && isDesktop && (
+            <button type="button" className={`bf-chat-top${chatOpen ? ' is-open' : ''}`} onClick={() => (chatOpen ? setChatOpen(false) : openChat())} aria-expanded={chatOpen} aria-label={chatOpen ? 'Закрыть чат' : 'Открыть чат с помощником'}>
+              <MessageCircle /><span>Чат с помощником</span>
+            </button>
+          )}
           <Link to={profileHref} className="bf-user" title="Личный кабинет" aria-label="Личный кабинет"><User /></Link>
         </header>
         <div className={`bf-body${showAside ? ' has-aside' : ''}`}>
           <div key={screen} className="bf-body-main" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{content}</div>
           {showAside && renderAside()}
         </div>
-        {chatReady && !(isDesktop && chatOpen) && (
-          isDesktop ? (
-            <button type="button" className="bf-chat-fab" onClick={openChat} aria-label="Открыть чат с помощником">
-              <MessageCircle /><span>Чат</span>
-            </button>
-          ) : (
-            <Link to={`/chat?business_id=${business!.id}`} className="bf-chat-fab" aria-label="Открыть чат с помощником">
-              <MessageCircle /><span>Чат</span>
-            </Link>
-          )
+        {/* На телефоне — плавающая кнопка и полноэкранный чат; на компьютере — кнопка в шапке и окошко. */}
+        {chatReady && !isDesktop && (
+          <Link to={`/chat?business_id=${business!.id}`} className="bf-chat-fab" aria-label="Открыть чат с помощником">
+            <MessageCircle /><span>Чат</span>
+          </Link>
         )}
       </main>
       {chatReady && isDesktop && chatEverOpened && (
         <div className="bf-chat-widget" role="dialog" aria-label="Чат с помощником" hidden={!chatOpen}>
           <Suspense fallback={<div className="bf-loading"><span className="bf-spinner" style={{ borderColor: '#d7e3f2', borderTopColor: '#346fda' }} /></div>}>
-            <ChatThread business={{ id: business!.id, name: business!.name }} embedded onClose={() => setChatOpen(false)} />
+            <ChatThread business={business!} embedded onClose={() => setChatOpen(false)} />
           </Suspense>
         </div>
       )}
