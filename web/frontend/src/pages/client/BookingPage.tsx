@@ -946,8 +946,23 @@ function BookingPageInner() {
   const minPrice = services.reduce<number | null>((min, s) => (s.price != null && s.price > 0 && (min == null || s.price < min) ? s.price : min), null)
   const minDuration = services.reduce<number | null>((min, s) => (s.duration_minutes && (min == null || s.duration_minutes < min) ? s.duration_minutes : min), null)
   const stepIndex = selectionSteps.indexOf(screen)
+  // «След» выбора на телефоне: что уже выбрано — чипами слева в верхней строке; по нажатию можно вернуться и поменять.
+  const trailChips: Array<{ key: string; text: string; target: Screen }> = []
+  if (servicesDone && screen !== 'services') trailChips.push({ key: 'svc', text: selectedServices.length > 1 ? `${selectedServices.length} ${plural(selectedServices.length, 'услуга', 'услуги', 'услуг')}` : serviceLabel, target: 'services' })
+  if ((selectedResource || anyResource) && screen !== 'resource') trailChips.push({ key: 'res', text: resourceLabel, target: 'resource' })
+  if (dateDone && screen !== 'calendar') trailChips.push({ key: 'date', text: `${ruDate(selectedDate!)} · ${selectedTime}`, target: 'calendar' })
+  const showTrail = (screen === 'resource' || screen === 'calendar' || screen === 'extras') && trailChips.length > 0
   const stepCount = (
-    <span className="bf-stepcount">{stepIndex >= 0 ? `Шаг ${stepIndex + 1} / ${selectionSteps.length}` : ''}</span>
+    <>
+      {showTrail && (
+        <span className="bf-trail" aria-label="Уже выбрано">
+          {trailChips.map((c) => (
+            <button key={c.key} type="button" className="bf-trail-chip" onClick={() => go(c.target)} title="Изменить">{c.text}</button>
+          ))}
+        </span>
+      )}
+      <span className="bf-stepcount">{stepIndex >= 0 ? `Шаг ${stepIndex + 1} / ${selectionSteps.length}` : ''}</span>
+    </>
   )
   const resourceIcon = isVenue ? <DoorOpen /> : <Users />
 
@@ -1122,7 +1137,7 @@ function BookingPageInner() {
           )}
           <div className="bf-stage" aria-live="polite">
             <div className="bf-stage-kicker">{business?.name} · {labels.service}</div>
-            <div className="bf-stage-feature">
+            <div className="bf-stage-feature" key={first?.id ?? 'none'}>
               <span className="bf-stage-symbol"><Sparkles /></span>
               <div className="bf-stage-main">
                 <div className="bf-stage-big">{first ? (selectedServices.length > 1 ? `${selectedServices.length} ${plural(selectedServices.length, 'услуга', 'услуги', 'услуг')}` : first.name) : 'Не уверены, что выбрать?'}</div>
@@ -1199,7 +1214,7 @@ function BookingPageInner() {
           <p className="bf-intro">{anyAllowed ? 'Можно выбрать любого — подберём подходящего' : 'Нажмите на вариант — сразу перейдём дальше'}</p>
           <div className="bf-stage" aria-live="polite">
             <div className="bf-stage-kicker">Ваш визит · {labels.resource}</div>
-            <div className="bf-stage-feature">
+            <div className="bf-stage-feature" key={selectedResource?.id ?? (anyResource ? 'any' : 'none')}>
               <div className="bf-stage-people">
                 {selectedResource ? portrait(selectedResource) : crew.map((r) => <span key={r.id} style={{ display: 'contents' }}>{portrait(r)}</span>)}
               </div>
@@ -1276,7 +1291,7 @@ function BookingPageInner() {
           <h2 className="bf-h2">{labels.date} и {labels.time.toLowerCase()}</h2>
           <div className="bf-stage" aria-live="polite" style={{ minHeight: 48 }}>
             <div className="bf-stage-kicker">Детали визита</div>
-            <div className="bf-stage-feature">
+            <div className="bf-stage-feature" key={`${selectedDate ?? ''}|${selectedTime ?? ''}`}>
               <span className="bf-stage-symbol"><Clock /></span>
               <div className="bf-stage-main">
                 <div className="bf-stage-big">{selectedDate ? `${ruDate(selectedDate)}${selectedTime ? ` · ${selectedTime}` : ''}` : 'Выберите удобный день'}</div>
@@ -1360,7 +1375,7 @@ function BookingPageInner() {
           <p className="bf-intro">{additionalServices.length > 0 ? 'Необязательно — добавьте, если нужно' : 'Выберите формат'}</p>
           <div className="bf-stage" style={{ minHeight: 40 }}>
             <div className="bf-stage-kicker">Ваш визит</div>
-            <div className="bf-stage-feature">
+            <div className="bf-stage-feature" key={`${totalPrice}|${selectedAddons.size}`}>
               <span className="bf-stage-symbol"><Package /></span>
               <div className="bf-stage-main">
                 <div className="bf-stage-big">{priceLoading ? 'Считаем стоимость…' : totalPrice > 0 ? formatPrice(totalPrice) : serviceLabel}</div>

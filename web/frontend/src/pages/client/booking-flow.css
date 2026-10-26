@@ -893,3 +893,53 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
   85% { opacity: 1; }
   100% { opacity: 0; transform: translate3d(var(--drift, 0), 110vh, 0) rotate(var(--spin, 540deg)); }
 }
+
+
+/* ═════ Движение, этап 2: след выбора, каскад вариантов и времени, «отклик» на выбор ═════ */
+
+/* Смена выбранного в «сцене» — мягкое проявление нового текста */
+.bf-stage-feature { animation: bfStageIn 0.34s cubic-bezier(0.22, 0.8, 0.3, 1) both; }
+@keyframes bfStageIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* Каскад: варианты, выбор на главной и слоты времени появляются по очереди */
+.bf-option-row, .bf-list > .bf-option, .bf-screen--bhome .bf-choice, .bf-time, .bf-time-skel, .bf-help {
+  animation: bfRise 0.42s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+  animation-delay: calc(min(var(--i, 0), 11) * 45ms + 60ms);
+}
+.bf-time, .bf-time-skel { animation-duration: 0.3s; animation-delay: calc(min(var(--i, 0), 15) * 22ms); }
+@keyframes bfRise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.bf-option-row:nth-child(1), .bf-list > .bf-option:nth-child(1), .bf-screen--bhome .bf-choice:nth-child(1), .bf-time:nth-child(1), .bf-time-skel:nth-child(1) { --i: 0; }
+.bf-option-row:nth-child(2), .bf-list > .bf-option:nth-child(2), .bf-screen--bhome .bf-choice:nth-child(2), .bf-time:nth-child(2), .bf-time-skel:nth-child(2) { --i: 1; }
+.bf-option-row:nth-child(3), .bf-list > .bf-option:nth-child(3), .bf-screen--bhome .bf-choice:nth-child(3), .bf-time:nth-child(3), .bf-time-skel:nth-child(3) { --i: 2; }
+.bf-option-row:nth-child(4), .bf-list > .bf-option:nth-child(4), .bf-screen--bhome .bf-choice:nth-child(4), .bf-time:nth-child(4), .bf-time-skel:nth-child(4) { --i: 3; }
+.bf-option-row:nth-child(5), .bf-list > .bf-option:nth-child(5), .bf-time:nth-child(5), .bf-time-skel:nth-child(5) { --i: 4; }
+.bf-option-row:nth-child(6), .bf-list > .bf-option:nth-child(6), .bf-time:nth-child(6), .bf-time-skel:nth-child(6) { --i: 5; }
+.bf-option-row:nth-child(7), .bf-list > .bf-option:nth-child(7), .bf-time:nth-child(7), .bf-time-skel:nth-child(7) { --i: 6; }
+.bf-option-row:nth-child(8), .bf-list > .bf-option:nth-child(8), .bf-time:nth-child(8), .bf-time-skel:nth-child(8) { --i: 7; }
+.bf-option-row:nth-child(n+9), .bf-list > .bf-option:nth-child(n+9), .bf-time:nth-child(n+9), .bf-time-skel:nth-child(n+9) { --i: 11; }
+.bf-time:nth-child(9), .bf-time-skel:nth-child(9) { --i: 8; }
+.bf-time:nth-child(10), .bf-time-skel:nth-child(10) { --i: 9; }
+.bf-time:nth-child(11), .bf-time-skel:nth-child(11) { --i: 10; }
+.bf-time:nth-child(12), .bf-time-skel:nth-child(12) { --i: 11; }
+.bf-time:nth-child(13), .bf-time-skel:nth-child(13) { --i: 12; }
+.bf-time:nth-child(14), .bf-time-skel:nth-child(14) { --i: 13; }
+.bf-time:nth-child(n+15), .bf-time-skel:nth-child(n+15) { --i: 15; }
+/* В окошке чата каскад не нужен — сетка времени там своя */
+.bf-chat-widget .bf-time, .bf-chat-card .bf-time { animation: none; }
+
+/* Отклик на выбор: «вспышка» выбранного дня и времени */
+.bf-day.selected { animation: bfPick 0.38s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.bf-time.selected { animation: bfPick 0.34s cubic-bezier(0.34, 1.56, 0.64, 1); animation-delay: 0s; }
+.bf-option.selected { animation: bfSelectSweep 0.5s ease-out; }
+@keyframes bfPick { 0% { transform: scale(0.82); } 100% { transform: scale(1); } }
+@keyframes bfSelectSweep { 0% { box-shadow: 0 0 0 0 #3c7fdf55; } 100% { box-shadow: 0 0 0 10px #3c7fdf00; } }
+.bf-chat-widget .bf-time.selected, .bf-chat-card .bf-time.selected { animation: none; }
+
+/* След выбора (телефон): чипы слева в верхней строке */
+.bf-trail { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; padding: 2px 0; margin-right: 8px; scrollbar-width: none; -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent); mask-image: linear-gradient(90deg, #000 88%, transparent); }
+.bf-trail::-webkit-scrollbar { display: none; }
+.bf-trail-chip { flex: 0 0 auto; max-width: 62%; min-height: 28px; padding: 4px 11px; border: 0; border-radius: 14px; background: #eef5fd; color: #1e4f94; font-size: 12px; font-weight: 520; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: bfChipIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.bf-trail-chip:nth-child(2) { animation-delay: 0.06s; }
+.bf-trail-chip:nth-child(3) { animation-delay: 0.12s; }
+@keyframes bfChipIn { from { opacity: 0; transform: translateX(-12px) scale(0.9); } to { opacity: 1; transform: none; } }
+@media (min-width: 1024px) { .bf-trail { display: none; } }
