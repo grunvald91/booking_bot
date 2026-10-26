@@ -1,0 +1,23 @@
+name: Diagnose ServGo web listing (read-only)
+# One-shot read-only server inspection; nothing on the server is changed.
+on:
+  push:
+    branches: [ ops/server-tls-check-20261026 ]
+permissions:
+  contents: read
+concurrency:
+  group: servgo-diagnose-web-listing
+  cancel-in-progress: true
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - run: python scripts/inspect_web_listing.py
