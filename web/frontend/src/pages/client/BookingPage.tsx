@@ -255,6 +255,43 @@ function useIsDesktop() {
   return matches
 }
 
+// Порядок экранов — чтобы понимать, куда идёт переход: вперёд (вход справа) или назад (слева).
+const SCREEN_RANK: Record<string, number> = { home: 0, services: 1, resource: 2, calendar: 3, extras: 4, review: 5, prepay: 6, done: 7 }
+
+// Галочка, которая «рисуется» (штрих анимируется стилями; без анимации — просто галочка).
+function DrawnCheck() {
+  return (
+    <svg className="bf-drawn-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 12.5l4.6 4.6L19 7.4" pathLength={1} />
+    </svg>
+  )
+}
+
+// Праздничное конфетти: детерминированный разброс (без Math.random), чтобы рендер был чистым.
+const CONFETTI_COLORS = ['#2f6fd6', '#4e93ea', '#75d5f1', '#f4b740', '#ef7d57', '#7ecb9b']
+function Confetti() {
+  const pieces = Array.from({ length: 34 }, (_, i) => {
+    const r = (n: number) => { const x = Math.sin(i * 12.9898 + n * 78.233) * 43758.5453; return x - Math.floor(x) }
+    return {
+      left: `${(i / 34) * 100 + (r(1) - 0.5) * 6}%`,
+      delay: `${(r(2) * 0.9).toFixed(2)}s`,
+      dur: `${(2.2 + r(3) * 1.6).toFixed(2)}s`,
+      drift: `${Math.round((r(4) - 0.5) * 120)}px`,
+      spin: `${Math.round(360 + r(5) * 540)}deg`,
+      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+      round: i % 3 === 0,
+      w: 6 + Math.round(r(6) * 5),
+    }
+  })
+  return (
+    <div className="bf-confetti" aria-hidden="true">
+      {pieces.map((p, i) => (
+        <span key={i} className={p.round ? 'is-round' : ''} style={{ left: p.left, width: p.w, height: p.round ? p.w : p.w * 1.6, background: p.color, animationDelay: p.delay, animationDuration: p.dur, ['--drift' as string]: p.drift, ['--spin' as string]: p.spin }} />
+      ))}
+    </div>
+  )
+}
+
 type Screen = 'home' | 'services' | 'resource' | 'calendar' | 'extras' | 'review' | 'prepay' | 'done'
 
 // ── Main Component ──
@@ -288,6 +325,9 @@ function BookingPageInner() {
   // Navigation
   const [screen, setScreen] = useState<Screen>('home')
   const historyRef = useRef<Screen[]>([])
+  const [track, setTrack] = useState<{ screen: Screen; prev: Screen }>({ screen: 'home', prev: 'home' })
+  if (track.screen !== screen) setTrack({ screen, prev: track.screen })
+  const direction = (SCREEN_RANK[track.screen] ?? 0) >= (SCREEN_RANK[track.prev] ?? 0) ? 'fwd' : 'back'
   const submittingRef = useRef(false)
 
   // Selections
@@ -1653,9 +1693,10 @@ function BookingPageInner() {
     const publicUrl = createdNotifyToken ? `${window.location.origin}/b/${createdNotifyToken}` : null
     return (
       <section className="bf-screen bf-screen--done" aria-label="Запись создана">
+        <Confetti />
         <SuccessErrorBoundary bookingId={createdBookingId} notifyToken={createdNotifyToken}>
           <div className="bf-inner bf-result">
-            <div className="bf-orb"><Check /></div>
+            <div className="bf-orb bf-orb--pop"><DrawnCheck /></div>
             <h2 className="bf-h2">Запись создана</h2>
             <p className="bf-intro">
               {serviceLabel}, {selectedDate && ruDate(selectedDate)} в {selectedTime}{resourceLabel ? ` · ${resourceLabel}` : ''}
@@ -1790,6 +1831,9 @@ function BookingPageInner() {
   }
 
   const chatReady = !!business && !loadError
+  // Прогресс: на первом экране 0, на шагах — доля пройденных, на финальном 100%.
+  const progressDone = screen === 'done' ? selectionSteps.length : stepIndex >= 0 ? stepIndex + 1 : 0
+  const progressPct = selectionSteps.length > 0 ? Math.round((progressDone / selectionSteps.length) * 100) : 0
 
   return createPortal(
     <div className="bf-root">
@@ -1798,9 +1842,14 @@ function BookingPageInner() {
           <Link to="/" className="bf-brand" aria-label="ServGo"><Logo size={28} /></Link>
           <div className="bf-spacer" />
           <Link to={profileHref} className="bf-user" title="Личный кабинет" aria-label="Личный кабинет"><User /></Link>
+          {chatReady && (
+            <div className="bf-progress" role="progressbar" aria-label="Ход записи" aria-valuemin={0} aria-valuemax={selectionSteps.length} aria-valuenow={progressDone}>
+              <span style={{ width: `${progressPct}%` }} />
+            </div>
+          )}
         </header>
         <div className={`bf-body${showAside ? ' has-aside' : ''}`}>
-          <div key={screen} className="bf-body-main" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{content}</div>
+          <div key={screen} className={`bf-body-main bf-dir-${direction}`} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{content}</div>
           {showAside && renderAside()}
         </div>
         {/* Плавающая кнопка «Чат»: на телефоне — полноэкранный чат, на компьютере — небольшое окошко. */}
