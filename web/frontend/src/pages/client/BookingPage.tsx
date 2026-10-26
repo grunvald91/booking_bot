@@ -1685,12 +1685,12 @@ function BookingPageInner() {
           <Link to={profileHref} className="bf-user" title="Личный кабинет" aria-label="Личный кабинет"><User /></Link>
         </header>
         <div key={screen} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{content}</div>
+        {business && !loadError && (
+          <Link to={`/chat?business_id=${business.id}`} className="bf-chat-fab" aria-label="Открыть чат с помощником">
+            <MessageCircle /><span>Чат</span>
+          </Link>
+        )}
       </main>
-      {business && !loadError && (
-        <Link to={`/chat?business_id=${business.id}`} className="bf-chat-fab" aria-label="Открыть чат с помощником">
-          <MessageCircle /><span>Чат</span>
-        </Link>
-      )}
       {toast && <div className="bf-toast" role="status">{toast}</div>}
       {infoModal && <InfoSheet data={infoModal} onClose={() => setInfoModal(null)} />}
     </div>,
