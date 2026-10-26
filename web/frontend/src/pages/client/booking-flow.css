@@ -132,7 +132,8 @@ html.tg-webapp .bf-root { top: var(--tg-safe-top, 0px); }
 /* ── Календарь и время ── */
 .bf-calendar { flex: 0 0 auto; margin-top: auto; }
 .bf-monthbar { display: flex; justify-content: space-between; align-items: center; min-height: 26px; margin-bottom: 2px; }
-.bf-monthtitle { font-size: 14px; font-weight: 550; letter-spacing: -0.02em; text-transform: capitalize; }
+.bf-monthtitle { font-size: 14px; font-weight: 550; letter-spacing: -0.02em; }
+.bf-monthtitle::first-letter { text-transform: uppercase; }
 .bf-monthnav { display: flex; }
 .bf-monthnav button { width: 30px; height: 30px; border: 0; border-radius: 50%; background: transparent; color: #7190b5; display: grid; place-items: center; }
 .bf-monthnav button:disabled { color: #cbd3dd; cursor: default; }
@@ -521,9 +522,153 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
   right: max(14px, calc((100% - var(--bf-w, 100%)) / 2 + 8px));
   bottom: calc(86px + env(safe-area-inset-bottom));
   display: inline-flex; align-items: center; gap: 7px; height: 46px; padding: 0 16px 0 13px;
+  border: 0; cursor: pointer; font-family: inherit;
   border-radius: 23px; background: #20354e; color: #fff; font-size: 14px; font-weight: 560; text-decoration: none;
   box-shadow: 0 8px 24px #0b203a40;
 }
 .bf-chat-fab svg { width: 19px; height: 19px; }
 /* Место под плавающую кнопку, чтобы она не перекрывала последние элементы списка */
 .bf-has-fab .bf-inner { padding-bottom: 60px; }
+
+/* ═════ Обёртка экрана записи: колонка контента (+ карточка «Ваша запись» на компьютере) ═════ */
+.bf-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.bf-aside { display: none; }
+.bf-chat-close { margin-left: auto; width: 34px; height: 34px; flex-shrink: 0; border: 0; border-radius: 50%; background: #f5f8fc; display: grid; place-items: center; color: #5b6f86; cursor: pointer; }
+.bf-chat-close svg { width: 17px; height: 17px; }
+
+/* ═════ Окошко чата на компьютере: небольшое, поверх страницы записи ═════ */
+.bf-chat-widget {
+  position: fixed; z-index: 90; right: 28px; bottom: 28px; width: 392px; height: min(640px, calc(100vh - 56px)); height: min(640px, calc(100dvh - 56px));
+  display: flex; flex-direction: column; background: #fff; border-radius: 22px; overflow: hidden;
+  box-shadow: 0 24px 80px #0b203a40, 0 0 0 1px var(--bf-line);
+  animation: bfAppear 0.2s ease-out;
+}
+.bf-chat-widget[hidden] { display: none; }
+.bf-chat-widget .bf-screen { animation: none; }
+.bf-chat-widget .bf-chat-head { padding: 14px 16px; }
+.bf-chat-widget .bf-inner, .bf-chat-widget .bf-chat-bar { padding-left: 16px; padding-right: 16px; }
+.bf-chat-widget .bf-primary { min-height: 42px; font-size: 13px; }
+.bf-chat-widget .bf-option-title { font-size: 14px; }
+.bf-chat-widget .bf-msg-bubble { font-size: 14px; }
+
+@media (min-width: 1024px) {
+  .bf-chat-fab { right: 28px; bottom: 104px; }
+  .bf-chat-fab:hover { background: #2a4565; }
+  .bf-has-fab .bf-inner { padding-bottom: 24px; }
+
+  /* Заголовки шагов крупнее */
+  .bf-body .bf-h2 { font-size: 34px; letter-spacing: -0.05em; margin-top: 12px; }
+  .bf-body .bf-intro { margin: 8px 0 24px; }
+  .bf-body .bf-stepcount { font-size: 13px; }
+  .bf-body .bf-inside-nav { min-height: 44px; padding-top: 14px; }
+
+  /* ── Шаги выбора: колонка контента + липкая карточка справа ── */
+  .bf-body.has-aside { flex-direction: row; gap: 56px; padding: 0 max(32px, calc((100% - 1180px) / 2)); }
+  .bf-body.has-aside .bf-body-main { min-width: 0; }
+  .bf-body.has-aside .bf-inner, .bf-body.has-aside .bf-inside-nav, .bf-body.has-aside .bf-bottombar { padding-left: 0; padding-right: 0; }
+  .bf-body.has-aside .bf-inner { padding-bottom: 24px; }
+  .bf-body.has-aside .bf-stage { display: none; }
+  .bf-body.has-aside .bf-bottombar { gap: 12px; padding-top: 16px; padding-bottom: 22px; border-top: 1px solid var(--bf-line); }
+  .bf-body.has-aside .bf-bottombar .bf-summary { display: none; }
+  .bf-body.has-aside .bf-bottombar .bf-primary { flex: 0 0 auto; min-width: 240px; margin-left: auto; }
+
+  /* Варианты — карточки в сетке */
+  .bf-body.has-aside .bf-list { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; padding-bottom: 8px; }
+  .bf-body.has-aside .bf-option { min-height: 88px; padding: 14px 16px; border: 1px solid var(--bf-line); border-radius: 16px; background: #fff; transition: background 0.15s, border-color 0.15s, box-shadow 0.15s; }
+  .bf-body.has-aside .bf-option.has-info { padding-right: 52px; }
+  .bf-body.has-aside .bf-option:hover { background: #f8fbff; border-color: #d3e2f4; }
+  .bf-body.has-aside .bf-option.selected { background: var(--bf-tint); border-color: #3c7fdf; box-shadow: 0 0 0 3px #3c7fdf1c; }
+  .bf-body.has-aside .bf-option.selected::after { display: none; }
+  .bf-body.has-aside .bf-info-btn { right: 12px; }
+  .bf-body.has-aside .bf-info-btn:hover { background: #e6effa; }
+  .bf-body.has-aside .bf-option-price { font-size: 14px; margin-top: 4px; }
+  .bf-body.has-aside .bf-mini-icon, .bf-body.has-aside .bf-portrait { width: 46px; height: 46px; font-size: 14px; }
+  .bf-body.has-aside .bf-portrait.is-venue { width: 58px; height: 46px; }
+  .bf-body.has-aside .bf-empty { grid-column: 1 / -1; font-size: 15px; }
+
+  /* Календарь слева, время справа */
+  .bf-body.has-aside .bf-screen--calendar .bf-inner { display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); column-gap: 48px; align-content: start; grid-auto-rows: auto; }
+  .bf-body.has-aside .bf-screen--calendar .bf-h2 { grid-column: 1 / -1; }
+  .bf-body.has-aside .bf-screen--calendar .bf-calendar { margin-top: 0; }
+  .bf-body.has-aside .bf-screen--calendar .bf-times { margin-top: 0; padding-top: 4px; }
+  .bf-body.has-aside .bf-monthtitle { font-size: 18px; }
+  .bf-body.has-aside .bf-monthnav button { width: 36px; height: 36px; }
+  .bf-body.has-aside .bf-monthnav button:not(:disabled):hover { background: #f1f6fc; }
+  .bf-body.has-aside .bf-dayname { font-size: 12px; line-height: 24px; }
+  .bf-body.has-aside .bf-day { width: 46px; height: 46px; font-size: 15px; }
+  .bf-body.has-aside .bf-day:not(:disabled):not(.selected):hover { background: radial-gradient(circle, #e4f0ff, #f7fbff 70%, transparent); }
+  .bf-body.has-aside .bf-times-heading { font-size: 18px; font-weight: 550; letter-spacing: -0.03em; }
+  .bf-body.has-aside .bf-times-sub { font-size: 14px; margin: 3px 0 14px; }
+  .bf-body.has-aside .bf-time-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 10px; }
+  .bf-body.has-aside .bf-time { min-height: 46px; font-size: 15px; border: 1px solid var(--bf-line); border-radius: 12px; background: #fff; transition: background 0.15s, border-color 0.15s; }
+  .bf-body.has-aside .bf-time::before, .bf-body.has-aside .bf-time.selected::after { display: none; }
+  .bf-body.has-aside .bf-time:hover { background: #f8fbff; border-color: #d3e2f4; }
+  .bf-body.has-aside .bf-time.selected { background: var(--bf-tint); border-color: #3c7fdf; color: #1f56b3; box-shadow: 0 0 0 3px #3c7fdf1c; }
+  .bf-body.has-aside .bf-time-skel { height: 46px; border-radius: 12px; }
+  .bf-body.has-aside .bf-placeholder { font-size: 14px; padding: 18px 0; text-align: left; }
+  .bf-body.has-aside .bf-call { font-size: 14px; min-height: 40px; }
+
+  /* Карточка «Ваша запись» */
+  .bf-aside { display: block; flex: 0 0 360px; align-self: flex-start; margin: 28px 0; padding: 26px 26px 22px; border-radius: 24px; background: #fff; border: 1px solid var(--bf-line); box-shadow: 0 14px 44px #18385814; max-height: calc(100% - 56px); overflow-y: auto; scrollbar-width: none; }
+  .bf-aside::-webkit-scrollbar { display: none; }
+  .bf-aside-kicker { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--bf-muted); }
+  .bf-aside-biz { margin-top: 8px; font-size: 22px; font-weight: 520; letter-spacing: -0.04em; line-height: 1.15; overflow-wrap: anywhere; }
+  .bf-aside-addr { margin-top: 4px; font-size: 13px; color: #92a0af; }
+  .bf-aside-rows { margin-top: 18px; border-top: 1px solid var(--bf-line); }
+  .bf-aside-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--bf-line); }
+  .bf-aside-text { min-width: 0; }
+  .bf-aside-label { font-size: 12px; color: #8999a9; }
+  .bf-aside-value { margin-top: 3px; font-size: 15px; line-height: 1.35; color: #a9b5c2; overflow-wrap: anywhere; }
+  .bf-aside-row.is-set .bf-aside-value { color: var(--bf-ink); font-weight: 480; }
+  .bf-aside-total { padding-top: 14px; display: grid; gap: 8px; }
+  .bf-aside-line { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13.5px; color: #7e8d9e; }
+  .bf-aside-line strong { font-weight: 520; color: #27425f; }
+  .bf-aside-line.is-big { font-size: 15px; color: var(--bf-ink); margin-top: 2px; }
+  .bf-aside-line.is-big strong { font-size: 26px; font-weight: 550; letter-spacing: -0.04em; color: var(--bf-ink); }
+  .bf-aside-call { display: flex; align-items: center; gap: 8px; margin-top: 18px; padding: 11px 14px; border-radius: 14px; background: #eef5fd; color: #1e4f94; font-size: 14px; font-weight: 520; text-decoration: none; }
+  .bf-aside-call svg { width: 16px; height: 16px; color: #2f6fd1; }
+  .bf-aside-call:hover { background: #e3effc; }
+
+  /* ── Проверка записи: слева итог, справа контакты ── */
+  .bf-screen--review { --bf-w: 1040px; }
+  .bf-screen--review .bf-inner { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 56px; align-content: start; grid-auto-flow: row dense; }
+  .bf-screen--review .bf-h2, .bf-screen--review .bf-intro { grid-column: 1 / -1; }
+  .bf-screen--review .bf-review, .bf-screen--review .bf-note { grid-column: 1; margin-top: 0; }
+  .bf-screen--review .bf-note + .bf-note { margin-top: 12px; }
+  .bf-screen--review .bf-fields, .bf-screen--review .bf-legal-box { grid-column: 2; margin-top: 0; padding-top: 0; }
+  .bf-screen--review .bf-review-row { padding: 14px 0; border-bottom: 1px solid var(--bf-line); }
+  .bf-screen--review .bf-review-label { font-size: 12px; }
+  .bf-screen--review .bf-review-value { font-size: 16px; }
+  .bf-screen--review .bf-review-edit { font-size: 13px; }
+  .bf-screen--review .bf-total { font-size: 14px; margin-top: 14px; }
+  .bf-screen--review .bf-total strong { font-size: 28px; }
+  .bf-screen--review .bf-note { font-size: 13px; padding: 12px 14px; border-radius: 14px; background: #f3f8ff; margin-top: 18px; }
+  .bf-screen--review .bf-note strong { font-size: 14px; }
+  .bf-screen--review .bf-fields h3 { font-size: 16px; margin-bottom: 10px; }
+  .bf-screen--review .bf-input { height: 46px; font-size: 16px; }
+  .bf-screen--review .bf-field-label { font-size: 12.5px; margin-top: 10px; }
+  .bf-screen--review .bf-legal { font-size: 13px; }
+  .bf-screen--review .bf-bottombar { border-top: 1px solid var(--bf-line); gap: 12px; padding-top: 16px; padding-bottom: 22px; }
+  .bf-screen--review .bf-bottombar .bf-summary { display: none; }
+  .bf-screen--review .bf-bottombar .bf-primary { flex: 0 0 auto; min-width: 260px; margin-left: auto; }
+
+  /* ── Главная страницы записи: обложка слева, выбор справа ── */
+  .bf-body .bf-screen--bhome { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); column-gap: 56px; align-content: center; align-items: center; padding: 24px max(32px, calc((100% - 1180px) / 2)); overflow-y: auto; }
+  .bf-body .bf-screen--bhome > .bf-hero { grid-column: 1; grid-row: 1; flex: none; width: auto; margin: 0; height: min(560px, calc(100vh - 190px)); height: min(560px, calc(100dvh - 190px)); border-radius: 28px; }
+  .bf-body .bf-screen--bhome > .bf-panel { grid-column: 2; grid-row: 1; margin: 0; padding: 0; border-radius: 0; }
+  .bf-body .bf-screen--bhome .bf-logo { position: static; width: 76px; height: 76px; margin: 0 0 16px; }
+  .bf-body .bf-screen--bhome .bf-h1 { font-size: 36px; margin-top: 0; letter-spacing: -0.05em; }
+  .bf-body .bf-screen--bhome .bf-address { font-size: 15px; margin-top: 6px; }
+  .bf-body .bf-screen--bhome .bf-about { font-size: 14px; padding-top: 10px; }
+  .bf-body .bf-screen--bhome .bf-choices { margin: 22px 0 0; display: grid; gap: 10px; }
+  .bf-body .bf-screen--bhome .bf-choice { min-height: 76px; padding: 12px 18px 12px 14px; border: 1px solid var(--bf-line); border-radius: 18px; gap: 14px; transition: background 0.15s, border-color 0.15s; }
+  .bf-body .bf-screen--bhome .bf-choice:hover { background: #f8fbff; border-color: #d3e2f4; }
+  .bf-body .bf-screen--bhome .bf-choice.is-complete { border-color: #3c7fdf; background: var(--bf-tint); }
+  .bf-body .bf-screen--bhome .bf-choice.is-complete::after { display: none; }
+  .bf-body .bf-screen--bhome .bf-choice-icon { width: 46px; height: 46px; }
+  .bf-body .bf-screen--bhome .bf-choice-name { font-size: 17px; }
+  .bf-body .bf-screen--bhome .bf-choice-details { font-size: 13.5px; margin-top: 2px; }
+  .bf-body .bf-screen--bhome > .bf-bottombar { grid-column: 2; grid-row: 2; padding: 18px 0 0; }
+  .bf-body .bf-screen--bhome > .bf-bottombar .bf-primary { flex: 1 1 auto; }
+  .bf-body .bf-screen--bhome > .bf-home-footer { grid-column: 1 / -1; grid-row: 2; padding-top: 22px; }
+}

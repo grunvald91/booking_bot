@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, Component, type ReactNode } from 'react'
+import { useState, useEffect, useMemo, useRef, lazy, Suspense, Component, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
 import {
@@ -232,6 +232,24 @@ function InfoSheet({ data, onClose }: { data: InfoModalData; onClose: () => void
   )
 }
 
+// Чат-помощник подгружается только когда нужен (на компьютере — окошком поверх записи).
+const ChatThread = lazy(() => import('./ChatPage').then((m) => ({ default: m.SalesThread })))
+
+// «Компьютер» = ширина от 1024px: там вместо перехода на страницу чата открывается небольшое окошко.
+function useIsDesktop() {
+  const query = '(min-width: 1024px)'
+  const [matches, setMatches] = useState(() => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia(query).matches)
+  useEffect(() => {
+    if (!window.matchMedia) return
+    const mql = window.matchMedia(query)
+    const onChange = () => setMatches(mql.matches)
+    onChange()
+    mql.addEventListener('change', onChange)
+    return () => mql.removeEventListener('change', onChange)
+  }, [])
+  return matches
+}
+
 type Screen = 'home' | 'services' | 'resource' | 'calendar' | 'extras' | 'review' | 'prepay' | 'done'
 
 // ── Main Component ──
@@ -251,6 +269,16 @@ function BookingPageInner() {
   const [additionalServices, setAdditionalServices] = useState<Service[]>([])
   const [employees, setEmployees] = useState<EmployeeWithPricing[]>([])
   const [infoModal, setInfoModal] = useState<InfoModalData | null>(null)
+  const isDesktop = useIsDesktop()
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatEverOpened, setChatEverOpened] = useState(false)
+  const openChat = () => { setChatOpen(true); setChatEverOpened(true) }
+  useEffect(() => {
+    if (!chatOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setChatOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [chatOpen])
 
   // Navigation
   const [screen, setScreen] = useState<Screen>('home')
@@ -937,7 +965,7 @@ function BookingPageInner() {
     const ready = nextNeeded() === 'review'
     const hasAbout = !!(business?.description || business?.directions || businessPhotos.length > 1)
     return (
-      <section className="bf-screen" aria-label="Главная страница записи">
+      <section className="bf-screen bf-screen--bhome" aria-label="Главная страница записи">
         <div className="bf-hero">
           {businessCover ? <img src={photoSrc(businessCover)} alt={business?.name || ''} /> : <HeroArt />}
           <div className="bf-hero-fade" />
@@ -1173,7 +1201,7 @@ function BookingPageInner() {
     const monthTitle = month.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })
     const todayKey = dateKey(today)
     return (
-      <section className="bf-screen" aria-label="Выбор даты и времени">
+      <section className="bf-screen bf-screen--calendar" aria-label="Выбор даты и времени">
         <div className="bf-inside-nav">{stepCount}</div>
         <div className="bf-inner">
           <h2 className="bf-h2">{labels.date} и {labels.time.toLowerCase()}</h2>
@@ -1355,7 +1383,7 @@ function BookingPageInner() {
     if (business?.legal_documents_enabled && !personalDataConsent) missing.push('согласие на обработку данных')
     if (business?.legal_documents_enabled && !bookingTermsAccepted) missing.push('принятие условий')
     return (
-      <section className="bf-screen" aria-label="Проверка записи">
+      <section className="bf-screen bf-screen--review" aria-label="Проверка записи">
         <div className="bf-inside-nav">{stepCount}</div>
         <div className="bf-inner">
           <h2 className="bf-h2">Проверьте запись</h2>
@@ -1466,7 +1494,7 @@ function BookingPageInner() {
           </div>
 
           {business?.legal_documents_enabled && (
-            <div style={{ marginTop: 8 }}>
+            <div className="bf-legal-box" style={{ marginTop: 8 }}>
               <label className="bf-legal">
                 <input type="checkbox" checked={personalDataConsent} onChange={(e) => { setPersonalDataConsent(e.target.checked); setBookingError(null) }} />
                 <span>Даю отдельное согласие на обработку персональных данных. <Link to={`/legal/consent/${business.id}`} target="_blank">Открыть согласие</Link></span>
@@ -1676,21 +1704,87 @@ function BookingPageInner() {
     } as Record<Screen, () => ReactNode>)[screen]()
   }
 
+  // Карточка «Ваша запись» справа — только на компьютере (на телефоне скрыта стилями).
+  const asideScreens: Screen[] = ['services', 'resource', 'calendar', 'extras']
+  const showAside = !!business && !loadError && asideScreens.includes(screen)
+  function renderAside() {
+    const when = dateDone ? `${ruDate(selectedDate!)} · ${selectedTime}` : selectedDate ? ruDate(selectedDate) : ''
+    const rowsAside: Array<{ label: string; value: string; target: Screen; empty: string }> = []
+    const serviceRow = { label: labels.service, value: serviceLabel, target: 'services' as Screen, empty: 'Не выбрано' }
+    const resourceRow = { label: labels.resource, value: resourceLabel, target: 'resource' as Screen, empty: 'Не выбрано' }
+    if (flowOrder === 'resource_first') {
+      if (hasResources) rowsAside.push(resourceRow)
+      rowsAside.push(serviceRow)
+    } else {
+      rowsAside.push(serviceRow)
+      if (hasResources) rowsAside.push(resourceRow)
+    }
+    rowsAside.push({ label: `${labels.date} и ${labels.time.toLowerCase()}`, value: when, target: 'calendar', empty: 'Не выбрано' })
+    return (
+      <aside className="bf-aside" aria-label="Ваша запись">
+        <div className="bf-aside-kicker">Ваша запись</div>
+        <div className="bf-aside-biz">{business?.name}</div>
+        {business?.address && <div className="bf-aside-addr">{business.address}</div>}
+        <div className="bf-aside-rows">
+          {rowsAside.map((r) => (
+            <div key={r.label} className={`bf-aside-row${r.value ? ' is-set' : ''}`}>
+              <div className="bf-aside-text">
+                <div className="bf-aside-label">{r.label}</div>
+                <div className="bf-aside-value">{r.value || r.empty}</div>
+              </div>
+              {r.value && r.target !== screen && (
+                <button type="button" className="bf-review-edit" onClick={() => go(r.target)}>Изменить</button>
+              )}
+            </div>
+          ))}
+        </div>
+        {(totalDuration > 0 || totalPrice > 0 || priceLoading) && (
+          <div className="bf-aside-total">
+            {totalDuration > 0 && <div className="bf-aside-line"><span>Длительность</span><strong>{formatDuration(totalDuration)}</strong></div>}
+            {(totalPrice > 0 || priceLoading) && <div className="bf-aside-line is-big"><span>Стоимость</span><strong>{priceLoading ? '…' : formatPrice(totalPrice)}</strong></div>}
+            {prepaymentNeeded && <div className="bf-aside-line"><span>Предоплата{prepaymentPercent < 100 ? ` ${prepaymentPercent}%` : ''}</span><strong>{formatPrice(estimatedPrepayment)}</strong></div>}
+          </div>
+        )}
+        {callHref && (
+          <a className="bf-aside-call" href={callHref}><Phone /><span>{business?.phone}</span></a>
+        )}
+      </aside>
+    )
+  }
+
+  const chatReady = !!business && !loadError
+
   return createPortal(
     <div className="bf-root">
-      <main className={`bf-device${business && !loadError ? ' bf-has-fab' : ''}`} aria-label="Онлайн-запись ServGo">
+      <main className={`bf-device${chatReady ? ' bf-has-fab' : ''}`} aria-label="Онлайн-запись ServGo">
         <header className="bf-topbar">
           <Link to="/" className="bf-brand" aria-label="ServGo"><Logo size={28} /></Link>
           <div className="bf-spacer" />
           <Link to={profileHref} className="bf-user" title="Личный кабинет" aria-label="Личный кабинет"><User /></Link>
         </header>
-        <div key={screen} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{content}</div>
-        {business && !loadError && (
-          <Link to={`/chat?business_id=${business.id}`} className="bf-chat-fab" aria-label="Открыть чат с помощником">
-            <MessageCircle /><span>Чат</span>
-          </Link>
+        <div className={`bf-body${showAside ? ' has-aside' : ''}`}>
+          <div key={screen} className="bf-body-main" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{content}</div>
+          {showAside && renderAside()}
+        </div>
+        {chatReady && !(isDesktop && chatOpen) && (
+          isDesktop ? (
+            <button type="button" className="bf-chat-fab" onClick={openChat} aria-label="Открыть чат с помощником">
+              <MessageCircle /><span>Чат</span>
+            </button>
+          ) : (
+            <Link to={`/chat?business_id=${business!.id}`} className="bf-chat-fab" aria-label="Открыть чат с помощником">
+              <MessageCircle /><span>Чат</span>
+            </Link>
+          )
         )}
       </main>
+      {chatReady && isDesktop && chatEverOpened && (
+        <div className="bf-chat-widget" role="dialog" aria-label="Чат с помощником" hidden={!chatOpen}>
+          <Suspense fallback={<div className="bf-loading"><span className="bf-spinner" style={{ borderColor: '#d7e3f2', borderTopColor: '#346fda' }} /></div>}>
+            <ChatThread business={{ id: business!.id, name: business!.name }} embedded onClose={() => setChatOpen(false)} />
+          </Suspense>
+        </div>
+      )}
       {toast && <div className="bf-toast" role="status">{toast}</div>}
       {infoModal && <InfoSheet data={infoModal} onClose={() => setInfoModal(null)} />}
     </div>,

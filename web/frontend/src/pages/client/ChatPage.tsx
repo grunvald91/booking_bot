@@ -1,6 +1,6 @@
 import { Fragment, useState, useRef, useEffect, useCallback } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Sparkles, Send, Check, Loader2, RotateCw, ChevronRight, ArrowRight } from 'lucide-react'
+import { Sparkles, Send, Check, Loader2, RotateCw, ChevronRight, ArrowRight, X } from 'lucide-react'
 import { api, type Business, type SalesPendingAction, type SalesConfirmation, type SalesSlotOffer } from '../../api/client'
 import { AirFrame } from './AirFrame'
 
@@ -190,11 +190,16 @@ function ConfirmationCard({ action, busy, onConfirm, onReject }: {
   )
 }
 
-function welcome(business: Business): ChatMessage {
+function welcome(business: Pick<Business, 'id' | 'name'>): ChatMessage {
   return { id: 'welcome', role: 'ai', text: `Здравствуйте! Помогу подобрать услугу в «${business.name}» и найти удобное время. Что вас интересует?` }
 }
 
-function SalesThread({ business }: { business: Business }) {
+export function SalesThread({ business, embedded = false, onClose }: {
+  business: Pick<Business, 'id' | 'name'>
+  /** Окошко чата на странице записи: без ссылки «Обычная запись», есть кнопка закрытия. */
+  embedded?: boolean
+  onClose?: () => void
+}) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [pending, setPending] = useState<SalesPendingAction | null>(null)
   const [offer, setOffer] = useState<SalesSlotOffer | null>(null)
@@ -294,6 +299,7 @@ function SalesThread({ business }: { business: Business }) {
           <span className="bf-option-title">{business.name}</span>
           <span className="bf-biz-line">{mode === 'human' ? 'Диалог у оператора — ответ появится здесь' : 'Помощник по записи'}</span>
         </span>
+        {onClose && <button type="button" className="bf-chat-close" onClick={onClose} aria-label="Закрыть чат"><X /></button>}
       </div>
       <div className="bf-inner bf-chat-log" aria-live="polite">
         {messages.map(message => (
@@ -322,7 +328,7 @@ function SalesThread({ business }: { business: Business }) {
       <div className="bf-chat-bar">
         {error && <p className="bf-error" role="alert">{error}</p>}
         <div className="bf-chat-links">
-          <Link to={`/book/${business.id}`}>Обычная запись</Link>
+          {embedded ? <span /> : <Link to={`/book/${business.id}`}>Обычная запись</Link>}
           {mode === 'ai' && <button type="button" disabled={busy || !ready} onClick={() => void requestOperator()}>Позвать оператора</button>}
         </div>
         <form className="bf-chat-input" onSubmit={e => { e.preventDefault(); void send() }}>
