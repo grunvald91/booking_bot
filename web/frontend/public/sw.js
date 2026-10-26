@@ -1,4 +1,4 @@
-const CACHE_NAME = 'servgo-pwa-v1'
+const CACHE_NAME = 'servgo-pwa-v2'
 const APP_SHELL = ['/', '/manifest.webmanifest', '/favicon.svg']
 
 self.addEventListener('install', (event) => {
@@ -69,7 +69,7 @@ self.addEventListener('push', (event) => {
     requireInteraction: payload.event_kind === 'prepayment_submitted',
     renotify: payload.event_kind === 'prepayment_submitted',
     body: payload.body || 'У вас есть обновление по записи',
-    icon: '/favicon.svg',
+    icon: '/icon-192.png',
     tag: payload.tag || 'servgo',
     data: {
       url: payload.url || '/my',
