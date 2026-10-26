@@ -903,7 +903,8 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
 
 /* Каскад: варианты, выбор на главной и слоты времени появляются по очереди */
 .bf-option-row, .bf-list > .bf-option, .bf-screen--bhome .bf-choice, .bf-time, .bf-time-skel, .bf-help {
-  animation: bfRise 0.42s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+  /* backwards, а не both: после появления элемент живёт обычными стилями (нажатие :active и т.п.) */
+  animation: bfRise 0.42s cubic-bezier(0.22, 0.8, 0.3, 1) backwards;
   animation-delay: calc(min(var(--i, 0), 11) * 45ms + 60ms);
 }
 .bf-time, .bf-time-skel { animation-duration: 0.3s; animation-delay: calc(min(var(--i, 0), 15) * 22ms); }
@@ -929,8 +930,10 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
 
 /* Отклик на выбор: «вспышка» выбранного дня и времени */
 .bf-day.selected { animation: bfPick 0.38s cubic-bezier(0.34, 1.56, 0.64, 1); }
-.bf-time.selected { animation: bfPick 0.34s cubic-bezier(0.34, 1.56, 0.64, 1); animation-delay: 0s; }
+/* Появление (bfRise) остаётся первым в списке: так при снятии выбора оно не проигрывается заново */
+.bf-time.selected { animation: bfRise 0.3s cubic-bezier(0.22, 0.8, 0.3, 1) backwards, bfPick 0.34s cubic-bezier(0.34, 1.56, 0.64, 1); animation-delay: calc(min(var(--i, 0), 15) * 22ms), 0s; }
 .bf-option.selected { animation: bfSelectSweep 0.5s ease-out; }
+.bf-list > .bf-option.selected { animation: bfRise 0.42s cubic-bezier(0.22, 0.8, 0.3, 1) backwards, bfSelectSweep 0.5s ease-out; animation-delay: calc(min(var(--i, 0), 11) * 45ms + 60ms), 0s; }
 @keyframes bfPick { 0% { transform: scale(0.82); } 100% { transform: scale(1); } }
 @keyframes bfSelectSweep { 0% { box-shadow: 0 0 0 0 #3c7fdf55; } 100% { box-shadow: 0 0 0 10px #3c7fdf00; } }
 .bf-chat-widget .bf-time.selected, .bf-chat-card .bf-time.selected { animation: none; }

@@ -1846,8 +1846,11 @@ function BookingPageInner() {
   }
 
   const chatReady = !!business && !loadError
-  // Прогресс: на первом экране 0, на шагах — доля пройденных, на финальном 100%.
-  const progressDone = screen === 'done' ? selectionSteps.length : stepIndex >= 0 ? stepIndex + 1 : 0
+  // Прогресс: на шагах — текущий шаг, на финальном 100%, на первом экране — сколько уже выбрано
+  // (чтобы при возврате на первый экран полоска не «обнулялась»).
+  const progressDone = screen === 'done'
+    ? selectionSteps.length
+    : stepIndex >= 0 ? stepIndex + 1 : (business ? Math.max(0, selectionSteps.indexOf(nextNeeded())) : 0)
   const progressPct = selectionSteps.length > 0 ? Math.round((progressDone / selectionSteps.length) * 100) : 0
 
   return createPortal(
