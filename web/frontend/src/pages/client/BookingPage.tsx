@@ -584,13 +584,16 @@ function BookingPageInner() {
     if (target === 'calendar' && (!servicesDone || !resourceDone)) target = nextNeeded()
     if ((target === 'extras' || target === 'review') && (!servicesDone || !resourceDone || !dateDone)) target = nextNeeded()
     if (target === screen) return
-    if (record) {
-      historyRef.current.push(screen)
-      // Отдельная запись в истории на каждый шаг: системный «назад»
-      // (Android, свайп iOS, Telegram) возвращает на прошлый шаг, а не уходит со страницы.
-      window.history.pushState({ ...(window.history.state ?? {}), bfStep: historyRef.current.length }, '')
-    }
+    if (record) pushStep()
     setScreen(target)
+  }
+
+  // Каждый шаг — отдельная запись и во внутренней истории, и в истории браузера: системный «назад»
+  // (Android, свайп iOS, Telegram) и кнопка «Назад» возвращают на прошлый шаг, а не уходят со страницы.
+  // Обе истории должны совпадать по длине — иначе «Назад» в какой-то момент уводит со страницы записи.
+  function pushStep() {
+    historyRef.current.push(screen)
+    window.history.pushState({ ...(window.history.state ?? {}), bfStep: historyRef.current.length }, '')
   }
 
   function back() {
@@ -627,15 +630,15 @@ function BookingPageInner() {
       if (step === 'services' && !sDone) return go('services')
       if (step === 'resource' && !rDone) return go('resource')
       if (step === 'calendar' && !dDone) {
-        historyRef.current.push(screen)
+        pushStep()
         return setScreen('calendar')
       }
       if (step === 'extras' && !extrasSeen) {
-        historyRef.current.push(screen)
+        pushStep()
         return setScreen('extras')
       }
     }
-    historyRef.current.push(screen)
+    pushStep()
     setScreen('review')
   }
 
@@ -844,8 +847,7 @@ function BookingPageInner() {
         setBookingError('Это время уже занято. Выберите другое время.')
         setSelectedTime(null)
         setSlotsKey('')
-        historyRef.current.push(screen)
-        window.history.pushState({ ...(window.history.state ?? {}), bfStep: historyRef.current.length }, '')
+        pushStep()
         setScreen('calendar')
       } else {
         setBookingError('Не удалось создать запись. Попробуйте ещё раз.')
@@ -1017,6 +1019,10 @@ function BookingPageInner() {
               </button>
             ))}
           </nav>
+          {/* На компьютере на первом экране — тот же заметный «Напишите» вместо плавающей кнопки */}
+          {isDesktop && business && (
+            <button type="button" className="bf-help bf-help--home" onClick={openChat}>{helpInner}</button>
+          )}
         </div>
         {ready ? (
           <div className="bf-bottombar">
@@ -1040,15 +1046,30 @@ function BookingPageInner() {
     return digits.replace(/\D/g, '').length >= 5 ? `tel:${digits}` : ''
   })()
 
+  // Подсказка на шаге услуг: не можете выбрать — напишите в чат.
+  const helpInner = (
+    <>
+      <span className="bf-help-icon" aria-hidden="true"><MessageCircle /></span>
+      <span className="bf-help-text">
+        <strong>Не можете выбрать? Напишите</strong>
+        <span>Подскажем в чате, какая услуга вам подходит</span>
+      </span>
+      <ArrowRight className="bf-help-arrow" aria-hidden="true" />
+    </>
+  )
+
   function renderServices() {
     const total = selectedServices.reduce((sum, s) => sum + (s.price ?? 0), 0)
     const first = selectedServices[0]
     return (
       <section className="bf-screen" aria-label="Выбор услуги">
         <div className="bf-inside-nav bf-inside-nav--call">
-          {callHref && (
+          {/* На компьютере сверху — «Напишите в чат» (телефон есть в карточке справа), на телефоне — звонок */}
+          {isDesktop && business ? (
+            <button type="button" className="bf-help" onClick={openChat}>{helpInner}</button>
+          ) : callHref && (
             <a className="bf-call" href={callHref} aria-label={`Позвонить: ${business?.phone}`}>
-              <Phone /><span>Не знаете, что выбрать? <strong>{business?.phone}</strong></span>
+              <Phone /><span>Позвонить <strong>{business?.phone}</strong></span>
             </a>
           )}
           {stepCount}
@@ -1056,6 +1077,9 @@ function BookingPageInner() {
         <div className="bf-inner">
           <h2 className="bf-h2">{choosePhrase('Выберите', labels.service)}</h2>
           <p className="bf-intro">{multiService ? 'Можно выбрать несколько — затем продолжите' : 'Нажмите на вариант — сразу перейдём дальше'}</p>
+          {business && !isDesktop && (
+            <Link to={`/chat?business_id=${business.id}`} className="bf-help">{helpInner}</Link>
+          )}
           <div className="bf-stage" aria-live="polite">
             <div className="bf-stage-kicker">{business?.name} · {labels.service}</div>
             <div className="bf-stage-feature">
@@ -1356,7 +1380,7 @@ function BookingPageInner() {
         <div className="bf-bottombar">
           <div className="bf-summary">{selectedAddons.size > 0 ? `Добавлено: ${selectedAddons.size}` : 'Можно пропустить'}{totalPrice > 0 ? ` · итого ${formatPrice(totalPrice)}` : ''}</div>
           {backButton}
-          <button type="button" className="bf-primary" onClick={() => { setExtrasSeen(true); historyRef.current.push(screen); setScreen('review') }}>Продолжить <ArrowRight /></button>
+          <button type="button" className="bf-primary" onClick={() => { setExtrasSeen(true); pushStep(); setScreen('review') }}>Продолжить <ArrowRight /></button>
         </div>
       </section>
     )
@@ -1769,26 +1793,26 @@ function BookingPageInner() {
 
   return createPortal(
     <div className="bf-root">
-      <main className={`bf-device${chatReady && !isDesktop ? ' bf-has-fab' : ''}`} aria-label="Онлайн-запись ServGo">
+      <main className={`bf-device bf-on-${screen}${chatReady && !isDesktop ? ' bf-has-fab' : ''}${showAside ? ' bf-aside-on' : ''}`} aria-label="Онлайн-запись ServGo">
         <header className="bf-topbar">
           <Link to="/" className="bf-brand" aria-label="ServGo"><Logo size={28} /></Link>
           <div className="bf-spacer" />
-          {chatReady && isDesktop && (
-            <button type="button" className={`bf-chat-top${chatOpen ? ' is-open' : ''}`} onClick={() => (chatOpen ? setChatOpen(false) : openChat())} aria-expanded={chatOpen} aria-label={chatOpen ? 'Закрыть чат' : 'Открыть чат с помощником'}>
-              <MessageCircle /><span>Чат с помощником</span>
-            </button>
-          )}
           <Link to={profileHref} className="bf-user" title="Личный кабинет" aria-label="Личный кабинет"><User /></Link>
         </header>
         <div className={`bf-body${showAside ? ' has-aside' : ''}`}>
           <div key={screen} className="bf-body-main" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{content}</div>
           {showAside && renderAside()}
         </div>
-        {/* На телефоне — плавающая кнопка и полноэкранный чат; на компьютере — кнопка в шапке и окошко. */}
+        {/* Плавающая кнопка «Чат»: на телефоне — полноэкранный чат, на компьютере — небольшое окошко. */}
         {chatReady && !isDesktop && (
           <Link to={`/chat?business_id=${business!.id}`} className="bf-chat-fab" aria-label="Открыть чат с помощником">
             <MessageCircle /><span>Чат</span>
           </Link>
+        )}
+        {chatReady && isDesktop && !chatOpen && (
+          <button type="button" className="bf-chat-fab" onClick={openChat} aria-label="Открыть чат с помощником">
+            <MessageCircle /><span>Чат</span>
+          </button>
         )}
       </main>
       {chatReady && isDesktop && chatEverOpened && (
