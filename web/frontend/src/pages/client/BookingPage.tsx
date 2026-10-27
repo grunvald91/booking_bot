@@ -255,6 +255,40 @@ function useIsDesktop() {
   return matches
 }
 
+function prefersReducedMotion() {
+  try { return typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false }
+}
+
+// Лёгкая вибрация-отклик на телефоне (где поддерживается; при «уменьшении движения» — выключена).
+function haptic(pattern: number | number[]) {
+  try {
+    if (!prefersReducedMotion() && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate(pattern)
+  } catch { /* noop */ }
+}
+
+// Цена, которая «досчитывается» до нового значения (fromZero — при первом показе считает с нуля).
+function CountPrice({ value, fromZero = false }: { value: number; fromZero?: boolean }) {
+  const [shown, setShown] = useState(() => (fromZero && !prefersReducedMotion() ? 0 : value))
+  const shownRef = useRef(shown)
+  useEffect(() => {
+    const from = shownRef.current
+    if (from === value) return
+    const dur = prefersReducedMotion() ? 0 : Math.min(900, 420 + Math.abs(value - from) / 40)
+    const t0 = performance.now()
+    let raf = 0
+    const tick = (now: number) => {
+      const p = dur > 0 ? Math.min(1, (now - t0) / dur) : 1
+      const v = p >= 1 ? value : Math.round(from + (value - from) * (1 - Math.pow(1 - p, 3)))
+      shownRef.current = v
+      setShown(v)
+      if (p < 1) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [value])
+  return <span className="bf-count">{formatPrice(shown)}</span>
+}
+
 // Порядок экранов — чтобы понимать, куда идёт переход: вперёд (вход справа) или назад (слева).
 const SCREEN_RANK: Record<string, number> = { home: 0, services: 1, resource: 2, calendar: 3, extras: 4, review: 5, prepay: 6, done: 7 }
 
@@ -324,6 +358,8 @@ function BookingPageInner() {
 
   // Navigation
   const [screen, setScreen] = useState<Screen>('home')
+  // Двойной «пульс» при успешной записи
+  useEffect(() => { if (screen === 'done') haptic([18, 60, 30]) }, [screen])
   const historyRef = useRef<Screen[]>([])
   const [track, setTrack] = useState<{ screen: Screen; prev: Screen }>({ screen: 'home', prev: 'home' })
   if (track.screen !== screen) setTrack({ screen, prev: track.screen })
@@ -1027,7 +1063,15 @@ function BookingPageInner() {
     const ready = nextNeeded() === 'review'
     const hasAbout = !!(business?.description || business?.directions || businessPhotos.length > 1)
     return (
-      <section className="bf-screen bf-screen--bhome" aria-label="Главная страница записи">
+      <section
+        className="bf-screen bf-screen--bhome"
+        aria-label="Главная страница записи"
+        onScroll={(e) => {
+          // лёгкий параллакс: фото сдвигается медленнее, чем страница
+          const hero = e.currentTarget.querySelector<HTMLElement>('.bf-hero')
+          if (hero) hero.style.setProperty('--par', String(Math.min(e.currentTarget.scrollTop, 260)))
+        }}
+      >
         <div className="bf-hero">
           {businessCover ? <img src={photoSrc(businessCover)} alt={business?.name || ''} /> : <HeroArt />}
           <div className="bf-hero-fade" />
@@ -1043,6 +1087,11 @@ function BookingPageInner() {
               </>
             )}
           </div>
+          {business && !loadError && !isDesktop && (
+            <Link to={`/chat?business_id=${business.id}`} className="bf-panel-chat" aria-label="Открыть чат с помощником">
+              <MessageCircle /><span>Чат</span>
+            </Link>
+          )}
           <h1 className="bf-h1">{business?.name}</h1>
           {business?.address ? (
             <a className="bf-address" href={mapsHref!} target="_blank" rel="noopener noreferrer" style={{ display: 'block', textDecoration: 'none' }}>{business.address}</a>
@@ -1491,7 +1540,7 @@ function BookingPageInner() {
               </div>
             )}
             {totalPrice > 0 && (
-              <div className="bf-total"><span>Стоимость</span><strong>{priceLoading ? '…' : formatPrice(totalPrice)}</strong></div>
+              <div className="bf-total"><span>Стоимость</span><strong>{priceLoading ? '…' : <CountPrice value={totalPrice} fromZero />}</strong></div>
             )}
           </div>
 
@@ -1621,7 +1670,7 @@ function BookingPageInner() {
             <span className="bf-pay-hero-icon" aria-hidden="true"><CreditCard /></span>
             <div>
               <span className="bf-pay-caption">Предоплата{prepaymentPercent < 100 ? ` ${prepaymentPercent}%` : ''}</span>
-              <div className="bf-pay-big">{formatPrice(prepaymentAmount)}</div>
+              <div className="bf-pay-big"><CountPrice value={prepaymentAmount} fromZero /></div>
             </div>
           </div>
           <div className="bf-receipt">
@@ -1726,7 +1775,7 @@ function BookingPageInner() {
               {business?.directions && (
                 <div className="bf-review-row"><div><div className="bf-review-label">Как добраться</div><div className="bf-review-value" style={{ whiteSpace: 'pre-line', fontSize: 12 }}>{linkifyText(business.directions)}</div></div></div>
               )}
-              {totalPrice > 0 && <div className="bf-total"><span>Итого</span><strong>{formatPrice(totalPrice)}</strong></div>}
+              {totalPrice > 0 && <div className="bf-total"><span>Итого</span><strong><CountPrice value={totalPrice} fromZero /></strong></div>}
             </div>
             <div className="bf-result-actions">
               <NotificationSetup notifyToken={createdNotifyToken} />
@@ -1834,8 +1883,8 @@ function BookingPageInner() {
         {(totalDuration > 0 || totalPrice > 0 || priceLoading) && (
           <div className="bf-aside-total">
             {totalDuration > 0 && <div className="bf-aside-line"><span>Длительность</span><strong>{formatDuration(totalDuration)}</strong></div>}
-            {(totalPrice > 0 || priceLoading) && <div className="bf-aside-line is-big"><span>Стоимость</span><strong>{priceLoading ? '…' : formatPrice(totalPrice)}</strong></div>}
-            {prepaymentNeeded && <div className="bf-aside-line"><span>Предоплата{prepaymentPercent < 100 ? ` ${prepaymentPercent}%` : ''}</span><strong>{formatPrice(estimatedPrepayment)}</strong></div>}
+            {(totalPrice > 0 || priceLoading) && <div className="bf-aside-line is-big"><span>Стоимость</span><strong>{priceLoading ? '…' : <CountPrice value={totalPrice} />}</strong></div>}
+            {prepaymentNeeded && <div className="bf-aside-line"><span>Предоплата{prepaymentPercent < 100 ? ` ${prepaymentPercent}%` : ''}</span><strong><CountPrice value={estimatedPrepayment} /></strong></div>}
           </div>
         )}
         {callHref && (
@@ -1855,7 +1904,7 @@ function BookingPageInner() {
 
   return createPortal(
     <div className="bf-root">
-      <main className={`bf-device bf-on-${screen}${chatReady && !isDesktop ? ' bf-has-fab' : ''}${showAside ? ' bf-aside-on' : ''}`} aria-label="Онлайн-запись ServGo">
+      <main className={`bf-device bf-on-${screen}${chatReady && !isDesktop ? ' bf-has-fab' : ''}${showAside ? ' bf-aside-on' : ''}`} aria-label="Онлайн-запись ServGo" onClickCapture={(e) => { if ((e.target as HTMLElement).closest?.('.bf-option, .bf-time, .bf-day, .bf-choice, .bf-primary')) haptic(8) }}>
         <header className="bf-topbar">
           <Link to="/" className="bf-brand" aria-label="ServGo"><Logo size={28} /></Link>
           <div className="bf-spacer" />
