@@ -33,7 +33,7 @@ jobs:
                       raise paramiko.SSHException('Host key mismatch')
                   client.get_host_keys().add(hostname,key.get_name(),key)
           if not os.environ.get('SERVER_PASSWORD'):raise RuntimeError('SSH secret unavailable')
-          source=pathlib.Path('scripts/autotochka_staff.py').read_bytes()
+          source=pathlib.Path('scripts/client_phone_change.py').read_bytes()
           payload=base64.b64encode(source).decode('ascii')
           ssh=None
           for attempt in range(3):
