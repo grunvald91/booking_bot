@@ -1066,10 +1066,18 @@ function BookingPageInner() {
       <section
         className="bf-screen bf-screen--bhome"
         aria-label="Главная страница записи"
-        onScroll={(e) => {
-          // лёгкий параллакс: фото сдвигается медленнее, чем страница
+        onPointerMove={(e) => {
+          // лёгкий параллакс за курсором (только мышь; на телефоне фото просто плавно «наезжает»)
+          if (e.pointerType !== 'mouse') return
           const hero = e.currentTarget.querySelector<HTMLElement>('.bf-hero')
-          if (hero) hero.style.setProperty('--par', String(Math.min(e.currentTarget.scrollTop, 260)))
+          if (!hero) return
+          const r = e.currentTarget.getBoundingClientRect()
+          hero.style.setProperty('--px', (((e.clientX - r.left) / r.width) * 2 - 1).toFixed(3))
+          hero.style.setProperty('--py', (((e.clientY - r.top) / r.height) * 2 - 1).toFixed(3))
+        }}
+        onPointerLeave={(e) => {
+          const hero = e.currentTarget.querySelector<HTMLElement>('.bf-hero')
+          if (hero) { hero.style.setProperty('--px', '0'); hero.style.setProperty('--py', '0') }
         }}
       >
         <div className="bf-hero">
