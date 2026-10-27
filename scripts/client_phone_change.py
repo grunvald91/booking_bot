@@ -5,6 +5,7 @@
 """
 import argparse
 import asyncio
+import os
 from datetime import date
 
 BUSINESS_ID = 16
@@ -44,8 +45,26 @@ async def run(apply: bool) -> None:
             total = (await db.execute(select(func.count()).select_from(Booking).where(Booking.client_id == user.id))).scalar_one()
             print(f'match booking={booking.id}; client_id={user.id}; client_total_bookings={total}; '
                   f'telegram_linked={bool(user.telegram_id and user.telegram_id > 0)}')
-        if apply:
-            raise RuntimeError('apply is not implemented in this version')
+        if not apply:
+            return
+        # ── Запись: строго один ожидаемый клиент ──
+        if len(matches) != 1:
+            raise RuntimeError('Refusing: expected exactly one matching booking')
+        booking, user = matches[0]
+        total = (await db.execute(select(func.count()).select_from(Booking).where(Booking.client_id == user.id))).scalar_one()
+        if (booking.id, user.id) != (3045, 2552) or total != 1 or (user.telegram_id and user.telegram_id > 0):
+            raise RuntimeError('Refusing: matched booking/client differs from the one verified by the owner')
+        digits = ''.join(ch for ch in os.environ.get('NEW_PHONE', '') if ch.isdigit())
+        if len(digits) != 11 or digits[0] not in '78':
+            raise RuntimeError('Refusing: NEW_PHONE must be an 11-digit Russian number')
+        old = user.phone or ''
+        prefix = '+7' if old.startswith('+7') else '7' if old.startswith('7') else '8' if old.startswith('8') else '+7'
+        new_phone = prefix + digits[1:]
+        clash = (await db.execute(select(func.count()).select_from(User).where(User.phone == new_phone, User.id != user.id))).scalar_one()
+        user.phone = new_phone
+        await db.commit()
+        print(f'APPLIED: client_id={user.id}; old_phone={mask_phone(old)}; new_phone={mask_phone(new_phone)}; '
+              f'other_users_with_same_phone={clash}; booking={booking.id}')
 
 
 if __name__ == '__main__':

@@ -6,6 +6,11 @@ on:
         description: 'Write changes to business 16 (false = read-only inspect)'
         required: true
         type: boolean
+      new_phone:
+        description: 'New phone (only for apply)'
+        required: false
+        type: string
+        default: ''
         default: false
 permissions:
   contents: read
@@ -16,6 +21,7 @@ jobs:
     env:
       SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
       APPLY: ${{ inputs.apply }}
+      NEW_PHONE: ${{ inputs.new_phone }}
     steps:
       - uses: actions/checkout@v4
       - name: Install Paramiko
@@ -48,7 +54,7 @@ jobs:
                   if attempt==2:raise
                   time.sleep(3)
           def execute(source_code,apply=False):
-              command="cd /opt/booking_bot && ./venv/bin/python -c "+shlex.quote(source_code)
+              command="cd /opt/booking_bot && NEW_PHONE="+shlex.quote(os.environ.get('NEW_PHONE',''))+" ./venv/bin/python -c "+shlex.quote(source_code)
               if apply:command+=' --apply'
               _,out,err=ssh.exec_command(command,timeout=75)
               stdout=out.read().decode('utf-8','replace')
