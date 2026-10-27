@@ -6,12 +6,12 @@ on:
         description: 'Write changes to business 16 (false = read-only inspect)'
         required: true
         type: boolean
+        default: false
       new_phone:
         description: 'New phone (only for apply)'
         required: false
         type: string
         default: ''
-        default: false
 permissions:
   contents: read
 jobs:
