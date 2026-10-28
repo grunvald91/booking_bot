@@ -941,10 +941,11 @@ async def blog_sitemap_handler(request: web.Request) -> web.Response:
     """Dedicated sitemap, including when the blog is served on servgo.ru."""
     from xml.sax.saxutils import escape
     from webapp.blog_content import BLOG_ARTICLES, BLOG_PUBLIC_ORIGIN
+    from webapp.blog_feed import all_articles
 
     base = escape(BLOG_PUBLIC_ORIGIN)
     rows = [f'<url><loc>{base}/blog</loc></url>']
-    for article in BLOG_ARTICLES:
+    for article in await all_articles(BLOG_ARTICLES):
         rows.append(
             f'<url><loc>{base}/blog/{article["slug"]}</loc>'
             f'<lastmod>{article["updated"]}</lastmod></url>'
@@ -961,27 +962,37 @@ async def blog_sitemap_handler(request: web.Request) -> web.Response:
 async def blog_handler(request: web.Request) -> web.Response:
     """Server-rendered, indexable editorial blog and individual articles."""
     from webapp.blog_content import (
-        BLOG_ARTICLES, BLOG_ARTICLES_BY_SLUG, BLOG_CATEGORIES,
+        BLOG_ARTICLES, BLOG_CATEGORIES,
         BLOG_PUBLIC_ORIGIN, filter_blog_articles,
     )
 
+    from webapp.blog_feed import all_articles
+
+    # The blog lives on one host; the old promo address permanently forwards to it.
+    request_host = request.host.split(":")[0]
+    canonical_host = BLOG_PUBLIC_ORIGIN.split("://", 1)[-1]
+    if request_host == "promo.servgo.ru" and canonical_host != request_host:
+        raise web.HTTPMovedPermanently(BLOG_PUBLIC_ORIGIN + request.path_qs)
+
+    everything = await all_articles(BLOG_ARTICLES)
+    by_slug = {item["slug"]: item for item in everything}
     slug = request.match_info.get("article_slug")
     article = None
     query = ""
     topic = "all"
     if slug is not None:
-        article = BLOG_ARTICLES_BY_SLUG.get(slug)
+        article = by_slug.get(slug)
         if article is None:
             raise web.HTTPNotFound()
         articles = []
         # Prefer the same topic while keeping related links useful.
         related = [
-            item for item in BLOG_ARTICLES
+            item for item in everything
             if item["slug"] != slug and item["topic"] == article["topic"]
         ][:2]
         if len(related) < 2:
             related += [
-                item for item in BLOG_ARTICLES
+                item for item in everything
                 if item["slug"] != slug and item not in related
             ][:2 - len(related)]
         canonical = f"{BLOG_PUBLIC_ORIGIN}/blog/{article['slug']}"
@@ -989,7 +1000,7 @@ async def blog_handler(request: web.Request) -> web.Response:
         query = request.query.get("q", "").strip()[:120]
         requested_topic = request.query.get("topic", "")
         topic = requested_topic if requested_topic in dict(BLOG_CATEGORIES) else "all"
-        articles = filter_blog_articles(topic, query)
+        articles = filter_blog_articles(topic, query, everything)
         related = []
         canonical = f"{BLOG_PUBLIC_ORIGIN}/blog"
 
@@ -1100,6 +1111,7 @@ async def sitemap_handler(request: web.Request) -> web.Response:
 
 async def robots_handler(request: web.Request) -> web.Response:
     """Static /robots.txt — allow everything except internal API/auth."""
+    from webapp.blog_content import BLOG_PUBLIC_ORIGIN
     text = (
         "User-agent: *\n"
         "Allow: /\n"
@@ -1107,8 +1119,29 @@ async def robots_handler(request: web.Request) -> web.Response:
         "Disallow: /auth/\n"
         "\n"
         "Sitemap: https://promo.servgo.ru/sitemap.xml\n"
+        f"Sitemap: {BLOG_PUBLIC_ORIGIN}/blog/sitemap.xml\n"
     )
     return web.Response(text=text, content_type='text/plain')
+
+
+async def llms_txt_handler(request: web.Request) -> web.Response:
+    """/llms.txt — a short, honest map of the blog for AI assistants and search agents."""
+    from webapp.blog_content import BLOG_ARTICLES, BLOG_PUBLIC_ORIGIN
+    from webapp.blog_feed import all_articles
+
+    lines = [
+        "# ServGo",
+        "",
+        "> ServGo — платформа для малого бизнеса: ИИ-маркетинг и онлайн-запись клиентов.",
+        "",
+        "## Блог",
+        "",
+    ]
+    for item in await all_articles(BLOG_ARTICLES):
+        summary = (item.get("direct_answer") or item["description"]).replace("\n", " ")[:200]
+        lines.append(f"- [{item['title']}]({BLOG_PUBLIC_ORIGIN}/blog/{item['slug']}): {summary}")
+    lines += ["", f"Карта сайта: {BLOG_PUBLIC_ORIGIN}/blog/sitemap.xml", ""]
+    return web.Response(text="\n".join(lines), content_type="text/plain", charset="utf-8")
 
 
 async def calendar_handler(request: web.Request) -> web.Response:
@@ -3626,6 +3659,7 @@ def create_webapp() -> web.Application:
     # serve_niche_landing поймает /sitemap.xml и /robots.txt и вернёт 404.
     app.router.add_get('/sitemap.xml', sitemap_handler)
     app.router.add_get('/robots.txt', robots_handler)
+    app.router.add_get('/llms.txt', llms_txt_handler)
 
     # Публичная дорожная карта — до catch-all /{slug}.
     app.router.add_get('/roadmap', serve_roadmap)

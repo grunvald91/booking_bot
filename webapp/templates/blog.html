@@ -18,7 +18,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
     <link rel="stylesheet" href="/static/css/landing.css?v=12">
-    <link rel="stylesheet" href="/static/css/blog.css?v=1">
+    <link rel="stylesheet" href="/static/css/blog.css?v=2">
     {% if article %}
     <script type="application/ld+json">
     {
@@ -26,14 +26,25 @@
         "@type": "BlogPosting",
         "headline": {{ article.title | tojson }},
         "description": {{ article.description | tojson }},
-        "image": {{ (origin + "/static/blog/" + article.slug + ".svg") | tojson }},
+        {% if not article.from_feed %}"image": {{ (origin + "/static/blog/" + article.slug + ".svg") | tojson }},{% endif %}
         "mainEntityOfPage": {"@type":"WebPage","@id":{{ canonical | tojson }}},
+        {% if article.published %}"datePublished": {{ article.published | tojson }},{% endif %}
         "dateModified": {{ article.updated | tojson }},
         "author": {"@type":"Organization","name":"ServGo","url":{{ origin | tojson }}},
         "publisher": {"@type":"Organization","name":"ServGo","url":{{ origin | tojson }}},
         "inLanguage": "ru-RU"
     }
     </script>
+    {% if article.faq %}
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "inLanguage": "ru-RU",
+        "mainEntity": [{% for item in article.faq %}{"@type":"Question","name":{{ item.question | tojson }},"acceptedAnswer":{"@type":"Answer","text":{{ item.answer | tojson }}}}{% if not loop.last %},{% endif %}{% endfor %}]
+    }
+    </script>
+    {% endif %}
     {% else %}
     <script type="application/ld+json">
     {
@@ -117,8 +128,9 @@
                             <span class="blog-text-link">Читать статью <span aria-hidden="true">→</span></span>
                         </div>
                         <div class="blog-feature-art">
-                            <img src="/static/blog/{{ featured.slug }}.svg" width="1200" height="650"
-                                 alt="{{ featured.image_alt }}" loading="eager" decoding="async">
+                            {% if featured.from_feed %}<span class="blog-art-text" aria-hidden="true">{{ featured.category }}</span>
+                            {% else %}<img src="/static/blog/{{ featured.slug }}.svg" width="1200" height="650"
+                                 alt="{{ featured.image_alt }}" loading="eager" decoding="async">{% endif %}
                         </div>
                     </a>
                     {% if articles | length > 1 %}
@@ -126,8 +138,9 @@
                         {% for post in articles[1:] %}
                         <a class="blog-card" href="/blog/{{ post.slug }}">
                             <div class="blog-card-art">
-                                <img src="/static/blog/{{ post.slug }}.svg" width="1200" height="650"
-                                     alt="{{ post.image_alt }}" loading="lazy" decoding="async">
+                                {% if post.from_feed %}<span class="blog-art-text" aria-hidden="true">{{ post.category }}</span>
+                                {% else %}<img src="/static/blog/{{ post.slug }}.svg" width="1200" height="650"
+                                     alt="{{ post.image_alt }}" loading="lazy" decoding="async">{% endif %}
                             </div>
                             <div class="blog-card-body">
                                 <span class="blog-kicker">{{ post.category }}</span>
@@ -175,11 +188,17 @@
         </header>
         <div class="blog-wrap blog-reading-layout">
             <article class="blog-article-body" aria-label="{{ article.title }}">
-                <figure class="blog-article-figure">
+                {% if not article.from_feed %}<figure class="blog-article-figure">
                     <img src="/static/blog/{{ article.slug }}.svg" width="1200" height="650"
                          alt="{{ article.image_alt }}" decoding="async" fetchpriority="high">
                     <figcaption>{{ article.image_caption }}</figcaption>
-                </figure>
+                </figure>{% endif %}
+                {% if article.direct_answer %}
+                <aside class="blog-takeaways" aria-labelledby="direct-answer-title">
+                    <h2 id="direct-answer-title">Коротко</h2>
+                    <p>{{ article.direct_answer }}</p>
+                </aside>
+                {% endif %}
                 {% if article.summary %}
                 <aside class="blog-takeaways" aria-labelledby="takeaways-title">
                     <h2 id="takeaways-title">Коротко, если нет времени читать</h2>
@@ -229,6 +248,16 @@
                     </section>
                     {% if not loop.last %}<div class="blog-divider" aria-hidden="true"></div>{% endif %}
                 {% endfor %}
+                {% if article.closing %}<p>{{ article.closing }}</p>{% endif %}
+                {% if article.faq %}
+                <section aria-labelledby="faq-heading" class="blog-faq">
+                    <h2 id="faq-heading">Частые вопросы</h2>
+                    {% for item in article.faq %}
+                    <h3>{{ item.question }}</h3>
+                    <p>{{ item.answer }}</p>
+                    {% endfor %}
+                </section>
+                {% endif %}
                 {% if article.pitfall %}
                 <aside class="blog-pitfall">
                     <h2>Типичная ошибка</h2><p>{{ article.pitfall }}</p>
@@ -263,7 +292,7 @@
                 <div class="blog-cards">
                 {% for post in related %}
                     <a class="blog-card" href="/blog/{{ post.slug }}">
-                        <div class="blog-card-art"><img src="/static/blog/{{ post.slug }}.svg" width="1200" height="650" alt="{{ post.image_alt }}" loading="lazy" decoding="async"></div>
+                        <div class="blog-card-art">{% if post.from_feed %}<span class="blog-art-text" aria-hidden="true">{{ post.category }}</span>{% else %}<img src="/static/blog/{{ post.slug }}.svg" width="1200" height="650" alt="{{ post.image_alt }}" loading="lazy" decoding="async">{% endif %}</div>
                         <div class="blog-card-body"><span class="blog-kicker">{{ post.category }}</span><h3>{{ post.title }}</h3><p>{{ post.description }}</p><span class="blog-text-link">Читать <span aria-hidden="true">→</span></span></div>
                     </a>
                 {% endfor %}

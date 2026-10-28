@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 
-BLOG_PUBLIC_ORIGIN = os.getenv("BLOG_PUBLIC_ORIGIN", "https://promo.servgo.ru").rstrip("/")
+BLOG_PUBLIC_ORIGIN = os.getenv("BLOG_PUBLIC_ORIGIN", "https://servgo.ru").rstrip("/")
 BLOG_CATEGORIES = (
     ("all", "Все темы"),
     ("marketing", "ИИ и маркетинг"),
@@ -213,14 +213,14 @@ BLOG_ARTICLES = tuple(
 BLOG_ARTICLES_BY_SLUG = {article["slug"]: article for article in BLOG_ARTICLES}
 
 
-def filter_blog_articles(topic: str = "", query: str = "") -> list[dict]:
+def filter_blog_articles(topic: str = "", query: str = "", articles=None) -> list[dict]:
     """Stable, side-effect-free filtering; unknown topics display all articles."""
     topics = {item[0] for item in BLOG_CATEGORIES}
     selected = topic if topic in topics else "all"
     search = query.casefold().strip()
     return [
         article
-        for article in BLOG_ARTICLES
+        for article in (BLOG_ARTICLES if articles is None else articles)
         if (selected == "all" or article["topic"] == selected)
         and (not search or search in (
             article["title"] + " " + article["description"] + " "
