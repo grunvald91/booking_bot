@@ -1,0 +1,22 @@
+name: Diagnose ServGo mail bounces (read-only)
+# Read-only: reads the mail log, queue and bounce messages; masks recipient addresses; changes nothing.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ ops/mail-bounce-diagnose ]
+permissions:
+  contents: read
+concurrency:
+  group: servgo-mail-bounce-diagnose
+  cancel-in-progress: false
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Inspect mail log, queue and bounces
+        run: python scripts/inspect_mail_bounces.py
