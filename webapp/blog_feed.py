@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -29,7 +30,8 @@ _MONTHS = (
 )
 _TOPIC = {"Советы": "marketing", "Сравнение и выбор": "growth", "Запуск": "booking"}
 
-_cache: dict = {"at": 0.0, "articles": []}
+_cache: dict = {"at": 0.0, "articles": [], "details": {}}
+_lock = asyncio.Lock()
 
 
 def _date(value: str) -> tuple[str, str]:
@@ -83,40 +85,53 @@ def normalize(raw: dict) -> dict | None:
 
 
 async def _download(session: aiohttp.ClientSession) -> list[dict]:
+    """Список берётся целиком, а полный текст — только для новых или изменённых статей."""
     async with session.get(GROWTH_FEED_BASE) as response:
         response.raise_for_status()
         items = (await response.json()).get("articles", [])
+    known: dict = _cache["details"]
+    fresh: dict = {}
     articles = []
     for item in items:
         slug = str(item.get("slug", ""))
         if not _SLUG.match(slug):
             continue
-        async with session.get(f"{GROWTH_FEED_BASE}/{slug}") as response:
-            if response.status != 200:
-                continue
-            article = normalize(await response.json())
+        version = (slug, str(item.get("updated_at")))
+        article = known.get(version)
+        if article is None:
+            async with session.get(f"{GROWTH_FEED_BASE}/{slug}") as response:
+                if response.status != 200:
+                    continue
+                article = normalize(await response.json())
         if article:
+            fresh[version] = article
             articles.append(article)
+    _cache["details"] = fresh
     return articles
 
 
 async def feed_articles(*, now: float | None = None) -> list[dict]:
     """Опубликованные платформой статьи; при сбое — последняя удачная копия или пусто."""
+    if not GROWTH_FEED_BASE:  # лента выключена (например, в тестах)
+        return []
     moment = time.monotonic() if now is None else now
     if _cache["at"] and moment - _cache["at"] < FEED_TTL_SECONDS:
         return list(_cache["articles"])
-    try:
-        timeout = aiohttp.ClientTimeout(total=FEED_TIMEOUT_SECONDS)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            _cache["articles"] = await _download(session)
-    except Exception as exc:  # лента не должна ронять блог
-        logger.warning("blog feed unavailable: %s", type(exc).__name__)
-    _cache["at"] = moment
+    async with _lock:  # одновременные посетители не скачивают ленту по нескольку раз
+        if _cache["at"] and moment - _cache["at"] < FEED_TTL_SECONDS:
+            return list(_cache["articles"])
+        try:
+            timeout = aiohttp.ClientTimeout(total=FEED_TIMEOUT_SECONDS)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                _cache["articles"] = await _download(session)
+        except Exception as exc:  # лента не должна ронять блог
+            logger.warning("blog feed unavailable: %s", type(exc).__name__)
+        _cache["at"] = moment
     return list(_cache["articles"])
 
 
 def reset_cache() -> None:
-    _cache.update(at=0.0, articles=[])
+    _cache.update(at=0.0, articles=[], details={})
 
 
 async def all_articles(builtin: tuple[dict, ...]) -> list[dict]:

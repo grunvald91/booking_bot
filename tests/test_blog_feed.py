@@ -74,11 +74,13 @@ class BlogFeedPagesTest(unittest.IsolatedAsyncioTestCase):
     async def test_builtin_articles_keep_working_when_feed_down(self):
         self.patch.stop()
         blog_feed.reset_cache()
-        with patch('webapp.blog_feed._download', side_effect=OSError):
+        with patch('webapp.blog_feed.GROWTH_FEED_BASE', 'https://feed.test/articles'), \
+                patch('webapp.blog_feed._download', side_effect=OSError) as download:
             async with TestClient(TestServer(create_webapp())) as c:
                 res = await c.get('/blog')
         self.patch.start()
         self.assertEqual(res.status, 200)
+        self.assertEqual(download.call_count, 1)
 
     async def test_unknown_slug_404(self):
         async with TestClient(TestServer(create_webapp())) as c:
@@ -89,6 +91,41 @@ class BlogFeedPagesTest(unittest.IsolatedAsyncioTestCase):
             res = await c.get('/blog/kak-vybrat-crm', headers={'Host': 'promo.servgo.ru'}, allow_redirects=False)
         self.assertEqual(res.status, 301)
         self.assertEqual(res.headers['Location'], 'https://servgo.ru/blog/kak-vybrat-crm')
+
+
+class IncrementalFeedTest(unittest.IsolatedAsyncioTestCase):
+    """Полный текст скачивается только для новых или изменённых статей."""
+
+    async def test_unchanged_articles_are_not_downloaded_again(self):
+        calls = []
+
+        class Resp:
+            def __init__(self, body):
+                self.body, self.status = body, 200
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *a):
+                return False
+            def raise_for_status(self):
+                pass
+            async def json(self):
+                return self.body
+
+        class Session:
+            def get(self, url):
+                calls.append(url)
+                if url.endswith('/articles'):
+                    return Resp({"articles": [{"slug": RAW["slug"], "updated_at": RAW["updated_at"]}]})
+                return Resp(RAW)
+
+        blog_feed.reset_cache()
+        with patch('webapp.blog_feed.GROWTH_FEED_BASE', 'https://feed.test/articles'):
+            first = await blog_feed._download(Session())
+            second = await blog_feed._download(Session())
+        blog_feed.reset_cache()
+        self.assertEqual([a["slug"] for a in second], [RAW["slug"]])
+        self.assertEqual(len(first), 1)
+        self.assertEqual(sum(1 for u in calls if u.endswith(RAW["slug"])), 1)
 
 
 if __name__ == '__main__':
