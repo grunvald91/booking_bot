@@ -34,6 +34,32 @@ class SalesConversation(Base):
     __table_args__ = (UniqueConstraint("business_id", "principal", name="uq_sales_business_principal"),)
 
 
+class CRMContact(Base):
+    """Business-local CRM data. Linked users retain their global account data unchanged."""
+    __tablename__ = "crm_contacts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    business_id: Mapped[int] = mapped_column(
+        ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # NULL for manually added contacts; unique per business for linked booking users.
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(320), nullable=True)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    stage: Mapped[str] = mapped_column(String(20), nullable=False, default="new")
+    follow_up_on: Mapped[Optional[datetime.date]] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+    __table_args__ = (UniqueConstraint("business_id", "user_id", name="uq_crm_business_user"),)
+
+
 class User(Base):
     """Пользователи бота (клиенты и владельцы бизнеса)"""
     __tablename__ = "users"
