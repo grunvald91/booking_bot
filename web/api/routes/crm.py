@@ -52,12 +52,20 @@ def _row(
     key: str, user: User | None, meta: CRMContact | None,
     bookings: int = 0, completed: int = 0,
     last_booking: date | None = None, next_booking: date | None = None,
+    account_contact: bool = True,
 ) -> dict:
     return {
         "key": key,
         "name": (meta.name if meta and meta.name else None) or (user.full_name if user else "Без имени"),
-        "phone": (meta.phone if meta and meta.phone else None) or (user.phone if user else None),
-        "email": (meta.email if meta and meta.email else None) or (user.email if user else None),
+        # Account-wide phone/email are disclosed only if the customer has booked
+        # THIS business; merely opening an authenticated AI chat is not consent
+        # to share contact details from an unrelated company.
+        "phone": (meta.phone if meta and meta.phone else None) or (
+            user.phone if user and account_contact else None
+        ),
+        "email": (meta.email if meta and meta.email else None) or (
+            user.email if user and account_contact else None
+        ),
         "notes": meta.notes if meta else "",
         "stage": meta.stage if meta else "new",
         "follow_up_on": meta.follow_up_on if meta else None,
@@ -178,7 +186,8 @@ async def list_contacts(
             CRMContact.user_id.in_(chat_user_ids),
         ))).all()
         metas = {m.user_id: m for m in chat_meta}
-        rows.extend(_row(f"u:{u.id}", u, metas.get(u.id)) for u in chat_users)
+        rows.extend(_row(f"u:{u.id}", u, metas.get(u.id), account_contact=False)
+                    for u in chat_users)
     manual = await db.scalars(
         select(CRMContact).where(CRMContact.business_id == business_id,
                                  CRMContact.user_id.is_(None))
@@ -254,7 +263,7 @@ async def get_contact(
         "price_estimate": booking.estimated_price if booking.estimated_price is not None else service_price,
     } for booking, service_name, service_price, employee_name in records[:100]]
     return {
-        **_row(key, user, meta, bookings=len(history)),
+        **_row(key, user, meta, bookings=len(history), account_contact=bool(history)),
         "bookings_count": await db.scalar(
             select(func.count(Booking.id)).where(Booking.business_id == business_id,
                                                   Booking.client_id == user.id)
