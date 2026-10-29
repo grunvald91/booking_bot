@@ -23,6 +23,7 @@ const NAV = [
 const MORE = [
   { to: '/admin/services', label: 'Услуги', Icon: Scissors },
   { to: '/admin/employees', label: 'Мастера', Icon: Users },
+  { to: '/admin/contacts', label: 'Клиенты', Icon: Users },
   { to: '/admin/analytics', label: 'Аналитика', Icon: BarChart3 },
   { to: '/admin/subscriptions', label: 'Абонементы', Icon: Repeat },
   { to: '/admin/sales/settings', label: 'ИИ-продавец', Icon: Bot },
