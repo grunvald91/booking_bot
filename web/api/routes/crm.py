@@ -12,8 +12,8 @@ from sqlalchemy import and_, case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import CRMContact
-from ..database import Booking, Business, Employee, Service, User, get_db
+from database.models import CRMContact, SalesConversation
+from ..database import Booking, Employee, Service, User, get_db
 from ..deps import get_current_admin
 from .admin import _get_owner_business_ids
 
@@ -45,7 +45,7 @@ async def _guard(db: AsyncSession, owner: User, business_id: int):
 
 
 def _strip(value: str | None) -> str | None:
-    return value.strip() or None if value is not None else None
+    return (value.strip() or None) if value is not None else None
 
 
 def _row(
@@ -115,7 +115,14 @@ async def _find(db: AsyncSession, business_id: int, key: str):
                                  Booking.client_id == identifier).limit(1)
     )
     if has_booking is None:
-        raise HTTPException(status_code=404, detail="Контакт не найден")
+        has_thread = await db.scalar(
+            select(SalesConversation.id).where(
+                SalesConversation.business_id == business_id,
+                SalesConversation.principal == f"user:{identifier}",
+            ).limit(1)
+        )
+        if has_thread is None:
+            raise HTTPException(status_code=404, detail="Контакт не найден")
     user = await db.get(User, identifier)
     if user is None:
         raise HTTPException(status_code=404, detail="Контакт не найден")
@@ -149,6 +156,29 @@ async def list_contacts(
         _row(f"u:{u.id}", u, m, total, completed, last, upcoming)
         for u, m, total, completed, last, upcoming in booked.all()
     ]
+    # Registered visitors who only talked to the sales assistant are also contacts.
+    # Anonymous guest sessions have no verified user identity and are intentionally
+    # left in the conversation inbox rather than inventing person records.
+    principals = await db.scalars(
+        select(SalesConversation.principal).where(
+            SalesConversation.business_id == business_id,
+            SalesConversation.principal.like("user:%"),
+        )
+    )
+    seen = {r["key"] for r in rows}
+    chat_user_ids = set()
+    for principal in principals.all():
+        suffix = principal.removeprefix("user:")
+        if suffix.isdecimal() and f"u:{suffix}" not in seen:
+            chat_user_ids.add(int(suffix))
+    if chat_user_ids:
+        chat_users = (await db.scalars(select(User).where(User.id.in_(chat_user_ids)))).all()
+        chat_meta = (await db.scalars(select(CRMContact).where(
+            CRMContact.business_id == business_id,
+            CRMContact.user_id.in_(chat_user_ids),
+        ))).all()
+        metas = {m.user_id: m for m in chat_meta}
+        rows.extend(_row(f"u:{u.id}", u, metas.get(u.id)) for u in chat_users)
     manual = await db.scalars(
         select(CRMContact).where(CRMContact.business_id == business_id,
                                  CRMContact.user_id.is_(None))
@@ -235,8 +265,14 @@ async def get_contact(
                                                   Booking.status == "completed")
         ),
         "last_booking": history[0]["date"] if history else None,
-        "next_booking": next((r["date"] for r in reversed(history)
-                             if r["date"] >= date.today() and r["status"] not in ("cancelled", "completed")), None),
+        "next_booking": await db.scalar(
+            select(func.min(Booking.booking_date)).where(
+                Booking.business_id == business_id,
+                Booking.client_id == user.id,
+                Booking.booking_date >= date.today(),
+                Booking.status.notin_(["cancelled", "completed"]),
+            )
+        ),
         "history": history,
         "history_has_more": len(records) > 100,
     }
@@ -275,7 +311,7 @@ async def update_contact(
     return await get_contact(business_id, key, owner, db)
 
 
-@router.delete("/businesses/{business_id}/contacts/{key}", status_code=204)
+@router.delete("/businesses/{business_id}/contacts/{key}")
 async def delete_contact(
     business_id: int,
     key: str,
@@ -289,3 +325,4 @@ async def delete_contact(
         raise HTTPException(409, detail="Клиент с записями не удаляется. Можно очистить заметки.")
     await db.delete(meta)
     await db.commit()
+    return {"ok": True}
