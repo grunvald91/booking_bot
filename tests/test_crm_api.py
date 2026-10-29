@@ -88,6 +88,9 @@ class CRMApiTests(unittest.IsolatedAsyncioTestCase):
         booked = next(r for r in records if r["key"] == f"u:{self.booked_id}")
         self.assertEqual(booked["bookings_count"], 1)
         self.assertEqual(booked["phone"], "+79990000001")
+        chat_only = next(r for r in records if r["key"] == f"u:{self.chatted_id}")
+        self.assertIsNone(chat_only["phone"])
+        self.assertIsNone(self.client.get(self.url(self.a, f"/u:{self.chatted_id}")).json()["phone"])
         other_business = self.client.get(self.url(self.b)).json()["items"]
         self.assertEqual([r["key"] for r in other_business], [f"u:{self.booked_id}"])
         self.assertEqual(other_business[0]["bookings_count"], 1)
