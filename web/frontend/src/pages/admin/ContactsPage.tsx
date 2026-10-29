@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { CalendarClock, Check, ChevronLeft, ChevronRight, Mail, Phone, Plus, Search, StickyNote, Trash2, UserRound, Users, X } from 'lucide-react'
 import { api, type CRMContact, type CRMContactDetail, type CRMContactInput } from '../../api/client'
 import { AdminShell } from '../../components/AdminShell'
@@ -195,7 +195,7 @@ function ContactDetail({ contact, loading, error, onEdit, onBack, onRetry }: {
     </div>
     <div className="crm-section-heading"><CalendarClock size={16} /> История записей</div>
     {contact.history.length === 0 ? (
-      <div className="crm-info-card crm-muted">Записей пока нет. Контакт добавлен вручную.</div>
+      <div className="crm-info-card crm-muted">Записей пока нет.</div>
     ) : (
       <div className="crm-history">
         {contact.history.map(booking => <div className="crm-history-row" key={booking.id}>
@@ -229,6 +229,8 @@ function ContactsWorkspace({ businessId }: { businessId: number }) {
   const [detailError, setDetailError] = useState('')
   const [editor, setEditor] = useState<EditorMode>(null)
   const [saving, setSaving] = useState(false)
+  const listRequestId = useRef(0)
+  const detailRequestId = useRef(0)
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setTerm(search); setPage(1) }, 250)
@@ -236,27 +238,36 @@ function ContactsWorkspace({ businessId }: { businessId: number }) {
   }, [search])
 
   const loadList = useCallback(async () => {
+    const requestId = ++listRequestId.current
     setListLoading(true); setListError('')
     try {
       const data = await api.getCRMContacts(businessId, term, filter, page)
-      setItems(data.items); setTotal(data.total)
+      if (requestId === listRequestId.current) { setItems(data.items); setTotal(data.total) }
     } catch (err) {
-      setItems([]); setListError(errorText(err))
-    } finally { setListLoading(false) }
+      if (requestId === listRequestId.current) { setItems([]); setListError(errorText(err)) }
+    } finally {
+      if (requestId === listRequestId.current) setListLoading(false)
+    }
   }, [businessId, term, filter, page])
 
   useEffect(() => { void loadList() }, [loadList])
 
   const loadDetail = useCallback(async (key: string) => {
+    const requestId = ++detailRequestId.current
     setDetailLoading(true); setDetailError('')
-    try { setContact(await api.getCRMContact(businessId, key)) }
-    catch (err) { setContact(null); setDetailError(errorText(err)) }
-    finally { setDetailLoading(false) }
+    try {
+      const data = await api.getCRMContact(businessId, key)
+      if (requestId === detailRequestId.current) setContact(data)
+    } catch (err) {
+      if (requestId === detailRequestId.current) { setContact(null); setDetailError(errorText(err)) }
+    } finally {
+      if (requestId === detailRequestId.current) setDetailLoading(false)
+    }
   }, [businessId])
 
   useEffect(() => {
     if (active) { setContact(null); void loadDetail(active) }
-    else setContact(null)
+    else { detailRequestId.current++; setContact(null); setDetailLoading(false) }
   }, [active, loadDetail])
 
   const save = async (body: CRMContactInput) => {
@@ -279,7 +290,7 @@ function ContactsWorkspace({ businessId }: { businessId: number }) {
     setSaving(true)
     try {
       await api.deleteCRMContact(businessId, active)
-      setEditor(null); setActive(null)
+      setEditor(null); setActive(null); setPage(1)
       await loadList()
     } finally { setSaving(false) }
   }
