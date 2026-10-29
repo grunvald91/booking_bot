@@ -1,0 +1,130 @@
+"""CRM API isolation and regression tests; no external database or GitHub Actions."""
+import os
+os.environ.setdefault("BOT_TOKEN", "test-token")
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+
+import unittest
+from datetime import date, time, timedelta
+
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
+
+from database.models import Base, Booking, Business, CRMContact, SalesConversation, Service, User
+from web.api.database import get_db
+from web.api.deps import get_current_admin
+from web.api.routes.crm import router
+
+
+class CRMApiTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+        self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with self.sessions() as db:
+            owner = User(telegram_id=901, full_name="Владелец")
+            foreign_owner = User(telegram_id=902, full_name="Чужой владелец")
+            booked = User(telegram_id=903, full_name="Клиент А", phone="+79990000001")
+            chatted = User(telegram_id=904, full_name="Клиент Б", phone="+79990000002")
+            foreign_client = User(telegram_id=905, full_name="Чужой клиент")
+            db.add_all([owner, foreign_owner, booked, chatted, foreign_client])
+            await db.flush()
+            a = Business(owner_id=owner.id, name="А", business_type="salon", is_active=True)
+            b = Business(owner_id=owner.id, name="Б", business_type="salon", is_active=True)
+            foreign = Business(owner_id=foreign_owner.id, name="В", business_type="salon", is_active=True)
+            db.add_all([a, b, foreign]); await db.flush()
+            service = Service(business_id=a.id, name="Стрижка", duration_minutes=60, price=1000)
+            other_service = Service(business_id=foreign.id, name="Чужая услуга", duration_minutes=60)
+            db.add_all([service, other_service]); await db.flush()
+            db.add_all([
+                Booking(business_id=a.id, client_id=booked.id, service_id=service.id,
+                        booking_date=date.today() + timedelta(days=2), booking_time=time(12, 0),
+                        status="confirmed", resource_duration_minutes=60),
+                Booking(business_id=foreign.id, client_id=foreign_client.id,
+                        service_id=other_service.id, booking_date=date.today(),
+                        booking_time=time(14, 0), status="completed", resource_duration_minutes=60),
+                SalesConversation(id="13c4d87e-b017-4d88-91f0-c66a64e04711", business_id=a.id,
+                                  principal=f"user:{chatted.id}", messages=[], facts={}),
+                SalesConversation(id="13c4d87e-b017-4d88-91f0-c66a64e04712", business_id=a.id,
+                                  principal="guest:an-unverified-browser", messages=[], facts={}),
+            ])
+            await db.commit()
+            self.owner_id = owner.id
+            self.booked_id = booked.id
+            self.chatted_id = chatted.id
+            self.foreign_client_id = foreign_client.id
+            self.a, self.b, self.foreign = a.id, b.id, foreign.id
+
+        app = FastAPI()
+        app.include_router(router, prefix="/admin")
+        async def session():
+            async with self.sessions() as db:
+                yield db
+        async def authenticated_owner(db: AsyncSession = Depends(get_db)):
+            return await db.get(User, self.owner_id)
+        app.dependency_overrides[get_db] = session
+        app.dependency_overrides[get_current_admin] = authenticated_owner
+        self.client = TestClient(app)
+
+    async def asyncTearDown(self):
+        self.client.close()
+        await self.engine.dispose()
+
+    def url(self, business_id, suffix=""):
+        return f"/admin/businesses/{business_id}/contacts{suffix}"
+
+    async def test_list_auto_includes_bookings_and_registered_chat_only(self):
+        response = self.client.get(self.url(self.a))
+        self.assertEqual(response.status_code, 200, response.text)
+        records = response.json()["items"]
+        self.assertEqual({r["key"] for r in records},
+                         {f"u:{self.booked_id}", f"u:{self.chatted_id}"})
+        booked = next(r for r in records if r["key"] == f"u:{self.booked_id}")
+        self.assertEqual(booked["bookings_count"], 1)
+        self.assertEqual(booked["phone"], "+79990000001")
+        self.assertEqual(self.client.get(self.url(self.b)).json()["total"], 0)
+
+    async def test_private_notes_do_not_change_global_user_or_other_business(self):
+        key = f"u:{self.booked_id}"
+        response = self.client.patch(self.url(self.a, "/" + key),
+                                     json={"notes": "Любит утренние слоты", "stage": "vip",
+                                           "name": "Имя только для салона А"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["stage"], "vip")
+        self.assertEqual(response.json()["history"][0]["service"], "Стрижка")
+        self.assertEqual(response.json()["next_booking"], (date.today() + timedelta(days=2)).isoformat())
+        self.assertEqual(self.client.get(self.url(self.a, "/" + key)).json()["notes"], "Любит утренние слоты")
+        async with self.sessions() as db:
+            global_user = await db.get(User, self.booked_id)
+            self.assertEqual(global_user.full_name, "Клиент А")
+            row = await db.get(CRMContact, 1)
+            self.assertEqual(row.business_id, self.a)
+        self.assertEqual(self.client.get(self.url(self.b)).json()["items"], [])
+
+    async def test_owner_can_create_find_and_delete_manual_contact(self):
+        created = self.client.post(self.url(self.a), json={
+            "name": "Новый контакт", "phone": "+79991112233", "notes": "Перезвонить",
+            "follow_up_on": date.today().isoformat(),
+        })
+        self.assertEqual(created.status_code, 201, created.text)
+        key = created.json()["key"]
+        self.assertTrue(key.startswith("m:"))
+        due = self.client.get(self.url(self.a), params={"stage": "follow_up"}).json()
+        self.assertEqual([r["key"] for r in due["items"]], [key])
+        self.assertEqual(self.client.delete(self.url(self.a, "/" + key)).json(), {"ok": True})
+        self.assertEqual(self.client.get(self.url(self.a, "/" + key)).status_code, 404)
+
+    async def test_cross_tenant_contact_read_and_write_denied(self):
+        self.assertEqual(self.client.get(self.url(self.foreign)).status_code, 403)
+        self.assertEqual(self.client.post(self.url(self.foreign), json={"name": "No"}).status_code, 403)
+        key = f"u:{self.foreign_client_id}"
+        self.assertEqual(self.client.get(self.url(self.a, "/" + key)).status_code, 404)
+        self.assertEqual(self.client.patch(self.url(self.a, "/" + key),
+                                           json={"notes": "leak"}).status_code, 404)
+        self.assertEqual(self.client.delete(self.url(self.a, f"/u:{self.booked_id}")).status_code, 409)
+
+
+if __name__ == "__main__":
+    unittest.main()
