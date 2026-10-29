@@ -36,11 +36,15 @@ class CRMApiTests(unittest.IsolatedAsyncioTestCase):
             foreign = Business(owner_id=foreign_owner.id, name="В", business_type="salon", is_active=True)
             db.add_all([a, b, foreign]); await db.flush()
             service = Service(business_id=a.id, name="Стрижка", duration_minutes=60, price=1000)
+            service_b = Service(business_id=b.id, name="Маникюр", duration_minutes=60)
             other_service = Service(business_id=foreign.id, name="Чужая услуга", duration_minutes=60)
-            db.add_all([service, other_service]); await db.flush()
+            db.add_all([service, service_b, other_service]); await db.flush()
             db.add_all([
                 Booking(business_id=a.id, client_id=booked.id, service_id=service.id,
                         booking_date=date.today() + timedelta(days=2), booking_time=time(12, 0),
+                        status="confirmed", resource_duration_minutes=60),
+                Booking(business_id=b.id, client_id=booked.id, service_id=service_b.id,
+                        booking_date=date.today() + timedelta(days=4), booking_time=time(11, 0),
                         status="confirmed", resource_duration_minutes=60),
                 Booking(business_id=foreign.id, client_id=foreign_client.id,
                         service_id=other_service.id, booking_date=date.today(),
@@ -84,7 +88,9 @@ class CRMApiTests(unittest.IsolatedAsyncioTestCase):
         booked = next(r for r in records if r["key"] == f"u:{self.booked_id}")
         self.assertEqual(booked["bookings_count"], 1)
         self.assertEqual(booked["phone"], "+79990000001")
-        self.assertEqual(self.client.get(self.url(self.b)).json()["total"], 0)
+        other_business = self.client.get(self.url(self.b)).json()["items"]
+        self.assertEqual([r["key"] for r in other_business], [f"u:{self.booked_id}"])
+        self.assertEqual(other_business[0]["bookings_count"], 1)
 
     async def test_private_notes_do_not_change_global_user_or_other_business(self):
         key = f"u:{self.booked_id}"
@@ -101,7 +107,10 @@ class CRMApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(global_user.full_name, "Клиент А")
             row = await db.get(CRMContact, 1)
             self.assertEqual(row.business_id, self.a)
-        self.assertEqual(self.client.get(self.url(self.b)).json()["items"], [])
+        in_b = self.client.get(self.url(self.b, "/" + key)).json()
+        self.assertEqual(in_b["name"], "Клиент А")
+        self.assertEqual(in_b["notes"], "")
+        self.assertEqual([b["service"] for b in in_b["history"]], ["Маникюр"])
 
     async def test_owner_can_create_find_and_delete_manual_contact(self):
         created = self.client.post(self.url(self.a), json={
