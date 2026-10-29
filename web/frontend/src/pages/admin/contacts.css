@@ -1,5 +1,6 @@
 /* CRM builds on the existing ServGo design tokens and AdminShell. */
 .crm-page { min-height: 100%; min-width: 0; }
+.crm-page > .ds-context { flex: 0 0 auto; justify-content: flex-start; min-height: 0; }
 .crm-workspace { display: grid; grid-template-columns: minmax(260px, 360px) minmax(0, 1fr); gap: 12px; min-width: 0; min-height: 560px; }
 .crm-list-panel, .crm-detail-panel { min-width: 0; border-radius: 18px; background: var(--s-surface); }
 .crm-list-panel { display: flex; flex-direction: column; gap: 10px; overflow: hidden; padding: 12px 8px; }
