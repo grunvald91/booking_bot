@@ -6,7 +6,10 @@ The new `/admin/contacts` screen uses the existing `AdminShell` and ServGo desig
 It displays contacts from booking history and authenticated (`user:<id>`) AI-sales
 conversations within the selected business. Anonymous chat sessions without a
 verified user identity remain in "Диалоги" and are NOT silently converted into
-people records. An owner may add other contacts manually.
+people records. For authenticated chat-only visitors, phone/email from their
+global account are NOT exposed to the business; contact fields are shown only
+when explicitly stored for this business or after a booking.
+An owner may add other contacts manually.
 
 Per-business notes, contact-name/phone/email overrides, stage
 (`new/active/vip/paused`) and follow-up date are stored in `crm_contacts`.
