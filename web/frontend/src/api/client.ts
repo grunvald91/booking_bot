@@ -348,6 +348,43 @@ export interface CreateBookingData {
   repeat_weeks?: number;
 }
 
+export interface CRMContact {
+  key: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  notes: string;
+  stage: 'new' | 'active' | 'vip' | 'paused';
+  follow_up_on: string | null;
+  bookings_count: number;
+  completed_count: number;
+  last_booking: string | null;
+  next_booking: string | null;
+  created_at: string | null;
+}
+
+export interface CRMContactDetail extends CRMContact {
+  history: Array<{
+    id: number;
+    date: string;
+    time: string;
+    service: string;
+    employee: string | null;
+    status: string;
+    price_estimate: number | null;
+  }>;
+  history_has_more: boolean;
+}
+
+export type CRMContactInput = {
+  name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  notes?: string;
+  stage?: CRMContact['stage'];
+  follow_up_on?: string | null;
+};
+
 export interface AdminBooking {
   version: number;
   id: number;
@@ -793,6 +830,21 @@ export const api = {
 
   // Admin
   getDashboard: () => request<DashboardData>('/admin/dashboard'),
+  getCRMContacts: (bizId: number, q = '', stage = 'all', page = 1) =>
+    request<{ items: CRMContact[]; total: number; page: number; page_size: number }>(
+      `/admin/businesses/${bizId}/contacts?${new URLSearchParams({ q, stage, page: String(page) })}`),
+  getCRMContact: (bizId: number, key: string) =>
+    request<CRMContactDetail>(`/admin/businesses/${bizId}/contacts/${encodeURIComponent(key)}`),
+  createCRMContact: (bizId: number, data: CRMContactInput) =>
+    request<CRMContact>(`/admin/businesses/${bizId}/contacts`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+  updateCRMContact: (bizId: number, key: string, data: CRMContactInput) =>
+    request<CRMContactDetail>(`/admin/businesses/${bizId}/contacts/${encodeURIComponent(key)}`, {
+      method: 'PATCH', body: JSON.stringify(data),
+    }),
+  deleteCRMContact: (bizId: number, key: string) =>
+    request<{ ok: boolean }>(`/admin/businesses/${bizId}/contacts/${encodeURIComponent(key)}`, { method: 'DELETE' }),
   getAdminBookings: (params?: string) =>
     request<AdminBooking[]>(`/admin/bookings${params ? '?' + params : ''}`),
   createManualBooking: (data: ManualBookingData) =>

@@ -18,6 +18,7 @@ import { AdminDashboard } from './pages/admin/AdminDashboard'
 import { ServicesPage } from './pages/admin/ServicesPage'
 import { EmployeesPage } from './pages/admin/EmployeesPage'
 import { AnalyticsPage } from './pages/admin/AnalyticsPage'
+import { ContactsPage } from './pages/admin/ContactsPage'
 import { SubscriptionsAdminPage } from './pages/admin/SubscriptionsAdminPage'
 import { ChatPage } from './pages/client/ChatPage'
 import { NotFoundPage } from './pages/client/NotFoundPage'
@@ -200,6 +201,7 @@ function App() {
             </AdminRoute>
           }
         />
+        <Route path="/admin/contacts" element={<AdminRoute><ContactsPage /></AdminRoute>} />
         <Route
           path="/admin/analytics"
           element={

@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   Wallet, LayoutDashboard, Clock, Scissors, Users, Settings, Moon, Sun, LogOut, MessageCircle,
-  MoreHorizontal, BarChart3, Repeat, Bot, Mail, Sparkles, X, ChevronRight, PlusCircle,
+  MoreHorizontal, BarChart3, Repeat, Bot, Mail, Sparkles, X, ChevronRight, PlusCircle, ContactRound,
 } from 'lucide-react'
 import { CreateBusinessSheet } from './CreateBusinessSheet'
 import { useTheme } from '../hooks/useTheme'
@@ -17,10 +17,11 @@ const NAV = [
   { to: '/admin', label: 'Панель', Icon: LayoutDashboard },
   { to: '/admin/schedule', label: 'Расписание', Icon: Clock },
   { to: '/admin/prepayments', label: 'Оплаты', Icon: Wallet },
-  { to: '/admin/sales', label: 'Диалоги', Icon: MessageCircle },
+  { to: '/admin/contacts', label: 'Клиенты', Icon: ContactRound },
 ]
 
 const MORE = [
+  { to: '/admin/sales', label: 'Диалоги', Icon: MessageCircle },
   { to: '/admin/services', label: 'Услуги', Icon: Scissors },
   { to: '/admin/employees', label: 'Мастера', Icon: Users },
   { to: '/admin/analytics', label: 'Аналитика', Icon: BarChart3 },
