@@ -18,6 +18,14 @@ User account data remains unchanged. The list supports search, filters and
 all-time counts for one business only. Booking price estimates do NOT imply
 payment and are not presented as revenue.
 
+When authenticated accounts are joined, CRM cards move to the surviving user
+within each business. If both users have a card in the same business, missing
+fields are filled and distinct notes are combined. Conflicting non-empty names,
+phones, emails, non-default stages or follow-up dates require reconciliation
+before the accounts can be joined; no value is silently overwritten. Combined
+notes must fit the existing 5000-character editor limit. These conflicts leave
+the accounts separate and preserve both CRM cards.
+
 **MVP constraints:** Manually created contacts and booking users are not
 automatically merged based on matching phone numbers; shared phones are not
 proof of identity. Due follow-up dates are visible in the CRM filter but do

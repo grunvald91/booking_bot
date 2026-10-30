@@ -9,7 +9,7 @@ from sqlalchemy import or_, select, update, text
 
 from database.models import (User, EmailIdentity, EmailChallenge, TelegramLinkRequest, UserAccountMerge,
     Business, BusinessOwner, Booking, ClientSubscription, PushSubscription, SalesConversation,
-    YandexIdentity, YandexTicket)
+    YandexIdentity, YandexTicket, CRMContact)
 
 
 class AccountLinkError(ValueError):
@@ -101,10 +101,54 @@ async def merge_email_into_telegram(db, request, source_user_id):
     return identity
 
 
+async def move_crm_contacts(db, source, target):
+    """Keep tenant-local CRM data when identities join; never silently discard conflicts."""
+    contacts = list((await db.scalars(select(CRMContact).where(
+        CRMContact.user_id.in_([source.id, target.id])
+    ).order_by(CRMContact.id).with_for_update())).all())
+    targets = {c.business_id: c for c in contacts if c.user_id == target.id}
+    pending = []
+    for contact in contacts:
+        if contact.user_id != source.id:
+            continue
+        existing = targets.get(contact.business_id)
+        if existing is None:
+            pending.append((contact, None, {}))
+            continue
+        changes = {}
+        for field in ("name", "phone", "email", "stage", "follow_up_on"):
+            old, new = getattr(contact, field), getattr(existing, field)
+            empty = "new" if field == "stage" else None
+            if old not in (empty, "") and new not in (empty, "") and old != new:
+                raise AccountLinkError(
+                    "Карточки CRM содержат разные данные. Согласуйте их в бизнесе "
+                    f"{contact.business_id} перед объединением аккаунтов"
+                )
+            if new in (empty, "") and old not in (empty, ""):
+                changes[field] = old
+        notes = existing.notes or ""
+        if contact.notes and contact.notes != notes:
+            notes = "\n\n".join(filter(None, (notes, contact.notes)))
+        if len(notes) > 5000:
+            raise AccountLinkError("Объединённая заметка CRM превышает 5000 символов. Сократите заметки перед объединением")
+        changes["notes"] = notes
+        changes["created_at"] = min(contact.created_at, existing.created_at)
+        pending.append((contact, existing, changes))
+    # Validate every tenant before changing any contact.
+    for contact, existing, changes in pending:
+        if existing is None:
+            contact.user_id = target.id
+        else:
+            for field, value in changes.items():
+                setattr(existing, field, value)
+            await db.delete(contact)
+
+
 async def move_account_data(db, source, target):
     """Move businesses, bookings, subscriptions and chats from source to target and record the merge.
 
     Both users must already be locked by the caller. Source stays as a redirect to target."""
+    await move_crm_contacts(db, source, target)
     # Preserve an existing paid/manual-owner entitlement; don't guess between two paid plans.
     if source.subscription_status != "none" or source.is_manual_owner:
         if target.subscription_status != "none" or target.is_manual_owner:

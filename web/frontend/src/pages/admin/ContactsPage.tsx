@@ -156,8 +156,9 @@ function ContactDetail({ contact, loading, error, onEdit, onBack, onRetry }: {
   onBack: () => void;
   onRetry: () => void;
 }) {
-  if (loading) return <div className="crm-detail-pad ds-sub" role="status">Загружаем историю клиента…</div>
-  if (error) return <div className="crm-detail-pad"><p role="alert" className="crm-error">{error}</p>
+  const back = <button className="crm-back" onClick={onBack}><ChevronLeft size={18} /> Все клиенты</button>
+  if (loading) return <div className="crm-detail-pad">{back}<div className="ds-sub" role="status">Загружаем историю клиента…</div></div>
+  if (error) return <div className="crm-detail-pad">{back}<p role="alert" className="crm-error">{error}</p>
     <button className="ds-btn ds-btn--ghost" onClick={onRetry}>Повторить</button></div>
   if (!contact) return <div className="crm-blank">
     <UserRound size={34} strokeWidth={1.4} />
@@ -166,7 +167,7 @@ function ContactDetail({ contact, loading, error, onEdit, onBack, onRetry }: {
   </div>
   const tel = contact.phone?.replace(/[^+\d]/g, '') || ''
   return <div className="crm-detail-pad">
-    <button className="crm-back" onClick={onBack}><ChevronLeft size={18} /> Все клиенты</button>
+    {back}
     <div className="crm-profile-header">
       <span className="crm-avatar crm-avatar--large">{initials(contact.name)}</span>
       <div className="crm-profile-name">
@@ -242,7 +243,11 @@ function ContactsWorkspace({ businessId }: { businessId: number }) {
     setListLoading(true); setListError('')
     try {
       const data = await api.getCRMContacts(businessId, term, filter, page)
-      if (requestId === listRequestId.current) { setItems(data.items); setTotal(data.total) }
+      if (requestId === listRequestId.current) {
+        setItems(data.items); setTotal(data.total)
+        const lastPage = Math.max(1, Math.ceil(data.total / data.page_size))
+        if (page > lastPage) setPage(lastPage)
+      }
     } catch (err) {
       if (requestId === listRequestId.current) { setItems([]); setListError(errorText(err)) }
     } finally {
@@ -267,7 +272,7 @@ function ContactsWorkspace({ businessId }: { businessId: number }) {
 
   useEffect(() => {
     if (active) { setContact(null); void loadDetail(active) }
-    else { detailRequestId.current++; setContact(null); setDetailLoading(false) }
+    else { detailRequestId.current++; setContact(null); setDetailLoading(false); setDetailError('') }
   }, [active, loadDetail])
 
   const save = async (body: CRMContactInput) => {
@@ -290,7 +295,7 @@ function ContactsWorkspace({ businessId }: { businessId: number }) {
     setSaving(true)
     try {
       await api.deleteCRMContact(businessId, active)
-      setEditor(null); setActive(null); setPage(1)
+      setEditor(null); setActive(null)
       await loadList()
     } finally { setSaving(false) }
   }

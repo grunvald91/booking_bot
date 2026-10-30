@@ -10,8 +10,10 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
+from sqlalchemy import select
 
 from database.models import Base, Booking, Business, CRMContact, SalesConversation, Service, User
+from database.account_link import AccountLinkError, move_account_data
 from web.api.database import get_db
 from web.api.deps import get_current_admin
 from web.api.routes.crm import router
@@ -136,6 +138,68 @@ class CRMApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.client.patch(self.url(self.a, "/" + key),
                                            json={"notes": "leak"}).status_code, 404)
         self.assertEqual(self.client.delete(self.url(self.a, f"/u:{self.booked_id}")).status_code, 409)
+
+    async def test_account_merge_preserves_crm_in_each_business(self):
+        old_key = f"/u:{self.booked_id}"
+        for business, note in ((self.a, "Заметка А"), (self.b, "Заметка Б")):
+            response = self.client.patch(self.url(business, old_key), json={
+                "notes": note, "stage": "vip", "follow_up_on": date.today().isoformat(),
+            })
+            self.assertEqual(response.status_code, 200)
+        async with self.sessions() as db:
+            await move_account_data(db, await db.get(User, self.booked_id),
+                                    await db.get(User, self.chatted_id))
+            await db.commit()
+        for business, note in ((self.a, "Заметка А"), (self.b, "Заметка Б")):
+            response = self.client.get(self.url(business, f"/u:{self.chatted_id}"))
+            self.assertEqual(response.status_code, 200)
+            contact = response.json()
+            self.assertEqual((contact["notes"], contact["stage"], contact["follow_up_on"]),
+                             (note, "vip", date.today().isoformat()))
+            self.assertEqual(contact["bookings_count"], 1)
+
+    async def test_account_merge_combines_complementary_crm_cards(self):
+        self.client.patch(self.url(self.a, f"/u:{self.booked_id}"), json={
+            "notes": "Предпочтения", "phone": "+79991234567", "stage": "vip",
+        })
+        self.client.patch(self.url(self.a, f"/u:{self.chatted_id}"), json={
+            "notes": "Договорённости", "email": "client@example.org",
+        })
+        async with self.sessions() as db:
+            await move_account_data(db, await db.get(User, self.booked_id),
+                                    await db.get(User, self.chatted_id))
+            await db.commit()
+        contact = self.client.get(self.url(self.a, f"/u:{self.chatted_id}")).json()
+        self.assertEqual(contact["notes"], "Договорённости\n\nПредпочтения")
+        self.assertEqual((contact["phone"], contact["email"], contact["stage"]),
+                         ("+79991234567", "client@example.org", "vip"))
+        async with self.sessions() as db:
+            cards = (await db.scalars(select(CRMContact))).all()
+            self.assertEqual(len(cards), 1)
+            self.assertEqual(cards[0].user_id, self.chatted_id)
+
+    async def test_account_merge_rejects_conflicting_crm_without_data_loss(self):
+        for field, source, target in (
+            ("phone", "+79990000001", "+79990000002"),
+            ("stage", "vip", "paused"),
+            ("follow_up_on", date.today(), date.today() + timedelta(days=1)),
+            ("notes", "a" * 3000, "b" * 3000),
+        ):
+            with self.subTest(field=field):
+                async with self.sessions() as db:
+                    db.add_all([
+                        CRMContact(business_id=self.a, user_id=self.booked_id, **{field: source}),
+                        CRMContact(business_id=self.a, user_id=self.chatted_id, **{field: target}),
+                    ])
+                    await db.flush()
+                    with self.assertRaises(AccountLinkError):
+                        await move_account_data(db, await db.get(User, self.booked_id),
+                                                await db.get(User, self.chatted_id))
+                    cards = (await db.scalars(select(CRMContact).order_by(CRMContact.id))).all()
+                    self.assertEqual([getattr(c, field) for c in cards], [source, target])
+                    booking = await db.scalar(select(Booking).where(Booking.business_id == self.a))
+                    self.assertEqual(booking.client_id, self.booked_id)
+                    await db.rollback()
 
 
 if __name__ == "__main__":
