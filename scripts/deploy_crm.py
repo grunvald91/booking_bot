@@ -51,9 +51,8 @@ from web.api.database import engine
 async def main():
     async with engine.begin() as conn:
         await conn.execute(text("SET LOCAL lock_timeout = '10s'"))
-        for statement in MIGRATION_SQL.split(';'):
-            if statement.strip():
-                await conn.execute(text(statement))
+        for statement in MIGRATION_STATEMENTS:
+            await conn.execute(text(statement))
         await conn.execute(text('SELECT id, business_id, user_id, notes, stage, follow_up_on FROM crm_contacts LIMIT 0'))
     await engine.dispose()
 asyncio.run(main())
@@ -87,6 +86,12 @@ print('crm_auth_guard=401; crm_owner_list=200; crm_read_smoke=ok')
 
 def python(client, code, timeout=60):
     return run(client, 'cd ' + ROOT + ' && ./venv/bin/python -c ' + shlex.quote(ENV + code), timeout)
+
+
+def migration_statements(sql):
+    # This migration has standalone line comments, including semicolons.
+    sql = '\n'.join(line for line in sql.splitlines() if not line.lstrip().startswith('--'))
+    return [statement.strip() for statement in sql.split(';') if statement.strip()]
 
 
 def main():
@@ -127,7 +132,7 @@ def main():
         backup_path = '/opt/booking_bot/crm-before-' + stamp + '.dump'
         print(python(client, 'BACKUP_PATH = ' + repr(backup_path) + '\n' + BACKUP, 210), flush=True)
         sql = new['migrations/add_crm_contacts.sql'].decode()
-        print(python(client, 'MIGRATION_SQL = ' + repr(sql) + '\n' + MIGRATE), flush=True)
+        print(python(client, 'MIGRATION_STATEMENTS = ' + repr(migration_statements(sql)) + '\n' + MIGRATE), flush=True)
         todo = [p for p in new if plan[p] != 'skip']
         for path in todo:
             target = ROOT + '/' + path
