@@ -14,12 +14,36 @@ export function resourceSupportsService(
 }
 
 export type BookingEntryStep = 'home' | 'services' | 'resource' | 'calendar'
+export type BookingFlowOrder = 'service_first' | 'resource_first'
+
+// Фильтруем противоположный шаг только пока он следует за уже выбранным параметром.
+// Это позволяет поменять услугу/мастера без потери остальных вариантов.
+export function getAvailableServices(
+  services: Service[],
+  resource: EmployeeWithPricing | null,
+  employees: EmployeeWithPricing[],
+  order: BookingFlowOrder,
+): Service[] {
+  return order === 'resource_first' && resource
+    ? services.filter((service) => resourceSupportsService(resource, service.id, employees))
+    : services
+}
+
+export function getAvailableResources(
+  selectedServices: Service[],
+  employees: EmployeeWithPricing[],
+  order: BookingFlowOrder,
+): EmployeeWithPricing[] {
+  return order === 'service_first' && selectedServices.length > 0
+    ? employees.filter((resource) => selectedServices.every((service) => resourceSupportsService(resource, service.id, employees)))
+    : employees
+}
 
 export function resolveBookingEntry(
   business: BusinessDetail,
   serviceId: number | null,
   employeeId: number | null,
-): { services: Service[]; resource: EmployeeWithPricing | null; step: BookingEntryStep } {
+): { services: Service[]; resource: EmployeeWithPricing | null; step: BookingEntryStep; order: BookingFlowOrder } {
   const allServices = business.services.filter((service) => service.is_active && !service.is_additional)
   const employees = business.employees || []
   const hasSelection = serviceId !== null || employeeId !== null
@@ -39,6 +63,12 @@ export function resolveBookingEntry(
     if (suitable.length === 1) service = suitable[0]
   }
 
+  // Если выбранный специалист не оказывает ни одной активной услуги,
+  // не запираем клиента на пустом списке: предложим выбор услуги заново.
+  if (!service && resource && allServices.every((item) => !resourceSupportsService(resource, item.id, employees))) {
+    resource = null
+  }
+
   // Если услугу оказывает только один специалист, не заставляем выбирать его повторно.
   // Для аренды зал остаётся явным выбором, даже если доступен лишь один.
   if (service && !resource && business.business_type !== 'venue_rental') {
@@ -54,5 +84,14 @@ export function resolveBookingEntry(
         ? 'resource'
         : 'calendar'
 
-  return { services: service ? [service] : [], resource, step }
+  // При входе с готовой услугой или специалистом первый шаг уже сделан.
+  // Меняем порядок только для этого посещения, не меняя настройку бизнеса.
+  const configuredOrder = business.booking_flow_order === 'resource_first' ? 'resource_first' : 'service_first'
+  const order: BookingFlowOrder = serviceId !== null && employeeId === null && service
+    ? 'service_first'
+    : employeeId !== null && serviceId === null && resource
+      ? 'resource_first'
+      : configuredOrder
+
+  return { services: service ? [service] : [], resource, step, order }
 }
