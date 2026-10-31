@@ -739,12 +739,21 @@ export function SchedulePage() {
     return () => clearInterval(timer)
   }, [fetchBookings])
 
+  const catalogueSequence = useRef(0)
   useEffect(() => {
-    if (!businessId) return
+    const sequence = ++catalogueSequence.current
     setSelectedEmployeeId(null)
+    setServices([])
+    setAllEmployees([])
+    if (!businessId) return
     Promise.all([api.getServices(businessId), api.getEmployees(businessId)])
-      .then(([svc, emp]) => { setServices(svc); setAllEmployees(emp) })
-      .catch(() => {})
+      .then(([svc, emp]) => {
+        if (sequence !== catalogueSequence.current) return
+        setServices(svc)
+        setAllEmployees(emp)
+      })
+      .catch(() => { /* records remain readable with the cached booking details */ })
+    return () => { catalogueSequence.current += 1 }
   }, [businessId])
 
   const replaceBooking = (updated: AdminBooking) => setBookings((prev) => prev.map((b) => (b.id === updated.id ? updated : b)))
