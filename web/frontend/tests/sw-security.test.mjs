@@ -99,14 +99,14 @@ test('upgrading v2 clears its cached private HTML but leaves unrelated caches un
   await h.dispatch('install').done
   await h.dispatch('activate').done
 
-  assert.deepEqual((await h.caches.keys()).sort(), ['servgo-pwa-v3', 'unrelated-app-cache'])
-  const fresh = await h.caches.open('servgo-pwa-v3')
+  assert.deepEqual((await h.caches.keys()).sort(), ['servgo-pwa-v4', 'unrelated-app-cache'])
+  const fresh = await h.caches.open('servgo-pwa-v4')
   assert.ok((await fresh.match('/offline.html'))?.ok)
-  assert.equal(await fresh.match('/index.html'), undefined)
+  assert.ok(await fresh.match('/index.html'), 'static PWA shell must exist for cold offline launch')
   assert.equal(await fresh.match('/'), undefined)
 })
 
-test('all navigation requests are network-only, including private Mail and Growth pages', async () => {
+test('online navigation is network-first, including private Mail and Growth pages', async () => {
   const h = createHarness(async () => response('<secret>PRIVATE</secret>', 'text/html', {
     'Cache-Control': 'private, no-store',
   }))
@@ -117,10 +117,10 @@ test('all navigation requests are network-only, including private Mail and Growt
     const served = await h.request(path)
     assert.match(await served.text(), /PRIVATE/)
   }
-  const fresh = await h.caches.open('servgo-pwa-v3')
-  assert.equal(fresh.items.size, 4, 'only public precache, never signed-in HTML')
-  assert.equal(await fresh.match('/index.html'), undefined)
-  assert.equal(h.networkRequests.length, 7)
+  const fresh = await h.caches.open('servgo-pwa-v4')
+  assert.equal(fresh.items.size, 5, 'static shell and public assets only, never signed-in HTML')
+  assert.ok(await fresh.match('/index.html'))
+  assert.equal(h.networkRequests.length, 8, 'seven navigations and offline asset manifest request')
 })
 
 test('offline navigation shows a neutral page, not a cached authenticated SPA shell', async () => {
@@ -130,6 +130,22 @@ test('offline navigation shows a neutral page, not a cached authenticated SPA sh
   const text = await served.text()
   assert.match(text, /Нет соединения с ServGo/)
   assert.doesNotMatch(text, /Private account|<secret>|Authorization/)
+})
+
+test('offline booking screens use the static shell, not saved personal HTML', async () => {
+  const h = createHarness(async () => { throw Error('offline') })
+  await h.dispatch('install').done
+  for (const url of ['/admin/schedule', '/my', '/master', '/account', '/']) {
+    const page = await h.request(url)
+    assert.equal(await page.text(), 'public asset')
+  }
+  for (const url of ['/studio/team', '/workspace/growth', '/workspace/mail/inbox', '/mail']) {
+    const page = await h.request(url)
+    assert.match(await page.text(), /Нет соединения с ServGo/)
+  }
+  const cache = await h.caches.open('servgo-pwa-v4')
+  assert.equal(await cache.match('/admin/schedule'), undefined)
+  assert.equal(await cache.match('/my'), undefined)
 })
 
 test('no interception for API requests, private resources or third-party URLs', async () => {
@@ -157,11 +173,11 @@ test('only public static assets are runtime-cached; private or HTML responses ne
 
   assert.equal(await (await h.request('/assets/index-abcdef123456.js', { mode: 'cors' })).text(), 'compiled code')
   assert.equal(await (await h.request('/assets/index-abcdef123456.js', { mode: 'cors' })).text(), 'compiled code')
-  assert.equal(h.networkRequests.length, 1, 'cache hit for safe public asset')
+  assert.equal(h.networkRequests.length, 2, 'one manifest fetch and one uncached asset fetch')
 
   await h.request('/assets/redirect-abcdef123456.js', { mode: 'cors' })
   await h.request('/assets/private-abcdef123456.js', { mode: 'cors' })
-  const cache = await h.caches.open('servgo-pwa-v3')
+  const cache = await h.caches.open('servgo-pwa-v4')
   assert.ok(await cache.match('/assets/index-abcdef123456.js'))
   assert.equal(await cache.match('/assets/redirect-abcdef123456.js'), undefined)
   assert.equal(await cache.match('/assets/private-abcdef123456.js'), undefined)
