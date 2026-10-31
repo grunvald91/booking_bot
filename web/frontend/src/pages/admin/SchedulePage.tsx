@@ -690,6 +690,18 @@ export function SchedulePage() {
   }, [businessId, viewMode, weekDates, dayDate])
 
   useEffect(() => { fetchBookings() }, [fetchBookings])
+
+  // Keep the current week's days available offline, even if the user only opened
+  // today's schedule. The API snapshot store splits this weekly response by day.
+  useEffect(() => {
+    if (!businessId || !online) return
+    const monday = getMonday(new Date())
+    const sunday = new Date(monday)
+    sunday.setDate(sunday.getDate() + 6)
+    const period = `business_id=${businessId}&start_date=${formatDateISO(monday)}&end_date=${formatDateISO(sunday)}`
+    void api.getAdminBookings(period).catch(() => { /* background prefetch is optional */ })
+  }, [businessId, online])
+
   useEffect(() => {
     const timer = setInterval(fetchBookings, 15000)
     return () => clearInterval(timer)
