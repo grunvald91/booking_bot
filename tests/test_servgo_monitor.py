@@ -1,5 +1,5 @@
 """Deterministic alert-state tests; no Telegram traffic."""
-from ops.servgo_monitor import update_states, mark_delivered, message, healthy_http_code
+from ops.servgo_monitor import update_states, mark_delivered, message, healthy_http_code, healthy_docker_state
 
 
 def test_monitor_requires_two_failures_and_sends_a_single_alert():
@@ -65,3 +65,12 @@ def test_protected_sto_401_is_reachable_but_other_401_is_not():
     assert not healthy_http_code("promo.servgo.ru", "401", True)
     assert not healthy_http_code("sto.servgo.ru", "502", True)
     assert not healthy_http_code("sto.servgo.ru", "401", False)
+
+
+def test_growth_worker_and_container_health_are_monitored():
+    assert healthy_docker_state("true|healthy", True)
+    assert healthy_docker_state("true|", True)  # Containers without HEALTHCHECK.
+    assert not healthy_docker_state("true|unhealthy", True)
+    assert not healthy_docker_state("true|starting", True)
+    assert not healthy_docker_state("false|", True)
+    assert not healthy_docker_state("true|healthy", False)
