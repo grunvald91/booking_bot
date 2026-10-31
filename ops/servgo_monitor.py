@@ -120,6 +120,13 @@ def collect_checks() -> dict[str, tuple[bool, str]]:
                         "--max-time", "5", "http://127.0.0.1:18080/_promo_health"], timeout=7)
     result["promo:standalone"] = (ok and code == "200", f"local HTTP {code or 'unreachable'}")
 
+    # The legacy listener also hosts STO / mini-app routes and may fail to
+    # start while the Telegram polling process itself remains alive.
+    ok, code = command(["curl", "-fsS", "-o", "/dev/null", "-w", "%{http_code}",
+                        "--max-time", "5", "http://127.0.0.1:8080/beauty"], timeout=7)
+    result["webapp:legacy-8080"] = (ok and code == "200",
+                                     f"legacy HTTP {code or 'unreachable'}")
+
     total, _used, free = shutil.disk_usage("/")
     used_pct = round((total - free) * 100 / total)
     result["disk:root"] = (used_pct < 90, f"disk {used_pct}% used")
