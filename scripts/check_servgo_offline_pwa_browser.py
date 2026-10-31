@@ -75,11 +75,11 @@ def main():
             page = context.new_page()
             errors = []
             page.on("pageerror", lambda exc: errors.append(str(exc)))
-            page.add_init_script("""() => {
+            page.add_init_script("""
               localStorage.setItem('token','servgo-browser-offline-fixture');
               localStorage.setItem('userRole','client');
               localStorage.setItem('userName','Тестовый пользователь');
-            }""")
+            """)
             page.goto(url + "/my", wait_until="load")
             page.get_by_text(SERVICE, exact=False).first.wait_for(timeout=15000)
             page.evaluate("""async () => {
