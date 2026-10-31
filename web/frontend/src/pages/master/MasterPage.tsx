@@ -94,7 +94,10 @@ export function MasterPage() {
     }
   }, [navigate])
 
-  useEffect(() => { void load(from) }, [from, load])
+  useEffect(() => {
+    window.dispatchEvent(new Event('servgo-offline-context-reset'))
+    void load(from)
+  }, [from, load])
   useEffect(() => {
     const refresh = () => { if (navigator.onLine) void load(from) }
     window.addEventListener('online', refresh)
