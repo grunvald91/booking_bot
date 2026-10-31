@@ -1,0 +1,61 @@
+name: Read-only promo 502 diagnosis
+on:
+  push:
+    branches:
+      - incident/promo-502-diagnostics-20261031
+    paths:
+      - '.github/workflows/promo-502-diagnostics.yml'
+permissions:
+  contents: read
+concurrency:
+  group: servgo-promo-diagnosis
+  cancel-in-progress: true
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned SSH client
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Inspect promo upstream and services (strictly read-only)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from scripts.deploy_business_creation_and_reminders import connect
+
+          if not os.environ.get("SERVGO_PASSWORD"):
+              raise RuntimeError("SSH secret is missing")
+          client = connect(os.environ["SERVGO_PASSWORD"])
+          probes = {
+              "clock": "date -u '+%Y-%m-%dT%H:%M:%SZ'",
+              "nginx_syntax": "nginx -t 2>&1 | tail -n 4",
+              "booking_service": "systemctl show booking-bot.service -p ActiveState -p SubState -p Result -p ExecMainStatus -p NRestarts -p ActiveEnterTimestamp -p FragmentPath --no-pager",
+              "web_api_service": "systemctl show booking-web-api.service -p ActiveState -p SubState -p Result -p ExecMainStatus --no-pager",
+              "listeners": "ss -ltn 2>/dev/null | grep -E ':(8080|8000) ' || true",
+              "direct_8080_home": "curl -sS -o /dev/null -w 'HTTP %{http_code}' --max-time 5 http://127.0.0.1:8080/ 2>/dev/null || true",
+              "direct_8080_beauty": "curl -sS -o /dev/null -w 'HTTP %{http_code}' --max-time 5 http://127.0.0.1:8080/beauty 2>/dev/null || true",
+              "nginx_promo": "curl -ksS -o /dev/null -w 'HTTP %{http_code}' --max-time 7 --resolve promo.servgo.ru:443:127.0.0.1 https://promo.servgo.ru/ 2>/dev/null || true",
+              "nginx_servgo": "curl -ksS -o /dev/null -w 'HTTP %{http_code}' --max-time 7 --resolve servgo.ru:443:127.0.0.1 https://servgo.ru/ 2>/dev/null || true",
+              "routing": "nginx -T 2>/dev/null | grep -E '^\\s*(server_name|proxy_pass|listen) ' | grep -E 'promo|servgo|8080|8000' | head -n 25",
+              "last_service_errors": "journalctl -u booking-bot.service -n 110 --no-pager -o cat 2>/dev/null | grep -Ei 'Traceback|error|exception|no module named|failed|exited|syntax' | tail -n 22 | cut -c1-200",
+              "nginx_upstream_errors": "tail -n 150 /var/log/nginx/error.log 2>/dev/null | grep -E 'upstream|connect\\(\\) failed|prematurely closed' | tail -n 10 | sed -E 's/client: [0-9a-fA-F:.]+/client: REDACTED/g' | cut -c1-230",
+          }
+          try:
+              for title, cmd in probes.items():
+                  print("\n## " + title, flush=True)
+                  _, stdout, stderr = client.exec_command(cmd, timeout=16)
+                  result = stdout.read().decode("utf-8", "replace")[:6500].strip()
+                  code = stdout.channel.recv_exit_status()
+                  print(result or "(empty)", flush=True)
+                  print("exit_code=" + str(code), flush=True)
+          finally:
+              client.close()
+          PY
