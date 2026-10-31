@@ -546,6 +546,9 @@ export function SchedulePage() {
   const [weekOffset, setWeekOffset] = useState(0)
   const [dayOffset, setDayOffset] = useState(0)
   const [bookings, setBookings] = useState<AdminBooking[]>([])
+  const [loadedQuery, setLoadedQuery] = useState('')
+  const [scheduleError, setScheduleError] = useState('')
+  const requestSequence = useRef(0)
   const [loading, setLoading] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<AdminBooking | null>(null)
   const [groupEntries, setGroupEntries] = useState<AdminBooking[] | null>(null)
@@ -674,22 +677,51 @@ export function SchedulePage() {
     return dayDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', weekday: 'short' })
   }, [viewMode, weekOffset, dayOffset, weekDates, dayDate])
 
-  const fetchBookings = useCallback(async () => {
-    if (!businessId) return
-    setLoading(true)
-    try {
-      let params = `business_id=${businessId}`
-      if (viewMode === 'week') params += `&start_date=${formatDateISO(weekDates[0])}&end_date=${formatDateISO(weekDates[6])}`
-      else params += `&date=${formatDateISO(dayDate)}`
-      setBookings(await api.getAdminBookings(params))
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false)
-    }
+  // The displayed data must belong to the selected business and date range.
+  const scheduleQuery = useMemo(() => {
+    if (!businessId) return ''
+    const period = viewMode === 'week'
+      ? `&start_date=${formatDateISO(weekDates[0])}&end_date=${formatDateISO(weekDates[6])}`
+      : `&date=${formatDateISO(dayDate)}`
+    return `business_id=${businessId}${period}`
   }, [businessId, viewMode, weekDates, dayDate])
 
-  useEffect(() => { fetchBookings() }, [fetchBookings])
+  const fetchBookings = useCallback(async () => {
+    if (!scheduleQuery) return
+    const sequence = ++requestSequence.current
+    setLoading(true)
+    try {
+      const result = await api.getAdminBookings(scheduleQuery)
+      if (sequence !== requestSequence.current) return
+      setBookings(result)
+      setLoadedQuery(scheduleQuery)
+      setScheduleError('')
+    } catch {
+      if (sequence !== requestSequence.current) return
+      // Never show a different date/business's cached list as this one.
+      if (loadedQuery !== scheduleQuery) {
+        setBookings([])
+        setLoadedQuery('')
+      }
+      setScheduleError('Не удалось загрузить записи за выбранный период. Если интернета нет, этот период ещё не сохранён.')
+    } finally {
+      if (sequence === requestSequence.current) setLoading(false)
+    }
+  }, [scheduleQuery, loadedQuery])
+
+  useEffect(() => {
+    // Invalidate all previous responses immediately when selection changes.
+    requestSequence.current += 1
+    setSelectedBooking(null)
+    setGroupEntries(null)
+    setManual(null)
+    setPendingMove(null)
+    setScheduleError('')
+    if (!scheduleQuery) { setBookings([]); setLoadedQuery(''); setLoading(false); return }
+    void fetchBookings()
+    // Invalidation belongs to the selected key, not to periodic refreshes.
+  }, [scheduleQuery]) // eslint-disable-line react-hooks/exhaustive-deps
+
 
   // Keep the current week's days available offline, even if the user only opened
   // today's schedule. The API snapshot store splits this weekly response by day.
@@ -805,7 +837,7 @@ export function SchedulePage() {
 
   // Filtering: by employee + search
   const visibleBookings = useMemo(() => {
-    let list = bookings.filter(isActive)
+    let list = (loadedQuery === scheduleQuery ? bookings : []).filter(isActive)
     if (selectedEmployeeId) list = list.filter((b) => b.employee_id === selectedEmployeeId)
     const q = search.trim().toLowerCase()
     if (q) {
@@ -814,7 +846,7 @@ export function SchedulePage() {
       )
     }
     return list
-  }, [bookings, selectedEmployeeId, search])
+  }, [bookings, loadedQuery, scheduleQuery, selectedEmployeeId, search])
 
   // Day columns = masters (or single column)
   const dayColumns = useMemo(() => {
@@ -1141,7 +1173,9 @@ export function SchedulePage() {
               {pull.refreshing ? 'Обновляем…' : pull.dist > 70 ? 'Отпустите для обновления' : 'Потяните вниз для обновления'}
             </div>
           )}
-          {loading && bookings.length === 0 && !businessId ? null : loading && bookings.length === 0 ? (
+          {scheduleError && loadedQuery !== scheduleQuery ? (
+            <div className="sched-empty" role="status">{scheduleError}</div>
+          ) : loading && loadedQuery !== scheduleQuery ? (
             <div className="sched-empty"><Loader2 size={20} className="animate-spin" /> Загрузка…</div>
           ) : (
             <div className="sched-timeline" style={{ height: colHeight, '--hour': `${hourPx}px` } as CSSProperties}>
