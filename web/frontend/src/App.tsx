@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useSearchParams, useLocation, useNavigate } fr
 import { api, ApiError } from './api/client'
 import { clearLogin, saveLogin } from './authUtils'
 import { Layout } from './components/Layout'
+import { OfflineNotice } from './components/OfflineNotice'
 import { HomePage } from './pages/client/HomePage'
 import { BusinessPage } from './pages/client/BusinessPage'
 import { BookingStatusPage } from './pages/client/BookingStatusPage'
@@ -134,7 +135,7 @@ function App() {
   }
 
   return (
-    <><RouteSeo /><AdminPaymentAttention /><Suspense fallback={<div role="status" className="flex min-h-[30vh] items-center justify-center">Загрузка…</div>}><Routes>
+    <><OfflineNotice /><RouteSeo /><AdminPaymentAttention /><Suspense fallback={<div role="status" className="flex min-h-[30vh] items-center justify-center">Загрузка…</div>}><Routes>
       <Route element={<Layout />}>
         {/* Client routes */}
         <Route path="/" element={<HomePage />} />
