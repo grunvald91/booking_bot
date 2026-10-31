@@ -430,7 +430,7 @@ export function MyBookingsPage() {
         setLoadError(expired
           ? 'Срок действия входа истёк. Войдите в прежний аккаунт, чтобы увидеть свои записи.'
           : 'Не удалось загрузить записи. Попробуйте ещё раз.')
-        if (expired) clearLogin()
+        if (expired) void clearLogin().catch(error => console.warn('Offline cleanup after expired login:', error))
       })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
