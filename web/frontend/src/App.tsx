@@ -172,6 +172,7 @@ function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/login/yandex" element={<YandexLoginPage />} />
         <Route path="/mail" element={<OwnerMailPage />} />
+        <Route path="/workspace/mail" element={<OwnerMailPage />} />
         <Route path="/account" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
         <Route path="/master" element={<ProtectedRoute><MasterPage /></ProtectedRoute>} />
         <Route path="/admin/prepayments" element={<AdminRoute><PrepaymentsPage /></AdminRoute>} />
