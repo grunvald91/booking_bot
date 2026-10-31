@@ -402,6 +402,12 @@ export function MyBookingsPage() {
   const [loadError, setLoadError] = useState('')
   const [authExpired, setAuthExpired] = useState(false)
   const [reload, setReload] = useState(0)
+  useEffect(() => {
+    const refresh = () => { if (navigator.onLine) setReload(value => value + 1) }
+    window.addEventListener('online', refresh)
+    window.addEventListener('focus', refresh)
+    return () => { window.removeEventListener('online', refresh); window.removeEventListener('focus', refresh) }
+  }, [])
   const [cancellingId, setCancellingId] = useState<number | null>(null)
   const [reschedulingId, setReschedulingId] = useState<number | null>(null)
   const [rescheduleLoading, setRescheduleLoading] = useState(false)
