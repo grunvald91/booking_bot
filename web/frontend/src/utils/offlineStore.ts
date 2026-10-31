@@ -48,7 +48,11 @@ function openDb(): Promise<IDBDatabase> {
         req.result.createObjectStore(STORE, { keyPath: 'id' })
       }
     }
-    req.onsuccess = () => resolve(req.result)
+    req.onsuccess = () => {
+      // Let logout in another tab delete the database without an IDB block.
+      req.result.onversionchange = () => req.result.close()
+      resolve(req.result)
+    }
     req.onerror = () => reject(req.error)
     req.onblocked = () => reject(new Error('Offline database blocked'))
   })
