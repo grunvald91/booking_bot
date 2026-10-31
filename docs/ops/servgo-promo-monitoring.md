@@ -18,9 +18,15 @@ ServGo Growth owner-notification bot (`TELEGRAM_BOT_TOKEN` and
 It tries direct HTTPS first; if that transport fails, SOCKS5 at
 `127.0.0.1:1089` is a fallback.
 
+Independent probes run in a bounded thread pool so a wider outage does not
+consume the systemd task timeout through 36 sequential network timeouts.
 Each failure is confirmed twice before the first alert. After two consecutive
 successes the system sends recovery. One still-failing incident is repeated
-at most every 6 hours. State persists under `/var/lib/servgo-monitor/state.json`.
+at most every 6 hours. Large incident groups are split into Telegram-sized
+batches; failed batches are not acknowledged in the state. If the state file
+cannot be saved (e.g. the filesystem is full), the monitor still attempts
+immediate emergency alert delivery rather than waiting for a second sample.
+State persists under `/var/lib/servgo-monitor/state.json`.
 No log bodies, visitor data, tokens or contact details are put in alerts.
 
 **36 checks currently enabled:**
@@ -30,7 +36,7 @@ No log bodies, visitor data, tokens or contact details are put in alerts.
   and active Sushef / Elitles containers;
 - 8 ServGo HTTPS domains;
 - Telegram SOCKS egress;
-- independent promo loopback `/_promo_health`;
+- independent promo loopback `/_promo_health` and the legacy booking Mini App listener on `8080`;
 - root filesystem utilization;
 - expiry/validation of the three core HTTPS certificates.
 
@@ -72,6 +78,25 @@ failure mode needs an external watchdog with independent Telegram credentials
 (for example a separate hosted GitHub Actions monitor with two repository
 secrets), not merely another timer on this server. Do not claim that this
 single-VPS implementation covers full-host or full-network outages.
+
+## Merging vs applying
+
+The production migration already ran from a guarded, now-removed one-time
+GitHub workflow. The historical `scripts/deploy_servgo_promo_monitor.py`
+is a **one-time bootstrap** whose drift guard intentionally prevents
+blindly repeating that earlier migration after subsequent hotfixes.
+
+Merging PR #111 into `main` publishes the reviewed source code and deploy
+workflow, but **does not automatically update the installed monitor code**:
+the standard webapp deployment workflow does not include `ops/**` paths.
+A subsequent scoped monitor update must compare current production bytes with
+an approved baseline and be verified before applying it. Do not assume this
+updated batching/parallel-probe logic is live just because its CI is green.
+
+The regular webapp deploy does restart the independent promo process after
+`webapp/**` source changes, then verifies public `/`, `/beauty` and
+`/robots.txt` endpoints. It continues to restart the legacy BookingBot
+because that older process still serves other webapp routes.
 
 ## Verified production runs
 
