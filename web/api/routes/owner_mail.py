@@ -38,6 +38,34 @@ router = APIRouter(prefix="/owner-mail", tags=["owner-mail"])
 COOKIE = "servgo_owner_mail"
 ADDRESS = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,63}$")
 HOST = "https://mail.servgo.ru"
+CANONICAL_HOST = "https://servgo.ru"
+MAIL_GATEWAY_FLAG = "SERVGO_MAIL_GATEWAY_ENABLED"
+
+
+def mail_gateway_enabled() -> bool:
+    return os.getenv(MAIL_GATEWAY_FLAG, "").casefold() in {"1", "true", "yes"}
+
+
+def canonical_mail_request(request: Request) -> bool:
+    """Only requests genuinely served at the HTTPS PWA origin can use its Mail session."""
+    return (mail_gateway_enabled() and request.url.scheme == "https"
+            and request.url.netloc.casefold() == "servgo.ru")
+
+
+def verify_mail_write_origin(request: Request):
+    """Preserve legacy POST safety and bind new same-origin calls to their actual host."""
+    sent = request.headers.get("origin")
+    if request.headers.get("sec-fetch-site", "").casefold() == "cross-site":
+        raise HTTPException(403, "Недопустимое происхождение запроса")
+    if not mail_gateway_enabled():
+        if sent != HOST:
+            raise HTTPException(403, "Недопустимое происхождение запроса")
+        return
+    host = request.url.netloc.casefold()
+    legacy = (request.url.scheme == "https" and host == "mail.servgo.ru" and sent == HOST)
+    canonical = canonical_mail_request(request) and sent == CANONICAL_HOST
+    if not (legacy or canonical):
+        raise HTTPException(403, "Недопустимое происхождение запроса")
 SESSION_SECONDS = 30 * 24 * 3600
 # Mail login reuses the AI Growth OS password: Growth checks it, this service never stores it.
 GROWTH_AUTH_URL = os.getenv("SERVGO_MAIL_GROWTH_AUTH_URL", "http://127.0.0.1:8091/studio/assets/servgo.svg")
