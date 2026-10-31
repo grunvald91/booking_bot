@@ -226,7 +226,9 @@ def mark_delivered(state: dict, kind: str, keys: list[str], now: float) -> None:
             item["last_sent"] = now
 
 
-def save_state(state: dict, path: Path = STATE_PATH) -> None:
+def save_state(state: dict, path: Path | None = None) -> None:
+    # Resolve the state path at call time so test/incident overrides are honored.
+    path = path if path is not None else STATE_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(path.name + ".tmp")
     temp.write_text(json.dumps(state, ensure_ascii=False, sort_keys=True), encoding="utf-8")
