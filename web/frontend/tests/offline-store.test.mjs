@@ -143,3 +143,22 @@ test('seven-day data expiry, same-login access and logout deletion', async () =>
   await h.code.clearOfflineSnapshots()
   assert.equal(h.db.rows.size, 0, 'logout removes stored personal data')
 })
+
+test('online weekly schedule becomes individually readable days while offline', async () => {
+  const h = harness()
+  h.localStorage.setItem('token', 'admin-login')
+  const week = '/admin/bookings?business_id=42&start_date=2026-10-26&end_date=2026-11-01'
+  const rows = [
+    { id: 10, date: '2026-10-31', client_name: 'Anna', client_phone: '+70000000001', notes: 'Important note' },
+    { id: 11, date: '2026-11-01', client_name: 'Maria', client_phone: '+70000000002', notes: 'Second note' },
+  ]
+  await h.code.saveOfflineSnapshot(week, rows, 'admin-login')
+  const saturday = await h.code.loadOfflineSnapshot('/admin/bookings?date=2026-10-31&business_id=42', 'admin-login')
+  assert.equal(saturday.data.length, 1)
+  assert.equal(saturday.data[0].notes, 'Important note')
+  const monday = await h.code.loadOfflineSnapshot('/admin/bookings?business_id=42&date=2026-10-26', 'admin-login')
+  assert.deepEqual(JSON.stringify(monday.data), '[]', 'empty days are cached as empty arrays')
+  const sunday = await h.code.loadOfflineSnapshot('/admin/bookings?business_id=42&date=2026-11-01', 'admin-login')
+  assert.equal(sunday.data[0].client_phone, '+70000000002')
+  assert.equal(h.db.rows.size, 8, 'weekly snapshot and seven individual days')
+})
