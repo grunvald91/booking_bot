@@ -51,7 +51,7 @@ jobs:
 
       - name: Test PWA cache isolation and push navigation
         working-directory: web/frontend
-        run: node --test tests/sw-security.test.mjs
+        run: node --test tests/sw-security.test.mjs tests/offline-store.test.mjs
 
       - name: Build frontend
         working-directory: web/frontend
