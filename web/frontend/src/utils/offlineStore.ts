@@ -129,7 +129,11 @@ export async function saveOfflineSnapshot<T>(path: string, data: T, token: strin
   // A response from an earlier login must never repopulate cache after logout.
   if (localStorage.getItem('token') !== token) return
   await transact<void>('readwrite', (store, finish) => {
-    records.forEach(record => store.put(record))
+    // Also check after asynchronous database opening: a logout may have started
+    // since the initial check, and must win over an in-flight response.
+    if (localStorage.getItem('token') === token) {
+      records.forEach(record => store.put(record))
+    }
     finish(undefined)
   })
   await cleanupExpiredOfflineSnapshots()
