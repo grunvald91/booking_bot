@@ -52,3 +52,20 @@
 5. [ ] Android/iOS/desktop PWA — переходы клиент → admin → Growth → Mail → назад, единый light/dark/system и правильный logout; затем production rollout с rollback.
 
 **Итог:** GitHub-код выборочно синхронизирован, но nginx управляется отдельно и сейчас не реализует основное требование «единый origin для Growth».
+
+## Исправлено на production: 31.10.2026, 08:23 UTC
+
+**Точечное исправление выполнено.** [Журнал GitHub Actions](https://github.com/grunvald91/booking_bot/actions/runs/41184386213).
+
+Скрипт проверил, что все 4 server-блока в `webapp.bak_auth3_` имеют эквивалентные привязки к именам и портам в других включённых конфигурациях, а основной `webapp` содержит HTTPS ServGo и `/sw.js`. Исходный SHA256 `nginx -T` совпал с ранее проверенным. Затем резервный конфиг атомарно перенесён из `sites-enabled` в `/etc/nginx/disabled-site-backups/webapp.bak_auth3_.20261031T082320Z`, не удалён.
+
+- До: 8 предупреждений `conflicting server name`; после `nginx -t`: **0 предупреждений**.
+- `systemctl reload nginx` успешен; сервер активен.
+- Шесть локальных HTTPS-smoke checks **не изменили статусы**: `servgo.ru/` 200, `/sw.js` 200, `/manifest.webmanifest` 200, `/api/health` 200, `growth.servgo.ru/studio` 401 без сессии, `mail.servgo.ru/` 200.
+- `rollback_needed=no`, `repair_result=success`.
+- Файл `/etc/nginx/sites-enabled/webapp` и бизнес-код не изменялись. Добавление `servgo.ru/studio` НЕ выполнялось.
+
+**Особенность аудита:** GitHub Actions отметил job как `failure` из-за ошибки обёртки скрипта после успешного завершения: `sys.exit(0)` был перехвачен `except BaseException`, что ложно выставило `repair_result=not_applied`. Этот дефект исправлен в [операционной ветке](https://github.com/grunvald91/booking_bot/blob/ops/servgo-nginx-duplicate-repair-20261031/scripts/ops_fix_nginx_duplicate.py) **без повторного применения**. Фактический результат подтверждён предыдущими выводами `repair_result=success`, шестью статусами и нулём предупреждений. Независимый повторный SSH-аудит после изменения не выполнялся.
+
+**Следующий шаг:** подготовить и проверить точечное добавление прокси `/studio` → `127.0.0.1:8091` в **единственный оставшийся активный HTTPS-vhost**, с предварительным выпуском безопасного PWA SW и сохранением правил `/api/*`. Смена маршрутизации пока не произведена.
+
