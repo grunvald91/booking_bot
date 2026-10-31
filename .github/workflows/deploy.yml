@@ -160,7 +160,11 @@ jobs:
                 sleep 2
               done
               [ "$code" = "200" ] || { echo "Isolated promo failed health check"; exit 1; }
-              echo "independent_promo_health=200"
+              for route in / /beauty /robots.txt; do
+                code=$(curl -ksS -o /dev/null -w "%{http_code}" --max-time 5 --resolve promo.servgo.ru:443:127.0.0.1 "https://promo.servgo.ru$route" || true)
+                [ "$code" = "200" ] || { echo "Isolated promo $route failed: HTTP $code"; exit 1; }
+              done
+              echo "independent_promo_http_routes=200"
             fi
           '
 
