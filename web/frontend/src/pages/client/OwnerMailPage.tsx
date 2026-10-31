@@ -27,7 +27,7 @@ export function OwnerMailPage() {
           data.url.startsWith('https://mail.servgo.ru/claim?ticket=') ||
           data.url.startsWith('https://servgo.ru/api/owner-mail/claim?ticket=')
         )
-        if (!valid) setState('error')
+        if (!data.url || !valid) setState('error')
         else window.location.assign(data.url)
       })
       .catch(() => { if (active) setState('error') })
