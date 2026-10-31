@@ -68,7 +68,7 @@ function transact<T>(mode: IDBTransactionMode, task: (store: IDBObjectStore, fin
   }))
 }
 
-async function pruneExpired() {
+export async function cleanupExpiredOfflineSnapshots() {
   await transact<void>('readwrite', (store, finish) => {
     const now = Date.now()
     const cursor = store.openCursor()
@@ -85,17 +85,50 @@ async function snapshotId(path: string, token: string) {
   return (await accountKey(token)) + ':' + canonicalPath(path)
 }
 
+/**
+ * A downloaded week covers individual days too. Persist all seven day keys,
+ * including empty days, so switching day while offline is reliable.
+ */
+function splitWeekIntoDays<T>(path: string, data: T): Array<{ path: string; data: T }> {
+  if (path.split('?')[0] !== '/admin/bookings' || !Array.isArray(data)) return []
+  const params = new URL(path, window.location.origin).searchParams
+  const businessId = params.get('business_id')
+  const start = params.get('start_date')
+  const end = params.get('end_date')
+  if (!businessId || !/^\\d+$/.test(businessId) || !start || !end
+    || !/^\\d{4}-\\d{2}-\\d{2}$/.test(start) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(end)) return []
+  const from = Date.parse(start + 'T00:00:00Z')
+  const to = Date.parse(end + 'T00:00:00Z')
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from || to - from > 6 * 86400000) return []
+  const result: Array<{ path: string; data: T }> = []
+  for (let day = from; day <= to; day += 86400000) {
+    const date = new Date(day).toISOString().slice(0, 10)
+    result.push({
+      path: `/admin/bookings?business_id=${businessId}&date=${date}`,
+      data: data.filter((entry: { date?: string }) => entry.date === date) as T,
+    })
+  }
+  return result
+}
+
 export async function saveOfflineSnapshot<T>(path: string, data: T, token: string): Promise<void> {
   if (!canSaveOffline(path) || !token) return
-  const id = await snapshotId(path, token)
+  const account = await accountKey(token)
+  const now = Date.now()
+  const records: RecordInDb[] = [
+    { id: account + ':' + canonicalPath(path), savedAt: now, expiresAt: now + OFFLINE_RETENTION_MS, data },
+    ...splitWeekIntoDays(path, data).map(item => ({
+      id: account + ':' + canonicalPath(item.path),
+      savedAt: now, expiresAt: now + OFFLINE_RETENTION_MS, data: item.data,
+    })),
+  ]
   // A response from an earlier login must never repopulate cache after logout.
   if (localStorage.getItem('token') !== token) return
-  const now = Date.now()
   await transact<void>('readwrite', (store, finish) => {
-    store.put({ id, savedAt: now, expiresAt: now + OFFLINE_RETENTION_MS, data } satisfies RecordInDb)
+    records.forEach(record => store.put(record))
     finish(undefined)
   })
-  await pruneExpired()
+  await cleanupExpiredOfflineSnapshots()
 }
 
 export async function loadOfflineSnapshot<T>(path: string, token: string): Promise<OfflineSnapshot<T> | null> {
