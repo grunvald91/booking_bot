@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -16,6 +15,7 @@ import socket
 import ssl
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
 STATE_PATH = Path(os.environ.get("SERVGO_MONITOR_STATE", "/var/lib/servgo-monitor/state.json"))
@@ -83,63 +83,96 @@ def healthy_docker_state(value: str, command_ok: bool) -> bool:
     return running == "true" and health.strip() not in ("unhealthy", "starting")
 
 
-def collect_checks() -> dict[str, tuple[bool, str]]:
-    result: dict[str, tuple[bool, str]] = {}
-    for name in SERVICES:
-        ok, value = command(["systemctl", "is-active", name])
-        result[f"service:{name}"] = (ok and value == "active", value or "not active")
+def _service_check(name: str) -> tuple[bool, str]:
+    ok, value = command(["systemctl", "is-active", name])
+    return ok and value == "active", value or "not active"
 
-    # Docker's process state catches a dead Growth worker or Telegram process
-    # even if its nginx API and the public site remain healthy.
-    for name in DOCKER_CONTAINERS:
-        ok, value = command([
-            "docker", "inspect", "--format",
-            "{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}",
-            name,
-        ])
-        result[f"docker:{name}"] = (healthy_docker_state(value, ok),
-                                     value or "container not found")
 
-    for host in SITES:
-        ok, code = command([
-            "curl", "-ksS", "--silent", "--show-error", "-o", "/dev/null",
-            "-w", "%{http_code}", "--max-time", "7",
-            "--resolve", f"{host}:443:127.0.0.1", f"https://{host}/",
-        ], timeout=10)
-        result[f"https:{host}"] = (healthy_http_code(host, code, ok), f"HTTP {code or 'unreachable'}")
+def _docker_check(name: str) -> tuple[bool, str]:
+    ok, value = command([
+        "docker", "inspect", "--format",
+        "{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}",
+        name,
+    ])
+    return healthy_docker_state(value, ok), value or "container not found"
 
+
+def _site_check(host: str) -> tuple[bool, str]:
+    ok, code = command([
+        "curl", "-ksS", "--silent", "--show-error", "-o", "/dev/null",
+        "-w", "%{http_code}", "--max-time", "7",
+        "--resolve", f"{host}:443:127.0.0.1", f"https://{host}/",
+    ], timeout=10)
+    return healthy_http_code(host, code, ok), f"HTTP {code or 'unreachable'}"
+
+
+def _telegram_proxy_check() -> tuple[bool, str]:
     ok, code = command([
         "curl", "-ksS", "-o", "/dev/null", "-w", "%{http_code}",
         "--proxy", "socks5h://127.0.0.1:1089", "--connect-timeout", "4",
         "--max-time", "8", "https://api.telegram.org/",
     ], timeout=11)
-    result["proxy:telegram-egress"] = (ok and code.isdigit() and 200 <= int(code) < 400,
-                                       f"Telegram egress HTTP {code or 'unreachable'}")
+    return ok and code.isdigit() and 200 <= int(code) < 400, f"Telegram egress HTTP {code or 'unreachable'}"
 
-    ok, code = command(["curl", "-fsS", "-o", "/dev/null", "-w", "%{http_code}",
-                        "--max-time", "5", "http://127.0.0.1:18080/_promo_health"], timeout=7)
-    result["promo:standalone"] = (ok and code == "200", f"local HTTP {code or 'unreachable'}")
 
-    # The legacy listener also hosts STO / mini-app routes and may fail to
-    # start while the Telegram polling process itself remains alive.
-    ok, code = command(["curl", "-fsS", "-o", "/dev/null", "-w", "%{http_code}",
-                        "--max-time", "5", "http://127.0.0.1:8080/beauty"], timeout=7)
-    result["webapp:legacy-8080"] = (ok and code == "200",
-                                     f"legacy HTTP {code or 'unreachable'}")
+def _local_web_check(url: str) -> tuple[bool, str]:
+    ok, code = command([
+        "curl", "-fsS", "-o", "/dev/null", "-w", "%{http_code}",
+        "--max-time", "5", url,
+    ], timeout=7)
+    return ok and code == "200", f"local HTTP {code or 'unreachable'}"
 
+
+def _disk_check() -> tuple[bool, str]:
     total, _used, free = shutil.disk_usage("/")
     used_pct = round((total - free) * 100 / total)
-    result["disk:root"] = (used_pct < 90, f"disk {used_pct}% used")
+    return used_pct < 90, f"disk {used_pct}% used"
 
+
+def _tls_check(host: str) -> tuple[bool, str]:
+    try:
+        with socket.create_connection(("127.0.0.1", 443), timeout=4) as sock:
+            with ssl.create_default_context().wrap_socket(sock, server_hostname=host) as channel:
+                expires = ssl.cert_time_to_seconds(channel.getpeercert()["notAfter"])
+        days = int((expires - time.time()) / 86400)
+        return days >= 14, f"TLS expires in {days} days"
+    except (OSError, ssl.SSLError, KeyError, ValueError):
+        return False, "TLS validation failed"
+
+
+def collect_checks() -> dict[str, tuple[bool, str]]:
+    """Check independently failing services in parallel.
+
+    Sequential probes could exceed systemd's 90-second start timeout during
+    a widespread outage, precisely when alerts are most important.
+    """
+    probes: list[tuple[str, Callable[[], tuple[bool, str]]]] = []
+    for name in SERVICES:
+        probes.append((f"service:{name}", lambda n=name: _service_check(n)))
+    for name in DOCKER_CONTAINERS:
+        probes.append((f"docker:{name}", lambda n=name: _docker_check(n)))
+    for host in SITES:
+        probes.append((f"https:{host}", lambda h=host: _site_check(h)))
+    probes.extend([
+        ("proxy:telegram-egress", _telegram_proxy_check),
+        ("promo:standalone", lambda: _local_web_check("http://127.0.0.1:18080/_promo_health")),
+        ("webapp:legacy-8080", lambda: _local_web_check("http://127.0.0.1:8080/beauty")),
+        ("disk:root", _disk_check),
+    ])
     for host in ("promo.servgo.ru", "servgo.ru", "growth.servgo.ru"):
-        try:
-            with socket.create_connection(("127.0.0.1", 443), timeout=4) as sock:
-                with ssl.create_default_context().wrap_socket(sock, server_hostname=host) as channel:
-                    expires = ssl.cert_time_to_seconds(channel.getpeercert()["notAfter"])
-            days = int((expires - time.time()) / 86400)
-            result[f"tls:{host}"] = (days >= 14, f"TLS expires in {days} days")
-        except (OSError, ssl.SSLError, KeyError, ValueError):
-            result[f"tls:{host}"] = (False, "TLS validation failed")
+        probes.append((f"tls:{host}", lambda h=host: _tls_check(h)))
+
+    result: dict[str, tuple[bool, str]] = {}
+    with ThreadPoolExecutor(max_workers=12, thread_name_prefix="servgo-check") as pool:
+        jobs = {pool.submit(probe): key for key, probe in probes}
+        for future in as_completed(jobs):
+            key = jobs[future]
+            try:
+                result[key] = future.result()
+            except Exception as exc:
+                # Never include exception messages: network errors could expose
+                # credentials, internal paths or customer data.
+                result[key] = False, f"probe failed ({type(exc).__name__})"
     return result
 
 
