@@ -81,6 +81,18 @@
 8. Все 61 функции отмечены как «перенесено/подключено/осталось старое»; на 320px без overflow; видео в UI — «Простое видео».
 9. После включения нового `servgo.ru/studio` повторить существующий пользовательский путь по `growth.servgo.ru` (старый bookmark, прямой `/studio`, deep link проекта, login/logout, GET/POST, сохранение/чтение, роль и tenant isolation). Проверять **оба адреса до/после включения флагов**; не допускать редиректа старого URL на новый.
 
+## Подтверждённый релиз SW v3 — 31 октября 2026, 08:53 UTC
+
+**Серверный выпуск этапа SW завершён.** Изолированный [PR #102](https://github.com/grunvald91/booking_bot/pull/102) объединён с main squash-коммитом [fe6777b](https://github.com/grunvald91/booking_bot/commit/fe6777bf5238559ead8e660157d570dca277fed8), без включения Growth/Mail gateway, темы и новых SSO маршрутов. [Frontend deployment](https://github.com/grunvald91/booking_bot/actions/runs/41186280994) — success (React build, SCP и dist upload). Перезапуска backend не было.
+
+**Независимый TLS/HTTP smoke (localhost с корректным SNI), до и после выпуска:**
+- [До релиза](https://github.com/grunvald91/booking_bot/actions/runs/41186243838), attempt 1: HTTP SW v2, SHA256 `e7dbc7b8e8992bb5e132abee95eec2d9a9dc2bd7198edf79d54621079a832fd8`, файл на диске совпадал с HTTPS-ответом.
+- [После релиза](https://github.com/grunvald91/booking_bot/actions/runs/41186243838), attempt 2: HTTP SW **v3**, SHA256 `e55df482f1d9a085c81f8ca9a09a9450b83b4223c3beaedeba052b9e22fc1e92`, файл совпадает с HTTPS-ответом, `offline.html` доступен с правильным маркером.
+- Статусы до/после совпадают: `servgo.ru/` 200, `/sw.js` 200, `/manifest.webmanifest` 200, `/api/health` 200, `growth.servgo.ru/studio` 401 без сессии, `mail.servgo.ru/` 200. `nginx -t` successful, 0 конфликтов; прежний `growth.servgo.ru` **не перенаправлен**.
+- Регрессионные тесты SW проверены [CI PR #102](https://github.com/grunvald91/booking_bot/actions/runs/41174553819): network-only HTML, очистка старого кеша, отсутствие приватного кеша, push navigation. **Реальное обновление существующей установки PWA на Android/iOS, работа push на устройстве и полноценные авторизованные бизнес-операции ещё НЕ подтверждены.**
+
+**Следующий безопасный шаг:** сначала device/installed-PWA проверка обновления v2→v3, offline, push, запись клиента, затем read-only diff нового nginx include с активным TLS vhost и staging Growth gateway. Раздельный существующий `growth.servgo.ru` сохраняется без срока отключения. Интеграционные PR #107/#184 пока draft; не сливать без отдельного gateway review. Поскольку #102 уже в main, перед будущим merge #107 сверить diff/rebase, чтобы не выпускать SW повторно как часть общего редизайна.
+
 ## Точка продолжения — 31 октября 2026, 08:36 UTC
 
 ### Проверенные результаты
