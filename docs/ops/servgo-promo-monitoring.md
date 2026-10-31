@@ -23,7 +23,7 @@ successes the system sends recovery. One still-failing incident is repeated
 at most every 6 hours. State persists under `/var/lib/servgo-monitor/state.json`.
 No log bodies, visitor data, tokens or contact details are put in alerts.
 
-**35 checks currently enabled:**
+**36 checks currently enabled:**
 - 13 systemd services/timers (Nginx, BookingBot and API, promo, mail worker,
   PostgreSQL, Redis, Dovecot, Postfix, proxy/relay and backup/cert timers);
 - 8 Docker containers, including Growth API, worker, Telegram and database
