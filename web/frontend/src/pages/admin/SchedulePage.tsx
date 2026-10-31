@@ -24,6 +24,7 @@ import { api, type AdminBooking, type Service, type Employee } from '../../api/c
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
 import { clearLogin } from '../../authUtils'
 import { useTheme } from '../../hooks/useTheme'
+import { useConnectivity } from '../../utils/useConnectivity'
 import { AdminBottomNav } from '../../components/AdminShell'
 import { BusinessSelector } from '../../components/BusinessSelector'
 import './schedule.css'
@@ -539,6 +540,7 @@ function ConfirmMoveDialog({ clientName, fromLabel, toLabel, submitting, onCance
 export function SchedulePage() {
   const { businesses, selectedId: businessId, selectBusiness } = useAdminBusiness()
   const [theme, toggleTheme] = useTheme()
+  const online = useConnectivity()
   const navigate = useNavigate()
   const [viewMode, setViewMode] = useState<'week' | 'day'>('day')
   const [weekOffset, setWeekOffset] = useState(0)
@@ -852,7 +854,7 @@ export function SchedulePage() {
 
   // ── Перетаскивание одиночной записи (день): long-press на тач, сразу — мышью ──
   const beginDrag = (e: React.PointerEvent, b: AdminBooking) => {
-    if (viewMode !== 'day') return
+    if (!online || viewMode !== 'day') return
     if (e.pointerType === 'mouse' && e.button !== 0) return
     const startX = e.clientX
     const startY = e.clientY
@@ -960,6 +962,7 @@ export function SchedulePage() {
   }
 
   const tapFreeSlot = (e: React.MouseEvent<HTMLDivElement>, date: Date, employeeId: number | null) => {
+    if (!online) return
     if (e.target !== e.currentTarget || Date.now() < suppressClickUntil.current) return
     const rect = e.currentTarget.getBoundingClientRect()
     const min = DAY_START_H * 60 + Math.round(((e.clientY - rect.top) / pxPerMin) / 15) * 15
@@ -1163,7 +1166,7 @@ export function SchedulePage() {
             <button className="sched-zoom-reset" onClick={() => setHourPx(DEFAULT_HOUR_PX)} aria-label="Вернуть масштаб 100%" title="Сбросить масштаб"><RotateCcw size={18} /></button>
           )}
           {businessId && (
-            <button className="sched-fab" onClick={() => {
+            <button className="sched-fab" disabled={!online} title={online ? 'Записать клиента' : 'Изменения доступны только при подключении'} onClick={() => {
               // Сегодня — сразу подставляем ближайшее время от текущей минуты (округляем вверх до 5 минут).
               const date = viewMode === 'week' ? new Date() : dayDate
               const isToday = formatDateISO(date) === todayISO
@@ -1275,7 +1278,7 @@ export function SchedulePage() {
           onQuote={handleRentalQuote}
           error={bookingError}
           onReschedule={(b) => { setRescheduleError(''); setRescheduleBooking(b) }}
-          updating={updating}
+          updating={updating || !online}
         />
       )}
 
