@@ -44,21 +44,20 @@ self.addEventListener('install', (event) => {
     // If the core precache fails, keep the previously installed worker active.
     const cache = await caches.open(CACHE_NAME)
     await cache.addAll(PRECACHE)
-    try {
-      // Generated at build time: all JS/CSS/font chunks, including lazy schedule.
-      // A missing optional asset must not abort the service worker installation.
-      try {
-        const manifest = await fetch('/offline-assets.json', { cache: 'no-store' })
-        if (manifest.ok) {
-          const assetPaths = await manifest.json()
-          if (Array.isArray(assetPaths)) {
-            await Promise.allSettled(assetPaths
-              .filter((path) => typeof path === 'string' && publicStaticAsset(path))
-              .map((path) => cache.add(path)))
-          }
-        }
-      } catch (_) { /* runtime assets are still cached when visited online */ }
-    } catch (_) { /* optional asset manifest: core shell is already available */ }
+    // Every hashed bundle in the generated manifest is required for a reliable
+    // cold start, including lazy schedule screens. On ANY failure, installation
+    // rejects and the previously active service worker stays in control.
+    const manifest = await fetch('/offline-assets.json', { cache: 'no-store' })
+    if (!manifest.ok) throw new Error('Offline asset manifest unavailable')
+    const assetPaths = await manifest.json()
+    if (!Array.isArray(assetPaths) || assetPaths.length === 0 ||
+        !assetPaths.every((path) => typeof path === 'string' && publicStaticAsset(path)) ||
+        !assetPaths.some((path) => /\.js$/i.test(path)) ||
+        !assetPaths.some((path) => /\.css$/i.test(path))) {
+      throw new Error('Invalid offline asset manifest')
+    }
+    // addAll is atomic per cache for this batch: no partial version activation.
+    await cache.addAll(assetPaths)
     await self.skipWaiting()
   })())
 })
