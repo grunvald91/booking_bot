@@ -273,9 +273,15 @@ async def login(data: LoginData, request: Request, session: AsyncSession = Depen
 
 
 @router.get("/api/logout")
-def logout():
-    response = RedirectResponse("/", status_code=303)
-    response.delete_cookie(COOKIE, secure=True, httponly=True, samesite="lax")
+def logout(request: Request):
+    is_pwa = canonical_mail_request(request)
+    response = RedirectResponse("/admin" if is_pwa else "/", status_code=303, headers={
+        "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+    })
+    response.delete_cookie(
+        COOKIE, path="/api/owner-mail" if is_pwa else "/",
+        secure=True, httponly=True, samesite="lax",
+    )
     return response
 
 
