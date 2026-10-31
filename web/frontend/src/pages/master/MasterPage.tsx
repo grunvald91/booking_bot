@@ -65,6 +65,7 @@ export function MasterPage() {
   const [loadedFrom, setLoadedFrom] = useState('')
   const data = loadedFrom === from ? rawData : null
   const latestRequest = useRef(0)
+  const lastLoadedFrom = useRef('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [changingId, setChangingId] = useState<number | null>(null)
@@ -80,17 +81,18 @@ export function MasterPage() {
       const result = await api.masterSchedule(start, addDays(start, WINDOW_DAYS - 1))
       if (sequence !== latestRequest.current) return
       setRawData(result)
+      lastLoadedFrom.current = start
       setLoadedFrom(start)
     } catch (e) {
       if (sequence !== latestRequest.current) return
       if (e instanceof ApiError && e.status === 401) { navigate('/login', { replace: true }); return }
       if (e instanceof ApiError && e.status === 403) { navigate('/my', { replace: true }); return }
-      if (loadedFrom !== start) { setRawData(null); setLoadedFrom('') }
+      if (lastLoadedFrom.current !== start) { setRawData(null); setLoadedFrom('') }
       setError('Записи за этот период не сохранены для офлайн-просмотра. Подключитесь к интернету и повторите.')
     } finally {
       if (sequence === latestRequest.current) setLoading(false)
     }
-  }, [navigate, loadedFrom])
+  }, [navigate])
 
   useEffect(() => { void load(from) }, [from, load])
   useEffect(() => {
