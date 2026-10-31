@@ -654,7 +654,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       try {
         const snapshot = await loadOfflineSnapshot<T>(path, token);
         if (snapshot) {
-          publishOfflineSnapshotUsed(snapshot.savedAt);
+          publishOfflineSnapshotUsed(snapshot.savedAt, path);
           return snapshot.data;
         }
       } catch (storageError) {
@@ -662,6 +662,19 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       }
     }
     throw error;
+  }
+  // Gateway outage: keep cached schedules readable, but never mask 401/403.
+  if ([502, 503, 504].includes(res.status) && offlineReadable && token) {
+    try {
+      const snapshot = await loadOfflineSnapshot<T>(path, token)
+      if (snapshot) {
+        window.dispatchEvent(new Event('servgo-api-offline'))
+        publishOfflineSnapshotUsed(snapshot.savedAt, path)
+        return snapshot.data
+      }
+    } catch (storageError) {
+      console.warn('ServGo offline fallback unavailable:', storageError)
+    }
   }
   window.dispatchEvent(new Event('servgo-api-online'))
   if (!res.ok) {
