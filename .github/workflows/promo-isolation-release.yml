@@ -1,0 +1,33 @@
+name: Guarded ServGo promo isolation + monitor release
+# One-time branch-triggered migration. Never deploys from normal code pushes.
+on:
+  push:
+    branches:
+      - feature/servgo-promo-isolation-monitor-20261031
+    paths:
+      - '.github/workflows/promo-isolation-release.yml'
+permissions:
+  contents: read
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      APPLY: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned SSH client and test tools
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1' 'pytest>=8,<9'
+      - name: Verify exact promo vhost rewrite and monitor state machine
+        run: |
+          python -m py_compile webapp/promo_standalone.py ops/servgo_monitor.py scripts/deploy_servgo_promo_monitor.py
+          python -m pytest -q tests/test_promo_isolation_contract.py tests/test_servgo_monitor.py tests/test_promo_release_contract.py
+      - name: Apply guarded promo-only migration with rollback
+        run: python scripts/deploy_servgo_promo_monitor.py
