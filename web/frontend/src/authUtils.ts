@@ -1,3 +1,4 @@
+import { clearOfflineSnapshots } from './utils/offlineStore'
 import type { AuthResponse } from './api/client'
 
 export function errorMessage(error: unknown) {
@@ -8,14 +9,21 @@ export function errorMessage(error: unknown) {
   } catch { return message }
 }
 
-export function clearLogin() {
+export async function clearLogin() {
+  // Remove the authorization key synchronously to prevent stale-data reads.
   localStorage.removeItem('token')
   localStorage.removeItem('userRole')
   localStorage.removeItem('userName')
+  localStorage.removeItem('adminBusinessId')
+  window.dispatchEvent(new Event('servgo-logout'))
+  // Callers handling explicit logout must await this before navigation.
+  await clearOfflineSnapshots()
 }
 
 export function saveLogin(res: AuthResponse) {
+  const previousToken = localStorage.getItem('token')
   localStorage.setItem('token', res.token)
+  if (previousToken !== res.token) window.dispatchEvent(new Event('servgo-account-changed'))
   localStorage.setItem('userRole', res.role)
   localStorage.setItem('userName', res.user.full_name)
   sessionStorage.removeItem('servgoExplicitLogout')

@@ -1,16 +1,28 @@
 /*
  * ServGo PWA service worker — shared-origin migration foundation.
  *
- * SECURITY: Never cache HTML navigations, authenticated responses or API data.
- * In particular, future /workspace/growth/* and /workspace/mail/* pages must
- * not be stored under the public SPA shell key (the previous v2 did that).
+ * Keep authenticated network responses out of CacheStorage. Only the static,
+ * user-independent Vite /index.html app shell is precached for offline launch.
+ * Live booking data is stored separately (seven days) in account-scoped IndexedDB.
+ * Growth/Mail HTML and every API response remain network-only.
  *
  * This worker owns only caches matching servgo-pwa-v<number>.
  * Do not delete push subscriptions or other apps' CacheStorage namespaces.
  */
-const CACHE_NAME = 'servgo-pwa-v3'
-const PRECACHE = ['/offline.html', '/favicon.svg', '/icon-192.png', '/icon-512.png']
-const PUBLIC_ICONS = new Set(PRECACHE.filter((path) => path !== '/offline.html'))
+const CACHE_NAME = 'servgo-pwa-v4'
+const PRECACHE = ['/index.html', '/offline.html', '/favicon.svg', '/icon-192.png', '/icon-512.png']
+const PUBLIC_ICONS = new Set(['/favicon.svg', '/icon-192.png', '/icon-512.png'])
+
+function offlineAppRoute(path) {
+  // Only same-origin BookingBot PWA screens. Growth and Mail keep their own auth.
+  return path === '/' || path === '/admin' || path.startsWith('/admin/')
+    || path === '/my' || path === '/master' || path === '/account'
+    || path === '/login' || path.startsWith('/login/')
+    || path.startsWith('/book/') || path.startsWith('/business/')
+    || path === '/subscriptions' || path === '/schedule' || path === '/calendar'
+    || path === '/analytics'
+}
+
 
 function publicStaticAsset(path) {
   // /assets/ is reserved for Vite-built, publicly served static resources.
@@ -28,12 +40,24 @@ function cacheableStaticResponse(response) {
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
-    try {
-      const cache = await caches.open(CACHE_NAME)
-      await cache.addAll(PRECACHE)
-    } catch (_) {
-      // Installation must not prevent network-only navigation if offline assets fail.
+    // Do not activate a new offline-capable worker without the verified shell.
+    // If the core precache fails, keep the previously installed worker active.
+    const cache = await caches.open(CACHE_NAME)
+    await cache.addAll(PRECACHE)
+    // Every hashed bundle in the generated manifest is required for a reliable
+    // cold start, including lazy schedule screens. On ANY failure, installation
+    // rejects and the previously active service worker stays in control.
+    const manifest = await fetch('/offline-assets.json', { cache: 'no-store' })
+    if (!manifest.ok) throw new Error('Offline asset manifest unavailable')
+    const assetPaths = await manifest.json()
+    if (!Array.isArray(assetPaths) || assetPaths.length === 0 ||
+        !assetPaths.every((path) => typeof path === 'string' && publicStaticAsset(path)) ||
+        !assetPaths.some((path) => /\.js$/i.test(path)) ||
+        !assetPaths.some((path) => /\.css$/i.test(path))) {
+      throw new Error('Invalid offline asset manifest')
     }
+    // addAll is atomic per cache for this batch: no partial version activation.
+    await cache.addAll(assetPaths)
     await self.skipWaiting()
   })())
 })
@@ -56,11 +80,16 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return
 
   if (request.mode === 'navigate') {
-    // Network-only for *every* navigation, including public and private pages.
-    // Never cache a signed-in HTML response as / or /index.html.
+    // Always fetch live pages when online. Offline only: serve the prebuilt,
+    // user-independent shell for BookingBot SPA routes. Never cache live HTML.
     event.respondWith(fetch(request).catch(async () => {
-      const cached = await caches.open(CACHE_NAME).then((cache) => cache.match('/offline.html'))
-      return cached || new Response('ServGo: нет соединения', {
+      const cache = await caches.open(CACHE_NAME)
+      if (offlineAppRoute(url.pathname)) {
+        const appShell = await cache.match('/index.html')
+        if (appShell) return appShell
+      }
+      const fallback = await cache.match('/offline.html')
+      return fallback || new Response('ServGo: нет соединения', {
         status: 503,
         headers: { 'Content-Type': 'text/plain; charset=utf-8' },
       })
