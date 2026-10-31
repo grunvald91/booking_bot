@@ -183,5 +183,17 @@ class MailPwaTests(unittest.TestCase):
         self.assertIn("Max-Age=0", response.headers["set-cookie"])
 
 
+    def test_both_mail_logout_endpoints_clear_the_correct_cookie_scope(self):
+        with patch.dict(os.environ, {"SERVGO_MAIL_GATEWAY_ENABLED": "true"}):
+            pwa = owner_mail.logout(request())
+            old = owner_mail.logout(request("mail.servgo.ru"))
+        self.assertEqual(pwa.headers["location"], "/admin")
+        self.assertEqual(old.headers["location"], "/")
+        self.assertIn("Path=/api/owner-mail", pwa.headers["set-cookie"])
+        self.assertIn("Path=/", old.headers["set-cookie"])
+        self.assertIn("Max-Age=0", pwa.headers["set-cookie"])
+        self.assertIn("Max-Age=0", old.headers["set-cookie"])
+
+
 if __name__ == "__main__":
     unittest.main()
