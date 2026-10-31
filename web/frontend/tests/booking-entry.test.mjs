@@ -147,3 +147,11 @@ test('мастер без доступных услуг не оставляет 
   assert.equal(result.step, 'services')
   assert.equal(result.order, 'service_first')
 })
+
+test('несовместимая пара в resource_first сохраняет приоритет явной услуги', () => {
+  const result = resolveBookingEntry(business([s1, s2], [m1, m2], { booking_flow_order: 'resource_first' }), 12, 21)
+  assert.equal(result.order, 'service_first')
+  assert.equal(result.services[0].id, 12)
+  assert.equal(result.resource.id, 22)
+  assert.equal(result.step, 'calendar')
+})
