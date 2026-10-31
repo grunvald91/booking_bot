@@ -133,6 +133,14 @@ def main():
             if remote is None or sha(remote) != expected[rel]:
                 raise RuntimeError("Staged file SHA mismatch: " + rel)
 
+        # Keep previous content-hashed JS/CSS chunks accessible for existing
+        # browser sessions and installed PWA clients during the rollout.
+        # Never overwrite the freshly built artifacts.
+        run(client, "if [ -d " + sh(DIST + "/assets") + " ]; then " +
+            "install -d -m 0755 " + sh(new_release + "/assets") +
+            " && cp -a -n " + sh(DIST + "/assets/.") + " " +
+            sh(new_release + "/assets/") + "; fi")
+
         if current_is_link:
             prev_link = run(client, "readlink " + sh(DIST))
             if not prev_link.startswith("releases/"):
