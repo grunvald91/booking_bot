@@ -88,7 +88,8 @@ async def mail_workspace_mailbox(request: Request, session: AsyncSession = Depen
 @router.get("/workspace/logout", include_in_schema=False)
 def mail_workspace_logout(request: Request):
     _require_pwa(request)
-    response = RedirectResponse("/mail", status_code=303, headers={
+    # Exit the mail workspace rather than instantly issuing a new SSO ticket.
+    response = RedirectResponse("/admin", status_code=303, headers={
         "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"
     })
     response.delete_cookie(COOKIE, path=PWA_API_PREFIX, secure=True,
