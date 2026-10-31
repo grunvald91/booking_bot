@@ -95,8 +95,8 @@ function splitWeekIntoDays<T>(path: string, data: T): Array<{ path: string; data
   const businessId = params.get('business_id')
   const start = params.get('start_date')
   const end = params.get('end_date')
-  if (!businessId || !/^\\d+$/.test(businessId) || !start || !end
-    || !/^\\d{4}-\\d{2}-\\d{2}$/.test(start) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(end)) return []
+  if (!businessId || !/^\d+$/.test(businessId) || !start || !end
+    || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return []
   const from = Date.parse(start + 'T00:00:00Z')
   const to = Date.parse(end + 'T00:00:00Z')
   if (!Number.isFinite(from) || !Number.isFinite(to) || to < from || to - from > 6 * 86400000) return []
