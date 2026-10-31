@@ -79,6 +79,18 @@ function App() {
   const [authReady, setAuthReady] = useState(false)
   // Enforce the approved seven-day retention when the PWA is next opened.
   useEffect(() => { void cleanupExpiredOfflineSnapshots().catch(console.warn) }, [])
+
+  // localStorage changes are broadcast to other tabs by the browser. Full
+  // navigation clears React's in-memory bookings, modal state and cached roles.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== 'token' || event.oldValue === event.newValue) return
+      // Another tab logged out or switched users; never keep showing its data.
+      window.location.replace(event.newValue ? '/admin' : '/login')
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
   const navigate = useNavigate()
 
   useEffect(() => {
