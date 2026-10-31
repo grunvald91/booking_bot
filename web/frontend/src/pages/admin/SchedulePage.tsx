@@ -712,6 +712,7 @@ export function SchedulePage() {
   useEffect(() => {
     // Invalidate all previous responses immediately when selection changes.
     requestSequence.current += 1
+    window.dispatchEvent(new Event('servgo-offline-context-reset'))
     setSelectedBooking(null)
     setGroupEntries(null)
     setManual(null)
