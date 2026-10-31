@@ -26,7 +26,8 @@
 - [x] Mail `GET /api/logout` очищает cookie с правильным `Path=/api/owner-mail` на canonical origin, и `Path=/` на legacy host. Регрессионный тест добавлен.
 - [x] Mail не выдаёт `mail_owner` другим бизнес-пользователям; SSO ticket одноразовый, привязан к origin.
 - [x] Growth принимает POST второго origin только при флаге и реальном HTTPS Host `servgo.ru`.
-- [ ] **Подтвердить конфигурацию production nginx**, включая active `server_name servgo.ru`, маршруты `/studio`, `/api`, `/workspace`, IP:порт Growth, trusted proxy headers, сертификат и резервную копию. Репозиторный снимок не является доказательством live-конфигурации.
+- [x] **Провести live-аудит действующего production nginx:** после сохранённого backup и удаления дубля остаётся один `servgo.ru:443`; `nginx -t` успешен, предупреждений 0, upstream BookingBot `/api` → `127.0.0.1:8000`, Growth legacy → `127.0.0.1:8091`. Подтверждено [независимым SSH-аудитом после исправления, attempt 2](https://github.com/grunvald91/booking_bot/actions/runs/41183811915).
+- [ ] **Проверить будущую конфигурацию gateway в реальном TLS-vhost:** `/studio` и `/workspace/growth` пока не активированы на `servgo.ru`. До включения сверить candidate nginx include с оставшимся блоком, сертификатом, proxy headers, API routes и резервной копией; проверить SSO на staging.
 - [ ] **Проверить точечный include** `deploy/nginx/servgo-growth-gateway.inc.example` именно в контексте действующего TLS server. `nginx -t` в CI проверяет только изолированный шаблон.
 - [ ] **Сохранить текущий безопасный доступ по legacy адресам** `growth.servgo.ru` и `mail.servgo.ru` на время миграции.
 - [ ] Выполнить staging E2E с валидным входом и разными ролями: 401/403, чужая компания, logout, CSRF, replay, referer, cookies и no-store.
@@ -48,6 +49,10 @@ Growth OS [`deploy-growth.yml`](https://github.com/grunvald91/Ai_growth_os/blob/
 - [ ] Переходы refresh, back/forward, deep links, режим offline, уведомления и возвращение из почты не открывают лишнюю вкладку браузера.
 - [ ] Mail: поиск компании, адресатов, черновики, письма и кампании работают, но массовая реальная рассылка **не используется** для тестов.
 - [ ] Проверка функционального паритета 61 сценария и подтверждённых ролей.
+
+## Точка продолжения 31.10.2026
+
+Независимый повторный аудит nginx завершён, поэтому исправление дубля повторять **не нужно**. Следующий невыполненный шаг — отдельно выпустить SW v3 после проверки [PR #102](https://github.com/grunvald91/booking_bot/pull/102), не включая gateway. Контрольная последовательность и ограничения обновлены в [живом плане](unified-pwa-implementation-plan.md). Никакого merge в main/переключения production в рамках этого обновления документации.
 
 ## Операторский порядок staged release (не выполнен)
 
