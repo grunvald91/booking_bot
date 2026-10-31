@@ -109,7 +109,7 @@ function App() {
           } catch (error) {
             // Preserve the session during temporary network/server outages.
             if (!(error instanceof ApiError) || error.status !== 401) return
-            clearLogin()
+            await clearLogin().catch(error => console.warn('Offline cleanup after expired login:', error))
           }
         }
         // Existing browser cookie from an authenticated Telegram session.
