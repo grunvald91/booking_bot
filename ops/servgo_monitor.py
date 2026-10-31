@@ -207,7 +207,7 @@ def update_states(
                     item["pending"] = "down"
         if item.get("pending") == "down" and item["alarm"]:
             pending["down"].append((key, item["detail"]))
-        if item.get("pending") == "up" and not item["alarm"]:
+        if item.get("pending") == "up" and healthy and not item["alarm"] and item["good"] >= RECOVER_THRESHOLD:
             pending["up"].append((key, item["detail"]))
     return state, pending
 
@@ -253,7 +253,9 @@ async def send_message(message: str) -> bool:
 
     token, chat = credentials()
     endpoint = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat, "text": message[:3800], "disable_web_page_preview": True}
+    if len(message) > 3800:
+        raise ValueError("Monitoring Telegram message exceeds safe size; use alert_batches")
+    payload = {"chat_id": chat, "text": message, "disable_web_page_preview": True}
     timeout = aiohttp.ClientTimeout(total=10)
     for via_proxy in (False, True):
         try:
@@ -278,6 +280,26 @@ def message(kind: str, failures: list[tuple[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def alert_batches(kind: str, items: list[tuple[str, str]], limit: int = 3500) -> list[tuple[list[tuple[str, str]], str]]:
+    """Split incidents without dropping alerts or acknowledging unsent checks."""
+    if limit < 350:
+        raise ValueError("Telegram batch limit must be at least 350 characters")
+    batches: list[tuple[list[tuple[str, str]], str]] = []
+    chunk: list[tuple[str, str]] = []
+    for item in items:
+        if len(message(kind, [item])) > limit:
+            raise ValueError("One monitoring incident exceeds Telegram size limit")
+        candidate = chunk + [item]
+        if chunk and len(message(kind, candidate)) > limit:
+            batches.append((chunk, message(kind, chunk)))
+            chunk = [item]
+        else:
+            chunk = candidate
+    if chunk:
+        batches.append((chunk, message(kind, chunk)))
+    return batches
+
+
 async def run(*, dry_run: bool = False, test_message: bool = False) -> bool:
     if test_message:
         return await send_message("✅ ServGo: тест системы мониторинга. Канал уведомлений работает.")
@@ -299,14 +321,14 @@ async def run(*, dry_run: bool = False, test_message: bool = False) -> bool:
     all_sent = True
     for kind in ("down", "up"):
         items = pending[kind]
-        if items:
+        for batch, text in alert_batches(kind, items):
             try:
-                delivered = await send_message(message(kind, items))
+                delivered = await send_message(text)
             except Exception as exc:
                 print(f"Monitoring notification failed: {type(exc).__name__}")
                 delivered = False
             if delivered:
-                mark_delivered(updated, kind, [key for key, _ in items], now)
+                mark_delivered(updated, kind, [key for key, _ in batch], now)
                 save_state(updated)
             else:
                 all_sent = False
