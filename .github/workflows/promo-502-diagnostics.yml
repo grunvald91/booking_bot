@@ -46,6 +46,12 @@ jobs:
               "nginx_servgo": "curl -ksS -o /dev/null -w 'HTTP %{http_code}' --max-time 7 --resolve servgo.ru:443:127.0.0.1 https://servgo.ru/ 2>/dev/null || true",
               "routing": "nginx -T 2>/dev/null | grep -E '^\\s*(server_name|proxy_pass|listen) ' | grep -E 'promo|servgo|8080|8000' | head -n 25",
               "last_service_errors": "journalctl -u booking-bot.service -n 110 --no-pager -o cat 2>/dev/null | grep -Ei 'Traceback|error|exception|no module named|failed|exited|syntax' | tail -n 22 | cut -c1-200",
+              "proxy_port": "ss -ltn 2>/dev/null | grep -E ':(1089|1080|1081|9050) ' || true",
+              "proxy_unit_names": "systemctl list-unit-files --no-pager 2>/dev/null | grep -Ei 'proxy|sing-box|xray|v2ray|socks|clash|3proxy|dante|warp|wireguard|tor' | head -n 35 || true",
+              "proxy_unit_runtime": "systemctl list-units --all --no-pager 2>/dev/null | grep -Ei 'proxy|sing-box|xray|v2ray|socks|clash|3proxy|dante|warp|wireguard|tor' | head -n 35 || true",
+              "booking_unit_command": "systemctl show booking-bot.service -p ExecStart -p ExecStartPre -p Requires -p Wants -p After -p WorkingDirectory -p EnvironmentFiles --no-pager | sed -E 's/(PASSWORD|TOKEN|SECRET|KEY)=[^ ;]+/\\1=REDACTED/Ig' | cut -c1-350",
+              "proxy_recent_errors": "journalctl --no-pager --since '2026-10-31 16:00:00' -p err -n 65 -o cat 2>/dev/null | grep -Ei '1089|proxy|socks|sing-box|xray|v2ray|booking-bot' | tail -n 25 | cut -c1-180",
+              "direct_telegram": "curl -sS -o /dev/null -w 'HTTP %{http_code}' --connect-timeout 4 --max-time 8 https://api.telegram.org/ 2>/dev/null || true",
               "nginx_upstream_errors": "tail -n 150 /var/log/nginx/error.log 2>/dev/null | grep -E 'upstream|connect\\(\\) failed|prematurely closed' | tail -n 10 | sed -E 's/client: [0-9a-fA-F:.]+/client: REDACTED/g' | cut -c1-230",
           }
           try:
