@@ -86,7 +86,7 @@ function App() {
     const onStorage = (event: StorageEvent) => {
       if (event.key !== 'token' || event.oldValue === event.newValue) return
       // Another tab logged out or switched users; never keep showing its data.
-      window.location.replace(event.newValue ? '/admin' : '/login')
+      window.location.reload()
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
