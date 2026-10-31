@@ -52,3 +52,14 @@ test('Mail resource endpoints have no write capability and dashboard remains own
   assert.match(routes, /await mail_owner\(request, session\)/)
   assert.doesNotMatch(routes, /@router\.post\("\/api\/servgo-air/)
 })
+
+
+test('client booking journey inherits dark ServGo Air without changing its light reference', () => {
+  const booking = load('../src/pages/client/booking-flow.css')
+  assert.match(booking, /ServGo Air unified dark skin/)
+  assert.match(booking, /html\[data-theme='dark'\] \.bf-root/)
+  assert.match(booking, /--bf-ink: var\(--s-text\)/)
+  assert.match(booking, /background: var\(--s-surface\)/)
+  assert.match(booking, /color-scheme: dark/)
+  assert.match(booking, /color-scheme: light/)
+})
