@@ -33,6 +33,20 @@ SERVICES = (
     "elitles-tg-proxy.service",
     "postgresql@16-main.service",
     "redis-server.service",
+    "dovecot.service",
+    "postfix.service",
+    "certbot.timer",
+    "sto-money-backup.timer",
+)
+DOCKER_CONTAINERS = (
+    "ai-growth-os-api-1",
+    "ai-growth-os-worker-1",
+    "ai-growth-os-telegram-1",
+    "ai-growth-os-postgres-1",
+    "sushef-bot-1",
+    "sushef-postgres-1",
+    "elitlesbot_app",
+    "elitlesbot_db",
 )
 SITES = (
     "promo.servgo.ru",
@@ -62,11 +76,29 @@ def healthy_http_code(host: str, code: str, transport_ok: bool) -> bool:
     return 200 <= status < 400 or (host == "sto.servgo.ru" and status == 401)
 
 
+def healthy_docker_state(value: str, command_ok: bool) -> bool:
+    if not command_ok:
+        return False
+    running, _, health = value.partition("|")
+    return running == "true" and health.strip() not in ("unhealthy", "starting")
+
+
 def collect_checks() -> dict[str, tuple[bool, str]]:
     result: dict[str, tuple[bool, str]] = {}
     for name in SERVICES:
         ok, value = command(["systemctl", "is-active", name])
         result[f"service:{name}"] = (ok and value == "active", value or "not active")
+
+    # Docker's process state catches a dead Growth worker or Telegram process
+    # even if its nginx API and the public site remain healthy.
+    for name in DOCKER_CONTAINERS:
+        ok, value = command([
+            "docker", "inspect", "--format",
+            "{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}",
+            name,
+        ])
+        result[f"docker:{name}"] = (healthy_docker_state(value, ok),
+                                     value or "container not found")
 
     for host in SITES:
         ok, code = command([
