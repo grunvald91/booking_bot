@@ -7,7 +7,10 @@ let cachedBusinesses: Business[] | null = null;
 let fetchPromise: Promise<Business[]> | null = null;
 
 // A logout must not reuse the previous account's in-memory business list.
-window.addEventListener('servgo-logout', () => { cachedBusinesses = null; fetchPromise = null });
+const resetAccountCache = () => { cachedBusinesses = null; fetchPromise = null }
+window.addEventListener('servgo-logout', resetAccountCache)
+window.addEventListener('servgo-account-changed', resetAccountCache)
+window.addEventListener('storage', event => { if (event.key === 'token') resetAccountCache() })
 
 /** После создания бизнеса: выбрать его и сбросить кэш списка, чтобы он появился везде. */
 export function rememberCreatedBusiness(id: number) {
