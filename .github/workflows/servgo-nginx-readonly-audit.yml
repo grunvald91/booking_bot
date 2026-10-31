@@ -1,0 +1,175 @@
+name: ServGo nginx effective-config audit (read-only)
+
+# A single read-only run on this dedicated owner branch.
+# Never runs on PR content and never deploys or restarts anything.
+on:
+  push:
+    branches: [ops/servgo-nginx-readonly-audit-20261031]
+    paths: [.github/workflows/servgo-nginx-readonly-audit.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: servgo-nginx-readonly-audit
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Confirm credentials available (never print their values)
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD unavailable"; exit 1; }
+      - name: Verify pinned SSH host key and install client
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -p "$SERVER_PORT" -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/servgo-host-keys
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/servgo-candidate
+            ssh-keygen -lf /tmp/servgo-candidate 2>/dev/null |
+              grep -q "SHA256:$HOST_FP " &&
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts || true
+          done < /tmp/servgo-host-keys
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Server host key fingerprint mismatch"; exit 1; }
+      - name: Inspect current nginx configuration and app file hashes (no changes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o BatchMode=no -o ConnectTimeout=18 \
+            -p "$SERVER_PORT" "root@$HOST" 'python3 -' <<'REMOTE_PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import re
+          import subprocess
+          import time
+
+          def run(cmd, timeout=14):
+              try:
+                  p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+                  return p.returncode, p.stdout, p.stderr
+              except Exception as e:
+                  return 250, '', type(e).__name__
+
+          print('audit=ServGo nginx on-disk effective config; read_only=yes')
+          print('timestamp_utc=' + time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()))
+          print('production_changed=no')
+          for name, cmd in [
+              ('nginx_systemd', ['systemctl', 'is-active', 'nginx']),
+              ('nginx_test', ['nginx', '-t']),
+          ]:
+              code, out, err = run(cmd)
+              if name == 'nginx_systemd':
+                  print('nginx_systemd=' + (out.strip() if code in (0, 3) and len(out.strip()) < 32 else 'unknown'))
+              else:
+                  print('nginx_test_ok=' + str(code == 0).lower())
+          code, raw, stderr = run(['nginx', '-T'], timeout=20)
+          print('nginx_dump_ok=' + str(code == 0).lower())
+          if code == 0:
+              print('nginx_config_sha256=' + hashlib.sha256(raw.encode()).hexdigest())
+              # Reduce entire config to a safe, fixed list of routing facts.
+              # NEVER print raw nginx -T or stderr: they could contain credentials.
+              stripped = '\n'.join(
+                  line.split('#', 1)[0] for line in raw.splitlines()
+                  if not line.lstrip().startswith('#')
+              )
+              def block_at(source, after_open):
+                  depth = 1
+                  quote = None
+                  escaped = False
+                  for i in range(after_open, len(source)):
+                      c = source[i]
+                      if escaped:
+                          escaped = False
+                          continue
+                      if c == '\\':
+                          escaped = True
+                          continue
+                      if c in ("'", '"'):
+                          if quote == c:
+                              quote = None
+                          elif quote is None:
+                              quote = c
+                          continue
+                      if quote is None:
+                          if c == '{':
+                              depth += 1
+                          elif c == '}':
+                              depth -= 1
+                              if depth == 0:
+                                  return source[after_open:i]
+                  return ''
+              servers = []
+              for m in re.finditer(r'(?m)^\s*server\s*\{', stripped):
+                  block = block_at(stripped, m.end())
+                  names = re.findall(r'(?m)^\s*server_name\s+([^;]+);', block)
+                  hostnames = ' '.join(names).replace('www.', '')
+                  if not any(z in hostnames.split() for z in ('servgo.ru', 'growth.servgo.ru', 'mail.servgo.ru')):
+                      continue
+                  listeners = re.findall(r'(?m)^\s*listen\s+([^;]+);', block)
+                  all_locations = []
+                  for lm in re.finditer(r'(?m)^\s*location\s+(.+?)\s*\{\s*$', block):
+                      route = lm.group(1).strip().replace('\t', ' ')
+                      body = block_at(block, lm.end())
+                      targets = re.findall(r'\bproxy_pass\s+([^;]+);', body)
+                      mapped = []
+                      for target in targets:
+                          local = re.search(r'(?i)(?:127\.0\.0\.1|localhost):(\d+)', target)
+                          mapped.append('loopback:' + local.group(1) if local else 'non-loopback/variable')
+                      all_locations.append({
+                          'route': route[:120],
+                          'proxy': sorted(set(mapped)),
+                          'host_header_set': bool(re.search(r'proxy_set_header\s+Host\s+', body, re.I)),
+                          'forwarded_proto_set': bool(re.search(r'proxy_set_header\s+X-Forwarded-Proto\s+', body, re.I)),
+                      })
+                  servers.append({
+                      'hostnames': sorted(set(x for x in hostnames.split() if x in ('servgo.ru','growth.servgo.ru','mail.servgo.ru'))),
+                      'listen': sorted(set(x.strip().split()[0][:32] for x in listeners)),
+                      'locations': all_locations[:100],
+                  })
+              print('relevant_server_blocks=' + str(len(servers)))
+              print('route_summary_json=' + json.dumps(servers, ensure_ascii=False))
+          else:
+              print('nginx_dump_error_type=command_failed_or_unavailable')
+          # Explicit allowlist of harmless status lines only.
+          for service in ('booking-web-api', 'booking-bot', 'nginx'):
+              code, out, _ = run(['systemctl', 'is-active', service])
+              value = out.strip()
+              print('service_' + service.replace('-', '_') + '=' +
+                    (value if value in ('active','inactive','failed','activating','deactivating') else 'unknown'))
+          # Names only. Never dump docker inspect, env, command lines or mounts.
+          code, out, _ = run(['docker','ps','--format','{{.Names}}'])
+          if code == 0:
+              names = [n for n in out.splitlines() if n.startswith(('ai-growth','booking'))]
+              print('containers=' + ','.join(names[:15]))
+          # Check that a source checkout really matches the files deployed.
+          # Digests only; never read or print .env, secrets, databases or mail.
+          for relative in (
+              'web/api/main.py', 'web/api/routes/owner_mail.py',
+              'web/api/routes/studio_sso.py',
+              'web/frontend/dist/index.html', 'web/frontend/dist/sw.js',
+          ):
+              p = Path('/opt/booking_bot') / relative
+              try:
+                  if p.is_file() and p.stat().st_size <= 2_000_000:
+                      digest = hashlib.sha256(p.read_bytes()).hexdigest()
+                      print('server_source_sha256 ' + relative + ' ' + digest)
+                  else:
+                      print('server_source_unavailable ' + relative)
+              except Exception as e:
+                  print('server_source_error ' + relative + ' ' + type(e).__name__)
+          print('audit_finished=yes; no nginx reload, no writes, no deployment')
+          REMOTE_PY
