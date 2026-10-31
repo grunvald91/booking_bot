@@ -648,6 +648,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       },
     });
   } catch (error) {
+    window.dispatchEvent(new Event('servgo-api-offline'))
     // Only a transport failure can fall back to saved data: never HTTP 401/403.
     if (offlineReadable && token) {
       try {
@@ -662,6 +663,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     }
     throw error;
   }
+  window.dispatchEvent(new Event('servgo-api-online'))
   if (!res.ok) {
     const text = await res.text();
     throw new ApiError(res.status, text || `HTTP ${res.status}`);
