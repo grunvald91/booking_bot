@@ -41,7 +41,7 @@ import { ApiError } from '../../api/client'
 import { HeroArt } from './AirFrame'
 import { photoSrc, photoThumbSrc } from './airPhotos'
 import { ACCUSATIVE, choosePhrase } from '../../utils/bookingLabels'
-import { resolveBookingEntry, resourceSupportsService } from './bookingEntry'
+import { resolveBookingEntry, resourceSupportsService, getAvailableResources, getAvailableServices, type BookingFlowOrder } from './bookingEntry'
 import './booking-flow.css'
 
 // ── Helpers ──
@@ -345,6 +345,7 @@ function BookingPageInner() {
 
   // Navigation
   const [screen, setScreen] = useState<Screen>('home')
+  const [entryFlowOrder, setEntryFlowOrder] = useState<BookingFlowOrder | null>(null)
   // Двойной «пульс» при успешной записи
   useEffect(() => { if (screen === 'done') haptic([18, 60, 30]) }, [screen])
   const historyRef = useRef<Screen[]>([])
@@ -441,10 +442,11 @@ function BookingPageInner() {
 
   const isVenue = business?.business_type === 'venue_rental'
   const multiService = isVenue || !!business?.allow_multiple_services
-  const flowOrder = business?.booking_flow_order === 'resource_first' ? 'resource_first' : 'service_first'
+  const configuredFlowOrder = business?.booking_flow_order === 'resource_first' ? 'resource_first' : 'service_first'
+  const flowOrder = entryFlowOrder ?? configuredFlowOrder
   const hasResources = employees.length > 0
-  // Для обычного бизнеса в порядке «сначала услуга» специалист необязателен («Любой специалист»).
-  const resourceOptional = !isVenue && flowOrder === 'service_first'
+  // Политика обязательности мастера принадлежит бизнесу и не зависит от входной ссылки.
+  const resourceOptional = !isVenue && configuredFlowOrder === 'service_first'
   const labels = useMemo(() => ({
     service: business?.booking_labels?.service?.trim() || 'Услуга',
     resource: business?.booking_labels?.resource?.trim() || (isVenue ? 'Зал' : 'Мастер'),
@@ -453,18 +455,13 @@ function BookingPageInner() {
     time: business?.booking_labels?.time?.trim() || 'Время',
   }), [business?.booking_labels, isVenue])
 
-  // Даже при входе по ссылке на мастера или услугу показываем только совместимые варианты.
-  const availableServices = useMemo(() => {
-    if (!selectedResource) return services
-    return services.filter((service) => resourceSupportsService(selectedResource, service.id, employees))
-  }, [selectedResource, services, employees])
+  const availableServices = useMemo(() =>
+    getAvailableServices(services, selectedResource, employees, flowOrder),
+  [services, selectedResource, employees, flowOrder])
 
-  const availableResources = useMemo(() => {
-    if (selectedServices.length === 0) return employees
-    return employees.filter((resource) =>
-      selectedServices.every((service) => resourceSupportsService(resource, service.id, employees))
-    )
-  }, [employees, selectedServices])
+  const availableResources = useMemo(() =>
+    getAvailableResources(selectedServices, employees, flowOrder),
+  [selectedServices, employees, flowOrder])
 
   // «Любой специалист» имеет смысл, только если из кого выбирать: когда выбранная услуга
   // привязана ровно к одному мастеру, выбор «любого» не предлагаем.
@@ -494,6 +491,7 @@ function BookingPageInner() {
         setServices(biz.services.filter((s: Service) => s.is_active && !s.is_additional))
         setAdditionalServices(biz.services.filter((s: Service) => s.is_active && s.is_additional))
         setEmployees(biz.employees || [])
+        setEntryFlowOrder(entry.order)
         setSelectedServices(entry.services)
         setSelectedResource(entry.resource)
         setAnyResource(false)
