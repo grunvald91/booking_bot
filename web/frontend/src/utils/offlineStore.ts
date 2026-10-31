@@ -167,6 +167,6 @@ export function clearOfflineSnapshots(): Promise<void> {
   })
 }
 
-export function publishOfflineSnapshotUsed(savedAt: number) {
-  window.dispatchEvent(new CustomEvent('servgo-offline-snapshot-used', { detail: { savedAt } }))
+export function publishOfflineSnapshotUsed(savedAt: number, path: string) {
+  window.dispatchEvent(new CustomEvent('servgo-offline-snapshot-used', { detail: { savedAt, path } }))
 }
