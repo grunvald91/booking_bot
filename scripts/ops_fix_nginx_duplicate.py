@@ -283,8 +283,10 @@ def main():
         if ("servgo.ru", "ipv4:443") not in cover(new_entries):
             raise RuntimeError("primary servgo.ru HTTPS vhost disappeared")
 
-        reload_nginx()
+        # Treat the reload as potentially applied even if systemctl returns an
+        # unexpected failure; rollback must issue its own reload in that case.
         did_reload = True
+        reload_nginx()
         time.sleep(1)
         after = smoke_all()
         print("post_reload_status=" + ",".join(
