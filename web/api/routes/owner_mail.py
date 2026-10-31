@@ -240,14 +240,19 @@ def logout():
 
 LOGIN_PAGE = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Почта ServGo</title>
-<style>body{margin:0;font-family:system-ui,sans-serif;background:#f5f5f7;color:#1d1d1f;display:flex;
+<link rel="stylesheet" href="/api/servgo-air-tokens.css?v=1">
+<link rel="stylesheet" href="/api/servgo-mail-air.css?v=1">
+<script src="/api/servgo-air-theme.js?v=1"></script>
+<script src="/api/servgo-mail-theme-picker.js?v=1" defer></script>
+<style>body{margin:0;font-family:var(--ds-font,system-ui),sans-serif;background:var(--s-bg,#fff);color:var(--s-text,#1b2d42);display:flex;
 min-height:100vh;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
-main{background:#fff;border-radius:16px;padding:24px;width:100%;max-width:360px;box-sizing:border-box;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+main{background:var(--s-surface,#fff);border-radius:20px;padding:24px;width:100%;max-width:360px;box-sizing:border-box;box-shadow:0 1px 3px rgba(0,0,0,.08)}
 h1{font-size:20px;margin:0 0 16px}label{display:block;font-size:14px;margin:0 0 12px}
-input{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:10px 12px;font-size:16px;border:1px solid #d2d2d7;border-radius:10px}
-button{width:100%;margin-top:4px;background:#0071e3;color:#fff;border:0;padding:12px;border-radius:999px;font-size:16px;font-weight:600}
+input{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:10px 12px;font-size:16px;border:1px solid var(--s-line,#e5ecf4);background:var(--s-surface-2,#f6f9fd);color:var(--s-text,#1b2d42);border-radius:10px}
+button{width:100%;margin-top:4px;background:var(--s-accent-grad,linear-gradient(110deg,#3174d4,#578fef));color:var(--s-accent-ink,#fff);border:0;padding:12px;border-radius:999px;font-size:16px;font-weight:600}
 #err{color:#c00;font-size:14px;min-height:20px;margin:8px 0 0}
 </style></head><body><main><h1>Почта ServGo</h1>
+<label class="servgo-mail-theme-picker" style="margin:0 0 16px">Тема <select id="servgo-mail-theme" aria-label="Тема оформления"><option value="system">Как в системе</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label>
 <form id="f"><label>Логин<input name="username" autocomplete="username" autocapitalize="none" required></label>
 <label>Пароль<input name="password" type="password" autocomplete="current-password" required></label>
 <button type="submit">Войти</button><p id="err" role="alert"></p></form>
@@ -276,8 +281,8 @@ async def app_page(request: Request, session: AsyncSession = Depends(get_db)):
         if exc.status_code != 401:
             raise
         return HTMLResponse(LOGIN_PAGE, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
-                                                 "Content-Security-Policy": "default-src 'self'; script-src 'unsafe-inline'; "
-                                                 "style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"})
+                                                 "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+                                                 "style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"})
     path = Path(__file__).resolve().parent / "mail_campaign_dashboard.html"
     return FileResponse(path, media_type="text/html", headers={
         "Cache-Control": "no-store",
