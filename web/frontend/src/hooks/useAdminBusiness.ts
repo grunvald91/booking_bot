@@ -6,6 +6,9 @@ import type { Business } from '../api/client';
 let cachedBusinesses: Business[] | null = null;
 let fetchPromise: Promise<Business[]> | null = null;
 
+// A logout must not reuse the previous account's in-memory business list.
+window.addEventListener('servgo-logout', () => { cachedBusinesses = null; fetchPromise = null });
+
 /** После создания бизнеса: выбрать его и сбросить кэш списка, чтобы он появился везде. */
 export function rememberCreatedBusiness(id: number) {
   cachedBusinesses = null;
