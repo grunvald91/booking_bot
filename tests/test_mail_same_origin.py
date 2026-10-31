@@ -174,8 +174,6 @@ class MailPwaTests(unittest.TestCase):
             with patch.dict(os.environ, {"SERVGO_MAIL_OWNER_USER_ID": "9"}):
                 check_exception(lambda: asyncio.run(mail_pwa._workspace(
                     client, FakeDB(), "owner_mail_ui.html", mailbox=True)), 403)
-            check_exception(lambda: asyncio.run(mail_pwa._workspace(
-                request(), FakeDB(), "owner_mail_ui.html", mailbox=True)), 404) if False else None
 
     def test_canonical_logout_only_revokes_mail_api_cookie(self):
         with patch.dict(os.environ, {"SERVGO_MAIL_GATEWAY_ENABLED": "true"}):
