@@ -4,6 +4,7 @@ import { api, ApiError } from './api/client'
 import { clearLogin, saveLogin } from './authUtils'
 import { Layout } from './components/Layout'
 import { OfflineNotice } from './components/OfflineNotice'
+import { cleanupExpiredOfflineSnapshots } from './utils/offlineStore'
 import { HomePage } from './pages/client/HomePage'
 import { BusinessPage } from './pages/client/BusinessPage'
 import { BookingStatusPage } from './pages/client/BookingStatusPage'
@@ -76,6 +77,8 @@ function RouteSeo() {
 
 function App() {
   const [authReady, setAuthReady] = useState(false)
+  // Enforce the approved seven-day retention when the PWA is next opened.
+  useEffect(() => { void cleanupExpiredOfflineSnapshots().catch(console.warn) }, [])
   const navigate = useNavigate()
 
   useEffect(() => {
