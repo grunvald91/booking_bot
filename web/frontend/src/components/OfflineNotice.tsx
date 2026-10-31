@@ -7,11 +7,21 @@ export function OfflineNotice() {
   const [savedAt, setSavedAt] = useState<number | null>(null)
   useEffect(() => {
     const onSnapshot = (event: Event) => {
-      const detail = (event as CustomEvent<{ savedAt: number }>).detail
-      if (typeof detail?.savedAt === 'number') setSavedAt(detail.savedAt)
+      const detail = (event as CustomEvent<{ savedAt: number; path: string }>).detail
+      const current = window.location.pathname
+      const type = detail?.path?.split('?')[0]
+      const relevant = (current.startsWith('/admin/schedule') && type === '/admin/bookings')
+        || (current === '/master' && type === '/master/schedule')
+        || (current === '/my' && type === '/my/bookings')
+      if (relevant && typeof detail?.savedAt === 'number') setSavedAt(detail.savedAt)
     }
+    const reset = () => setSavedAt(null)
     window.addEventListener('servgo-offline-snapshot-used', onSnapshot)
-    return () => window.removeEventListener('servgo-offline-snapshot-used', onSnapshot)
+    window.addEventListener('servgo-offline-context-reset', reset)
+    return () => {
+      window.removeEventListener('servgo-offline-snapshot-used', onSnapshot)
+      window.removeEventListener('servgo-offline-context-reset', reset)
+    }
   }, [])
   useEffect(() => { if (online) setSavedAt(null) }, [online])
   if (online) return null
