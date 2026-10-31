@@ -15,6 +15,14 @@
 
 `nginx -T` показывает **два server-блока** с `server_name servgo.ru` и `listen 443`. `nginx -t` возвращает 0, но это не подтверждает отсутствие предупреждения `conflicting server name` — stderr намеренно не выводился, чтобы не показать секреты.
 
+
+**Уточнено отдельной read-only проверкой 08:15 UTC:** [лог GitHub Actions #41183811915](https://github.com/grunvald91/booking_bot/actions/runs/41183811915).
+- `nginx -T` / `nginx -t` вернули успех, но nginx сообщил **8 предупреждений о конфликтующих server_name** (общий счёт по всем доменам), включая **конфликт для `servgo.ru:443`**.
+- TLS-блок №1: `/etc/nginx/sites-enabled/webapp`, `listen 443 ssl`, содержит `location = /sw.js` и **не содержит** `/studio`.
+- TLS-блок №2: `/etc/nginx/sites-enabled/webapp.bak_auth3_`, `listen 443 ssl`, **не содержит** `location = /sw.js` и **не содержит** `/studio`.
+- С большой вероятностью резервная копия ошибочно оставлена в каталоге активных nginx include; важно **не удалять её без проверки остальных server_name и резервной копии действующей конфигурации**. Конкретный конфиг **на диске** установлен, однако текущий live worker следует проверять HTTP-ответом и после reload.
+- План безопасного исправления: проверить, какие другие серверные блоки/доменны присутствуют в `webapp.bak_auth3_`; переместить/отключить только лишнюю резервную конфигурацию из `sites-enabled` (не уничтожая файл), выполнить `nginx -t` и проверку warnings **до** reload; сохранить резервный путь для rollback. **На сервере пока ничего не перемещалось.**
+
 **Блокер:** до переноса Growth установить, какие именно конфигурационные файлы содержат два блока, их фактический IP:port и какой блок обрабатывает запросы. Иначе можно добавить `location` в игнорируемый nginx server. Проверить предупреждения, бэкап, подготовить точечный diff действующего файла, `nginx -t`, безопасный reload и smoke test. Не перехватывать существующий BookingBot `/api/*`.
 
 Официально: [nginx request processing](https://nginx.org/en/docs/http/request_processing.html), [server_name](https://nginx.org/en/docs/http/server_names.html).
