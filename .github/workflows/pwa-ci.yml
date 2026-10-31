@@ -5,6 +5,9 @@ on:
     paths:
       - 'web/frontend/**'
       - 'web/api/**'
+      - 'deploy/nginx/**'
+      - 'tests/test_growth_gateway_contract.py'
+      - 'tests/test_studio_sso.py'
       - 'bot/services/notifications.py'
       - 'bot/services/webpush.py'
       - 'bot/services/notification_events.py'
@@ -93,3 +96,17 @@ jobs:
           python tests/test_booking_safety.py
           python tests/test_notification_rules.py
           python tests/test_email_utils.py
+
+      - name: Install API test dependencies for Growth SSO
+        run: python -m pip install --disable-pip-version-check -r web/api/requirements.txt aiosqlite
+
+      - name: Verify Growth one-time SSO and access roles
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python tests/test_studio_sso.py
+
+      - name: Install nginx for isolated syntax verification
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nginx >/dev/null
+
+      - name: Verify the staged Growth reverse-proxy contract
+        run: python tests/test_growth_gateway_contract.py
