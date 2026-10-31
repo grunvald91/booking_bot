@@ -14,6 +14,7 @@ import { ClientShell } from '../../components/ClientShell'
 import { NotificationSetup } from '../../components/NotificationSetup'
 import { downloadBookingIcs } from '../../utils/calendar'
 import { useNavigate } from 'react-router-dom'
+import { useConnectivity } from '../../utils/useConnectivity'
 
 // ── Status config ──
 
@@ -395,6 +396,7 @@ function ReschedulePanel({
 
 export function MyBookingsPage() {
   const navigate = useNavigate()
+  const online = useConnectivity()
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -554,8 +556,8 @@ export function MyBookingsPage() {
   // ── Booking card renderer ──
   const renderBookingCard = (booking: Booking) => {
     const statusAllowsModify = booking.status === 'confirmed' || booking.status === 'pending'
-    const canCancel = booking.can_cancel !== undefined ? booking.can_cancel : statusAllowsModify
-    const canReschedule = booking.can_reschedule !== undefined ? booking.can_reschedule : statusAllowsModify
+    const canCancel = online && (booking.can_cancel !== undefined ? booking.can_cancel : statusAllowsModify)
+    const canReschedule = online && (booking.can_reschedule !== undefined ? booking.can_reschedule : statusAllowsModify)
     const canModify = canCancel || canReschedule
     const canAddCalendar = booking.status !== 'cancelled' && booking.status !== 'completed' && !isPast(booking.date)
     const isRescheduling = reschedulingId === booking.id
