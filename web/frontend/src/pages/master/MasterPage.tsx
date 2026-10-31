@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Phone, ChevronLeft, ChevronRight, CalendarOff } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useConnectivity } from '../../utils/useConnectivity'
@@ -61,7 +61,10 @@ export function MasterPage() {
   const today = useMemo(() => toKey(new Date()), [])
   const nowHHMM = `${pad(new Date().getHours())}:${pad(new Date().getMinutes())}`
   const [from, setFrom] = useState(today)
-  const [data, setData] = useState<MasterSchedule | null>(null)
+  const [rawData, setRawData] = useState<MasterSchedule | null>(null)
+  const [loadedFrom, setLoadedFrom] = useState('')
+  const data = loadedFrom === from ? rawData : null
+  const latestRequest = useRef(0)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [changingId, setChangingId] = useState<number | null>(null)
@@ -70,18 +73,24 @@ export function MasterPage() {
   const [actionError, setActionError] = useState('')
 
   const load = useCallback(async (start: string) => {
+    const sequence = ++latestRequest.current
     setLoading(true)
     setError('')
     try {
-      setData(await api.masterSchedule(start, addDays(start, WINDOW_DAYS - 1)))
+      const result = await api.masterSchedule(start, addDays(start, WINDOW_DAYS - 1))
+      if (sequence !== latestRequest.current) return
+      setRawData(result)
+      setLoadedFrom(start)
     } catch (e) {
+      if (sequence !== latestRequest.current) return
       if (e instanceof ApiError && e.status === 401) { navigate('/login', { replace: true }); return }
       if (e instanceof ApiError && e.status === 403) { navigate('/my', { replace: true }); return }
-      setError('Не удалось загрузить расписание. Проверьте интернет и попробуйте ещё раз.')
+      if (loadedFrom !== start) { setRawData(null); setLoadedFrom('') }
+      setError('Записи за этот период не сохранены для офлайн-просмотра. Подключитесь к интернету и повторите.')
     } finally {
-      setLoading(false)
+      if (sequence === latestRequest.current) setLoading(false)
     }
-  }, [navigate])
+  }, [navigate, loadedFrom])
 
   useEffect(() => { void load(from) }, [from, load])
   useEffect(() => {
