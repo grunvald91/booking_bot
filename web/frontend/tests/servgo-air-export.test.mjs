@@ -41,8 +41,8 @@ test('the Mail login also uses canonical colors and permits only its own static 
     assert.ok(source.includes(asset), 'login missing ' + asset)
   }
   assert.match(source, /id="servgo-mail-theme"/)
-  assert.match(source, /script-src \\'self\\' \\'unsafe-inline\\'/)
-  assert.match(source, /style-src \\'self\\' \\'unsafe-inline\\'/)
+  assert.ok(source.includes("script-src 'self' 'unsafe-inline'"))
+  assert.ok(source.includes("style-src 'self' 'unsafe-inline'"))
 })
 
 test('Mail resource endpoints have no write capability and dashboard remains owner-only', () => {
