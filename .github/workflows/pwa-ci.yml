@@ -90,6 +90,14 @@ jobs:
             web/api/routes/client.py \
             web/api/schemas.py
 
+      - name: Install API dependencies for protected Mail PWA tests
+        run: python -m pip install --disable-pip-version-check -r web/api/requirements.txt aiosqlite
+
+      - name: Verify canonical Mail SSO, owner-only access and API URL rewrites
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python tests/test_mail_same_origin.py
+
       - name: Run regression tests
         env:
           PYTHONPATH: ${{ github.workspace }}
