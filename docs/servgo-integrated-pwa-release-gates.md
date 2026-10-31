@@ -29,7 +29,9 @@
 - [x] **Провести live-аудит действующего production nginx:** после сохранённого backup и удаления дубля остаётся один `servgo.ru:443`; `nginx -t` успешен, предупреждений 0, upstream BookingBot `/api` → `127.0.0.1:8000`, Growth legacy → `127.0.0.1:8091`. Подтверждено [независимым SSH-аудитом после исправления, attempt 2](https://github.com/grunvald91/booking_bot/actions/runs/41183811915).
 - [ ] **Проверить будущую конфигурацию gateway в реальном TLS-vhost:** `/studio` и `/workspace/growth` пока не активированы на `servgo.ru`. До включения сверить candidate nginx include с оставшимся блоком, сертификатом, proxy headers, API routes и резервной копией; проверить SSO на staging.
 - [ ] **Проверить точечный include** `deploy/nginx/servgo-growth-gateway.inc.example` именно в контексте действующего TLS server. `nginx -t` в CI проверяет только изолированный шаблон.
-- [ ] **Сохранить текущий безопасный доступ по legacy адресам** `growth.servgo.ru` и `mail.servgo.ru` на время миграции.
+- [ ] **Сохранить `growth.servgo.ru` без срока отключения**, даже после появления `servgo.ru/studio`: никаких принудительных редиректов/смены URL, прежний вход, отдельная сессия, bookmarks, deep links к проектам/задачам, GET/POST/CSRF, роль/tenant isolation и данные должны оставаться доступными. Это release-blocking требование до отдельного решения владельца.
+- [ ] Сохранить безопасный доступ к `mail.servgo.ru` на время миграции; изменения Mail не должны нарушить старую почтовую ссылку.
+- [ ] **Двухдоменный regression E2E до и после gateway rollout**: проверить `growth.servgo.ru/studio` и вложенные пути как с активной legacy-сессией, так и после новой авторизации; параллельно проверить новый `servgo.ru/studio`, отсутствие cross-host CSRF и отсутствие redirect со старого домена.
 - [ ] Выполнить staging E2E с валидным входом и разными ролями: 401/403, чужая компания, logout, CSRF, replay, referer, cookies и no-store.
 - [ ] Проверить точность SSO-разрешений и сроков жизни билетов на реальной БД/бекенде (не в CI с фейковыми пользователями).
 
