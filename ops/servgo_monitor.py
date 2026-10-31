@@ -54,6 +54,14 @@ def command(parts: list[str], *, timeout: int = 7) -> tuple[bool, str]:
         return False, ""
 
 
+def healthy_http_code(host: str, code: str, transport_ok: bool) -> bool:
+    """Authenticated sites may reject anonymous users while still being healthy."""
+    if not transport_ok or not code.isdigit():
+        return False
+    status = int(code)
+    return 200 <= status < 400 or (host == "sto.servgo.ru" and status == 401)
+
+
 def collect_checks() -> dict[str, tuple[bool, str]]:
     result: dict[str, tuple[bool, str]] = {}
     for name in SERVICES:
@@ -66,7 +74,7 @@ def collect_checks() -> dict[str, tuple[bool, str]]:
             "-w", "%{http_code}", "--max-time", "7",
             "--resolve", f"{host}:443:127.0.0.1", f"https://{host}/",
         ], timeout=10)
-        result[f"https:{host}"] = (ok and code.isdigit() and 200 <= int(code) < 400, f"HTTP {code or 'unreachable'}")
+        result[f"https:{host}"] = (healthy_http_code(host, code, ok), f"HTTP {code or 'unreachable'}")
 
     ok, code = command([
         "curl", "-ksS", "-o", "/dev/null", "-w", "%{http_code}",
