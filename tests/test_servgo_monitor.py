@@ -1,5 +1,5 @@
 """Deterministic alert-state tests; no Telegram traffic."""
-from ops.servgo_monitor import update_states, mark_delivered, message
+from ops.servgo_monitor import update_states, mark_delivered, message, healthy_http_code
 
 
 def test_monitor_requires_two_failures_and_sends_a_single_alert():
@@ -58,3 +58,10 @@ def test_never_send_recovery_if_initial_outage_was_not_delivered():
     for when in (120, 130):
         state, pending = update_states(state, {key: (True, "HTTP 200")}, now=when)
     assert pending["up"] == []
+
+
+def test_protected_sto_401_is_reachable_but_other_401_is_not():
+    assert healthy_http_code("sto.servgo.ru", "401", True)
+    assert not healthy_http_code("promo.servgo.ru", "401", True)
+    assert not healthy_http_code("sto.servgo.ru", "502", True)
+    assert not healthy_http_code("sto.servgo.ru", "401", False)
