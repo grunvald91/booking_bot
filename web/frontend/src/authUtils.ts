@@ -21,7 +21,9 @@ export async function clearLogin() {
 }
 
 export function saveLogin(res: AuthResponse) {
+  const previousToken = localStorage.getItem('token')
   localStorage.setItem('token', res.token)
+  if (previousToken !== res.token) window.dispatchEvent(new Event('servgo-account-changed'))
   localStorage.setItem('userRole', res.role)
   localStorage.setItem('userName', res.user.full_name)
   sessionStorage.removeItem('servgoExplicitLogout')
