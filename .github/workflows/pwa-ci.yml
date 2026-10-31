@@ -5,6 +5,10 @@ on:
     paths:
       - 'web/frontend/**'
       - 'web/api/**'
+      - 'deploy/nginx/**'
+      - 'tests/test_studio_sso.py'
+      - 'tests/test_growth_gateway_contract.py'
+      - 'tests/test_mail_same_origin.py'
       - 'bot/services/notifications.py'
       - 'bot/services/webpush.py'
       - 'bot/services/notification_events.py'
@@ -48,6 +52,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: web/frontend
         run: npm ci --legacy-peer-deps
+
+      - name: Verify private-navigation PWA cache isolation
+        working-directory: web/frontend
+        run: node --test tests/sw-security.test.mjs
 
       - name: Verify ServGo theme migration and synchronization
         working-directory: web/frontend
@@ -97,6 +105,17 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: python tests/test_mail_same_origin.py
+
+      - name: Verify signed Growth SSO and role restrictions
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python tests/test_studio_sso.py
+
+      - name: Install nginx for an isolated staging syntax check
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nginx >/dev/null
+
+      - name: Validate narrow Growth reverse-proxy routes
+        run: python tests/test_growth_gateway_contract.py
 
       - name: Run regression tests
         env:
