@@ -51,11 +51,28 @@ jobs:
 
       - name: Test PWA cache isolation and push navigation
         working-directory: web/frontend
-        run: node --test tests/sw-security.test.mjs
+        run: node --test tests/sw-security.test.mjs tests/offline-store.test.mjs
 
       - name: Build frontend
         working-directory: web/frontend
         run: npm run build
+
+      - name: Verify offline asset manifest includes deployable app bundles
+        working-directory: web/frontend
+        run: |
+          node --input-type=module -e '
+            import { readFileSync, existsSync } from "node:fs";
+            const assets = JSON.parse(readFileSync("dist/offline-assets.json", "utf8"));
+            if (!Array.isArray(assets) || !assets.some(p => p.endsWith(".js")) ||
+                !assets.some(p => p.endsWith(".css"))) throw Error("Missing offline JS/CSS");
+            for (const url of assets) {
+              if (!url.startsWith("/assets/") || !existsSync("dist" + url)) {
+                throw Error("Offline manifest contains missing or untrusted path");
+              }
+            }
+            if (!existsSync("dist/index.html")) throw Error("Missing static app shell");
+            console.log("Offline app shell and " + assets.length + " bundle assets verified");
+          '
 
       - name: Set up Python
         uses: actions/setup-python@v5

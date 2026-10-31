@@ -15,11 +15,12 @@ function response(body, type = 'text/plain', headers = {}) {
   return value
 }
 
-function createHarness(network = async () => response('live')) {
+function createHarness(network = async () => response('live'), { failBundle = false } = {}) {
   const listeners = new Map()
   const entries = new Map()
   const networkRequests = []
   const opened = []
+  let skippedWaiting = false
   const key = (request) => new URL(typeof request === 'string' ? request : request.url, ORIGIN).href
 
   function makeCache() {
@@ -27,6 +28,9 @@ function createHarness(network = async () => response('live')) {
     return {
       items,
       async addAll(paths) {
+        if (failBundle && paths.some(path => String(path).endsWith('.js'))) {
+          throw Error('Simulated offline bundle download failure')
+        }
         for (const path of paths) {
           items.set(key(path), path === '/offline.html'
             ? response(offline, 'text/html')
@@ -56,13 +60,18 @@ function createHarness(network = async () => response('live')) {
   const self = {
     location: { origin: ORIGIN },
     addEventListener(name, handler) { listeners.set(name, handler) },
-    skipWaiting: async () => undefined,
+    skipWaiting: async () => { skippedWaiting = true },
     clients,
     registration: { showNotification: async () => undefined },
   }
 
   const fetch = async (request) => {
     networkRequests.push(request)
+    if (request === '/offline-assets.json') {
+      return new Response(JSON.stringify(['/assets/app-123.js', '/assets/app-123.css']), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
     return network(request)
   }
 
@@ -87,7 +96,7 @@ function createHarness(network = async () => response('live')) {
     return fired.event.response ? fired.event.response : null
   }
 
-  return { dispatch, request, caches, entries, networkRequests, self, opened }
+  return { dispatch, request, caches, entries, networkRequests, self, opened, hasActivatedNewWorker: () => skippedWaiting }
 }
 
 test('upgrading v2 clears its cached private HTML but leaves unrelated caches untouched', async () => {
@@ -99,14 +108,20 @@ test('upgrading v2 clears its cached private HTML but leaves unrelated caches un
   await h.dispatch('install').done
   await h.dispatch('activate').done
 
-  assert.deepEqual((await h.caches.keys()).sort(), ['servgo-pwa-v3', 'unrelated-app-cache'])
-  const fresh = await h.caches.open('servgo-pwa-v3')
+  assert.deepEqual((await h.caches.keys()).sort(), ['servgo-pwa-v4', 'unrelated-app-cache'])
+  const fresh = await h.caches.open('servgo-pwa-v4')
   assert.ok((await fresh.match('/offline.html'))?.ok)
-  assert.equal(await fresh.match('/index.html'), undefined)
+  assert.ok(await fresh.match('/index.html'), 'static PWA shell must exist for cold offline launch')
   assert.equal(await fresh.match('/'), undefined)
 })
 
-test('all navigation requests are network-only, including private Mail and Growth pages', async () => {
+test('SW v4 does not activate when any required JS or CSS asset cannot be precached', async () => {
+  const h = createHarness(undefined, { failBundle: true })
+  await assert.rejects(h.dispatch('install').done, /Simulated offline bundle download failure/)
+  assert.equal(h.hasActivatedNewWorker(), false)
+})
+
+test('online navigation is network-first, including private Mail and Growth pages', async () => {
   const h = createHarness(async () => response('<secret>PRIVATE</secret>', 'text/html', {
     'Cache-Control': 'private, no-store',
   }))
@@ -117,10 +132,10 @@ test('all navigation requests are network-only, including private Mail and Growt
     const served = await h.request(path)
     assert.match(await served.text(), /PRIVATE/)
   }
-  const fresh = await h.caches.open('servgo-pwa-v3')
-  assert.equal(fresh.items.size, 4, 'only public precache, never signed-in HTML')
-  assert.equal(await fresh.match('/index.html'), undefined)
-  assert.equal(h.networkRequests.length, 7)
+  const fresh = await h.caches.open('servgo-pwa-v4')
+  assert.equal(fresh.items.size, 7, 'static shell, manifest bundles and public assets only')
+  assert.ok(await fresh.match('/index.html'))
+  assert.equal(h.networkRequests.length, 8, 'seven navigations and offline asset manifest request')
 })
 
 test('offline navigation shows a neutral page, not a cached authenticated SPA shell', async () => {
@@ -130,6 +145,22 @@ test('offline navigation shows a neutral page, not a cached authenticated SPA sh
   const text = await served.text()
   assert.match(text, /Нет соединения с ServGo/)
   assert.doesNotMatch(text, /Private account|<secret>|Authorization/)
+})
+
+test('offline booking screens use the static shell, not saved personal HTML', async () => {
+  const h = createHarness(async () => { throw Error('offline') })
+  await h.dispatch('install').done
+  for (const url of ['/admin/schedule', '/my', '/master', '/account', '/']) {
+    const page = await h.request(url)
+    assert.equal(await page.text(), 'public asset')
+  }
+  for (const url of ['/studio/team', '/workspace/growth', '/workspace/mail/inbox', '/mail']) {
+    const page = await h.request(url)
+    assert.match(await page.text(), /Нет соединения с ServGo/)
+  }
+  const cache = await h.caches.open('servgo-pwa-v4')
+  assert.equal(await cache.match('/admin/schedule'), undefined)
+  assert.equal(await cache.match('/my'), undefined)
 })
 
 test('no interception for API requests, private resources or third-party URLs', async () => {
@@ -157,11 +188,11 @@ test('only public static assets are runtime-cached; private or HTML responses ne
 
   assert.equal(await (await h.request('/assets/index-abcdef123456.js', { mode: 'cors' })).text(), 'compiled code')
   assert.equal(await (await h.request('/assets/index-abcdef123456.js', { mode: 'cors' })).text(), 'compiled code')
-  assert.equal(h.networkRequests.length, 1, 'cache hit for safe public asset')
+  assert.equal(h.networkRequests.length, 2, 'one manifest fetch and one uncached asset fetch')
 
   await h.request('/assets/redirect-abcdef123456.js', { mode: 'cors' })
   await h.request('/assets/private-abcdef123456.js', { mode: 'cors' })
-  const cache = await h.caches.open('servgo-pwa-v3')
+  const cache = await h.caches.open('servgo-pwa-v4')
   assert.ok(await cache.match('/assets/index-abcdef123456.js'))
   assert.equal(await cache.match('/assets/redirect-abcdef123456.js'), undefined)
   assert.equal(await cache.match('/assets/private-abcdef123456.js'), undefined)
