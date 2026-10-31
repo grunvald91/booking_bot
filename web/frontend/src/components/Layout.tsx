@@ -1,3 +1,4 @@
+import { clearLogin } from '../authUtils'
 import { OwnerMailEntry } from './OwnerMailEntry'
 import { useState, useEffect, useRef } from 'react'
 import { Outlet, Link, useLocation } from 'react-router-dom'
@@ -76,10 +77,10 @@ export function Layout() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [profileOpen])
 
-  const handleLogout = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('userRole')
-    localStorage.removeItem('userName')
+  const handleLogout = async () => {
+    sessionStorage.setItem('servgoExplicitLogout', '1')
+    try { await clearLogin() }
+    catch { alert('Не удалось удалить офлайн-данные. Закройте другие вкладки ServGo и повторите выход.'); return }
     window.location.href = '/'
   }
 
