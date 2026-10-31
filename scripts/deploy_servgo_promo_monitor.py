@@ -31,7 +31,7 @@ FILES = {
 
 def nginx_promo_transform(old: str) -> str:
     """Never touch another vhost. Both promo / and /static/ go to the new port."""
-    names = re.findall(r"^\s*server_name\s+([^;]+);", old, re.M)
+    names = re.findall(r"\bserver_name\s+([^;]+);", old)
     if len(names) != 2 or any(x.strip() != "promo.servgo.ru" for x in names):
         raise ValueError("Expected one isolated promo vhost file with two promo server blocks")
     previous = "proxy_pass http://127.0.0.1:8080/"
