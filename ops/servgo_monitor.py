@@ -235,6 +235,16 @@ def save_state(state: dict, path: Path | None = None) -> None:
     os.replace(temp, path)
 
 
+def persist_state_best_effort(state: dict) -> bool:
+    """A full filesystem must not prevent an already detected disk alert."""
+    try:
+        save_state(state)
+        return True
+    except OSError as exc:
+        print(f"Monitoring state persistence failed: {type(exc).__name__}")
+        return False
+
+
 def credentials() -> tuple[str, str]:
     token = os.getenv("SERVGO_MONITOR_BOT_TOKEN", "").strip()
     chat = os.getenv("SERVGO_MONITOR_CHAT_ID", "").strip()
@@ -319,7 +329,7 @@ async def run(*, dry_run: bool = False, test_message: bool = False) -> bool:
 
     now = time.time()
     updated, pending = update_states(previous, observations, now)
-    save_state(updated)
+    saved = persist_state_best_effort(updated)
     all_sent = True
     for kind in ("down", "up"):
         items = pending[kind]
@@ -331,7 +341,7 @@ async def run(*, dry_run: bool = False, test_message: bool = False) -> bool:
                 delivered = False
             if delivered:
                 mark_delivered(updated, kind, [key for key, _ in batch], now)
-                save_state(updated)
+                saved = persist_state_best_effort(updated) and saved
             else:
                 all_sent = False
     summary = {
@@ -339,9 +349,10 @@ async def run(*, dry_run: bool = False, test_message: bool = False) -> bool:
         "checks": len(observations),
         "open_incidents": sum(1 for item in updated["checks"].values() if item["alarm"]),
         "delivery_ok": all_sent,
+        "state_saved": saved,
     }
     print(json.dumps(summary, ensure_ascii=False))
-    return all_sent
+    return all_sent and saved
 
 
 if __name__ == "__main__":
