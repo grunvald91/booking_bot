@@ -53,9 +53,8 @@ export function resolveBookingEntry(
 
   // Противоречивые параметры нельзя превращать в недоступную комбинацию.
   // Приоритет у явно выбранной услуги, а специалиста клиент сможет выбрать заново.
-  if (service && resource && !resourceSupportsService(resource, service.id, employees)) {
-    resource = null
-  }
+  const incompatibleExplicitPair = !!service && !!resource && !resourceSupportsService(resource, service.id, employees)
+  if (incompatibleExplicitPair) resource = null
 
   // Если специалист оказывает только одну доступную услугу, повторный выбор не нужен.
   if (!service && resource) {
@@ -87,7 +86,7 @@ export function resolveBookingEntry(
   // При входе с готовой услугой или специалистом первый шаг уже сделан.
   // Меняем порядок только для этого посещения, не меняя настройку бизнеса.
   const configuredOrder = business.booking_flow_order === 'resource_first' ? 'resource_first' : 'service_first'
-  const order: BookingFlowOrder = serviceId !== null && employeeId === null && service
+  const order: BookingFlowOrder = incompatibleExplicitPair || (serviceId !== null && employeeId === null && service)
     ? 'service_first'
     : employeeId !== null && serviceId === null && resource
       ? 'resource_first'
