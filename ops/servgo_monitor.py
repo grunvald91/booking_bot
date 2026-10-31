@@ -330,6 +330,13 @@ async def run(*, dry_run: bool = False, test_message: bool = False) -> bool:
     now = time.time()
     updated, pending = update_states(previous, observations, now)
     saved = persist_state_best_effort(updated)
+    if not saved:
+        # Without durable counters, do not silently lose an emergency such as
+        # a suddenly full disk. Bypass the two-sample debounce while storage
+        # is unavailable, accepting possible duplicate alerts instead.
+        already = {key for key, _ in pending["down"]}
+        pending["down"].extend((key, detail[:160]) for key, (ok, detail) in observations.items()
+                               if not ok and key not in already)
     all_sent = True
     for kind in ("down", "up"):
         items = pending[kind]
