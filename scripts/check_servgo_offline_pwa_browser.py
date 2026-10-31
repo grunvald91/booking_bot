@@ -80,8 +80,21 @@ def main():
               localStorage.setItem('userRole','client');
               localStorage.setItem('userName','Тестовый пользователь');
             """)
+            seen_api = []
+            page.on("response", lambda response: seen_api.append({
+              "url": response.url.split("?", 1)[0],
+              "status": response.status,
+            }) if "/api/" in response.url else None)
             page.goto(url + "/my", wait_until="load")
-            page.get_by_text(SERVICE, exact=False).first.wait_for(timeout=15000)
+            try:
+                page.get_by_text(SERVICE, exact=False).first.wait_for(timeout=12000)
+            except Exception:
+                print("PWA_BROWSER_DIAGNOSTICS", json.dumps({
+                    "url": page.url, "body": page.locator("body").inner_text()[:1400],
+                    "api": seen_api[-20:], "pageErrors": errors[-12:],
+                    "token": page.evaluate("!!localStorage.getItem('token')"),
+                }, ensure_ascii=False), flush=True)
+                raise
             page.evaluate("""async () => {
               const ready = await navigator.serviceWorker.ready;
               if (!ready.active) throw Error('No active service worker');
