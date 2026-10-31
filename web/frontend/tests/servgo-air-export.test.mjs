@@ -34,6 +34,17 @@ test('both standalone Mail pages include shared theme resources and visible pick
   }
 })
 
+test('the Mail login also uses canonical colors and permits only its own static theme assets', () => {
+  const source = load('../../api/routes/owner_mail.py')
+  for (const asset of ['/api/servgo-air-tokens.css', '/api/servgo-mail-air.css',
+    '/api/servgo-air-theme.js', '/api/servgo-mail-theme-picker.js']) {
+    assert.ok(source.includes(asset), 'login missing ' + asset)
+  }
+  assert.match(source, /id="servgo-mail-theme"/)
+  assert.match(source, /script-src \\'self\\' \\'unsafe-inline\\'/)
+  assert.match(source, /style-src \\'self\\' \\'unsafe-inline\\'/)
+})
+
 test('Mail resource endpoints have no write capability and dashboard remains owner-only', () => {
   assert.match(routes, /@router\.get\("\/api\/servgo-air-tokens\.css"/)
   assert.match(routes, /@router\.get\("\/api\/servgo-mail-air\.css"/)
