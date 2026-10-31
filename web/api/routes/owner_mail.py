@@ -162,20 +162,30 @@ async def mail_owner(request: Request, session: AsyncSession = Depends(get_db)):
     if not user or not owner(user):
         raise HTTPException(403, "Нет доступа")
     if request.method not in {"GET", "HEAD"}:
-        if request.headers.get("origin") != HOST:
-            raise HTTPException(403, "Недопустимое происхождение запроса")
+        verify_mail_write_origin(request)
     return user
 
 
 @router.post("/entry")
 def entry(user: User = Depends(require_owner)):
-    ticket = sign(user.id, "mail-entry", 60, jti=uuid4().hex)
+    destination = "pwa" if mail_gateway_enabled() else "legacy"
+    ticket = sign(user.id, "mail-entry", 60, jti=uuid4().hex, destination=destination)
+    if destination == "pwa":
+        return {"url": CANONICAL_HOST + "/api/owner-mail/claim?ticket=" + ticket}
     return {"url": HOST + "/claim?ticket=" + ticket}
 
 
 @router.get("/claim")
-async def claim(ticket: str, session: AsyncSession = Depends(get_db)):
+async def claim(ticket: str, request: Request, session: AsyncSession = Depends(get_db)):
     data = verify(ticket, "mail-entry")
+    is_pwa = canonical_mail_request(request)
+    # Tickets minted for a canonical origin must not be accepted at the legacy
+    # mail host, and legacy tickets must not be accepted at the PWA origin.
+    if request.url.netloc.casefold() == "servgo.ru" and not is_pwa:
+        raise HTTPException(403, "Вход через единое приложение не настроен")
+    expected_destination = "pwa" if is_pwa else "legacy"
+    if data.get("destination", "legacy") != expected_destination:
+        raise HTTPException(401, "Ссылка предназначена для другого адреса")
     try:
         user_id = int(data["sub"])
         jti = str(data["jti"])
@@ -189,17 +199,21 @@ async def claim(ticket: str, session: AsyncSession = Depends(get_db)):
             db.execute("INSERT INTO claims VALUES (?)", (jti,))
         except sqlite3.IntegrityError:
             raise HTTPException(401, "Ссылка использована") from None
-    response = RedirectResponse("/", status_code=303)
-    set_session(response, user.id)
+    response = RedirectResponse(
+        "/api/owner-mail/workspace" if is_pwa else "/", status_code=303,
+    )
+    set_session(response, user.id, cookie_path="/api/owner-mail" if is_pwa else "/")
     response.headers.update({"Referrer-Policy": "no-referrer", "Cache-Control": "no-store"})
     return response
 
 
-def set_session(response, user_id):
+def set_session(response, user_id, *, cookie_path="/"):
     # Lax, not Strict: links from Gmail or Telegram must not drop the session. Every write
-    # still requires Origin == HOST in mail_owner. Each device gets its own 30-day session.
+    # still requires strict, host-bound Origin checks for writes. A canonical PWA
+    # session is scoped to the Mail API path and cannot be sent to other services.
     response.set_cookie(COOKIE, sign(user_id, "mail-session", SESSION_SECONDS),
-                        secure=True, httponly=True, samesite="lax", max_age=SESSION_SECONDS)
+                        secure=True, httponly=True, samesite="lax",
+                        path=cookie_path, max_age=SESSION_SECONDS)
 
 
 def too_many_failures(client: str) -> bool:
@@ -224,8 +238,7 @@ class LoginData(BaseModel):
 
 @router.post("/api/login")
 async def login(data: LoginData, request: Request, session: AsyncSession = Depends(get_db)):
-    if request.headers.get("origin") != HOST:
-        raise HTTPException(403, "Недопустимое происхождение запроса")
+    verify_mail_write_origin(request)
     client = request.headers.get("x-real-ip") or (request.client.host if request.client else "?")
     if too_many_failures(client):
         raise HTTPException(429, "Слишком много попыток. Подождите 15 минут")
