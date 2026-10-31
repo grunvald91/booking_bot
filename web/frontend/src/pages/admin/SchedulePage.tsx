@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { api, type AdminBooking, type Service, type Employee } from '../../api/client'
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
+import { clearLogin } from '../../authUtils'
 import { useTheme } from '../../hooks/useTheme'
 import { AdminBottomNav } from '../../components/AdminShell'
 import { BusinessSelector } from '../../components/BusinessSelector'
@@ -585,11 +586,10 @@ export function SchedulePage() {
     return () => clearTimeout(t)
   }, [toast])
 
-  const handleLogout = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('userRole')
-    localStorage.removeItem('userName')
+  const handleLogout = async () => {
     sessionStorage.setItem('servgoExplicitLogout', '1')
+    try { await clearLogin() }
+    catch { alert('Не удалось удалить офлайн-данные. Закройте другие вкладки ServGo и повторите выход.'); return }
     navigate('/login', { replace: true })
   }
 
