@@ -1,0 +1,62 @@
+name: Recover promo 502 by starting stopped booking service
+on:
+  push:
+    branches:
+      - incident/promo-502-diagnostics-20261031
+    paths:
+      - '.github/workflows/promo-502-recover.yml'
+permissions:
+  contents: read
+concurrency:
+  group: servgo-promo-recovery
+  cancel-in-progress: false
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: SSH client
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Verify relay and start ONLY failed booking-bot service
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, time
+          from scripts.deploy_business_creation_and_reminders import connect, run
+          if not os.environ.get("SERVGO_PASSWORD"):
+              raise RuntimeError("Missing SSH secret")
+          client = connect(os.environ["SERVGO_PASSWORD"])
+          try:
+              def checked(label, cmd, timeout=30):
+                  result = run(client, cmd, timeout)
+                  print(f"{label}: {result}", flush=True)
+                  return result
+              checked("nginx_syntax", "nginx -t >/dev/null 2>&1 && echo OK")
+              checked("relay_state", "systemctl is-active booking-bot-relay89.service")
+              checked("proxy_listening", "ss -ltn | grep -q '127.0.0.1:1089 ' && echo YES")
+              code = checked("telegram_via_relay", "curl -sS -o /dev/null -w '%{http_code}' --proxy socks5h://127.0.0.1:1089 --connect-timeout 5 --max-time 14 https://api.telegram.org/ 2>/dev/null || true", 20)
+              if code not in ("200","301","302","403","404"):
+                  raise RuntimeError("Proxy not proven healthy; refusing service start")
+              before = checked("booking_before", "systemctl is-active booking-bot.service || true")
+              if before != "active":
+                  checked("reset_start", "systemctl reset-failed booking-bot.service && systemctl start booking-bot.service && echo STARTED", 50)
+              for attempt in range(15):
+                  state = checked("service_state", "systemctl is-active booking-bot.service || true")
+                  local = checked("local_web", "curl -sS -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:8080/beauty 2>/dev/null || true")
+                  promo = checked("promo_https", "curl -ksS -o /dev/null -w '%{http_code}' --max-time 4 --resolve promo.servgo.ru:443:127.0.0.1 https://promo.servgo.ru/ 2>/dev/null || true")
+                  if state == "active" and local == "200" and promo == "200":
+                      print("PROMO_RECOVERED=true; changed_services=booking-bot.service; nginx_untouched=true", flush=True)
+                      break
+                  if attempt == 14:
+                      raise RuntimeError(f"Promo not healthy after service start: booking={state} local={local} promo={promo}")
+                  time.sleep(2)
+              checked("main_site", "curl -ksS -o /dev/null -w '%{http_code}' --max-time 5 --resolve servgo.ru:443:127.0.0.1 https://servgo.ru/ 2>/dev/null || true")
+          finally:
+              client.close()
+          PY
