@@ -52,6 +52,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps(BOOKINGS, ensure_ascii=False).encode())
             elif self.path.startswith("/api/auth/me"):
                 self.wfile.write(json.dumps({"id":1,"full_name":"Тестовый пользователь","role":"client"}).encode())
+            elif self.path.startswith("/api/studio/businesses"):
+                self.wfile.write(b'[]')
             else:
                 self.wfile.write(b'{}')
             return
