@@ -32,6 +32,15 @@ def mail_air_styles():
     )
 
 
+@router.get("/api/servgo-mail-theme-picker.js", include_in_schema=False)
+def mail_theme_picker():
+    return FileResponse(
+        Path(__file__).with_name("servgo-mail-theme-picker.js"),
+        media_type="text/javascript",
+        headers={"Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @router.get("/api/servgo-air-theme.js", include_in_schema=False)
 def mail_theme_bootstrap():
     return FileResponse(
