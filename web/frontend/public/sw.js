@@ -40,9 +40,11 @@ function cacheableStaticResponse(response) {
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
+    // Do not activate a new offline-capable worker without the verified shell.
+    // If the core precache fails, keep the previously installed worker active.
+    const cache = await caches.open(CACHE_NAME)
+    await cache.addAll(PRECACHE)
     try {
-      const cache = await caches.open(CACHE_NAME)
-      await cache.addAll(PRECACHE)
       // Generated at build time: all JS/CSS/font chunks, including lazy schedule.
       // A missing optional asset must not abort the service worker installation.
       try {
@@ -56,9 +58,7 @@ self.addEventListener('install', (event) => {
           }
         }
       } catch (_) { /* runtime assets are still cached when visited online */ }
-    } catch (_) {
-      // Installation must not prevent network-only navigation if offline assets fail.
-    }
+    } catch (_) { /* optional asset manifest: core shell is already available */ }
     await self.skipWaiting()
   })())
 })
