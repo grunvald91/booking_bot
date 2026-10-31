@@ -99,6 +99,11 @@ def main() -> None:
         if not site_old:
             raise RuntimeError("Promo nginx config missing")
         site_new = nginx_promo_transform(site_old.decode("utf-8")).encode("utf-8")
+        # Never take over an unrecognized process already bound to our new port.
+        port_state = run(remote, "ss -ltn | grep -q ':18080 ' && echo occupied || echo free")
+        current_unit = run(remote, "systemctl is-active servgo-promo-web.service || true")
+        if port_state == "occupied" and current_unit != "active":
+            raise RuntimeError("Promo port 18080 is already occupied by another service")
 
         to_copy = {}
         for local, target in FILES.items():
@@ -129,8 +134,11 @@ def main() -> None:
 
         run(remote, "cd " + shell(ROOT) + " && venv/bin/python -m py_compile "
                     "webapp/promo_standalone.py ops/servgo_monitor.py")
-        run(remote, "systemctl daemon-reload && systemctl enable --now " + UNIT)
-        started = True
+        run(remote, "systemctl daemon-reload")
+        # Preserve an already-running independently managed service on failure.
+        started = current_unit != "active"
+        if started:
+            run(remote, "systemctl enable --now " + UNIT)
 
         for i in range(20):
             code = run(remote, "curl -sS -o /dev/null -w '%{http_code}' "
