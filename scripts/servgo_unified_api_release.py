@@ -12,7 +12,10 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.deploy_business_creation_and_reminders import ROOT, WEB_SERVICE, connect, put, run, wait_web_ready
 
