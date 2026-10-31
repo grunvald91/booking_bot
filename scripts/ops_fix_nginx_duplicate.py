@@ -316,7 +316,7 @@ def main():
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except BaseException as exc:
+    except Exception as exc:
         print("preflight_error_type=" + type(exc).__name__)
         print("preflight_error=" + str(exc)[:160])
         print("repair_result=not_applied", flush=True)
