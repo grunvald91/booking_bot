@@ -84,6 +84,12 @@ export function MasterPage() {
   }, [navigate])
 
   useEffect(() => { void load(from) }, [from, load])
+  useEffect(() => {
+    const refresh = () => { if (navigator.onLine) void load(from) }
+    window.addEventListener('online', refresh)
+    window.addEventListener('focus', refresh)
+    return () => { window.removeEventListener('online', refresh); window.removeEventListener('focus', refresh) }
+  }, [from, load])
 
   const runAction = async (bookingId: number, action: () => Promise<unknown>, failText: string) => {
     setBusyId(bookingId)
