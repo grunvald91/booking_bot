@@ -5,6 +5,10 @@ on:
     paths:
       - 'web/frontend/**'
       - 'web/api/**'
+      - 'deploy/nginx/**'
+      - 'tests/test_studio_sso.py'
+      - 'tests/test_growth_gateway_contract.py'
+      - 'tests/test_mail_same_origin.py'
       - 'bot/services/notifications.py'
       - 'bot/services/webpush.py'
       - 'bot/services/notification_events.py'
@@ -52,6 +56,10 @@ jobs:
       - name: Test PWA cache isolation and push navigation
         working-directory: web/frontend
         run: node --test tests/sw-security.test.mjs tests/offline-store.test.mjs
+
+      - name: Verify ServGo theme migration and synchronization
+        working-directory: web/frontend
+        run: node --test tests/servgo-theme.test.mjs tests/servgo-air-export.test.mjs
 
       - name: Build frontend
         working-directory: web/frontend
@@ -106,6 +114,25 @@ jobs:
             web/api/routes/notifications.py \
             web/api/routes/client.py \
             web/api/schemas.py
+
+      - name: Install API dependencies for protected Mail PWA tests
+        run: python -m pip install --disable-pip-version-check -r web/api/requirements.txt aiosqlite
+
+      - name: Verify canonical Mail SSO, owner-only access and API URL rewrites
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python tests/test_mail_same_origin.py
+
+      - name: Verify signed Growth SSO and role restrictions
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python tests/test_studio_sso.py
+
+      - name: Install nginx for an isolated staging syntax check
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nginx >/dev/null
+
+      - name: Validate narrow Growth reverse-proxy routes
+        run: python tests/test_growth_gateway_contract.py
 
       - name: Run regression tests
         env:
