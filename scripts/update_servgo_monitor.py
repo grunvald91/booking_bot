@@ -8,7 +8,7 @@ import sys
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-BASE = "f2225da81d37c982d43b1f2f2b1be2bdd8469bb3"
+BASE = "fada98b47d05e04af940e08358b68f58c5484272"
 REMOTE = "/opt/booking_bot/ops/servgo_monitor.py"
 
 
