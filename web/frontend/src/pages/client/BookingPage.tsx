@@ -41,6 +41,7 @@ import { ApiError } from '../../api/client'
 import { HeroArt } from './AirFrame'
 import { photoSrc, photoThumbSrc } from './airPhotos'
 import { ACCUSATIVE, choosePhrase } from '../../utils/bookingLabels'
+import { resolveBookingEntry, resourceSupportsService } from './bookingEntry'
 import './booking-flow.css'
 
 // ── Helpers ──
@@ -141,20 +142,6 @@ function plural(n: number, one: string, few: string, many: string) {
   if (m10 === 1 && m100 !== 11) return one
   if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few
   return many
-}
-
-// Кто выполняет услугу: если она явно отмечена хотя бы у одного сотрудника, её делают только
-// отмеченные. Сотрудники без единой привязки считаются «делают всё» только пока услуга
-// не отмечена ни у кого (так работали бизнесы, где привязки вообще не настраивали).
-function resourceSupportsService(
-  resource: EmployeeWithPricing | null | undefined,
-  serviceId: number,
-  all: EmployeeWithPricing[],
-): boolean {
-  if (!resource) return true
-  const explicit = all.some((r) => (r.service_ids || []).includes(serviceId))
-  if (explicit) return (resource.service_ids || []).includes(serviceId)
-  return (resource.service_ids || []).length === 0
 }
 
 // ── Error boundaries ──
@@ -466,17 +453,18 @@ function BookingPageInner() {
     time: business?.booking_labels?.time?.trim() || 'Время',
   }), [business?.booking_labels, isVenue])
 
+  // Даже при входе по ссылке на мастера или услугу показываем только совместимые варианты.
   const availableServices = useMemo(() => {
-    if (flowOrder !== 'resource_first' || !selectedResource) return services
+    if (!selectedResource) return services
     return services.filter((service) => resourceSupportsService(selectedResource, service.id, employees))
-  }, [flowOrder, selectedResource, services, employees])
+  }, [selectedResource, services, employees])
 
   const availableResources = useMemo(() => {
-    if (flowOrder !== 'service_first' || selectedServices.length === 0) return employees
+    if (selectedServices.length === 0) return employees
     return employees.filter((resource) =>
       selectedServices.every((service) => resourceSupportsService(resource, service.id, employees))
     )
-  }, [flowOrder, employees, selectedServices])
+  }, [employees, selectedServices])
 
   // «Любой специалист» имеет смысл, только если из кого выбирать: когда выбранная услуга
   // привязана ровно к одному мастеру, выбор «любого» не предлагаем.
@@ -492,28 +480,27 @@ function BookingPageInner() {
     if (anyResource && !anyAllowed) setAnyResource(false)
   }, [anyResource, anyAllowed])
 
-  // Load business data
+  // Load business data. Ссылка с ?service= или ?employee= — уже сделанный выбор,
+  // поэтому открываем следующий незаполненный шаг, а не повторный экран маршрута.
   useEffect(() => {
+    let cancelled = false
     const bizId = Number(businessId)
     api
       .getBusiness(bizId)
       .then((biz: BusinessDetail) => {
+        if (cancelled) return
+        const entry = resolveBookingEntry(biz, preselectedServiceId, preselectedEmployeeId)
         setBusiness(biz)
         setServices(biz.services.filter((s: Service) => s.is_active && !s.is_additional))
         setAdditionalServices(biz.services.filter((s: Service) => s.is_active && s.is_additional))
         setEmployees(biz.employees || [])
-        const found = preselectedServiceId
-          ? biz.services.find((service: Service) => service.id === preselectedServiceId && service.is_active && !service.is_additional)
-          : undefined
-        const emp = preselectedEmployeeId
-          ? (biz.employees || []).find((resource) => resource.id === preselectedEmployeeId)
-          : undefined
-        const order = biz.booking_flow_order === 'resource_first' ? 'resource_first' : 'service_first'
-        const compatible = !found || !emp || resourceSupportsService(emp, found.id, biz.employees || [])
-        if (emp && (compatible || order === 'resource_first')) setSelectedResource(emp)
-        if (found && (compatible || order === 'service_first')) setSelectedServices([found])
+        setSelectedServices(entry.services)
+        setSelectedResource(entry.resource)
+        setAnyResource(false)
+        setScreen(entry.step)
       })
-      .catch(() => setLoadError(true))
+      .catch(() => { if (!cancelled) setLoadError(true) })
+    return () => { cancelled = true }
   }, [businessId, preselectedServiceId, preselectedEmployeeId])
 
   // Total duration
@@ -674,7 +661,7 @@ function BookingPageInner() {
 
   function back() {
     if (historyRef.current.length > 0) window.history.back()
-    else if (screen !== 'home') setScreen('home')
+    else if (screen !== 'home' && preselectedServiceId === null && preselectedEmployeeId === null) setScreen('home')
     else navigate(`/business/${businessId}`)
   }
 
