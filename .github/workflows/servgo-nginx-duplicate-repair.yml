@@ -1,0 +1,55 @@
+name: Repair duplicate ServGo nginx vhost (guarded one-shot)
+
+# Triggered once from the owner's dedicated ops branch; no PR secrets.
+# PRE-FLIGHT MUST PASS or there is no write. Single possible changed file.
+on:
+  push:
+    branches: [ops/servgo-nginx-duplicate-repair-20261031]
+    paths: [.github/workflows/servgo-nginx-duplicate-repair.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: servgo-production-nginx
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure repair script parses and credentials are configured
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ops_fix_nginx_duplicate.py
+          test -n "$SSHPASS" || { echo "::error::SSH secret not configured"; exit 1; }
+      - name: Verify pinned ServGo host key
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -p "$SERVER_PORT" -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/servgo-host-keys
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/servgo-candidate
+            ssh-keygen -lf /tmp/servgo-candidate 2>/dev/null |
+              grep -q "SHA256:$HOST_FP " &&
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts || true
+          done < /tmp/servgo-host-keys
+          test -s ~/.ssh/known_hosts || { echo "::error::Host key mismatch"; exit 1; }
+      - name: Apply the guarded repair with automatic rollback on error
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o BatchMode=no \
+            -o ConnectTimeout=18 -p "$SERVER_PORT" "root@$HOST" \
+            'python3 -' < scripts/ops_fix_nginx_duplicate.py
