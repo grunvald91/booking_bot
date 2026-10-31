@@ -143,6 +143,27 @@ jobs:
           sshpass -e scp -r $SSH_OPTS -P "$SERVER_PORT" web/frontend/dist/. "$SERVER_USER@$SERVER_HOST:$REMOTE_PATH/web/frontend/dist/"
           sshpass -e ssh -n $SSH_OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "grep -R -q 'grunvaldlab@gmail.com' '$REMOTE_PATH/web/frontend/dist/assets' && echo 'frontend footer marker: ok'"
 
+      # Promotion pages have their own process after the isolated rollout.
+      # Restart them independently before touching Telegram polling.
+      - name: Restart independent promo runtime (if installed)
+        if: env.ANY == '1'
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh -n $SSH_OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" '
+            set -e
+            if systemctl is-enabled --quiet servgo-promo-web.service; then
+              systemctl restart servgo-promo-web.service
+              for attempt in 1 2 3 4 5 6 7 8 9 10; do
+                code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:18080/_promo_health 2>/dev/null || true)
+                [ "$code" = "200" ] && break
+                sleep 2
+              done
+              [ "$code" = "200" ] || { echo "Isolated promo failed health check"; exit 1; }
+              echo "independent_promo_health=200"
+            fi
+          '
+
       - name: Restart service and verify
         if: env.ANY == '1'
         run: |
