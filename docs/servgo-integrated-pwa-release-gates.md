@@ -52,6 +52,14 @@ Growth OS [`deploy-growth.yml`](https://github.com/grunvald91/Ai_growth_os/blob/
 - [ ] Mail: поиск компании, адресатов, черновики, письма и кампании работают, но массовая реальная рассылка **не используется** для тестов.
 - [ ] Проверка функционального паритета 61 сценария и подтверждённых ролей.
 
+## Release record: SW v3 production, 31.10.2026
+
+- [x] Отдельный [PR #102](https://github.com/grunvald91/booking_bot/pull/102) слит в main, коммит [fe6777b](https://github.com/grunvald91/booking_bot/commit/fe6777bf5238559ead8e660157d570dca277fed8); остальные интеграционные feature flags и маршруты не включались.
+- [x] [Автодеплой фронтенда](https://github.com/grunvald91/booking_bot/actions/runs/41186280994) завершён успешно.
+- [x] [Read-only smoke до/после](https://github.com/grunvald91/booking_bot/actions/runs/41186243838): после выпуска HTTPS `/sw.js` — **v3**, совпадает с серверным dist, `/offline.html` доступен; `/api/health`, manifest, основной домен, старые домены Growth/Mail отвечают прежними статусами; nginx warnings 0.
+- [ ] Проверка существующего установленного PWA на физическом Android/iOS: автоматический update SW v2→v3, очистка старого CacheStorage, оффлайн-восстановление, push click, logout и запись клиента. Одних CI/HTTP-проверок для этой галочки недостаточно.
+- [ ] После device-проверки — подготовить gateway-срез и staging E2E, сохранив `growth.servgo.ru` постоянно действующим адресом без редиректа и без сброса старых сессий.
+
 ## Точка продолжения 31.10.2026
 
 Независимый повторный аудит nginx завершён, поэтому исправление дубля повторять **не нужно**. Следующий невыполненный шаг — отдельно выпустить SW v3 после проверки [PR #102](https://github.com/grunvald91/booking_bot/pull/102), не включая gateway. Контрольная последовательность и ограничения обновлены в [живом плане](unified-pwa-implementation-plan.md). Никакого merge в main/переключения production в рамках этого обновления документации.
