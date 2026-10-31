@@ -15,6 +15,7 @@ import sys
 import time
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
 ROOT = "/opt/booking_bot"
 SITE = "/etc/nginx/sites-enabled/servgo-promo"
 PORT = 18080
