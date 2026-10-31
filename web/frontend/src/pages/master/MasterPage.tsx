@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Phone, ChevronLeft, ChevronRight, CalendarOff } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useConnectivity } from '../../utils/useConnectivity'
 import { api, ApiError, type MasterBooking, type MasterSchedule } from '../../api/client'
 import { ClientShell } from '../../components/ClientShell'
 
@@ -56,6 +57,7 @@ function phoneHref(phone: string) {
 /** Личное расписание мастера: только его записи, без цен, аналитики и настроек. */
 export function MasterPage() {
   const navigate = useNavigate()
+  const online = useConnectivity()
   const today = useMemo(() => toKey(new Date()), [])
   const nowHHMM = `${pad(new Date().getHours())}:${pad(new Date().getMinutes())}`
   const [from, setFrom] = useState(today)
@@ -176,11 +178,11 @@ export function MasterPage() {
                       {b.notes && <div className="ds-sub">Комментарий: {b.notes}</div>}
                       {CHANGEABLE.includes(b.status) && (
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
-                          {FINISHABLE.includes(b.status) && <button className="ds-btn ds-btn--sm" disabled={busyId === b.id}
+                          {FINISHABLE.includes(b.status) && <button className="ds-btn ds-btn--sm" disabled={!online || busyId === b.id}
                             onClick={() => void runAction(b.id, () => api.masterFinishBooking(b.id), 'Не удалось завершить')}>
                             {b.date === today && b.time <= nowHHMM ? 'Завершить сейчас' : 'Завершить'}
                           </button>}
-                          <button className="ds-btn ds-btn--sm" disabled={busyId === b.id}
+                          <button className="ds-btn ds-btn--sm" disabled={!online || busyId === b.id}
                             onClick={() => { setChangingId(changingId === b.id ? null : b.id); setNewServiceId(''); setActionError('') }}>
                             Сменить услугу
                           </button>
@@ -196,7 +198,7 @@ export function MasterPage() {
                               .map((sv) => <option key={sv.id} value={sv.id}>{sv.name}{sv.duration_minutes ? ` · ${sv.duration_minutes} мин` : ''}</option>)}
                           </select>
                           <button className="ds-btn ds-btn--primary ds-btn--sm" style={{ justifySelf: 'start' }}
-                            disabled={!newServiceId || busyId === b.id}
+                            disabled={!online || !newServiceId || busyId === b.id}
                             onClick={() => void runAction(b.id, () => api.masterChangeService(b.id, Number(newServiceId)), 'Не удалось заменить услугу')}>
                             Заменить
                           </button>
