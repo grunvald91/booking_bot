@@ -152,16 +152,16 @@ jobs:
               # Identify which on-disk include files define each canonical TLS
               # block, without dumping config content or private directives.
               file_markers = list(re.finditer(
-                  r'(?m)^# configuration file ([^:\\n]+):', raw
+                  r'(?m)^# configuration file ([^:\n]+):', raw
               ))
               tls_blocks = []
-              for sm in re.finditer(r'(?m)^\\s*server\\s*\\{', raw):
+              for sm in re.finditer(r'(?m)^\s*server\s*\{', raw):
                   body = block_at(raw, sm.end())
-                  names = re.findall(r'(?m)^\\s*server_name\\s+([^;]+);', body)
-                  listens = re.findall(r'(?m)^\\s*listen\\s+([^;]+);', body)
+                  names = re.findall(r'(?m)^\s*server_name\s+([^;]+);', body)
+                  listens = re.findall(r'(?m)^\s*listen\s+([^;]+);', body)
                   if not any('servgo.ru' in entry.split() for entry in names):
                       continue
-                  if not any(re.search(r'(?:^|:)443(?:\\s|$)', x) for x in listens):
+                  if not any(re.search(r'(?:^|:)443(?:\s|$)', x) for x in listens):
                       continue
                   previous = [fm.group(1).strip() for fm in file_markers if fm.start() < sm.start()]
                   file_path = previous[-1] if previous else 'unknown'
@@ -171,10 +171,10 @@ jobs:
                       'config_file': file_path,
                       'listen': sorted(set(x.strip() for x in listens)),
                       'has_exact_sw_route': bool(re.search(
-                          r'(?m)^\\s*location\\s+=\\s*/sw\\.js\\s*\\{', body
+                          r'(?m)^\s*location\s+=\s*/sw\.js\s*\{', body
                       )),
                       'has_growth_studio_route': bool(re.search(
-                          r'(?m)^\\s*location\\s+(?:=\\s*)?/studio(?:/|\\s|\\{)', body
+                          r'(?m)^\s*location\s+(?:=\s*)?/studio(?:/|\s|\{)', body
                       )),
                   })
               print('servgo_https_files_json=' + json.dumps(tls_blocks, ensure_ascii=False))
