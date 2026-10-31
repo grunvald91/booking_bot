@@ -268,7 +268,7 @@ async def login(data: LoginData, request: Request, session: AsyncSession = Depen
         raise HTTPException(503, "Владелец почты не настроен")
     LOGIN_FAILURES.pop(client, None)
     response = JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
-    set_session(response, user.id)
+    set_session(response, user.id, cookie_path="/api/owner-mail" if canonical_mail_request(request) else "/")
     return response
 
 
