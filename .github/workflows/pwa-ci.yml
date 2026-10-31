@@ -49,6 +49,10 @@ jobs:
         working-directory: web/frontend
         run: npm ci --legacy-peer-deps
 
+      - name: Verify ServGo theme migration and synchronization
+        working-directory: web/frontend
+        run: node --test tests/servgo-theme.test.mjs
+
       - name: Build frontend
         working-directory: web/frontend
         run: npm run build
