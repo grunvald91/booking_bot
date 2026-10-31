@@ -1,0 +1,132 @@
+name: ServGo SW v3 live verification (read-only)
+
+# Dedicated owner-controlled verification branch. No production changes.
+on:
+  push:
+    branches: [ops/servgo-sw-v3-live-smoke-20261031]
+    paths: [.github/workflows/servgo-sw-v3-live-verify.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: servgo-sw-v3-live-verification
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Verify remote credential presence
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::Missing SSH credential"; exit 1; }
+      - name: Install SSH client and verify pinned host fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -p "$SERVER_PORT" -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/sw-host-candidates
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/sw-one-host
+            if ssh-keygen -lf /tmp/sw-one-host 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/sw-host-candidates
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::SSH host fingerprint mismatch"; exit 1; }
+      - name: Read-only HTTP, SW and nginx smoke tests (localhost TLS SNI)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=18 -p "$SERVER_PORT" "root@$HOST" 'python3 -' <<'REMOTE_PY'
+          import hashlib
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          from urllib.parse import urlparse
+
+          def cmd(*args):
+              return subprocess.run(args, capture_output=True, text=True, timeout=25, check=False)
+
+          nginx = cmd('nginx', '-t')
+          print('nginx_test_ok=' + str(nginx.returncode == 0).lower())
+          print('nginx_duplicate_server_warnings=' + str(nginx.stderr.count('conflicting server name')))
+          print('nginx_active=' + cmd('systemctl', 'is-active', 'nginx').stdout.strip())
+          print('verification_mode=read_only')
+          if nginx.returncode:
+              raise SystemExit('nginx syntax invalid')
+
+          targets = [
+            ('servgo.ru', '/'),
+            ('servgo.ru', '/sw.js'),
+            ('servgo.ru', '/offline.html'),
+            ('servgo.ru', '/manifest.webmanifest'),
+            ('servgo.ru', '/api/health'),
+            ('growth.servgo.ru', '/studio'),
+            ('mail.servgo.ru', '/'),
+          ]
+          with tempfile.TemporaryDirectory(prefix='servgo-sw-check-') as temp:
+              results = {}
+              bodies = {}
+              headers = {}
+              for index, (host, path) in enumerate(targets):
+                  body = str(Path(temp) / ('body' + str(index)))
+                  header = str(Path(temp) / ('head' + str(index)))
+                  url = 'https://' + host + path
+                  r = cmd('curl', '--silent', '--show-error', '--max-time', '14',
+                          '--resolve', host + ':443:127.0.0.1',
+                          '--dump-header', header, '--output', body,
+                          '--write-out', '%{http_code}', url)
+                  key = host + path
+                  code = r.stdout.strip()
+                  results[key] = code
+                  if r.returncode != 0 or not code.isdigit():
+                      print('curl_transport_failure=' + key + ' code=' + str(r.returncode))
+                      raise SystemExit('TLS/HTTP check unavailable')
+                  bodies[key] = Path(body).read_bytes()
+                  headers[key] = Path(header).read_text(errors='replace').lower()
+                  print('http_status ' + key + ' ' + code)
+
+              site = 'servgo.ru'
+              for key in (site+'/',site+'/sw.js',site+'/manifest.webmanifest',site+'/api/health'):
+                  if results[key] != '200':
+                      raise SystemExit('Core route unexpected HTTP status: ' + key)
+              if results['growth.servgo.ru/studio'] not in ('200','302','303','401'):
+                  raise SystemExit('Old Growth route unavailable')
+              # Do not permit forced migration of existing shared links.
+              old_headers = headers['growth.servgo.ru/studio']
+              if ('location: https://servgo.ru/' in old_headers or
+                  'location: http://servgo.ru/' in old_headers):
+                  raise SystemExit('Legacy Growth URL redirects to canonical ServGo')
+              if results['mail.servgo.ru/'] not in ('200','302','303','401'):
+                  raise SystemExit('Legacy Mail route unavailable')
+              sw_bytes = bodies[site+'/sw.js']
+              live_sw_sha256 = hashlib.sha256(sw_bytes).hexdigest()
+              print('sw_http_sha256=' + live_sw_sha256)
+              print('sw_http_version=' +
+                    ('v3' if b'servgo-pwa-v3' in sw_bytes else
+                     ('v2' if b'servgo-pwa-v2' in sw_bytes else 'unknown')))
+              local_sw = Path('/opt/booking_bot/web/frontend/dist/sw.js')
+              if not local_sw.is_file():
+                  raise SystemExit('Installed SW missing')
+              disk_sha = hashlib.sha256(local_sw.read_bytes()).hexdigest()
+              print('sw_disk_sha256=' + disk_sha)
+              print('sw_matches_disk=' + str(disk_sha == live_sw_sha256).lower())
+              if disk_sha != live_sw_sha256:
+                  raise SystemExit('HTTP SW differs from deployed dist')
+              offline = bodies[site+'/offline.html']
+              print('offline_page_marker=' +
+                    str('Нет соединения с ServGo'.encode() in offline).lower())
+              print('existing_domains_preserved=true')
+              print('verification_complete=true')
+          REMOTE_PY
