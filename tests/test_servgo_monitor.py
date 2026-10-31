@@ -157,3 +157,26 @@ def test_partial_batch_delivery_only_acknowledges_delivered_incidents(tmp_path, 
                if item["pending"] == "down" and not item["notified"]]
     assert acked and pending
     assert len(acked) + len(pending) == len(incidents)
+
+
+def test_disk_full_still_alerts_even_when_incident_state_cannot_be_saved(tmp_path, monkeypatch):
+    monkeypatch.setattr(monitor, "STATE_PATH", tmp_path / "monitor.json")
+    monkeypatch.setattr(monitor, "collect_checks", lambda: {
+        "disk:root": (False, "disk 100% used"),
+        "https:promo.servgo.ru": (True, "HTTP 200"),
+    })
+
+    def cant_save(_state):
+        raise OSError("no space left")
+
+    delivered = []
+    async def send(text):
+        delivered.append(text)
+        return True
+
+    monkeypatch.setattr(monitor, "save_state", cant_save)
+    monkeypatch.setattr(monitor, "send_message", send)
+    assert not asyncio.run(monitor.run())
+    assert len(delivered) == 1
+    assert "disk:root" in delivered[0]
+    assert "disk 100% used" in delivered[0]
