@@ -3,6 +3,8 @@ import { Routes, Route, Navigate, useSearchParams, useLocation, useNavigate } fr
 import { api, ApiError } from './api/client'
 import { clearLogin, saveLogin } from './authUtils'
 import { Layout } from './components/Layout'
+import { OfflineNotice } from './components/OfflineNotice'
+import { cleanupExpiredOfflineSnapshots } from './utils/offlineStore'
 import { HomePage } from './pages/client/HomePage'
 import { BusinessPage } from './pages/client/BusinessPage'
 import { BookingStatusPage } from './pages/client/BookingStatusPage'
@@ -75,6 +77,20 @@ function RouteSeo() {
 
 function App() {
   const [authReady, setAuthReady] = useState(false)
+  // Enforce the approved seven-day retention when the PWA is next opened.
+  useEffect(() => { void cleanupExpiredOfflineSnapshots().catch(console.warn) }, [])
+
+  // localStorage changes are broadcast to other tabs by the browser. Full
+  // navigation clears React's in-memory bookings, modal state and cached roles.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== 'token' || event.oldValue === event.newValue) return
+      // Another tab logged out or switched users; never keep showing its data.
+      window.location.reload()
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -105,7 +121,7 @@ function App() {
           } catch (error) {
             // Preserve the session during temporary network/server outages.
             if (!(error instanceof ApiError) || error.status !== 401) return
-            clearLogin()
+            await clearLogin().catch(error => console.warn('Offline cleanup after expired login:', error))
           }
         }
         // Existing browser cookie from an authenticated Telegram session.
@@ -134,7 +150,7 @@ function App() {
   }
 
   return (
-    <><RouteSeo /><AdminPaymentAttention /><Suspense fallback={<div role="status" className="flex min-h-[30vh] items-center justify-center">Загрузка…</div>}><Routes>
+    <><OfflineNotice /><RouteSeo /><AdminPaymentAttention /><Suspense fallback={<div role="status" className="flex min-h-[30vh] items-center justify-center">Загрузка…</div>}><Routes>
       <Route element={<Layout />}>
         {/* Client routes */}
         <Route path="/" element={<HomePage />} />
@@ -156,6 +172,7 @@ function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/login/yandex" element={<YandexLoginPage />} />
         <Route path="/mail" element={<OwnerMailPage />} />
+        <Route path="/workspace/mail" element={<OwnerMailPage />} />
         <Route path="/account" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
         <Route path="/master" element={<ProtectedRoute><MasterPage /></ProtectedRoute>} />
         <Route path="/admin/prepayments" element={<AdminRoute><PrepaymentsPage /></AdminRoute>} />
