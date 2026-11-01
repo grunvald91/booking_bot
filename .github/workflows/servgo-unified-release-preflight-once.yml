@@ -1,0 +1,110 @@
+name: ServGo combined PWA backend/SSO release readiness (read only)
+on:
+  push:
+    branches: [ops/servgo-unified-release-preflight-20261101]
+
+permissions:
+  contents: read
+concurrency:
+  group: servgo-unified-release-preflight-once
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: b7b0694e6a5ef96c1a3726d43cb79f890116f3f8
+          fetch-depth: 0
+      - name: Install pinned SSH preflight dependencies (no application tests repeated)
+        run: |
+          python -m pip install -q --disable-pip-version-check 'paramiko==3.5.1'
+          sudo apt-get install -y -qq sshpass >/dev/null
+      - name: Dry-run existing guarded backend release against live server
+        shell: bash
+        env:
+          SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+          APPLY: 'false'
+        run: |
+          set -euo pipefail
+          if python scripts/servgo_unified_api_release.py; then
+            echo 'BACKEND_RELEASE_PREFLIGHT=PASS'
+          else
+            echo 'BACKEND_RELEASE_PREFLIGHT=BLOCKED; do not apply old baseline'
+          fi
+      - name: Read-only SSO parity, nginx TLS, and current endpoint inventory
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+          HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+          HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SSH secret missing"; exit 1; }
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            if ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Pinned host fingerprint mismatch"; exit 1; }
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo 'AUDIT=read_only; no secrets printed; no restarts or nginx changes'
+          date -u '+CHECK_UTC=%Y-%m-%dT%H:%M:%SZ'
+          nginx -t >/dev/null 2>&1
+          echo 'LIVE_NGINX_SYNTAX=PASS'
+          systemctl is-active booking-web-api.service | sed 's/^/BOOKING_API_SERVICE=/'
+          docker inspect --format 'GROWTH_API_RUNNING={{.State.Running}} GROWTH_API_HEALTH={{if .State.Health}}{{.State.Health.Status}}{{else}}not_configured{{end}}' ai-growth-os-api-1
+          echo 'SERVICE_ENV_PARITY (sensitive values never logged)'
+          python3 - <<'PY'
+          import json,subprocess
+          from pathlib import Path
+          def env_bytes(value):
+              return {key.decode('utf-8','replace'):val.decode('utf-8','replace')
+                      for key,sep,val in (item.partition(b'=') for item in value.split(b'\x00')) if sep}
+          raw=subprocess.check_output(['systemctl','show','booking-web-api.service','--property=MainPID','--value'],text=True).strip()
+          web={}
+          try:
+              pid=int(raw)
+              if pid: web=env_bytes(Path(f'/proc/{pid}/environ').read_bytes())
+          except (OSError,ValueError) as exc:
+              print('BOOKING_PROCESS_ENV=UNVERIFIED:'+type(exc).__name__)
+          growth={}
+          try:
+              cmd=['docker','exec','ai-growth-os-api-1','python','-c',
+                   'import os,json; print(json.dumps({k:os.environ.get(k,"") for k in ("SERVGO_SSO_SECRET","SERVGO_INTERNAL_KEY","STUDIO_SERVGO_GATEWAY_ENABLED")}))']
+              growth=json.loads(subprocess.check_output(cmd,text=True,timeout=12))
+          except Exception as exc:
+              print('GROWTH_PROCESS_ENV=UNVERIFIED:'+type(exc).__name__)
+          for bk,gr in (('STUDIO_SSO_SECRET','SERVGO_SSO_SECRET'),
+                        ('STUDIO_INTERNAL_KEY','SERVGO_INTERNAL_KEY')):
+              a=web.get(bk,'');b=growth.get(gr,'')
+              state='MATCH' if len(a)>=32 and a==b else 'MISMATCH' if a and b else 'UNVERIFIED'
+              print('SSO_PARITY',bk,gr,state,'booking_present='+str(len(a)>=32),
+                    'growth_present='+str(len(b)>=32))
+          for key in ('SERVGO_GROWTH_GATEWAY_ENABLED','SERVGO_MAIL_GATEWAY_ENABLED'):
+              v=web.get(key,'').lower()
+              print('BOOKING_FLAG',key,('ON' if v in ('true','1','yes') else 'OFF_or_UNVERIFIED'))
+          v=growth.get('STUDIO_SERVGO_GATEWAY_ENABLED','').lower()
+          print('GROWTH_FLAG STUDIO_SERVGO_GATEWAY_ENABLED',('ON' if v in ('true','1','yes') else 'OFF_or_UNVERIFIED'))
+          PY
+          echo 'PUBLIC_PROBES (no authentication or SSO-ticket used)'
+          probe() {
+            host="$1"; path="$2"
+            curl -sS --max-time 10 --resolve "$host:443:127.0.0.1" -o /dev/null \
+              -w "PROBE $host$path code=%{http_code} mime=%{content_type} redirect=%{redirect_url}\n" \
+              "https://$host$path" | sed -E 's#redirect=https?://[^[:space:]]+[^/]#redirect=(suppressed)#' | cut -c1-190
+          }
+          probe servgo.ru /api/health
+          probe servgo.ru /studio
+          probe servgo.ru /studio/assets/growth-live.css
+          probe servgo.ru /api/owner-mail/workspace
+          probe growth.servgo.ru /studio
+          probe mail.servgo.ru /api/status
+          echo 'STAGING_READINESS_PREFLIGHT=COMPLETE; all operations read only'
+          REMOTE
