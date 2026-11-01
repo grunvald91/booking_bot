@@ -50,12 +50,7 @@ jobs:
           gateway = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
           assert gateway.count('location ') >= 7 and '127.0.0.1:8091' in gateway
           nginx = subprocess.run(['nginx','-T'], text=True, capture_output=True, check=True, timeout=20)
-          config_files = list(dict.fromkeys(re.findall(r'^# configuration file ([^:\n]+):\s*
-          PY
-          tar -czf - -C "$tmp" gateway.inc check.py |
-            sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
-            'set -e; d=$(mktemp -d); trap "rm -rf $d" EXIT; tar -xzf - -C "$d"; python3 "$d/check.py" "$d/gateway.inc"'
-, nginx.stdout, re.M)))
+          config_files = list(dict.fromkeys(re.findall(r'^# configuration file ([^:\n]+):\s*$', nginx.stdout, re.M)))
           candidates=[]
           def closing_brace(txt, start):
               depth=0
