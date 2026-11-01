@@ -1,3 +1,4 @@
+# Final owner-Mail permission gate: same targeted tests and atomic frontend release; no full CI.
 name: ServGo Growth admin entry — targeted verification and atomic release
 on:
   push:
