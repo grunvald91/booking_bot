@@ -3664,6 +3664,14 @@ def create_webapp() -> web.Application:
     # Публичная дорожная карта — до catch-all /{slug}.
     app.router.add_get('/roadmap', serve_roadmap)
 
+    # Владелец бизнеса: самостоятельная анкета без отправки данных на сервер.
+    async def serve_onboarding_checklist(request: web.Request) -> web.StreamResponse:
+        response = web.FileResponse(os.path.join(static_path, 'onboarding.html'))
+        response.headers['X-Robots-Tag'] = 'noindex, nofollow'
+        return response
+
+    app.router.add_get('/onboarding', serve_onboarding_checklist)
+
     # Нишевые лендинги promo.servgo.ru/<slug> — регистрируется последним,
     # чтобы конкретные роуты выше (/calendar, /book, /login и т.д.) ловили
     # свой запрос раньше, а сюда попадали только остаточные слаги.
