@@ -1,0 +1,161 @@
+name: ServGo live nginx candidate syntax and rollback backup (no activation)
+on:
+  push:
+    branches: [ops/servgo-nginx-candidate-dryrun-20261101]
+permissions:
+  contents: read
+concurrency:
+  group: servgo-nginx-candidate-preflight
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: b7b0694e6a5ef96c1a3726d43cb79f890116f3f8
+      - name: Validate candidate in a copy of the real nginx TLS config; save rollback copy
+        shell: bash
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+          HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+          HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD missing"; exit 1; }
+          sudo apt-get install -qq -y sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            if ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::SSH host mismatch"; exit 1; }
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          cp deploy/nginx/servgo-growth-gateway.inc.example "$tmp/gateway.inc"
+          cat > "$tmp/check.py" <<'PY'
+          import datetime
+          import hashlib
+          import pathlib
+          import re
+          import shutil
+          import subprocess
+          import sys
+          import tempfile
+          
+          gateway = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+          assert gateway.count('location ') >= 7 and '127.0.0.1:8091' in gateway
+          nginx = subprocess.run(['nginx','-T'], text=True, capture_output=True, check=True, timeout=20)
+          config_files = list(dict.fromkeys(re.findall(r'^# configuration file ([^:\n]+):\s*
+          PY
+          tar -czf - -C "$tmp" gateway.inc check.py |
+            sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'set -e; d=$(mktemp -d); trap "rm -rf $d" EXIT; tar -xzf - -C "$d"; python3 "$d/check.py" "$d/gateway.inc"'
+, nginx.stdout, re.M)))
+          candidates=[]
+          def closing_brace(txt, start):
+              depth=0
+              quoted=''
+              comment=False
+              escaped=False
+              for pos in range(start,len(txt)):
+                  c=txt[pos]
+                  if c=='\n':
+                      comment=False
+                  if comment: continue
+                  if quoted:
+                      if escaped: escaped=False
+                      elif c=='\\': escaped=True
+                      elif c==quoted: quoted=''
+                      continue
+                  if c=='#': comment=True; continue
+                  if c in '"\'': quoted=c; continue
+                  if c=='{': depth+=1
+                  elif c=='}':
+                      depth-=1
+                      if depth==0:return pos
+              raise RuntimeError('unbalanced nginx vhost')
+          for path in config_files:
+              p=pathlib.Path(path)
+              if not str(p).startswith('/etc/nginx/') or not p.is_file():continue
+              content=p.read_text(encoding='utf-8')
+              for m in re.finditer(r'(?m)^\s*server\s*\{',content):
+                  end=closing_brace(content,m.end()-1)
+                  block=content[m.end():end]
+                  names=set()
+                  for match in re.findall(r'\bserver_name\s+([^;]+);',block):
+                      names.update(match.split())
+                  listens=re.findall(r'\blisten\s+([^;]+);',block)
+                  if 'servgo.ru' in names and any(re.search(r'(?<!\d)443(?!\d)',x) for x in listens):
+                      candidates.append((p,m.end()-1,hashlib.sha256(p.read_bytes()).hexdigest()))
+          assert len(candidates)==1, f'Expected one canonical TLS vhost, got {len(candidates)}'
+          original,insert_pos,oldsha=candidates[0]
+          print('ACTIVE_TARGET_FILE:',str(original))
+          print('ACTIVE_TARGET_SHA256:',oldsha[:20])
+          assert not any(x in original.read_text() for x in (
+           'include /opt/booking_bot/deploy/nginx/servgo-growth-gateway',
+          )), 'Unexpected existing Growth gateway include'
+          with tempfile.TemporaryDirectory(prefix='servgo-nginx-candidate-') as td:
+              clone=pathlib.Path(td)/'nginx'
+              shutil.copytree('/etc/nginx',clone,symlinks=False)
+              for item in clone.rglob('*'):
+                  if not item.is_file():continue
+                  try: text=item.read_text(encoding='utf-8')
+                  except (UnicodeError,OSError):continue
+                  if '/etc/nginx/' in text:
+                      item.write_text(text.replace('/etc/nginx/', str(clone)+'/'),encoding='utf-8')
+              relative=original.relative_to('/etc/nginx')
+              target=clone/relative
+              stage_content=target.read_text(encoding='utf-8')
+              # All rewritten absolute config paths have equal byte counts before target
+              # only when the path rewrite is absent. Recompute the vhost insertion offset.
+              target_matches=[]
+              for m in re.finditer(r'(?m)^\s*server\s*\{',stage_content):
+                  end=closing_brace(stage_content,m.end()-1)
+                  block=stage_content[m.end():end]
+                  names=set()
+                  for line in re.findall(r'\bserver_name\s+([^;]+);',block):
+                      names.update(line.split())
+                  listens=re.findall(r'\blisten\s+([^;]+);',block)
+                  if 'servgo.ru' in names and any(re.search(r'(?<!\d)443(?!\d)',x) for x in listens):
+                      target_matches.append(m.end()-1)
+              assert len(target_matches)==1,'Ambiguous staging TLS vhost'
+              at=target_matches[0]
+              stage_content=stage_content[:at+1]+'\n'+gateway+'\n'+stage_content[at+1:]
+              target.write_text(stage_content,encoding='utf-8')
+              check=subprocess.run(['nginx','-t','-c',str(clone/'nginx.conf')],
+                                   text=True,capture_output=True,timeout=25)
+              if check.returncode:
+                  print('CANDIDATE_NGINX_SYNTAX=FAIL')
+                  safe = (check.stdout + '\n' + check.stderr).splitlines()
+                  for line in safe[-8:]:
+                      if re.search(r'\b(?:emerg|error|failed)\b',line,re.I):
+                          print('STAGING_ERROR:',line[:220])
+                  raise SystemExit(1)
+              print('CANDIDATE_NGINX_SYNTAX=PASS')
+              print('NEW_LOCATIONS=',len(re.findall(r'(?m)^\s*location\s+',gateway)))
+              # A timestamped byte-for-byte rollback copy is produced; production nginx
+              # config, workers and running sockets are NOT modified or reloaded.
+              if hashlib.sha256(original.read_bytes()).hexdigest()!=oldsha:
+                  raise RuntimeError('Live vhost changed during preflight, refusing backup')
+              backup_dir=pathlib.Path('/opt/booking_bot/.servgo-gateway-backups')
+              backup_dir.mkdir(mode=0o700,parents=True,exist_ok=True)
+              backup_dir.chmod(0o700)
+              stamp=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+              dest=backup_dir/('servgo-443-pre-gateway-'+stamp+'.conf')
+              with dest.open('xb') as fh:
+                  fh.write(original.read_bytes())
+              dest.chmod(0o600)
+              assert hashlib.sha256(dest.read_bytes()).hexdigest()==oldsha
+              print('ROLLBACK_BACKUP:',str(dest))
+              print('ROLLBACK_BACKUP_SHA256_MATCH=YES')
+              print('PRODUCTION_NGINX_UNCHANGED=YES')
+          
+          PY
+          tar -czf - -C "$tmp" gateway.inc check.py |
+            sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'set -e; d=$(mktemp -d); trap "rm -rf $d" EXIT; tar -xzf - -C "$d"; python3 "$d/check.py" "$d/gateway.inc"'
