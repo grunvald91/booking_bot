@@ -6,20 +6,21 @@ may read applications. Existing ServGo SMTP sender is injected by webapp.server.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from aiohttp import web
 from sqlalchemy import (
     JSON, Column, DateTime, Integer, MetaData, String, Table,
-    insert, select, update,
+    and_, insert, or_, select, update,
 )
 from sqlalchemy.exc import IntegrityError
 
@@ -149,9 +150,13 @@ def _no_store(response: web.StreamResponse):
     return response
 
 
-def _rate_allowed(request: web.Request) -> bool:
-    # Do not trust X-Forwarded-For from a public caller.
-    key = request.remote or "unknown"
+def _rate_allowed(request: web.Request, form: dict) -> bool:
+    # Per-contact throttling avoids blocking every business behind one nginx proxy.
+    # Never trust X-Forwarded-For from public callers.
+    contact = (form["fields"].get("Контакт для настройки") or
+               form["fields"].get("Email для связи") or
+               form["fields"].get("Телефон для клиентов") or "")
+    key = hashlib.sha256(((request.remote or "unknown") + ":" + contact.casefold()).encode()).hexdigest()
     now = time.monotonic()
     if len(_recent) > 4000:
         for host in list(_recent):
@@ -229,7 +234,7 @@ def register_onboarding_routes(app, *, engine, get_user, admin_ids, send_email):
             form, business_name, client_key = validate_application(data)
         except (ValueError, UnicodeDecodeError, TypeError) as exc:
             return _no_store(web.json_response({"error": str(exc)}, status=400))
-        if not _rate_allowed(request):
+        if not _rate_allowed(request, form):
             return _no_store(web.json_response({"error": "Слишком много отправок. Попробуйте позднее"}, status=429))
 
         async with engine.connect() as conn:
@@ -266,7 +271,13 @@ def register_onboarding_routes(app, *, engine, get_user, admin_ids, send_email):
             claimed = (await conn.execute(
                 update(applications).where(
                     applications.c.id == application_id,
-                    applications.c.email_state.in_(("pending", "failed")),
+                    or_(
+                        applications.c.email_state.in_(("pending", "failed")),
+                        and_(
+                            applications.c.email_state == "sending",
+                            applications.c.email_attempted_at < datetime.now(timezone.utc) - timedelta(minutes=10),
+                        ),
+                    ),
                 ).values(
                     email_state="sending", email_attempted_at=datetime.now(timezone.utc)
                 ).returning(applications.c.id)
