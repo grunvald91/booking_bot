@@ -1,0 +1,79 @@
+name: Release ServGo combined API once (guarded, gateway OFF)
+on:
+  push:
+    branches: [ops/servgo-unified-api-apply-once-20261101]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: b7b0694e6a5ef96c1a3726d43cb79f890116f3f8
+          fetch-depth: 0
+      - name: Guard exact CI-tested candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET=b7b0694e6a5ef96c1a3726d43cb79f890116f3f8
+          [ "$(git rev-parse HEAD)" = "$TARGET" ] || exit 1
+          [ "$(git ls-remote origin refs/heads/integration/servgo-unified-release-20261101 | awk '{print $1}')" = "$TARGET" ] || {
+            echo "::error::Candidate branch moved; refusing release"; exit 1;
+          }
+          echo 'Source: CI-tested PR #119 at pinned commit; no main/source drift'
+      - name: Verify scoped rollback contract (fast unit tests only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q --disable-pip-version-check 'paramiko==3.5.1' 'pytest>=8,<9'
+          python -m pytest -q tests/test_servgo_unified_api_release.py
+      - name: Apply guarded API only; back up every changed file, rollback on failure
+        shell: bash
+        env:
+          SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+          APPLY: 'true'
+        run: |
+          set -euo pipefail
+          [ -n "$SERVGO_PASSWORD" ] || exit 1
+          python scripts/servgo_unified_api_release.py
+      - name: Confirm API, legacy Mail and Growth, nginx and disabled canonical gateway
+        shell: bash
+        env:
+          SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from scripts.deploy_business_creation_and_reminders import connect, run
+          client=connect(os.environ['SERVGO_PASSWORD'])
+          try:
+              assert run(client,'systemctl is-active booking-web-api.service')=='active'
+              assert run(client,'nginx -t 2>/dev/null && echo ok')=='ok'
+              print('BOOKING_API_AND_NGINX: OK')
+              checks=[
+                ('ServGo API','servgo.ru','/api/health',('200',),('application/json',)),
+                ('Old Growth protected','growth.servgo.ru','/studio',('401','403'),()),
+                ('Old Mail protected','mail.servgo.ru','/api/status',('401','403'),()),
+                ('Canonical Mail disabled','servgo.ru','/api/owner-mail/workspace',('404',),()),
+              ]
+              for name,host,path,statuses,mimes in checks:
+                  cmd=('curl -sS --max-time 9 --resolve '+host+':443:127.0.0.1 '
+                       +'-o /dev/null -w \'%{http_code}|%{content_type}\' '
+                       +'https://'+host+path)
+                  answer=run(client,cmd)
+                  code,_,mime=answer.partition('|')
+                  print(name+': HTTP='+code+', MIME='+mime)
+                  if code not in statuses or (mimes and not any(mime.startswith(m) for m in mimes)):
+                      raise RuntimeError(name+' unexpected HTTP response (manual inspection required)')
+              print('BACKEND_STAGED_RELEASE_SMOKE: PASS (flags unchanged)')
+          finally:
+              client.close()
+          PY
