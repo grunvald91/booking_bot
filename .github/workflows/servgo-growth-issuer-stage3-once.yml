@@ -1,0 +1,42 @@
+name: ServGo Growth issuer stage 3 — guarded opt-in
+on:
+  push:
+    branches: [ops/servgo-growth-issuer-stage3-20261101]
+    paths:
+      - '.github/workflows/servgo-growth-issuer-stage3-once.yml'
+permissions:
+  contents: read
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 92d21cd016711bd94c677c5b9b7562761aa94ba9
+      - name: Check script syntax before connecting
+        run: python3 -m py_compile scripts/ops/servgo_growth_issuer_stage3.py
+      - name: Enable Booking SSO issuer (Mail remains OFF)
+        shell: bash
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+          HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+          HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SSH secret missing"; exit 1; }
+          sudo apt-get install -qq -y sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            if ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::SSH host fingerprint mismatch"; exit 1; }
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'python3 -' < scripts/ops/servgo_growth_issuer_stage3.py
