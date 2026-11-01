@@ -1,0 +1,47 @@
+name: ServGo owner onboarding CI
+on:
+  pull_request:
+    paths:
+      - 'webapp/onboarding_requests.py'
+      - 'webapp/server.py'
+      - 'webapp/static/onboarding.html'
+      - 'webapp/templates/onboarding_request.html'
+      - 'tests/test_onboarding_requests.py'
+      - '.github/workflows/onboarding-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install focused test dependencies
+        run: python -m pip install --disable-pip-version-check 'aiohttp>=3.9,<4' 'SQLAlchemy>=2.0,<3' 'aiosqlite>=0.20'
+      - name: Python syntax and isolated onboarding regression tests
+        run: |
+          python -m py_compile webapp/server.py webapp/onboarding_requests.py tests/test_onboarding_requests.py
+          python -m unittest discover -s tests -p test_onboarding_requests.py -v
+      - name: Check HTML scripts parse in Node
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re, subprocess, tempfile
+          for path in [Path('webapp/static/onboarding.html'), Path('webapp/templates/onboarding_request.html')]:
+              s = path.read_text()
+              scripts = re.findall(r'<script>(.*?)</script>', s, re.DOTALL)
+              assert len(scripts) == 1, (path, len(scripts))
+              with tempfile.NamedTemporaryFile('w',suffix='.js') as f:
+                  f.write(scripts[0])
+                  f.flush()
+                  subprocess.run(['node','--check',f.name],check=True)
+              print(path, 'inline script syntax OK')
+          PY
