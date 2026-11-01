@@ -137,10 +137,12 @@ jobs:
       - name: Install API dependencies for protected Mail PWA tests
         run: python -m pip install --disable-pip-version-check -r web/api/requirements.txt aiosqlite
 
-      - name: Verify canonical Mail SSO, owner-only access and API URL rewrites
+      - name: Verify canonical Mail SSO, owner-only access and Air V2 UI contracts
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: python tests/test_mail_same_origin.py
+        run: |
+          python tests/test_mail_same_origin.py
+          python tests/test_mail_air_v2.py
 
       - name: Verify signed Growth SSO and role restrictions
         env:
