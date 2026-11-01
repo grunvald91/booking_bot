@@ -7,9 +7,20 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from webapp.onboarding_requests import (
-    _email_body, _recent, register_onboarding_routes, validate_application,
+# The webapp package __init__ imports the whole production bot; load this
+# isolated module directly so focused tests do not require live bot secrets.
+import importlib.util
+from pathlib import Path
+_spec = importlib.util.spec_from_file_location(
+    "onboarding_under_test",
+    Path(__file__).resolve().parents[1] / "webapp" / "onboarding_requests.py",
 )
+_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_module)
+_email_body = _module._email_body
+_recent = _module._recent
+register_onboarding_routes = _module.register_onboarding_routes
+validate_application = _module.validate_application
 
 
 def example_form():
