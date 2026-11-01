@@ -44,3 +44,38 @@ jobs:
             exit 1
           fi
           echo "PASS: public checklist + protected reviewer + validation, no test submission"
+
+
+  server-diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compare expected and running server version (read only)
+        run: |
+          set -euo pipefail
+          if [ -z "$SSHPASS" ]; then echo "::error::SSH access unavailable"; exit 1; fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass >/dev/null
+          EXPECTED=$(git show origin/main:webapp/server.py | sha256sum | awk '{print $1}')
+          OPTIONS="-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/servgo-live-known-hosts"
+          ACTUAL=$(sshpass -e ssh $OPTIONS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" \
+            'sha256sum /opt/booking_bot/webapp/server.py' | awk '{print $1}')
+          echo "Expected version from main: $EXPECTED"
+          echo "Installed server version: $ACTUAL"
+          sshpass -e ssh $OPTIONS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" \
+            'echo "booking-bot service: $(systemctl is-active booking-bot)"; \
+             echo "internal POST route (invalid body) status: $(curl -s -o /dev/null -w "%{http_code}" --max-time 3 -X POST -H "Content-Type: application/json" -d "{}" http://127.0.0.1:8080/api/onboarding/requests)"'
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::Production does not yet have onboarding source from main"
+            exit 1
+          fi
