@@ -101,7 +101,7 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
   const { pathname } = useLocation()
   const [moreOpen, setMoreOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
-  const moreActive = MORE.some(item => item.to === pathname)
+  const moreActive = MORE.some(item => item.to === pathname) || pathname === '/workspace/growth'
   const handleLogout = onLogout
   const { selectedId } = useAdminBusiness()
   const { open: openStudio, busy: studioBusy, error: studioError } = useOpenStudio(selectedId)
