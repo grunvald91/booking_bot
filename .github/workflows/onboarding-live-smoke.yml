@@ -1,0 +1,46 @@
+name: ServGo onboarding production read-only smoke
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/onboarding-live-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  verify-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Check public checklist and API without creating test data
+        run: |
+          set -euo pipefail
+          BASE="https://promo.servgo.ru"
+          PASS=0
+          for attempt in $(seq 1 18); do
+            echo "Read-only smoke attempt $attempt"
+            PAGE=000
+            if curl --fail --silent --show-error --location --max-time 12 \
+                -o /tmp/onboarding-live.html "$BASE/static/onboarding.html?v=20261101"; then
+              if grep -q 'id="submitBtn"' /tmp/onboarding-live.html; then PAGE=200; fi
+            fi
+            API=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 12 \
+              "$BASE/api/onboarding/requests" || true)
+            PRIVATE=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 12 \
+              "$BASE/onboarding/request/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || true)
+            INVALID=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 12 \
+              -X POST -H 'Content-Type: application/json' --data '{}' \
+              "$BASE/api/onboarding/requests" || true)
+            echo "public=$PAGE api_get=$API unauthorized_review=$PRIVATE invalid_post=$INVALID"
+            if [ "$PAGE" = 200 ] && [ "$API" = 405 ] && \
+               [ "$PRIVATE" = 403 ] && [ "$INVALID" = 400 ]; then
+              PASS=1
+              break
+            fi
+            sleep 7
+          done
+          if [ "$PASS" != 1 ]; then
+            echo "::error::New onboarding submit/read endpoints not fully live"
+            exit 1
+          fi
+          echo "PASS: public checklist + protected reviewer + validation, no test submission"
