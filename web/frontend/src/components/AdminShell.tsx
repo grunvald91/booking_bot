@@ -104,7 +104,7 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
   const moreActive = MORE.some(item => item.to === pathname)
   const handleLogout = onLogout
   const { selectedId } = useAdminBusiness()
-  const { open: openStudio, busy: studioBusy } = useOpenStudio(selectedId)
+  const { open: openStudio, busy: studioBusy, error: studioError } = useOpenStudio(selectedId)
   return (
     <>
         <nav className="ds-bottomnav">
@@ -168,6 +168,12 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
             </div>
           </div>
         )}
+        {studioError && <div role="alert" style={{
+          position: 'fixed', zIndex: 120, left: 16, right: 16, bottom: 88,
+          margin: '0 auto', maxWidth: 480, border: '1px solid var(--s-line)',
+          borderRadius: 14, padding: 12, background: 'var(--s-surface)',
+          color: 'var(--s-danger)', boxShadow: 'var(--sh-pop)', fontSize: 13,
+        }}>{studioError}</div>}
         {createOpen && <CreateBusinessSheet onClose={() => setCreateOpen(false)} />}
     </>
   )
