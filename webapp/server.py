@@ -3666,7 +3666,7 @@ def create_webapp() -> web.Application:
 
     # Данные подключаемых бизнесов: независимая таблица, просмотр только platform-admin.
     from database.database import engine as booking_engine
-    from .onboarding_requests import register_onboarding_routes
+    from webapp.onboarding_requests import register_onboarding_routes
     register_onboarding_routes(
         app, engine=booking_engine, get_user=get_authenticated_telegram_user,
         admin_ids=ADMIN_IDS, send_email=send_landing_request_email,
