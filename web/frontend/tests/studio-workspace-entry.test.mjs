@@ -31,6 +31,8 @@ test('PWA Growth entry issues fresh ticket, not an unauthenticated /studio redir
   const screen = readFileSync(new URL('pages/client/GrowthWorkspacePage.tsx', root), 'utf8')
   assert.match(app, /path="\/workspace\/growth" element=\{<ProtectedRoute/)
   assert.match(screen, /<StudioEntry showUnavailable/)
+  assert.match(screen, /<AdminShell title="AI Growth OS"/)
+  assert.doesNotMatch(screen, /<ClientShell/)
   assert.match(entry, /api\.studioTicket\(id\)/)
   assert.match(entry, /isTrustedStudioTicketUrl\(url\)/)
   assert.match(entry, /window\.location\.assign\(url\)/)
@@ -47,4 +49,24 @@ test('first visit uses native ServGo confirmation, no ticket or personal data in
   assert.match(screen, /to="\/admin"/)
   assert.doesNotMatch(screen, /searchParams\.get\('(c|ticket|t)'\)/)
   assert.doesNotMatch(screen, /localStorage\.setItem\(['"]sg_growth_setup/)
+})
+
+test('Growth entry from admin fails closed in the admin shell instead of legacy login', () => {
+  const hook = readFileSync(new URL('hooks/useOpenStudio.ts', root), 'utf8')
+  const dashboard = readFileSync(new URL('pages/admin/AdminDashboard.tsx', root), 'utf8')
+  assert.match(hook, /isTrustedStudioTicketUrl\(url\)/)
+  assert.match(hook, /setError\('Не удалось открыть маркетинг/)
+  assert.doesNotMatch(hook, /location\.assign\('https:\/\/growth\.servgo\.ru\/studio'\)/)
+  assert.match(dashboard, /studioError && <p role="alert"/)
+})
+
+test('native Growth setup has a safe error screen and a protected admin route', () => {
+  const app = readFileSync(new URL('App.tsx', root), 'utf8')
+  const screen = readFileSync(new URL('pages/client/GrowthWorkspacePage.tsx', root), 'utf8')
+  assert.match(app, /path="\/workspace\/growth" element=\{<AdminRoute/)
+  for (const state of ['expired', 'denied', 'origin', 'business', 'conflict', 'owner-required']) {
+    assert.match(screen, new RegExp(state))
+  }
+  assert.match(screen, /action="\/studio\/sso\/create"/)
+  assert.doesNotMatch(screen, /searchParams\.get\('(c|ticket|t)'\)/)
 })
