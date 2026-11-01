@@ -300,8 +300,8 @@ jobs:
               plain = gateway.decode('utf-8')
               assert len(re.findall(r'(?m)^\s*location\s+', plain)) == 7
               assert plain.count('proxy_pass http://127.0.0.1:8091;') == 7
-              assert 'location = /workspace/growth' not in plain
-              assert 'location /api/' not in plain
+              assert not re.search(r'(?m)^\s*location\s*=\s*/workspace/growth(?:\s|\{)', plain)
+              assert not re.search(r'(?m)^\s*location\s+/api/', plain)
               assert TARGET_LINK.exists() and PREVIOUS_BACKUP.exists()
               target = TARGET_LINK.resolve()
               assert target.is_file() and str(target).startswith('/etc/nginx/')
