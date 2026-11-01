@@ -70,3 +70,13 @@ test('native Growth setup has a safe error screen and a protected admin route', 
   assert.match(screen, /action="\/studio\/sso\/create"/)
   assert.doesNotMatch(screen, /searchParams\.get\('(c|ticket|t)'\)/)
 })
+
+
+test('admin mail item requires server-confirmed platform owner permission', () => {
+  const admin = readFileSync(new URL('components/AdminShell.tsx', root), 'utf8')
+  assert.match(admin, /fetch\('\/api\/owner-mail\/permission'/)
+  assert.match(admin, /res\.ok && \(await res\.json\(\)\)\.allowed === true/)
+  assert.match(admin, /mailAllowed && <OwnerMailEntry/)
+  assert.match(admin, /MORE\.filter\(item => mailAllowed \|\| item\.to !== '\/mail'\)/)
+  assert.doesNotMatch(admin, /localStorage\.getItem\('userRole'\).*mailAllowed/)
+})
