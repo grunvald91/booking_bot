@@ -1,0 +1,118 @@
+name: ServGo unified PWA live gateway and SSO audit (read only)
+on:
+  push:
+    branches: [ops/servgo-unified-readonly-preflight-20261101]
+permissions:
+  contents: read
+concurrency:
+  group: servgo-unified-readonly-audit
+  cancel-in-progress: true
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Verify host and inspect live nginx, SSO entry routes and status (no writes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SSH credential missing"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            if ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Pinned SSH host key not matched"; exit 1; }
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo 'AUDIT_MODE=read_only; server files and secrets not changed or printed'
+          nginx -t >/dev/null
+          echo 'NGINX_SYNTAX=OK'
+          tmp="$(mktemp)"
+          headers="$(mktemp)"
+          trap 'rm -f "$tmp" "$headers"' EXIT
+          chmod 600 "$tmp" "$headers"
+          nginx -T >"$tmp" 2>/dev/null
+          python3 - "$tmp" <<'PY'
+          import re,sys
+          conf=open(sys.argv[1]).read()
+          conf=re.sub(r'(?m)^\s*#.*$', '', conf)
+          def endbrace(start):
+              depth=0
+              for k in range(start,len(conf)):
+                  if conf[k]=='{': depth+=1
+                  elif conf[k]=='}':
+                      depth-=1
+                      if depth==0:return k
+              raise ValueError('unbalanced nginx server block')
+          targets=('servgo.ru','growth.servgo.ru','mail.servgo.ru')
+          servers=[]
+          for m in re.finditer(r'\bserver\s*\{',conf):
+              block=conf[m.start():endbrace(m.end()-1)+1]
+              names=set()
+              for matched in re.findall(r'\bserver_name\s+([^;]+);',block):
+                  names.update(matched.split())
+              is_tls=bool(re.search(r'\blisten\s+[^;]*\b443\b[^;]*;',block))
+              if not names.intersection(targets):continue
+              locations=re.findall(r'\blocation\s+([^\{\n;]+)\{',block)
+              public=[]
+              for loc in locations:
+                  clean=' '.join(loc.split()).strip()
+                  if any(part in clean for part in ('studio','mail','owner-mail','intelligence','/api','products/','/workspace','/ ')) or clean in ('/','= /'):
+                      public.append(clean[:120])
+              servers.append((names,is_tls,public))
+          for host in targets:
+              matches=[item for item in servers if host in item[0] and item[1]]
+              print('TLS_VHOST',host,'count='+str(len(matches)))
+              for i,(_,_,locs) in enumerate(matches,1):
+                  print('  LOCATION_SUMMARY',i,'|'.join(locs[:36]) or 'none')
+              print('  HAS_EXACT_STUDIO='+str(any(any(p=='= /studio' for p in locs) for _,_,locs in matches)))
+              print('  HAS_STUDIO_PREFIX='+str(any(any('/studio/' in p for p in locs) for _,_,locs in matches)))
+          PY
+          echo 'LOOPBACK_HEALTH'
+          for item in api:8091; do
+            port="${item#*:}"
+            code="$(curl -sS --max-time 9 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/health" || true)"
+            echo "  growth-api:$port/health HTTP=$code"
+          done
+          echo 'PUBLIC_ROUTE_PROBES (no login or SSO tickets used)'
+          probe() {
+            host="$1"; path="$2"
+            : > "$headers"
+            code="$(curl -sS --max-time 11 --resolve "$host:443:127.0.0.1" -D "$headers" -o /dev/null -w '%{http_code}' "https://$host$path" || true)"
+            # Print only sanitized status and redirect path, never cookies, ticket query or credentials.
+            redirect="$(python3 - "$headers" <<'PY'
+          import sys
+          from urllib.parse import urlsplit
+          value=''
+          for line in open(sys.argv[1],errors='replace'):
+              if line.lower().startswith('location:'):
+                  value=urlsplit(line.split(':',1)[1].strip()).path[:100]
+          print(value or '-')
+          PY
+          )"
+            echo "  $host$path HTTP=$code redirect_path=$redirect"
+          }
+          probe servgo.ru /
+          probe servgo.ru /mail
+          probe servgo.ru /workspace/mail
+          probe servgo.ru /studio
+          probe servgo.ru /studio/assets/growth-live.css
+          probe servgo.ru /api/owner-mail/workspace
+          probe growth.servgo.ru /studio
+          probe growth.servgo.ru /studio/assets/growth-live.css
+          probe growth.servgo.ru /health
+          probe mail.servgo.ru /
+          probe mail.servgo.ru /api/status
+          echo 'DOCKER_CONTAINER_STATUS (no environment or process command lines)'
+          docker ps --format '{{.Names}} {{.Status}}' | grep -Ei 'growth|booking|mail' | head -20 || true
+          echo 'SERVER_AUDIT_COMPLETE=YES'
+          REMOTE
