@@ -116,7 +116,21 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             if isinstance(node, ast.AsyncFunctionDef)
             and node.name == "api_landing_connect_request"
         )
-        namespace = {"web": web}
+        async def fake_persist(data):
+            return 912
+
+        async def fake_telegram(data):
+            return False
+
+        namespace = {
+            "web": web, "asyncio": __import__("asyncio"),
+            "logger": __import__("logging").getLogger("onboarding-test"),
+            "validate_landing_request_payload": lambda data: data,
+            "persist_landing_marketing_lead": fake_persist,
+            "send_landing_request_email": lambda data: True,
+            "send_landing_request_telegram": fake_telegram,
+            "is_landing_request_telegram_required": lambda: False,
+        }
         exec(compile(ast.Module(body=[dispatch_node], type_ignores=[]),
                      str(server_source), "exec"), namespace)
         app.router.add_post("/api/landing/connect-request",
@@ -172,6 +186,19 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                  "webapp" / "static" / "onboarding-request.html").read_text()
         self.assertIn("onboarding=view&request_id=", shell)
         self.assertNotIn("Тестовая студия", shell)
+
+    async def test_original_promo_contact_submission_still_works(self):
+        # Normal landing leads without the onboarding query parameter must
+        # continue down the existing SMTP/Telegram funnel unchanged.
+        response = await self.client.post(
+            "/api/landing/connect-request",
+            json={"name": "Пробная заявка", "phone": "+79990000000"},
+        )
+        self.assertEqual(response.status, 200)
+        reply = await response.json()
+        self.assertTrue(reply["success"])
+        self.assertTrue(reply["email_sent"])
+        self.assertEqual(reply["lead_id"], 912)
 
     async def test_double_submit_does_not_double_email(self):
         body = payload()
