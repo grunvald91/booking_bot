@@ -32,6 +32,7 @@ class MailPageParser(HTMLParser):
 
 class MailAirV2ContractTests(unittest.TestCase):
     def pages(self):
+        records = []
         for name, body_class in (
             ("owner_mail_ui.html", "servgo-mail-inbox"),
             ("mail_campaign_dashboard.html", "servgo-mail-campaigns"),
@@ -49,14 +50,15 @@ class MailAirV2ContractTests(unittest.TestCase):
                 self.assertIn('id="mail-main-content"', text)
                 self.assertIn('aria-label="Разделы почты"', text)
                 self.assertIn("servgo-mail-theme", page.ids)
-                yield name, page, text
+                records.append((name, page, text))
+        return records
 
     def test_pages_share_accessible_servgo_air_shell(self):
-        records = list(self.pages())
+        records = self.pages()
         self.assertEqual(len(records), 2)
 
     def test_mailbox_existing_api_and_compose_hooks_survive(self):
-        _, parsed, source = next(self.pages())
+        _, parsed, source = self.pages()[0]
         for key in ("compose-dialog", "compose-form", "compose-to",
                     "compose-subject", "compose-body", "compose-submit",
                     "fab-compose", "list", "detail", "refresh"):
@@ -68,7 +70,7 @@ class MailAirV2ContractTests(unittest.TestCase):
             self.assertIn(key, source)
 
     def test_campaign_actions_remain_behind_existing_approval(self):
-        _, parsed, source = list(self.pages())[1]
+        _, parsed, source = self.pages()[1]
         for key in ("auto-switch", "campaign-list", "campaign-detail",
                     "new-dialog", "search-dialog", "edit-dialog"):
             self.assertIn(key, parsed.ids)
