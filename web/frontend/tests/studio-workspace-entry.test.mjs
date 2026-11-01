@@ -29,7 +29,7 @@ test('PWA Growth entry issues fresh ticket, not an unauthenticated /studio redir
   const app = readFileSync(new URL('App.tsx', root), 'utf8')
   const entry = readFileSync(new URL('components/StudioEntry.tsx', root), 'utf8')
   const screen = readFileSync(new URL('pages/client/GrowthWorkspacePage.tsx', root), 'utf8')
-  assert.match(app, /path="\/workspace\/growth" element=\{<ProtectedRoute/)
+  assert.match(app, /path="\/workspace\/growth" element=\{<AdminRoute/)
   assert.match(screen, /<StudioEntry showUnavailable/)
   assert.match(screen, /<AdminShell title="AI Growth OS"/)
   assert.doesNotMatch(screen, /<ClientShell/)
