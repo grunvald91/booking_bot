@@ -65,6 +65,7 @@ class MailAirV2ContractTests(unittest.TestCase):
             self.assertIn(key, parsed.ids)
         self.assertIn('fetch("/api"+path', source)
         self.assertIn('confirm("Отправить письмо на "', source)
+        self.assertIn('$("compose").onclick = () => openCompose(state.replyFull ?', source)
         for key in ('data-tab="inbox"', 'data-tab="outbox"',
                     'data-tab="drafts"', 'data-tab="prospects"'):
             self.assertIn(key, source)
@@ -107,6 +108,7 @@ class MailAirV2ContractTests(unittest.TestCase):
         css = (ROOT / "servgo-mail-air.css").read_text(encoding="utf-8")
         self.assertIn(".mail-v3-dock {position:fixed;bottom:0", css)
         self.assertIn(".mail-v3-search-actions {position:fixed", css)
+        self.assertIn(".mail-v3-actionbar #compose {display:inline-flex!important", css)
         self.assertIn("safe-area-inset-bottom", css)
 
 if __name__ == "__main__":

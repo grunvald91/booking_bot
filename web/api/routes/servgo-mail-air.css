@@ -673,3 +673,6 @@ html[data-theme] body.servgo-mail-v2 #search-dialog {max-height:none;overflow:vi
   html[data-theme] body.servgo-mail-v2 .mail-v3-search-actions #search-close {display:none}
   html[data-theme] body.servgo-mail-v2 .app > main {padding-bottom:calc(235px + env(safe-area-inset-bottom,0px))}
 }
+
+/* Keep the real mobile compose/reply control visible after moving it into the dock. */
+html[data-theme] body.servgo-mail-inbox .mail-v3-actionbar #compose {display:inline-flex!important;align-items:center;justify-content:center}
