@@ -1,0 +1,16 @@
+{
+  "name": "ai-job-research",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js tests/worker/*.test.js",
+    "check": "node scripts/preflight.mjs",
+    "deploy": "npm test && node scripts/preflight.mjs --deploy && tgcloud push",
+    "migrate": "tgcloud migrate",
+    "status": "tgcloud status"
+  },
+  "devDependencies": {
+    "@tgcloud/cli": "0.2.0"
+  }
+}

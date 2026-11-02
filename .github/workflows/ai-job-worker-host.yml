@@ -1,4 +1,4 @@
-name: Inspect AI Job worker host
+name: Install AI Job background worker
 on:
   push:
     branches: [work/ai-job-worker-20261102]
@@ -9,9 +9,9 @@ concurrency:
   group: ai-job-worker-host
   cancel-in-progress: false
 jobs:
-  inspect:
+  install:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 7
     env:
       SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
       SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
@@ -20,25 +20,6 @@ jobs:
     steps:
       - name: Install SSH client
         run: python -m pip install --quiet 'paramiko==3.5.1'
-      - name: Inspect isolated worker prerequisites
-        run: |
-          python - <<'PY'
-          import os,paramiko
-          c=paramiko.SSHClient()
-          c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-          c.connect(os.environ['SERVER_HOST'],port=int(os.environ['SERVER_PORT']),username=os.environ['SERVER_USER'],password=os.environ['SERVGO_PASSWORD'],timeout=20)
-          commands=[
-            "node --version; npm --version; docker --version; python3 --version",
-            "df -h /opt; free -m",
-            "systemctl list-units --type=service --state=running --no-pager | head -25",
-            "ls -l /etc/nginx/sites-enabled",
-            "rg -n 'server_name|include|location|ssl_certificate' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null || grep -RnE 'server_name|include|location|ssl_certificate' /etc/nginx/sites-enabled /etc/nginx/conf.d",
-            "ss -ltn | grep -E ':8793|:8794' || true",
-            "test -d /opt/ai-job-research-worker && ls -la /opt/ai-job-research-worker || true",
-          ]
-          for command in commands:
-              print('CHECK:',command)
-              _,out,err=c.exec_command(command,timeout=25)
-              print(out.read().decode()[:14000]);print(err.read().decode()[:1000])
-          c.close()
-          PY
+      - uses: actions/checkout@v4
+      - name: Install isolated worker and validate nginx
+        run: python scripts/install_ai_job_worker.py
