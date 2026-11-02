@@ -17,7 +17,7 @@ from web.api.routes.mail_campaign_store import initialize
 @pytest.fixture
 def mailenv(tmp_path, monkeypatch):
     data = tmp_path / "mail"
-    data.mkdir()
+    data.mkdir(mode=0o700)
     monkeypatch.setenv("SERVGO_MAIL_DATA_DIR", str(data))
     monkeypatch.setenv("SERVGO_MAIL_SESSION_SECRET", "a" * 48)
     monkeypatch.setenv("SERVGO_MAIL_FROM", "mail@servgo.ru")
