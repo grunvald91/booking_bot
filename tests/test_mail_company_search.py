@@ -166,7 +166,7 @@ def test_search_collects_cards_finds_email_on_site_and_marks_fit(env):
     by_name = {h["name"]: h for h in view["hits"]}
     assert by_name["Мята"]["email"] == "hello@mint-studio.ru" and by_name["Мята"]["email_source"] == "2ГИС"
     assert by_name["Лотос"]["email"] == "booking@lotos.ru" and by_name["Лотос"]["email_source"] == "сайт"
-    assert by_name["Магазин шин"]["email"] == "" and by_name["Магазин шин"]["fit"] == 0
+    assert by_name["Магазин шин"]["email"] == "" and by_name["Магазин шин"]["fit"] is None
     assert view["counts"] == {"found": 3, "with_email": 2, "fit": 2, "ready": 2}
 
 
@@ -264,7 +264,7 @@ def test_found_companies_are_judged_against_the_chosen_company(env):
     new_job()
     asyncio.run(search.run_job("j1", "салон", "sochi", None, BRIEF))
     judged = [p for p in env.prompts if "Найденная организация" in p]
-    assert len(judged) == 3
+    assert len(judged) == 2  # avoid paying for LLM calls for leads without email
     assert all("Студия маникюра в Сочи" in p and "Отели рядом" in p and "Маникюр" in p for p in judged)
     assert all("profile_source" not in p for p in judged)
 
@@ -536,3 +536,24 @@ def test_unrecognised_2gis_payload_is_not_reported_as_empty_success():
     }}})
     with pytest.raises(search.Blocked):
         search.parse_search_page(payload, 1)
+
+
+def test_2gis_first_page_404_does_not_look_like_success(env):
+    new_job()
+    asyncio.run(search.run_job("j1", "салон", "sochi", None))
+    with owner_mail.db_open() as db:
+        view = search._view(db, "j1")
+    assert view["job"]["status"] == "blocked"
+    assert "404" in view["job"]["message"]
+
+
+def test_missing_email_is_kept_without_paying_for_ai(env):
+    serve_two_firms(env)
+    new_job()
+    asyncio.run(search.run_job("j1", "салон", "sochi", None))
+    with owner_mail.db_open() as db:
+        view = search._view(db, "j1")
+    no_email = next(x for x in view["hits"] if x["name"] == "Магазин шин")
+    assert no_email["fit"] is None
+    assert "Email не найден" in no_email["fit_reason"]
+    assert len(env.prompts) == 2
