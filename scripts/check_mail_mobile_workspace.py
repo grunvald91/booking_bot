@@ -22,9 +22,9 @@ LONG_STATUS = ("Выключена: ни одно письмо не уйдёт, 
 
 def isolated_html(name: str, theme: str) -> str:
     html = (ROOT / name).read_text(encoding="utf-8")
-    html = re.sub(r"<script\\b[^>]*>.*?</script\\s*>", "", html,
+    html = re.sub(r"<script\b[^>]*>.*?</script\s*>", "", html,
                   flags=re.IGNORECASE | re.DOTALL)
-    html = re.sub(r"<link\\b[^>]*>", "", html, flags=re.IGNORECASE)
+    html = re.sub(r"<link\b[^>]*>", "", html, flags=re.IGNORECASE)
     html = html.replace("<html lang=\"ru\">",
                         f'<html lang="ru" data-theme="{theme}">', 1)
     html = html.replace("</head>",
