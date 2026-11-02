@@ -30,7 +30,7 @@ def sender_for_campaign(company_id: str) -> tuple[str, str]:
             return "", ""
         address = str(item.get("email") or "").strip().lower()
         display = str(item.get("name") or "").strip()
-        if ADDRESS.fullmatch(address) and display and len(display) <= 160:
+        if ADDRESS.fullmatch(address) and display and len(display) <= 160 and not any(ord(ch) < 32 for ch in display):
             return address, display
     except (ValueError, TypeError):
         pass
@@ -91,13 +91,19 @@ def reserve_send():
         if changed.rowcount != 1:
             return None
         audit(db, candidate["campaign_id"], "send_attempt", candidate["id"])
-        return dict(candidate), sender, message_id
+        message_row = dict(candidate)
+        message_row["sender_display_name"] = _display_name
+        return message_row, sender, message_id
 
 
 def make_message(row, sender, message_id):
     msg = EmailMessage()
-    company_id = row["company_id"] if "company_id" in row else ""
-    _sender, name = sender_for_campaign(company_id)
+    try:
+        company_id = row["company_id"]
+    except (KeyError, IndexError, TypeError):
+        company_id = ""
+    _sender, fallback_name = sender_for_campaign(company_id)
+    name = row.get("sender_display_name", fallback_name) if isinstance(row, dict) else fallback_name
     msg["From"] = formataddr((name or "ServGo", sender))
     msg["To"] = row["email"]
     msg["Subject"] = row["subject"]
