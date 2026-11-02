@@ -164,6 +164,7 @@ class MailPwaTests(unittest.TestCase):
         self.assertNotIn('fetch("/api"+path', mailbox)
         self.assertNotIn('href="/api/mailbox-dashboard', campaigns)
         for page in (campaigns, mailbox):
+            self.assertGreater(page.index('<nav class="sg-pwa-workspace-nav"'), page.index('<div class="mail-v3-popover-content">'))
             self.assertIn("Выйти из почты", page)
             self.assertIn('href="/workspace/growth"', page)
             self.assertIn('href="/admin"', page)

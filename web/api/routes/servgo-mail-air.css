@@ -676,3 +676,8 @@ html[data-theme] body.servgo-mail-v2 #search-dialog {max-height:none;overflow:vi
 
 /* Keep the real mobile compose/reply control visible after moving it into the dock. */
 html[data-theme] body.servgo-mail-inbox .mail-v3-actionbar #compose {display:inline-flex!important;align-items:center;justify-content:center}
+
+/* Global navigation and duplicate outbox composer do not occupy the top of Mail V3. */
+html[data-theme] body.servgo-mail-inbox #list-compose {display:none!important}
+html[data-theme] body.servgo-mail-v2 .mail-v3-popover-content > .sg-pwa-workspace-nav {display:flex;flex-wrap:wrap;gap:4px 12px;margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid var(--s-line)}
+html[data-theme] body.servgo-mail-v2 .mail-v3-popover-content > .sg-pwa-workspace-nav a {font-size:12px;min-height:34px;padding:6px}
