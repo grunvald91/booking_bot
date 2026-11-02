@@ -221,9 +221,15 @@ return entries;
 async function loadSearchProviders(){
 const status=await sapi("/providers");
 el("search-provider").querySelector('option[value="exa"]').disabled=!status.exa;
-el("search-help").textContent=status.exa?
-  "2ГИС — локальный поиск; Exa — поиск сайтов. "+(status.jev?"Jev оценивает первичное соответствие. ":"ИИ оценивает соответствие. ")+"Результаты можно сохранить без рассылки.":
-  "Exa не настроен на сервере (EXA_API_KEY). Доступен 2ГИС. Результаты поиска сохраняются без создания рассылки.";
+const hint=()=>{
+const viaExa=el("search-provider").value==="exa";
+el("search-help").textContent=viaExa?
+  "Exa: платный API-запрос по квоте ключа, по умолчанию до 20 сайтов и до 3 проверок одновременно. Время зависит от сайтов и ИИ.":
+  "2ГИС: по умолчанию пауза 5 секунд на карточку плюс время загрузки и ИИ. Для 100 карточек — не менее 500 секунд только пауз. "+
+  (status.jev?"Первичную оценку делает Jev. ":"Оценку делает настроенный ИИ. ")+
+  (status.exa?"Exa доступен как второй источник.":"Exa пока не настроен на сервере.");
+};
+el("search-provider").onchange=hint;hint();
 }
 async function openSearch(){if(location.hash!=="#search"){location.hash="search";return}pageMode();const target=state.campaigns.find(x=>x.campaign.id===state.selected);if(!target||!["draft","paused"].includes(target.campaign.status)){const first=state.campaigns.find(x=>["draft","paused"].includes(x.campaign.status));if(first)await select(first.campaign.id)}await loadCompanies();await loadSearchProviders();const recent=await loadHistory();
 if(!found.job&&recent.length)found.job=recent[0].id;
