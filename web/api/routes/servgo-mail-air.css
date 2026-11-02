@@ -698,3 +698,15 @@ html[data-theme] body.servgo-mail-v2 .mail-v3-search-actions {box-shadow:none;bo
  html[data-theme] body.servgo-mail-campaigns .mail-v3-search :is(#search-provider,#search-history) {min-height:44px}
  html[data-theme] body.servgo-mail-campaigns #search-help {font-size:11px}
 }
+
+/* Exactly one prominent next step for the current campaign stays in the bottom action row. */
+html[data-theme] body.servgo-mail-campaigns .mail-v4-primary {display:flex;flex:1;min-width:0;max-width:260px}
+html[data-theme] body.servgo-mail-campaigns .mail-v4-primary:empty {display:none}
+html[data-theme] body.servgo-mail-campaigns .mail-v4-primary button {width:100%;min-height:38px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+html[data-theme] body.servgo-mail-campaigns .mail-v4-automation-status {max-width:650px;margin:0 auto 14px;text-align:center}
+@media(max-width:450px) {
+ html[data-theme] body.servgo-mail-campaigns #mail-campaign-toolbar {justify-content:space-between;gap:4px}
+ html[data-theme] body.servgo-mail-campaigns #mail-campaign-toolbar #create {padding:7px 8px;font-size:11px;white-space:nowrap}
+ html[data-theme] body.servgo-mail-campaigns #mail-campaign-toolbar .mail-v3-popover > summary {min-width:69px;font-size:11px;padding:7px 8px}
+ html[data-theme] body.servgo-mail-campaigns #mail-campaign-toolbar .mail-v4-primary button {padding:7px 5px;font-size:11px}
+}
