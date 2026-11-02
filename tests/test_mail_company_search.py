@@ -477,6 +477,7 @@ def test_exa_provider_enriches_bounded_websites_without_real_network(env, monkey
 
 def test_jev_typed_lead_decisions_and_conservative_uncertainty(env, monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "mock-openrouter-key")
+    monkeypatch.setenv("SERVGO_MAIL_USE_JEV", "true")
     monkeypatch.delenv("SERVGO_MAIL_JEV_FALLBACK_TO_HUB", raising=False)
     ratings = [0.94, 0.51, 0.12]
     requests = []
@@ -511,3 +512,27 @@ def test_jev_typed_lead_decisions_and_conservative_uncertainty(env, monkeypatch)
     assert len(requests) == 3
     assert all("candidate" in x["state"] and "our_company" in x["state"] for x in requests)
     assert not env.prompts, "Jev results must not trigger a generative per-lead judge"
+
+
+def test_jev_never_runs_by_default_even_if_openrouter_is_configured(env, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "configured-for-other-service")
+    monkeypatch.delenv("SERVGO_MAIL_USE_JEV", raising=False)
+    monkeypatch.setattr(search.httpx, "AsyncClient", FakeClient)
+    value, reason = asyncio.run(search.judge({
+        "name": "Мята", "rubrics": ["Салоны красоты"], "address": "Сочи",
+        "rating": 4.9, "website": "https://example.org"
+    }, BRIEF))
+    assert value == 1 and reason
+    assert env.prompts and not FakeClient.asked
+
+
+def test_unrecognised_2gis_payload_is_not_reported_as_empty_success():
+    payload = page({"data": {"search": {"profile": {"x": {"data": {"pages": 1, "total": 5}}}}}})
+    with pytest.raises(search.Blocked):
+        search.parse_search_page(payload, 1)
+    payload = page({"data": {"search": {
+        "profile": {"x": {"data": {"pages": 1, "total": 5}}},
+        "pagination": {"x": {"1": {"data": []}}}
+    }}})
+    with pytest.raises(search.Blocked):
+        search.parse_search_page(payload, 1)
