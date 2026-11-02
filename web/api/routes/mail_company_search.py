@@ -122,6 +122,11 @@ def parse_search_page(html: str, page: int) -> SearchPage:
         data = (item or {}).get("data") or {}
         result.pages = int(data.get("pages") or 0)
         result.total = int(data.get("total") or 0)
+    # A changed or incomplete 2GIS server response must never look like a successful empty search.
+    if not isinstance(search.get("pagination"), dict) or not isinstance(search.get("profile"), dict):
+        raise Blocked("2ГИС изменил структуру выдачи: нет pagination/profile")
+    if not result.ids and result.total > 0:
+        raise Blocked("2ГИС не вернул идентификаторы компаний в непустой выдаче")
     profiles = _profiles(state)
     for firm_id in result.ids:
         data = (profiles.get(firm_id) or {}).get("data")
@@ -287,7 +292,8 @@ async def judge(card: dict, brief: dict) -> tuple[int | None, str]:
     # Jev is a typed, low-cost decision model, not a text generator.
     # Keep ambiguous cases for review instead of inventing high-confidence matches.
     key = os.getenv("OPENROUTER_API_KEY", "").strip()
-    if key:
+    use_jev = os.getenv("SERVGO_MAIL_USE_JEV", "false").lower() in ("1", "true", "yes")
+    if key and use_jev:
         question = {
             "model": os.getenv("SERVGO_MAIL_JEV_MODEL", "typesafe/jev-1.14"),
             "state": {"our_company": json.loads(brief_for_prompt(brief)), "candidate": json.loads(facts)},
@@ -346,6 +352,7 @@ async def run_job(job_id: str, niche: str, city: str, want: int | None, brief: d
         if want and ready >= want:
             _finish(job_id, "done", "Подходящих компаний с почтой уже достаточно")
             return
+        max_pages = max(1, min(50, int(os.getenv("SERVGO_2GIS_MAX_PAGES", "10"))))
         async with httpx.AsyncClient(timeout=30, headers={"User-Agent": USER_AGENT, "Accept-Language": "ru-RU,ru"},
                                      follow_redirects=False) as client:
             page, seen = 1, set(known_ids)
@@ -393,13 +400,13 @@ async def run_job(job_id: str, niche: str, city: str, want: int | None, brief: d
                         if want and ready >= want:
                             _finish(job_id, "done", "Найдено запрошенное число подходящих компаний с почтой")
                             return
-                if page >= found.pages:
+                if page >= found.pages or page >= max_pages:
                     break
                 page += 1
                 await asyncio.sleep(pause)
-        _finish(job_id, "done", "Все страницы поиска просмотрены")
+        _finish(job_id, "done", "Поиск завершён в пределах лимита страниц (максимум " + str(max_pages) + ")")
     except Blocked as err:
-        _finish(job_id, "blocked", f"{err}. Найденное сохранено; повторите позже или с другого сервера.")
+        _finish(job_id, "blocked", f"{err}. Найденное сохранено; источник временно недоступен.")
     except asyncio.CancelledError:
         _finish(job_id, "interrupted", "Поиск остановлен")
         raise
@@ -569,8 +576,9 @@ async def company_brief(company_id: str) -> dict:
 
 @router.get("/providers")
 def providers(_=Depends(mail_owner)):
+    use_jev = os.getenv("SERVGO_MAIL_USE_JEV", "false").lower() in ("1", "true", "yes")
     return {"2gis": True, "exa": bool(os.getenv("EXA_API_KEY", "").strip()),
-            "jev": bool(os.getenv("OPENROUTER_API_KEY", "").strip())}
+            "jev": use_jev and bool(os.getenv("OPENROUTER_API_KEY", "").strip())}
 
 
 @router.get("/companies")
