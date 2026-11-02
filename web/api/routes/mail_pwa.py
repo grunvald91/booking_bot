@@ -44,6 +44,8 @@ def adapt_mail_html(page: str, *, mailbox: bool = False) -> str:
     page = page.replace('"/api', '"/api/owner-mail/api').replace("'/api", "'/api/owner-mail/api")
     # Navigation links must stay in the adapted workspace, not load the
     # unadapted legacy HTML templates at their old paths.
+    page = page.replace('href="/api/owner-mail/api/campaigns-dashboard#',
+                        'href="/api/owner-mail/workspace#')
     page = page.replace('href="/api/owner-mail/api/campaigns-dashboard"',
                         'href="/api/owner-mail/workspace"')
     page = page.replace('href="/api/owner-mail/api/mailbox-dashboard',
