@@ -32,7 +32,7 @@ jobs:
           python-version: '3.12'
       - name: Install pinned SSH test dependency
         run: python -m pip install -q 'paramiko==3.5.1' pytest
-      - name: Test runtime SSO equivalence guard and compile release
+      - name: Verify exact two-function SSO relocation guard and compile release
         run: |
           python -m pytest -q tests/test_pwa_frontend_sso_equivalence.py
           python -m py_compile scripts/deploy_servgo_frontend_atomic.py
