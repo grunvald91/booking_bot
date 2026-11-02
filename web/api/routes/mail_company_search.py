@@ -420,7 +420,8 @@ async def run_exa_job(job_id: str, niche: str, city: str, want: int | None,
         return
     brief = brief or dict(SERVGO)
     try:
-        count = min(50, max(10, (want or 25) * 2))
+        budget = max(10, min(50, int(os.getenv("SERVGO_EXA_MAX_RESULTS", "20"))))
+        count = min(budget, max(10, (want or 10) * 2))
         query = f"{niche} компании {city} официальный сайт контакты email"
         async with httpx.AsyncClient(timeout=35) as client:
             response = await client.post(
