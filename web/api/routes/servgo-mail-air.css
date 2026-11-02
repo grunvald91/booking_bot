@@ -831,3 +831,21 @@ html[data-theme] body.servgo-mail-v2 .mail-v3-popover-content :is(a,button) {
     max-height:min(58dvh,480px);
   }
 }
+
+/* On narrow phones the Details trigger is not centered; anchoring the sheet
+ * to its right edge can push the sheet off the left side of the viewport. */
+@media (max-width:650px) {
+  html[data-theme] body.servgo-mail-v2 .mail-v3-popover > :is(nav,.mail-v3-popover-content) {
+    position:fixed;
+    left:12px;
+    right:12px;
+    bottom:calc(112px + env(safe-area-inset-bottom,0px));
+    width:auto;
+    min-width:0;
+    max-width:none;
+    max-height:min(58dvh,480px);
+    margin:0;
+    overflow-x:hidden;
+    overscroll-behavior:contain;
+  }
+}
