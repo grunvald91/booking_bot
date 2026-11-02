@@ -473,3 +473,41 @@ def test_exa_provider_enriches_bounded_websites_without_real_network(env, monkey
     assert len(view["hits"]) == 2
     assert all(r["source"] == "Exa" for r in view["hits"])
     assert view["counts"]["ready"] == 2
+
+
+def test_jev_typed_lead_decisions_and_conservative_uncertainty(env, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "mock-openrouter-key")
+    monkeypatch.delenv("SERVGO_MAIL_JEV_FALLBACK_TO_HUB", raising=False)
+    ratings = [0.94, 0.51, 0.12]
+    requests = []
+
+    class Reply:
+        def __init__(self, value):
+            self.value = value
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"answers": {"fit": {"type": "noul", "noul": self.value}}}
+
+    class JevClient:
+        def __init__(self, **kwargs):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            return None
+        async def post(self, url, **kwargs):
+            assert url == "https://openrouter.ai/api/alpha/decisions"
+            assert kwargs["headers"]["Authorization"] == "Bearer mock-openrouter-key"
+            assert kwargs["json"]["questions"]["fit"]["type"] == "noul"
+            requests.append(kwargs["json"])
+            return Reply(ratings.pop(0))
+
+    monkeypatch.setattr(search.httpx, "AsyncClient", JevClient)
+    candidate = {"name": "Отель", "rubrics": ["Гостиницы"], "address": "Сочи",
+                 "rating": None, "website": "https://example.org"}
+    outcomes = [asyncio.run(search.judge(candidate, BRIEF)) for _ in range(3)]
+    assert [value for value, _ in outcomes] == [1, None, 0]
+    assert len(requests) == 3
+    assert all("candidate" in x["state"] and "our_company" in x["state"] for x in requests)
+    assert not env.prompts, "Jev results must not trigger a generative per-lead judge"
