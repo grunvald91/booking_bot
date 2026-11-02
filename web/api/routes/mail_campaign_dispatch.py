@@ -53,6 +53,15 @@ def reserve_send():
         ).fetchone()[0]
         if attempts >= limit:
             return None
+        try:
+            configured = json.loads(os.getenv("SERVGO_MAIL_COMPANY_SENDERS", "{}"))
+        except (ValueError, TypeError):
+            configured = {}
+        verified_ids = sorted(k for k in configured if sender_for_campaign(k)[0]) if isinstance(configured, dict) else []
+        allowed = " AND (c.company_id=''"
+        if verified_ids:
+            allowed += " OR c.company_id IN (" + ",".join("?" for _ in verified_ids) + ")"
+        allowed += ")"
         candidate = db.execute("""
             SELECT r.*, c.min_interval_seconds, c.company_id
             FROM campaign_recipient r
@@ -60,8 +69,7 @@ def reserve_send():
             WHERE r.status='approved' AND c.status='running'
               AND (c.not_before='' OR c.not_before<=?)
               AND NOT EXISTS (SELECT 1 FROM campaign_exclusions x WHERE x.email=r.email)
-            ORDER BY r.created_at,r.id LIMIT 1
-        """, (current.isoformat(),)).fetchone()
+        """ + allowed + " ORDER BY r.created_at,r.id LIMIT 1", (current.isoformat(), *verified_ids)).fetchone()
         if not candidate:
             return None
         sender, _display_name = sender_for_campaign(candidate["company_id"])
@@ -88,7 +96,8 @@ def reserve_send():
 
 def make_message(row, sender, message_id):
     msg = EmailMessage()
-    _sender, name = sender_for_campaign(row.get("company_id", ""))
+    company_id = row["company_id"] if "company_id" in row else ""
+    _sender, name = sender_for_campaign(company_id)
     msg["From"] = formataddr((name or "ServGo", sender))
     msg["To"] = row["email"]
     msg["Subject"] = row["subject"]
