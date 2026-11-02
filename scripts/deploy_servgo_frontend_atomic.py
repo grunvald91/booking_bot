@@ -195,6 +195,27 @@ def main():
                       "--max-time 12 https://servgo.ru/sw.js | sha256sum | cut -d' ' -f1")
         if sw_hash != expected["sw.js"]:
             raise RuntimeError("Live HTTPS SW checksum is not the staged version")
+
+        # Verify critical same-origin navigation and owner-only gates *before*
+        # finalizing release; any failure uses the existing symlink rollback.
+        routes = {
+            ("servgo.ru", "/mail"): {"200"},
+            ("servgo.ru", "/workspace/mail"): {"200"},
+            ("servgo.ru", "/workspace/growth"): {"200"},
+            ("servgo.ru", "/api/owner-mail/workspace"): {"303"},
+            ("servgo.ru", "/api/owner-mail/api/company-search"): {"401", "403"},
+            ("servgo.ru", "/internal/studio/businesses?user_id=0"): {"403"},
+            ("mail.servgo.ru", "/"): {"200"},
+        }
+        for (domain, path), expected_codes in routes.items():
+            status = run(
+                client, "curl -sS -o /dev/null -w '%{http_code}' --max-time 12"
+                + " --resolve " + sh(domain + ":443:127.0.0.1")
+                + " " + sh("https://" + domain + path)
+            )
+            if status not in expected_codes:
+                raise RuntimeError("Post-release route verification failed: " + domain + path + " HTTP " + status)
+            print("frontend_route_check=" + domain + path + " http=" + status, flush=True)
         print(f"frontend_release_ok=true commit={commit} assets_verified={len(files)} release={name}")
     except Exception:
         if switched or legacy:
