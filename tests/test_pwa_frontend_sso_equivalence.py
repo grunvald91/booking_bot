@@ -65,3 +65,11 @@ async def studio_accessible_businesses():
     assert not backend_equivalent(STUDIO_SSO, live.replace(
         b"def _businesses_for_studio():", b"def removed_helper():"
     ), main)
+
+
+def test_studio_auth_smoke_goes_to_actual_api_not_spa_fallback():
+    from pathlib import Path
+    script = (Path(__file__).resolve().parents[1] / "scripts/deploy_servgo_frontend_atomic.py").read_text()
+    assert 'http://127.0.0.1:8000/internal/studio/businesses?user_id=0' in script
+    assert '("servgo.ru", "/internal/studio/businesses' not in script
+    assert 'studio_code != "403"' in script
