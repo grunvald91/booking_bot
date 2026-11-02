@@ -1,0 +1,33 @@
+name: ServGo Mail PWA production preflight (read only)
+on:
+  push:
+    branches:
+      - ops/servgo-mail-pwa-20261102
+    paths:
+      - '.github/workflows/mail-pwa-preflight.yml'
+permissions:
+  contents: read
+concurrency:
+  group: servgo-mail-pwa-preflight
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install SSH client
+        run: python -m pip install -q 'paramiko==3.5.1'
+      - name: Validate preflight syntax
+        run: python -m py_compile scripts/mail_pwa_server_preflight.py
+      - name: Compare production Mail files to prior main and new release, no changes
+        run: python -m scripts.mail_pwa_server_preflight
