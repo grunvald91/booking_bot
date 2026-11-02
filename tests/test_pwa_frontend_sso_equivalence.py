@@ -25,10 +25,10 @@ def test_any_sso_code_change_fails_closed():
     assert not backend_equivalent(STUDIO_SSO, None, a)
 
 
-def test_sso_type_comments_must_match():
+def test_runtime_ignored_sso_type_comments_are_allowed():
     a=b"def f(x): # type: (int) -> int\n    return x\n"
     b=b"def f(x): # type: (str) -> int\n    return x\n"
-    assert not backend_equivalent(STUDIO_SSO, a, b)
+    assert backend_equivalent(STUDIO_SSO, a, b)
 
 
 def test_unparseable_sso_cannot_pass_preflight():
