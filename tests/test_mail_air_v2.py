@@ -104,6 +104,19 @@ class MailAirV2ContractTests(unittest.TestCase):
         self.assertIn('id="campaign-action-dock"', campaigns[2])
         self.assertNotIn('el("search-dialog").showModal()', campaigns[2])
 
+    def test_v4_search_and_send_safety_controls(self):
+        _inbox, campaigns = self.pages()
+        _, parsed, source = campaigns
+        for key in ("search-provider", "search-history", "search-create-campaign",
+                    "search-resume", "search-campaign", "campaign-automation-summary"):
+            self.assertIn(key, parsed.ids)
+        self.assertIn('firm_ids:[...found.picks]', source)
+        self.assertIn('legal_basis_confirmed:true', source)
+        self.assertIn('function loadHistory()', source)
+        self.assertIn('function loadSearchProviders()', source)
+        self.assertIn('search-review-yes', source)
+        self.assertIn('search-review-no', source)
+
     def test_v3_controls_live_at_the_bottom(self):
         css = (ROOT / "servgo-mail-air.css").read_text(encoding="utf-8")
         self.assertIn(".mail-v3-dock {position:fixed;bottom:0", css)
