@@ -1,14 +1,5 @@
-import os,paramiko
+import os,paramiko,shlex
 c=paramiko.SSHClient();c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 c.connect('155.212.162.47',username='root',password=os.environ['SERVGO_PASSWORD'],timeout=20)
-commands=[
-"docker inspect ai-job-research-worker --format '{{json .State}}'",
-"docker logs --tail 20 ai-job-research-worker",
-"docker exec ai-job-research-worker /app/node_modules/.bin/tgcloud --version",
-"docker exec ai-job-research-worker node -e \"fetch('https://cloud.telegram.org').then(r=>console.log('Telegram HTTP',r.status)).catch(e=>console.log('Telegram connection',e.message,e.cause?.code))\"",
-"docker exec ai-job-research-worker node -e \"const f=require('fs');console.log('CLI package',f.readFileSync('/app/node_modules/@tgcloud/cli/package.json','utf8'));console.log('project',f.readdirSync('/state/project-next'))\"",
-"docker exec ai-job-research-worker sh -c 'ls /app/node_modules/@tgcloud/cli/dist; ls /app/node_modules/@tgcloud/cli'"
-]
-for cmd in commands:
- _,o,e=c.exec_command(cmd,timeout=40);print(o.read().decode()[-14000:]);print(e.read().decode()[-3000:])
-c.close()
+cmd='docker exec ai-job-research-worker node -e '+shlex.quote("const dns=require('dns').promises,https=require('https'),fs=require('fs'),path=require('path');\n(async()=>{\nfor(const h of ['cloud.telegram.org','api.telegram.org'])console.log('DNS',h,await dns.lookup(h,{all:true}).catch(e=>e.code));\nconst scan=d=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())scan(p);else if(p.endsWith('.js')){const lines=fs.readFileSync(p,'utf8').split('\\n');lines.forEach((l,i)=>{if(/https:\\/\\/|TGCLOUD_API|API_URL|BASE_URL|TGCLOUD_HOST/.test(l))console.log('CLI',p,i+1,l.slice(0,400))})}}};scan('/app/node_modules/@tgcloud/cli/src');\nawait Promise.all(['https://api.telegram.org','https://cloud.telegram.org','https://cloud.telegram.org:443'].map(async url=>{try{const r=await fetch(url,{signal:AbortSignal.timeout(6000)});console.log('HTTP',url,r.status)}catch(e){console.log('HTTP',url,e.cause?.code||e.name)}}));\n})();")
+i,o,e=c.exec_command(cmd,timeout=35);i.close();print(o.read().decode()[-28000:]);print(e.read().decode()[-3000:]);o.close();e.close();c.close()
