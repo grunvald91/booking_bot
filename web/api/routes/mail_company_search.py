@@ -361,6 +361,8 @@ async def run_job(job_id: str, niche: str, city: str, want: int | None, brief: d
                     return
                 html = await fetch(client, search_url(city, niche, page))
                 if html is None:
+                    if page == 1:
+                        raise Blocked("2ГИС вернул HTTP 404 для первой страницы поиска")
                     break
                 found = parse_search_page(html, page)
                 with db_open() as db:
@@ -384,7 +386,10 @@ async def run_job(job_id: str, niche: str, city: str, want: int | None, brief: d
                         site = await asyncio.to_thread(research_public_site, card["website"], 3_000_000, True)
                         card["email"] = email_from_site(site)
                         source = "сайт" if card["email"] else ""
-                    fit, reason = await judge(card, brief)
+                    if card["email"]:
+                        fit, reason = await judge(card, brief)
+                    else:
+                        fit, reason = None, "Email не найден — ИИ-оценка пропущена"
                     with db_open() as db:
                         initialize(db)
                         db.execute(
