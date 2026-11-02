@@ -57,10 +57,10 @@ STUDIO_SSO = "web/api/routes/studio_sso.py"
 def backend_equivalent(path: str, current: bytes | None, candidate: bytes) -> bool:
     """Permit a text-only production SSO difference without overwriting it.
 
-    Other backend files must remain byte-for-byte identical. Parsing *both*
-    SSO sources without type comments ensures executable AST parity, while
-    preserving differences in runtime-ignored comments. This does not write or
-    restart the existing SSO service.
+    Other backend files must remain byte-for-byte identical. We accept only
+    the exact pre-existing production SSO shape: two identical declarations
+    appended at the end, with every other AST node in identical order.
+    Runtime-ignored comments may differ. The live SSO file is not changed.
     """
     if current == candidate:
         return True
@@ -69,9 +69,31 @@ def backend_equivalent(path: str, current: bytes | None, candidate: bytes) -> bo
     try:
         current_tree = ast.parse(current.decode("utf-8"), filename=path)
         candidate_tree = ast.parse(candidate.decode("utf-8"), filename=path)
-        return ast.dump(current_tree, include_attributes=False) == ast.dump(
-            candidate_tree, include_attributes=False
-        )
+        canonical = lambda node: ast.dump(node, include_attributes=False)
+        if canonical(current_tree) == canonical(candidate_tree):
+            return True
+        # The existing production SSO patch appended exactly these two
+        # unmodified definitions after all other declarations. Preserve it
+        # only when *everything else*, including decorator AST, matches main
+        # in the same order. Never allow arbitrary definition reordering.
+        moved = ("_businesses_for_studio", "studio_accessible_businesses")
+        def function_name(node):
+            return node.name if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else None
+        current_nodes = current_tree.body
+        candidate_nodes = candidate_tree.body
+        if len(current_nodes) < 2 or tuple(function_name(n) for n in current_nodes[-2:]) != moved:
+            return False
+        if [function_name(n) for n in candidate_nodes].count(moved[0]) != 1:
+            return False
+        if [function_name(n) for n in candidate_nodes].count(moved[1]) != 1:
+            return False
+        original_moved = [next(n for n in candidate_nodes if function_name(n) == name) for name in moved]
+        if [canonical(n) for n in current_nodes[-2:]] != [canonical(n) for n in original_moved]:
+            return False
+        other_candidate = [n for n in candidate_nodes if function_name(n) not in moved]
+        if [canonical(n) for n in current_nodes[:-2]] != [canonical(n) for n in other_candidate]:
+            return False
+        return True
     except (SyntaxError, UnicodeError, ValueError):
         return False
 
