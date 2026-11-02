@@ -314,8 +314,10 @@ async def judge(card: dict, brief: dict) -> tuple[int | None, str]:
                 if likelihood <= 0.20:
                     return 0, f"Jev: низкое соответствие ({probability}%)"
                 return None, f"Jev: оценка неоднозначна ({probability}%). Проверьте вручную"
-        except (httpx.HTTPError, ValueError, TypeError, KeyError):
-            pass  # Only if Jev is unavailable fall back to the configured generative judge.
+        except (httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError):
+            if os.getenv("SERVGO_MAIL_JEV_FALLBACK_TO_HUB", "false").lower() not in ("1", "true", "yes"):
+                return None, "Jev недоступен. Компания оставлена на ручную проверку"
+            # Explicitly enabled fallback; otherwise avoid potentially expensive LLM calls.
     try:
         answer = await hub(
             "Ты ищешь клиентов для компании, описанной ниже (наша компания). Реши, может ли найденная "
