@@ -63,6 +63,5 @@ async def studio_accessible_businesses():
     assert not backend_equivalent(STUDIO_SSO, live.replace(b"@router.get('/internal/studio/businesses')", b"@router.get('/internal/studio/users')"), main)
     assert not backend_equivalent(STUDIO_SSO, live.replace(b"def unrelated(x):", b"def legacy_extra(x):"), main)
     assert not backend_equivalent(STUDIO_SSO, live.replace(
-        b"def _businesses_for_studio():\\n    return 5\\n",
-        b""
+        b"def _businesses_for_studio():", b"def removed_helper():"
     ), main)
