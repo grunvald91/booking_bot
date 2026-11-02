@@ -8,6 +8,7 @@ directory in releases/legacy-*; subsequent switches are atomic.
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import os
 from pathlib import Path
@@ -48,6 +49,30 @@ def read_file(sftp, path: str) -> bytes | None:
             return handle.read()
     except OSError:
         return None
+
+
+STUDIO_SSO = "web/api/routes/studio_sso.py"
+
+
+def backend_equivalent(path: str, current: bytes | None, candidate: bytes) -> bool:
+    """Permit a text-only production SSO difference without overwriting it.
+
+    Other backend files must remain byte-for-byte identical. Parsing *both*
+    SSO sources with type comments ensures any executable AST difference fails
+    closed. This does not write or restart the existing SSO service.
+    """
+    if current == candidate:
+        return True
+    if path != STUDIO_SSO or current is None:
+        return False
+    try:
+        current_tree = ast.parse(current.decode("utf-8"), filename=path, type_comments=True)
+        candidate_tree = ast.parse(candidate.decode("utf-8"), filename=path, type_comments=True)
+        return ast.dump(current_tree, include_attributes=False) == ast.dump(
+            candidate_tree, include_attributes=False
+        )
+    except (SyntaxError, UnicodeError, ValueError):
+        return False
 
 
 def main():
@@ -101,8 +126,10 @@ def main():
         for path in FILES:
             server = read_file(sftp, ROOT + "/" + path)
             candidate = (root / path).read_bytes()
-            if server != candidate:
+            if not backend_equivalent(path, server, candidate):
                 mismatches.append(path)
+            elif server != candidate:
+                print("backend_sso_ast_equivalent=true; preserving_server_studio_sso=yes", flush=True)
         print(f"frontend_preflight=ok files={len(files)} backend_ready={str(not mismatches).lower()}")
         for item in mismatches:
             print("backend_release_required=" + item)
