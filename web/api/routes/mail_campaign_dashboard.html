@@ -203,10 +203,17 @@ btn.textContent="Перенести выбранные ("+found.picks.size+")";
 }
 async function loadSearch(){clearTimeout(found.timer);if(!found.job)return;const v=await sapi("/"+found.job);renderSearch(v);if(v.job.status==="running"&&!el("search-dialog").hidden)found.timer=setTimeout(()=>safe(loadSearch),4000)}
 function campaignCompany(){const b=state.detail&&state.detail.campaign.company_brief;if(!b)return null;try{return{id:state.detail.campaign.company_id,name:JSON.parse(b).name||""}}catch{return null}}
-async function loadCompanies(){const sel=el("search-company");const own=campaignCompany();let list=[];try{list=await sapi("/companies")}catch{}
-if(own){sel.innerHTML='<option value="'+e(own.id)+'">'+e(own.name||"ServGo")+'</option>';sel.disabled=true;return}
-sel.disabled=false;sel.innerHTML=list.length?list.map(c=>'<option value="'+e(c.id)+'">'+e(c.name)+'</option>').join(""):'<option value="">ServGo (данные платформы недоступны)</option>';
-const servgo=list.find(c=>/servgo/i.test(c.name));if(servgo)sel.value=servgo.id}
+async function loadCompanies(){
+const sel=el("search-company"), previous=sel.value, own=campaignCompany();
+let list=[];try{list=await sapi("/companies")}catch{}
+sel.disabled=false;
+const ids=new Set();
+sel.innerHTML='<option value="">ServGo (платформа)</option>'+list.filter(c=>{
+if(!c.id||ids.has(c.id))return false;ids.add(c.id);return true
+}).map(c=>'<option value="'+e(c.id)+'">'+e(c.name)+'</option>').join("");
+const initial=previous||own?.id||"";
+sel.value=[...sel.options].some(o=>o.value===initial)?initial:"";
+}
 async function loadHistory(){
 const entries=await sapi("");const selector=el("search-history");
 selector.innerHTML='<option value="">Выберите прошлый поиск</option>'+entries.map(x=>
