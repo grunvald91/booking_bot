@@ -1,0 +1,36 @@
+"""Never bypass the full backend fingerprint check except for nonsemantic Studio SSO changes."""
+from scripts.deploy_servgo_frontend_atomic import STUDIO_SSO, backend_equivalent
+
+
+def test_identical_sources_are_accepted():
+    assert backend_equivalent("web/api/routes/owner_mail.py", b"print(1)\n", b"print(1)\n")
+
+
+def test_non_sso_files_must_remain_byte_identical():
+    assert not backend_equivalent("web/api/routes/owner_mail.py", b"print(1)\n", b"print(1) # comment\n")
+    assert not backend_equivalent("web/api/routes/mail_pwa.py", None, b"print(1)\n")
+
+
+def test_sso_comments_and_whitespace_are_nonsemantic():
+    a=b"def studio_role(x):\n    return x + 1\n"
+    b=b"# reformat only\ndef studio_role(x):\n  return (x + 1)\n"
+    assert backend_equivalent(STUDIO_SSO, a, b)
+
+
+def test_any_sso_code_change_fails_closed():
+    a=b"def studio_role(x):\n    return x + 1\n"
+    assert not backend_equivalent(STUDIO_SSO, a, b"def studio_role(x):\n    return x + 2\n")
+    assert not backend_equivalent(STUDIO_SSO, a, b"def studio_role(x):\n    return True\n")
+    assert not backend_equivalent(STUDIO_SSO, a, b"def studio_role(x):\n    return x\n\ndef new_route(): pass\n")
+    assert not backend_equivalent(STUDIO_SSO, None, a)
+
+
+def test_sso_type_comments_must_match():
+    a=b"def f(x): # type: (int) -> int\n    return x\n"
+    b=b"def f(x): # type: (str) -> int\n    return x\n"
+    assert not backend_equivalent(STUDIO_SSO, a, b)
+
+
+def test_unparseable_sso_cannot_pass_preflight():
+    assert not backend_equivalent(STUDIO_SSO, b"def role(:\n", b"def role(): pass\n")
+    assert not backend_equivalent(STUDIO_SSO, b"\xff", b"def role(): pass\n")
