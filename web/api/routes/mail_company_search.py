@@ -13,10 +13,13 @@ without data, the job stops with the status «blocked»; what was found so far s
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Literal
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
@@ -221,7 +224,7 @@ def initialize(db) -> None:
         CREATE TABLE IF NOT EXISTS search_job (
             id TEXT PRIMARY KEY, niche TEXT NOT NULL, city TEXT NOT NULL, want INTEGER,
             company_id TEXT NOT NULL DEFAULT '', company_name TEXT NOT NULL DEFAULT '',
-            company_brief TEXT NOT NULL DEFAULT '',
+            company_brief TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT '2gis',
             status TEXT NOT NULL, message TEXT NOT NULL DEFAULT '',
             pages_total INTEGER NOT NULL DEFAULT 0, found_total INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -233,9 +236,16 @@ def initialize(db) -> None:
             email_source TEXT NOT NULL DEFAULT '', website TEXT NOT NULL DEFAULT '',
             telegram TEXT NOT NULL DEFAULT '', whatsapp TEXT NOT NULL DEFAULT '',
             fit INTEGER, fit_reason TEXT NOT NULL DEFAULT '', imported INTEGER NOT NULL DEFAULT 0,
+            source TEXT NOT NULL DEFAULT '2ГИС',
             PRIMARY KEY (job_id, firm_id)
         );
     """)
+    job_columns = {r[1] for r in db.execute("PRAGMA table_info(search_job)")}
+    if "provider" not in job_columns:
+        db.execute("ALTER TABLE search_job ADD COLUMN provider TEXT NOT NULL DEFAULT '2gis'")
+    hit_columns = {r[1] for r in db.execute("PRAGMA table_info(search_hit)")}
+    if "source" not in hit_columns:
+        db.execute("ALTER TABLE search_hit ADD COLUMN source TEXT NOT NULL DEFAULT '2ГИС'")
 
 
 RUNNING: dict[str, asyncio.Task] = {}
@@ -292,7 +302,7 @@ async def judge(card: dict, brief: dict) -> tuple[int | None, str]:
 async def run_job(job_id: str, niche: str, city: str, want: int | None, brief: dict | None = None) -> None:
     pause = float(os.getenv("SERVGO_SEARCH_PAUSE_SECONDS", "5"))
     brief = brief or dict(SERVGO)
-    emailable = 0
+    ready = 0
     try:
         async with httpx.AsyncClient(timeout=30, headers={"User-Agent": USER_AGENT, "Accept-Language": "ru-RU,ru"},
                                      follow_redirects=False) as client:
@@ -336,10 +346,10 @@ async def run_job(job_id: str, niche: str, city: str, want: int | None, brief: d
                              card["rating"], "; ".join(card["phones"]), card["email"], source, card["website"],
                              card["telegram"], card["whatsapp"], fit, reason))
                         _touch(db, job_id)
-                    if card["email"]:
-                        emailable += 1
-                        if want and emailable >= want:
-                            _finish(job_id, "done", "Нужное число компаний с почтой найдено")
+                    if card["email"] and fit == 1:
+                        ready += 1
+                        if want and ready >= want:
+                            _finish(job_id, "done", "Найдено запрошенное число подходящих компаний с почтой")
                             return
                 if page >= found.pages:
                     break
