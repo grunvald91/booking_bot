@@ -399,18 +399,112 @@ async def run_job(job_id: str, niche: str, city: str, want: int | None, brief: d
         RUNNING.pop(job_id, None)
 
 
+
+async def run_exa_job(job_id: str, niche: str, city: str, want: int | None,
+                      brief: dict | None = None) -> None:
+    """Exa discovery + bounded site enrichment; never mistake search results for verified leads."""
+    key = os.getenv("EXA_API_KEY", "").strip()
+    if not key:
+        _finish(job_id, "error", "Exa не настроен: добавьте EXA_API_KEY на сервер")
+        RUNNING.pop(job_id, None)
+        return
+    brief = brief or dict(SERVGO)
+    try:
+        count = min(50, max(10, (want or 25) * 2))
+        query = f"{niche} компании {city} официальный сайт контакты email"
+        async with httpx.AsyncClient(timeout=35) as client:
+            response = await client.post(
+                "https://api.exa.ai/search",
+                headers={"x-api-key": key, "Content-Type": "application/json"},
+                json={"query": query, "type": "auto", "numResults": count,
+                      "contents": {"highlights": True}})
+            response.raise_for_status()
+            payload = response.json()
+        rows = payload.get("results") or []
+        if not isinstance(rows, list):
+            raise ValueError("Неверный ответ поиска Exa")
+        seen: set[str] = set()
+        candidates = []
+        for result in rows:
+            if not isinstance(result, dict):
+                continue
+            website = clean_website(str(result.get("url") or ""))
+            if not website:
+                continue
+            host = urlsplit(website).hostname
+            if not host or host in seen:
+                continue
+            seen.add(host)
+            title = str(result.get("title") or host).strip()[:160]
+            candidates.append({"id": "exa-" + hashlib.sha256(host.encode()).hexdigest()[:24],
+                               "name": title or host, "website": website})
+        with db_open() as db:
+            initialize(db)
+            _touch(db, job_id, pages_total=1, found_total=len(candidates))
+        ready = 0
+
+        async def enrich(item: dict) -> bool:
+            if not _is_running(job_id):
+                return False
+            try:
+                site = await asyncio.to_thread(research_public_site, item["website"], 3_000_000, True)
+                email = email_from_site(site or {})
+            except Exception:
+                email = ""
+            card = {"name": item["name"], "address": city, "rubrics": [niche],
+                    "rating": None, "website": item["website"], "email": email}
+            fit, reason = await judge(card, brief)
+            if not _is_running(job_id):
+                return False
+            with db_open() as db:
+                initialize(db)
+                db.execute(
+                    "INSERT OR IGNORE INTO search_hit (job_id,firm_id,name,address,rubrics,rating,phones,"
+                    "email,email_source,website,telegram,whatsapp,fit,fit_reason,source) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (job_id, item["id"], item["name"], city, niche, None, "", email,
+                     "сайт (Exa)" if email else "", item["website"], "", "", fit, reason, "Exa"))
+                _touch(db, job_id)
+            return bool(email and fit == 1)
+
+        # Only three sites in parallel; a bounded result set caps costs and network load.
+        for at in range(0, len(candidates), 3):
+            if not _is_running(job_id):
+                return
+            ready += sum(await asyncio.gather(*(enrich(c) for c in candidates[at:at + 3])))
+            if want and ready >= want:
+                _finish(job_id, "done", "Найдено запрошенное число подходящих компаний с почтой")
+                return
+        _finish(job_id, "done", "Выдача Exa проверена; результат ограничен размером выдачи")
+    except asyncio.CancelledError:
+        _finish(job_id, "interrupted", "Поиск прерван")
+        raise
+    except httpx.HTTPStatusError as err:
+        _finish(job_id, "error", f"Exa вернул HTTP {err.response.status_code}")
+    except Exception as err:
+        _finish(job_id, "error", "Ошибка Exa: " + type(err).__name__)
+    finally:
+        RUNNING.pop(job_id, None)
+
+
 # --------------------------------------------------------------------------- API
 
 class SearchInput(BaseModel):
     company_id: str = Field(default="", max_length=64, description="компания студии; пусто — ServGo")
     niche: str = Field(min_length=2, max_length=100)
     city: str = Field(default="Сочи", min_length=2, max_length=60)
-    want: int | None = Field(default=None, ge=1, description="сколько компаний с почтой нужно; пусто — все")
+    want: int | None = Field(default=None, ge=1, le=5000, description="сколько подходящих компаний с почтой нужно")
+    provider: Literal["2gis", "exa"] = "2gis"
 
 
 class ToCampaign(BaseModel):
     campaign_id: str = Field(min_length=3, max_length=64)
     only_fit: bool = True
+    firm_ids: list[str] | None = Field(default=None, max_length=1000)
+
+
+class HitReview(BaseModel):
+    fit: bool
 
 
 def _view(db, job_id: str) -> dict:
@@ -424,7 +518,12 @@ def _view(db, job_id: str) -> dict:
                    ("Сервис перезапускался; найденное сохранено", job_id))
         job["status"], job["message"] = "interrupted", "Сервис перезапускался; найденное сохранено"
     hits = [dict(row) for row in db.execute("SELECT * FROM search_hit WHERE job_id=? ORDER BY rowid", (job_id,))]
-    return {"job": job, "hits": hits,
+    try:
+        elapsed = max(0, int((datetime.now(timezone.utc) -
+                              datetime.fromisoformat(job["created_at"])).total_seconds()))
+    except (ValueError, TypeError):
+        elapsed = 0
+    return {"job": job, "hits": hits, "progress": {"processed": len(hits), "elapsed_seconds": elapsed},
             "counts": {"found": len(hits), "with_email": sum(1 for h in hits if h["email"]),
                        "fit": sum(1 for h in hits if h["fit"] == 1),
                        "ready": sum(1 for h in hits if h["email"] and h["fit"] == 1 and not h["imported"])}}
@@ -443,6 +542,12 @@ async def company_brief(company_id: str) -> dict:
     if not isinstance(brief, dict) or not brief.get("name"):
         raise HTTPException(502, "Не удалось получить данные компании с growth.servgo.ru. Повторите позже.")
     return brief
+
+
+@router.get("/providers")
+def providers(_=Depends(mail_owner)):
+    return {"2gis": True, "exa": bool(os.getenv("EXA_API_KEY", "").strip()),
+            "jev": bool(os.getenv("OPENROUTER_API_KEY", "").strip())}
 
 
 @router.get("/companies")
@@ -480,18 +585,21 @@ async def suggest(data: SuggestInput, _=Depends(mail_owner)):
 
 @router.post("")
 async def start(data: SearchInput, _=Depends(mail_owner)):
-    city = city_slug(data.city)
+    city = city_slug(data.city) if data.provider == "2gis" else data.city.strip()
+    if data.provider == "exa" and not os.getenv("EXA_API_KEY", "").strip():
+        raise HTTPException(503, "Exa не настроен на сервере; требуется EXA_API_KEY")
     if any(not task.done() for task in RUNNING.values()):
         raise HTTPException(409, "Другой поиск ещё идёт: дождитесь его или остановите")
     brief = await company_brief(data.company_id)
     job_id = uuid4().hex
     with db_open() as db:
         initialize(db)
-        db.execute("INSERT INTO search_job (id,niche,city,want,company_id,company_name,company_brief,status,"
-                   "created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        db.execute("INSERT INTO search_job (id,niche,city,want,company_id,company_name,company_brief,provider,status,"
+                   "created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                    (job_id, data.niche.strip(), city, data.want, data.company_id, brief.get("name", ""),
-                    json.dumps(brief, ensure_ascii=False), "running", utcnow(), utcnow()))
-    RUNNING[job_id] = asyncio.create_task(run_job(job_id, data.niche.strip(), city, data.want, brief))
+                    json.dumps(brief, ensure_ascii=False), data.provider, "running", utcnow(), utcnow()))
+    engine = run_exa_job if data.provider == "exa" else run_job
+    RUNNING[job_id] = asyncio.create_task(engine(job_id, data.niche.strip(), city, data.want, brief))
     return {"id": job_id}
 
 
