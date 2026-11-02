@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import email.utils
+import json
 import os
 import smtplib
 from datetime import datetime, timedelta, timezone
@@ -15,6 +16,25 @@ from email.utils import formataddr
 
 from .mail_campaign_store import audit, initialize, utcnow
 from .owner_mail import ADDRESS, db_open, sign
+
+
+def sender_for_campaign(company_id: str) -> tuple[str, str]:
+    """Return a server-verified sender for one organization, or no sender to prevent impersonation."""
+    if not company_id:
+        address = os.getenv("SERVGO_MAIL_FROM", "").strip()
+        return (address, "ServGo") if ADDRESS.fullmatch(address) else ("", "")
+    try:
+        mapping = json.loads(os.getenv("SERVGO_MAIL_COMPANY_SENDERS", "{}"))
+        item = mapping.get(company_id) if isinstance(mapping, dict) else None
+        if not isinstance(item, dict) or item.get("verified") is not True:
+            return "", ""
+        address = str(item.get("email") or "").strip().lower()
+        display = str(item.get("name") or "").strip()
+        if ADDRESS.fullmatch(address) and display and len(display) <= 160:
+            return address, display
+    except (ValueError, TypeError):
+        pass
+    return "", ""
 
 
 def reserve_send():
@@ -34,7 +54,7 @@ def reserve_send():
         if attempts >= limit:
             return None
         candidate = db.execute("""
-            SELECT r.*, c.min_interval_seconds
+            SELECT r.*, c.min_interval_seconds, c.company_id
             FROM campaign_recipient r
             JOIN campaign c ON c.id=r.campaign_id
             WHERE r.status='approved' AND c.status='running'
@@ -44,6 +64,9 @@ def reserve_send():
         """, (current.isoformat(),)).fetchone()
         if not candidate:
             return None
+        sender, _display_name = sender_for_campaign(candidate["company_id"])
+        if not sender:
+            return None  # Never send another company's offer from an unverified sender.
         last = db.execute(
             "SELECT max(occurred_at) AS last_time FROM campaign_event "
             "WHERE event='send_attempt'"
@@ -65,7 +88,8 @@ def reserve_send():
 
 def make_message(row, sender, message_id):
     msg = EmailMessage()
-    msg["From"] = formataddr(("ServGo", sender))
+    _sender, name = sender_for_campaign(row.get("company_id", ""))
+    msg["From"] = formataddr((name or "ServGo", sender))
     msg["To"] = row["email"]
     msg["Subject"] = row["subject"]
     msg["Date"] = email.utils.formatdate(localtime=False)
