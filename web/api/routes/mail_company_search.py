@@ -281,7 +281,8 @@ async def judge(card: dict, brief: dict) -> tuple[int | None, str]:
     """Is the found organization a likely client or partner of the chosen company? Only stated facts count."""
     facts = json.dumps({
         "название": card["name"], "рубрики": card["rubrics"], "адрес": card["address"],
-        "рейтинг": card["rating"], "есть_сайт": bool(card["website"]),
+        "рейтинг": card["rating"], "сайт": card["website"],
+        "доказанные_сведения": str(card.get("evidence") or "")[:1000],
     }, ensure_ascii=False)
     # Jev is a typed, low-cost decision model, not a text generator.
     # Keep ambiguous cases for review instead of inventing high-confidence matches.
@@ -444,8 +445,12 @@ async def run_exa_job(job_id: str, niche: str, city: str, want: int | None,
                 continue
             seen.add(host)
             title = str(result.get("title") or host).strip()[:160]
+            highlights = result.get("highlights") or []
+            if not isinstance(highlights, list):
+                highlights = []
+            excerpts = " ".join(str(x) for x in highlights if isinstance(x, str))[:700]
             candidates.append({"id": "exa-" + hashlib.sha256(host.encode()).hexdigest()[:24],
-                               "name": title or host, "website": website})
+                               "name": title or host, "website": website, "evidence": excerpts})
         with db_open() as db:
             initialize(db)
             _touch(db, job_id, pages_total=1, found_total=len(candidates))
@@ -463,8 +468,10 @@ async def run_exa_job(job_id: str, niche: str, city: str, want: int | None,
                 email = email_from_site(site or {})
             except Exception:
                 email = ""
-            card = {"name": item["name"], "address": city, "rubrics": [niche],
-                    "rating": None, "website": item["website"], "email": email}
+            # Do not pretend the search city or query niche is a verified company attribute.
+            evidence = (str((site or {}).get("excerpt") or "") + " " + item["evidence"])[:1000]
+            card = {"name": item["name"], "address": "", "rubrics": [],
+                    "rating": None, "website": item["website"], "email": email, "evidence": evidence}
             fit, reason = await judge(card, brief)
             if not _is_running(job_id):
                 return False
@@ -474,7 +481,7 @@ async def run_exa_job(job_id: str, niche: str, city: str, want: int | None,
                     "INSERT OR IGNORE INTO search_hit (job_id,firm_id,name,address,rubrics,rating,phones,"
                     "email,email_source,website,telegram,whatsapp,fit,fit_reason,source) "
                     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (job_id, item["id"], item["name"], city, niche, None, "", email,
+                    (job_id, item["id"], item["name"], "", "", None, "", email,
                      "сайт (Exa)" if email else "", item["website"], "", "", fit, reason, "Exa"))
                 _touch(db, job_id)
             return bool(email and fit == 1)
