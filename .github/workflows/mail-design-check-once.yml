@@ -1,0 +1,79 @@
+name: ServGo Mail mobile design & PWA parity (focused)
+on:
+  push:
+    branches: [fix/mail-mobile-navigation-20261102]
+    paths: ['.github/workflows/mail-design-check-once.yml']
+permissions:
+  contents: read
+concurrency:
+  group: mail-design-one-shot
+  cancel-in-progress: false
+jobs:
+  design:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      BOT_TOKEN: test-token
+      DATABASE_URL: sqlite+aiosqlite:///:memory:
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install focused test dependencies
+        run: |
+          python -m pip install -r requirements.txt -r web/api/requirements.txt pytest aiosqlite playwright
+      - name: Python syntax and exact design contract
+        run: |
+          python -m py_compile web/api/routes/mail_pwa.py web/api/routes/mail_campaign_ui.py scripts/check_mail_mobile_workspace.py
+          python -m pytest -q tests/test_mail_air_v2.py tests/test_mail_same_origin.py tests/test_mail_servgo_design_contract.py
+      - name: Validate inline Mail JavaScript and duplicate element IDs
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import re,subprocess,tempfile
+          class IDs(HTMLParser):
+              def __init__(self):
+                  super().__init__();self.ids=set();self.dupes=[]
+              def handle_starttag(self,tag,attrs):
+                  val=dict(attrs).get('id')
+                  if val in self.ids:self.dupes.append(val)
+                  if val:self.ids.add(val)
+          for p in ('mail_campaign_dashboard.html','owner_mail_ui.html'):
+              html=(Path('web/api/routes')/p).read_text()
+              scanner=IDs();scanner.feed(html)
+              assert not scanner.dupes,(p,scanner.dupes)
+              scripts=re.findall(r'<script>(.*?)</script>',html,re.S)
+              assert len(scripts)==1,p
+              with tempfile.NamedTemporaryFile('w',suffix='.js') as f:
+                  f.write(scripts[0]);f.flush()
+                  subprocess.run(['node','--check',f.name],check=True)
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: Verify Onest webfont subsets from the canonical frontend build
+        working-directory: web/frontend
+        run: |
+          npm ci --legacy-peer-deps --no-audit --no-fund
+          npm run build
+          python - <<'PY'
+          from pathlib import Path
+          assets=Path('dist/assets')
+          for subset in ('latin','cyrillic'):
+              fonts=list(assets.glob('onest-'+subset+'-wght-normal-*.woff2'))
+              assert fonts, 'Missing Onest '+subset+' assets from Vite build'
+              print('ONEST_ASSET_OK',subset,len(fonts))
+          PY
+      - name: Install Chromium for actual responsive geometry
+        run: python -m playwright install --with-deps chromium
+      - name: Run 320,360,390,768px two-theme Chromium mobile design test
+        run: python scripts/check_mail_mobile_workspace.py
