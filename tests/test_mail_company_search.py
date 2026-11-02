@@ -400,3 +400,76 @@ def test_background_draft_is_written_on_behalf_of_the_campaigns_company(env, mon
     assert "Студия маникюра в Сочи" in prompts[0] and "servgo_offer" not in prompts[0]
     with owner_mail.db_open() as db:
         assert db.execute("SELECT status FROM campaign_recipient").fetchone()["status"] == "review"
+
+
+def test_requested_count_means_suitable_email_leads_not_any_email(env):
+    serve_two_firms(env)
+    # The first company has a public email but is not a potential customer.
+    env.routes[search.firm_url("sochi", "1")] = (
+        200, firm_page("1", "Магазин шин", CONTACTS_FULL, rubrics=("Шины",)))
+    new_job(want=1)
+    asyncio.run(search.run_job("j1", "салон", "sochi", 1))
+    with owner_mail.db_open() as db:
+        view = search._view(db, "j1")
+    assert view["job"]["status"] == "done"
+    assert len(view["hits"]) == 2
+    assert view["counts"]["ready"] == 1
+    assert search.firm_url("sochi", "3") not in env.asked
+
+
+def test_manual_review_and_selected_import_preserve_unselected_companies(env):
+    serve_two_firms(env)
+    new_job()
+    asyncio.run(search.run_job("j1", "салон", "sochi", None))
+    with owner_mail.db_open() as db:
+        init_campaigns(db)
+    campaign_id = create_campaign(CampaignInput(name="Выбранные"), None)["id"]
+    review = search.review_hit("j1", "1", search.HitReview(fit=False), None)
+    assert next(x for x in review["hits"] if x["firm_id"] == "1")["fit"] == 0
+    result = search.to_campaign("j1", search.ToCampaign(campaign_id=campaign_id, firm_ids=["2"]), None)
+    assert result["added"] == 1 and result["selected"] == 1
+    with owner_mail.db_open() as db:
+        entries = db.execute("SELECT email FROM campaign_recipient").fetchall()
+        untouched = db.execute("SELECT imported FROM search_hit WHERE firm_id='1'").fetchone()
+        imported = db.execute("SELECT imported FROM search_hit WHERE firm_id='2'").fetchone()
+    assert [r["email"] for r in entries] == ["booking@lotos.ru"]
+    assert untouched["imported"] == 0 and imported["imported"] == 1
+
+
+def test_exa_provider_enriches_bounded_websites_without_real_network(env, monkeypatch):
+    monkeypatch.setenv("EXA_API_KEY", "test-exa-not-real")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    class ExaResponse:
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return {"results": [
+                {"url": "https://lotos.ru", "title": "Лотос"},
+                {"url": "https://lotos.ru/about", "title": "Лотос — о нас"},
+                {"url": "https://mint-studio.ru", "title": "Мята"}]}
+
+    class ExaClient:
+        def __init__(self, **_):
+            self.calls = []
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            return None
+        async def post(self, url, *, headers, json):
+            assert url == "https://api.exa.ai/search"
+            assert headers["x-api-key"] == "test-exa-not-real"
+            assert json["numResults"] <= 50
+            return ExaResponse()
+
+    monkeypatch.setattr(search.httpx, "AsyncClient", ExaClient)
+    new_job()
+    with owner_mail.db_open() as db:
+        db.execute("UPDATE search_job SET provider='exa' WHERE id='j1'")
+    asyncio.run(search.run_exa_job("j1", "салон", "Сочи", None))
+    with owner_mail.db_open() as db:
+        view = search._view(db, "j1")
+    assert view["job"]["status"] == "done"
+    assert len(view["hits"]) == 2
+    assert all(r["source"] == "Exa" for r in view["hits"])
+    assert view["counts"]["ready"] == 2
