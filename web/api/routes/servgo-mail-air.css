@@ -660,3 +660,16 @@ html[data-theme] body.servgo-mail-v2 .message-list {max-height:52dvh}
 html[data-theme] body.servgo-mail-v2 .mail-v3-popover > summary {min-width:76px;padding:7px}
 html[data-theme] body.servgo-mail-v2 .mail-v3-actionbar {gap:5px}
 }
+
+/* Search is an inline workspace, not a constrained modal. */
+html[data-theme] body.servgo-mail-v2 #search-dialog {max-height:none;overflow:visible;position:static;width:100%;padding:0;border:0;box-shadow:none;background:transparent;color:var(--s-text)}
+@media (max-width:850px) {
+  html[data-theme] body.servgo-mail-v2 .mail-v3-search-actions {flex-wrap:wrap!important;overflow:visible;justify-content:space-between!important;padding:7px 12px}
+  html[data-theme] body.servgo-mail-v2 .mail-v3-search-actions #search-go,
+  html[data-theme] body.servgo-mail-v2 .mail-v3-search-actions #search-suggest {flex:1 1 calc(50% - 6px);order:0;white-space:nowrap;padding-inline:8px}
+  html[data-theme] body.servgo-mail-v2 .mail-v3-search-actions #search-add:not(:disabled) {flex:1 1 100%;order:1}
+  html[data-theme] body.servgo-mail-v2 .mail-v3-search-actions #search-add:disabled {display:none}
+  html[data-theme] body.servgo-mail-v2 .mail-v3-search-actions #search-stop {flex:1 1 100%;order:2}
+  html[data-theme] body.servgo-mail-v2 .mail-v3-search-actions #search-close {display:none}
+  html[data-theme] body.servgo-mail-v2 .app > main {padding-bottom:calc(235px + env(safe-area-inset-bottom,0px))}
+}
