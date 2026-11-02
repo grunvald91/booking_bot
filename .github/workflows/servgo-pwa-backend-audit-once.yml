@@ -1,0 +1,27 @@
+name: ServGo PWA live backend audit (read only)
+on:
+  push:
+    branches: [ops/servgo-pwa-final-release-20261102]
+    paths: ['.github/workflows/servgo-pwa-backend-audit-once.yml']
+permissions:
+  contents: read
+concurrency:
+  group: servgo-pwa-final-audit
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned SSH dependency
+        run: pip install -q 'paramiko==3.5.1'
+      - name: Compare live API with main by hashes and SSO AST
+        run: python scripts/servgo_pwa_backend_audit.py
