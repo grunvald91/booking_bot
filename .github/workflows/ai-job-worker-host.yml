@@ -1,4 +1,4 @@
-name: Verify Telegram DNS routing with certificate checks
+name: Verify existing owned Telegram proxy routes
 on:
   push:
     branches: [work/ai-job-worker-20261102]
