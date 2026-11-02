@@ -463,6 +463,7 @@ async def run_exa_job(job_id: str, niche: str, city: str, want: int | None,
         async def enrich(item: dict) -> bool:
             if not _is_running(job_id):
                 return False
+            site = {}
             try:
                 site = await asyncio.to_thread(research_public_site, item["website"], 3_000_000, True)
                 email = email_from_site(site or {})
