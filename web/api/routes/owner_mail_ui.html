@@ -95,8 +95,8 @@ dialog{padding:18px;border-radius:18px}dialog .row{justify-content:stretch!impor
   <div class="mail-v3-actionbar">
     <details class="mail-v3-popover mail-v3-folders"><summary>☷ Папки</summary>
         <nav class="nav" aria-label="Папки почты">
-    <button type="button" data-tab="inbox" class="active"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span>Входящие</span></button>
-    <button type="button" data-tab="outbox"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg><span>Исходящие</span></button>
+    <button type="button" data-tab="inbox" class="active"><b>✉</b><span>Входящие</span></button>
+    <button type="button" data-tab="outbox"><b>↗</b><span>Исходящие</span></button>
     <button type="button" data-tab="drafts"><b>✦</b><span>Черновики</span></button>
     <button type="button" data-tab="prospects"><b>♧</b><span>Адресаты</span></button>
     
@@ -108,8 +108,8 @@ dialog{padding:18px;border-radius:18px}dialog .row{justify-content:stretch!impor
   </div>
   <nav class="mail-v3-nav" aria-label="Разделы почты">
     <a href="/api/campaigns-dashboard#search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7.5"/><path d="m20 20-4-4"/></svg><span>Поиск</span></a>
-    <a href="/api/campaigns-dashboard#campaigns"><b>↗</b><span>Рассылки</span></a>
-    <a href="/api/mailbox-dashboard#inbox" aria-current="page"><b>✉</b><span>Письма</span></a>
+    <a href="/api/campaigns-dashboard#campaigns"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg><span>Рассылки</span></a>
+    <a href="/api/mailbox-dashboard#inbox" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span>Письма</span></a>
   </nav>
 </div>
 <dialog id="create-dialog">
