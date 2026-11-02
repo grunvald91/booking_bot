@@ -219,7 +219,7 @@ selector.onchange=()=>safe(async()=>{
 return entries;
 }
 async function loadSearchProviders(){
-const status=await sapi("/providers");
+let status={exa:false,jev:false};try{status=await sapi("/providers")}catch{note("Статус Exa недоступен. Пока используйте 2ГИС.")}
 el("search-provider").querySelector('option[value="exa"]').disabled=!status.exa;
 const hint=()=>{
 const viaExa=el("search-provider").value==="exa";
