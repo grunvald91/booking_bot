@@ -681,3 +681,20 @@ html[data-theme] body.servgo-mail-inbox .mail-v3-actionbar #compose {display:inl
 html[data-theme] body.servgo-mail-inbox #list-compose {display:none!important}
 html[data-theme] body.servgo-mail-v2 .mail-v3-popover-content > .sg-pwa-workspace-nav {display:flex;flex-wrap:wrap;gap:4px 12px;margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid var(--s-line)}
 html[data-theme] body.servgo-mail-v2 .mail-v3-popover-content > .sg-pwa-workspace-nav a {font-size:12px;min-height:34px;padding:6px}
+
+/* Mail V4 lead search controls: source/history are optional, selections remain visible. */
+html[data-theme] body.servgo-mail-campaigns .mail-v4-create {align-self:end;min-height:43px;max-width:220px}
+html[data-theme] body.servgo-mail-campaigns .mail-v4-hit-choice {display:flex;align-items:flex-start;gap:9px;min-width:0;flex:1;cursor:pointer}
+html[data-theme] body.servgo-mail-campaigns .mail-v4-hit-choice b {overflow-wrap:anywhere;line-height:1.4}
+html[data-theme] body.servgo-mail-campaigns .mail-v4-hit-choice input {width:20px;min-width:20px;min-height:20px;height:20px;margin:1px 0 0;accent-color:var(--s-accent)}
+html[data-theme] body.servgo-mail-campaigns .mail-v4-hit-review {display:flex;gap:8px;margin-top:10px}
+html[data-theme] body.servgo-mail-campaigns .mail-v4-hit-review button {background:var(--s-surface-2);border:1px solid var(--s-line);border-radius:9px;padding:7px 9px;color:var(--s-text-2);font-size:12px}
+html[data-theme] body.servgo-mail-campaigns .mail-v4-hit-review button:disabled {opacity:.5}
+html[data-theme] body.servgo-mail-campaigns .mail-v4-hit-review button:not(:disabled):focus-visible {outline:2px solid var(--s-accent);outline-offset:2px}
+html[data-theme] body.servgo-mail-v2 .mail-v3-dock {background:var(--s-surface);box-shadow:none;border-top-color:transparent}
+html[data-theme] body.servgo-mail-v2 .mail-v3-search-actions {box-shadow:none;border-top-color:var(--s-line)}
+@media(max-width:650px) {
+ html[data-theme] body.servgo-mail-campaigns .mail-v4-create {max-width:100%;width:100%;grid-column:1/-1}
+ html[data-theme] body.servgo-mail-campaigns .mail-v3-search :is(#search-provider,#search-history) {min-height:44px}
+ html[data-theme] body.servgo-mail-campaigns #search-help {font-size:11px}
+}
