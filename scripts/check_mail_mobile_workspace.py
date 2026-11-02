@@ -84,6 +84,12 @@ def run():
                                 name, width, "automation text squeezed", tx)
                             assert tx["x"] + tx["width"] <= sb["x"] - 4, (
                                 name, width, "switch overlaps text", tx, sb)
+                        if not has_switch and width <= 390:
+                            page.locator(".mail-v3-more > summary").click()
+                            page.locator(".mail-v3-folders > summary").click()
+                            folder = bounds(page, ".mail-v3-folders > nav")
+                            assert folder["x"] >= 0 and folder["x"] + folder["width"] <= width + 2, (
+                                name, width, "folder menu escapes viewport", folder)
                         overflow = page.evaluate(
                             "() => document.documentElement.scrollWidth - innerWidth")
                         assert overflow <= 2, (name, width, theme, "horizontal overflow", overflow)
