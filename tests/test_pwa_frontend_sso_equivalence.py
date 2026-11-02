@@ -34,3 +34,35 @@ def test_runtime_ignored_sso_type_comments_are_allowed():
 def test_unparseable_sso_cannot_pass_preflight():
     assert not backend_equivalent(STUDIO_SSO, b"def role(:\n", b"def role(): pass\n")
     assert not backend_equivalent(STUDIO_SSO, b"\xff", b"def role(): pass\n")
+
+
+def test_exact_production_sso_two_declarations_relocated_only():
+    main=b"""def _businesses_for_studio():
+    return 5
+def studio_businesses():
+    return _businesses_for_studio()
+@router.get('/internal/studio/businesses')
+async def studio_accessible_businesses():
+    return _businesses_for_studio()
+def unrelated(x):
+    return x + 1
+"""
+    live=b"""def studio_businesses():
+    return _businesses_for_studio()
+def unrelated(x):
+    return x + 1
+def _businesses_for_studio():
+    return 5
+@router.get('/internal/studio/businesses')
+async def studio_accessible_businesses():
+    return _businesses_for_studio()
+"""
+    assert backend_equivalent(STUDIO_SSO, live, main)
+    assert not backend_equivalent(STUDIO_SSO, live.replace(b"return 5", b"return 6"), main)
+    assert not backend_equivalent(STUDIO_SSO, live.replace(b"x + 1", b"x + 2"), main)
+    assert not backend_equivalent(STUDIO_SSO, live.replace(b"@router.get('/internal/studio/businesses')", b"@router.get('/internal/studio/users')"), main)
+    assert not backend_equivalent(STUDIO_SSO, live.replace(b"def unrelated(x):", b"def legacy_extra(x):"), main)
+    assert not backend_equivalent(STUDIO_SSO, live.replace(
+        b"def _businesses_for_studio():\\n    return 5\\n",
+        b""
+    ), main)
