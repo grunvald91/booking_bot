@@ -1,4 +1,4 @@
-name: Diagnose AI Job worker bootstrap
+name: Repair AI Job worker network isolation
 on:
   push:
     branches: [work/ai-job-worker-20261102]
@@ -14,4 +14,4 @@ jobs:
     steps:
       - run: python -m pip install --quiet 'paramiko==3.5.1'
       - uses: actions/checkout@v4
-      - run: python scripts/diagnose_ai_job_worker.py
+      - run: python scripts/install_ai_job_worker.py

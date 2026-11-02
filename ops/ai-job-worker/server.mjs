@@ -161,5 +161,5 @@ export function createWorker({stateDir,cli,appId='8737599643',fetcher=fetch,runC
 }
 if(process.argv[1]&&fileURLToPath(import.meta.url)===resolve(process.argv[1])){
  const worker=createWorker({stateDir:process.env.STATE_DIR||'/state',cli:process.env.TGCLOUD_CLI||'/app/node_modules/.bin/tgcloud'});
- worker.server.listen(Number(process.env.PORT)||8793,'0.0.0.0',()=>console.log('AI Job background worker listening'));
+ worker.server.listen(Number(process.env.PORT)||8793,process.env.BIND_HOST||'0.0.0.0',()=>console.log('AI Job background worker listening'));
 }

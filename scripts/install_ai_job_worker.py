@@ -26,10 +26,14 @@ try:
     with client.open_sftp() as sftp:
         for source, target in [('server.mjs', 'worker/server.mjs'), ('Dockerfile', 'worker/Dockerfile'), ('package.json', 'package.json'), ('package-lock.json', 'package-lock.json')]:
             sftp.put(str(Path('ops/ai-job-worker') / source), '/opt/ai-job-worker-build/' + target)
-    run('docker build -f /opt/ai-job-worker-build/worker/Dockerfile -t ai-job-worker:20261102 /opt/ai-job-worker-build', 300)
+    run('docker build -f /opt/ai-job-worker-build/worker/Dockerfile -t ai-job-worker:20261102b /opt/ai-job-worker-build', 300)
     existing = run("docker ps -a --filter name='^/ai-job-research-worker$' --format '{{.Names}}'")
-    if not existing.strip():
-        run('docker run -d --name ai-job-research-worker --restart unless-stopped --memory=256m --memory-swap=384m --cpus=0.5 --pids-limit=64 --security-opt=no-new-privileges --cap-drop=ALL --read-only --tmpfs /tmp:rw,noexec,nosuid,size=32m --log-opt max-size=5m --log-opt max-file=2 -v /opt/ai-job-worker-state:/state -p 127.0.0.1:8793:8793 ai-job-worker:20261102')
+    network_check = "Promise.all(['https://cloud.telegram.org','https://api.claudehub.fun','https://openrouter.ai'].map(async url=>{try{const r=await fetch(url,{signal:AbortSignal.timeout(12000)});console.log(new URL(url).host,r.status);return true}catch(e){console.log(new URL(url).host,e.cause?.code||e.name);return false}})).then(r=>{if(!r.every(Boolean))process.exitCode=1})"
+    run('docker run --rm --network host --entrypoint node ai-job-worker:20261102b -e '+shlex.quote(network_check), 45)
+    if existing.strip():
+        run('docker rm -f ai-job-research-worker')
+    if True:
+        run('docker run -d --name ai-job-research-worker --restart unless-stopped --memory=256m --memory-swap=384m --cpus=0.5 --pids-limit=64 --security-opt=no-new-privileges --cap-drop=ALL --read-only --tmpfs /tmp:rw,noexec,nosuid,size=32m --log-opt max-size=5m --log-opt max-file=2 -v /opt/ai-job-worker-state:/state --network host -e BIND_HOST=127.0.0.1 ai-job-worker:20261102b')
     run("python3 - <<'REMOTE'\nimport urllib.request,time\nfor n in range(20):\n try:\n  print(urllib.request.urlopen('http://127.0.0.1:8793/health',timeout=2).read().decode());break\n except Exception:\n  if n==19:raise\n  time.sleep(1)\nREMOTE")
     # Match the observed TLS vhost exactly and preserve the original for rollback.
     remote = r'''import pathlib,subprocess,urllib.request
