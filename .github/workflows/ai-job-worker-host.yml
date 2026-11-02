@@ -1,0 +1,44 @@
+name: Inspect AI Job worker host
+on:
+  push:
+    branches: [work/ai-job-worker-20261102]
+    paths: [.github/workflows/ai-job-worker-host.yml]
+permissions:
+  contents: read
+concurrency:
+  group: ai-job-worker-host
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Install SSH client
+        run: python -m pip install --quiet 'paramiko==3.5.1'
+      - name: Inspect isolated worker prerequisites
+        run: |
+          python - <<'PY'
+          import os,paramiko
+          c=paramiko.SSHClient()
+          c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+          c.connect(os.environ['SERVER_HOST'],port=int(os.environ['SERVER_PORT']),username=os.environ['SERVER_USER'],password=os.environ['SERVGO_PASSWORD'],timeout=20)
+          commands=[
+            "node --version; npm --version; docker --version; python3 --version",
+            "df -h /opt; free -m",
+            "systemctl list-units --type=service --state=running --no-pager | head -25",
+            "ls -l /etc/nginx/sites-enabled",
+            "rg -n 'server_name|include|location|ssl_certificate' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null || grep -RnE 'server_name|include|location|ssl_certificate' /etc/nginx/sites-enabled /etc/nginx/conf.d",
+            "ss -ltn | grep -E ':8793|:8794' || true",
+            "test -d /opt/ai-job-research-worker && ls -la /opt/ai-job-research-worker || true",
+          ]
+          for command in commands:
+              print('CHECK:',command)
+              _,out,err=c.exec_command(command,timeout=25)
+              print(out.read().decode()[:14000]);print(err.read().decode()[:1000])
+          c.close()
+          PY
