@@ -24,8 +24,8 @@ jobs:
           persist-credentials: false
       - name: Ensure frontend and API sources still match current main
         run: |
-          git fetch origin main
-          git diff --exit-code --quiet HEAD origin/main -- web/frontend web/api database/models.py scripts/servgo_unified_api_release.py
+          git show-ref --verify refs/remotes/origin/main
+          git diff --exit-code --quiet HEAD refs/remotes/origin/main -- web/frontend web/api database/models.py scripts/servgo_unified_api_release.py
           echo "source_parity_with_main=true"
       - uses: actions/setup-python@v5
         with:
