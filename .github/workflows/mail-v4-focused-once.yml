@@ -58,6 +58,6 @@ jobs:
                   subprocess.run(['node','--check', temp.name],check=True)
               print(name, 'syntax and static IDs OK')
           PY
-      - name: Run focused mail regression tests only
+      - name: Run focused mail regression tests (including mocked Jev)
         run: |
           python -m pytest -q tests/test_mail_company_search.py tests/test_mail_campaign_safety_v4.py tests/test_mail_air_v2.py tests/test_mail_same_origin.py
