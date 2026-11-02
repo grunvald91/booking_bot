@@ -57,5 +57,5 @@ jobs:
                   subprocess.run(["node","--check",f.name],check=True)
           print("Mail HTML JS and IDs verified")
           PY
-      - name: Verify 320-768px dark/light layouts in real Chromium
+      - name: Check fixed mobile action/folder menus and nav at 320-768px in Chromium
         run: python scripts/check_mail_mobile_workspace.py
