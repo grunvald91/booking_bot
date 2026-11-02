@@ -1,0 +1,48 @@
+name: ServGo Mail Air V5 scoped production release
+on:
+  push:
+    branches:
+      - ops/mail-design-production-20261102
+    paths:
+      - '.github/workflows/mail-design-release-once.yml'
+permissions:
+  contents: read
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify production Mail files match merged main
+        run: |
+          git show-ref --verify refs/remotes/origin/main
+          git diff --exit-code --quiet HEAD refs/remotes/origin/main --             web/api/routes/mail_campaign_dashboard.html             web/api/routes/owner_mail_ui.html             web/api/routes/servgo-mail-air.css             web/api/routes/mail_campaign_ui.py             web/api/routes/mail_pwa.py
+          echo 'mail_main_source_parity=true'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned SSH dependency
+        run: python -m pip install -q 'paramiko==3.5.1'
+      - name: Compile guarded release and Mail route modules
+        run: |
+          python -m py_compile scripts/deploy_mail_design_scoped.py             web/api/routes/mail_pwa.py web/api/routes/mail_campaign_ui.py
+      - name: Read-only production preflight and local font availability check
+        env:
+          APPLY: 'false'
+        run: |
+          python scripts/deploy_mail_design_scoped.py | tee /tmp/mail-design-preflight.log
+          grep -q 'MAIL_DESIGN_PREFLIGHT passed=true pending=5 apply=false' /tmp/mail-design-preflight.log
+          grep -q 'MAIL_DESIGN_DRYRUN production_untouched=true' /tmp/mail-design-preflight.log
+      - name: Publish only five Mail UI backend files with rollback and full origin smoke
+        env:
+          APPLY: 'true'
+        run: python scripts/deploy_mail_design_scoped.py
