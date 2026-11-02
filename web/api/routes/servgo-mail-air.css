@@ -710,3 +710,9 @@ html[data-theme] body.servgo-mail-campaigns .mail-v4-automation-status {max-widt
  html[data-theme] body.servgo-mail-campaigns #mail-campaign-toolbar .mail-v3-popover > summary {min-width:69px;font-size:11px;padding:7px 8px}
  html[data-theme] body.servgo-mail-campaigns #mail-campaign-toolbar .mail-v4-primary button {padding:7px 5px;font-size:11px}
 }
+
+@media(max-width:650px) {
+ html[data-theme] body.servgo-mail-campaigns.mail-search-active .app > main {padding-bottom:calc(255px + env(safe-area-inset-bottom,0px))}
+ html[data-theme] body.servgo-mail-campaigns .mail-v3-search-actions #search-resume {flex:1 1 100%;order:3}
+ html[data-theme] body.servgo-mail-campaigns .mail-v3-search-actions #search-resume:not([style*="display: none"]) {min-width:0}
+}
