@@ -29,6 +29,6 @@ jobs:
       - name: Verify isolated smoke scripts compile
         run: |
           python -m py_compile scripts/mail_isolated_server_smoke.py scripts/probe_mail_search_server.py
-      - name: Isolated five-card 2GIS plus ClaudeHub smoke on server
+      - name: Verify existing server with isolated 2GIS and ClaudeHub test
         run: |
           python scripts/probe_mail_search_server.py
