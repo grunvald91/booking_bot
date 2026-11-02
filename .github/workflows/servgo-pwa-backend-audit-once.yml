@@ -23,5 +23,5 @@ jobs:
           python-version: '3.12'
       - name: Install pinned SSH dependency
         run: pip install -q 'paramiko==3.5.1'
-      - name: Compare live API with main by hashes and SSO AST
+      - name: Identify exact live SSO AST declaration order differences
         run: python scripts/servgo_pwa_backend_audit.py
