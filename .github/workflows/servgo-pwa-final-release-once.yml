@@ -1,0 +1,63 @@
+name: ServGo PWA atomic frontend release after SSO reconciliation
+on:
+  push:
+    branches:
+      - ops/servgo-pwa-final-release-20261102
+    paths:
+      - '.github/workflows/servgo-pwa-final-release-once.yml'
+permissions:
+  contents: read
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Ensure frontend and API sources still match current main
+        run: |
+          git fetch origin main
+          git diff --exit-code --quiet HEAD origin/main -- web/frontend web/api database/models.py scripts/servgo_unified_api_release.py
+          echo "source_parity_with_main=true"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned SSH test dependency
+        run: python -m pip install -q 'paramiko==3.5.1' pytest
+      - name: Test SSO AST comparison guard and compile release
+        run: |
+          python -m pytest -q tests/test_pwa_frontend_sso_equivalence.py
+          python -m py_compile scripts/deploy_servgo_frontend_atomic.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: web/frontend
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
+      - name: Run PWA security, access, and Studio/Mail navigation tests
+        working-directory: web/frontend
+        run: node --test tests/sw-security.test.mjs tests/auth-route.test.mjs tests/studio-workspace-entry.test.mjs tests/offline-store.test.mjs
+      - name: Produce current-main frontend release
+        working-directory: web/frontend
+        run: npm run build
+      - name: Read-only frontend and live backend preflight
+        run: |
+          APPLY=false python scripts/deploy_servgo_frontend_atomic.py | tee /tmp/servgo-pwa-final-preflight.log
+          grep -q 'backend_ready=true' /tmp/servgo-pwa-final-preflight.log
+          grep -q 'backend_sso_ast_equivalent=true' /tmp/servgo-pwa-final-preflight.log
+          grep -q 'frontend_production_untouched=true' /tmp/servgo-pwa-final-preflight.log
+          echo "frontend_preflight_passed=true"
+      - name: Atomic production frontend switch with rollback and HTTPS smoke checks
+        env:
+          APPLY: 'true'
+        run: python scripts/deploy_servgo_frontend_atomic.py
