@@ -57,7 +57,7 @@ jobs:
           grep -q 'backend_sso_ast_equivalent=true' /tmp/servgo-pwa-final-preflight.log
           grep -q 'frontend_production_untouched=true' /tmp/servgo-pwa-final-preflight.log
           echo "frontend_preflight_passed=true"
-      - name: Atomic production frontend switch with rollback and HTTPS smoke checks
+      - name: Atomic PWA switch with public and loopback API checks plus rollback
         env:
           APPLY: 'true'
         run: python scripts/deploy_servgo_frontend_atomic.py
