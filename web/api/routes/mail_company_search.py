@@ -626,6 +626,19 @@ def cancel(job_id: str, _=Depends(mail_owner)):
         return _view(db, job_id)["job"]
 
 
+@router.post("/{job_id}/hits/{firm_id}/review")
+def review_hit(job_id: str, firm_id: str, data: HitReview, _=Depends(mail_owner)):
+    with db_open() as db:
+        initialize(db)
+        changed = db.execute(
+            "UPDATE search_hit SET fit=?,fit_reason='Проверено владельцем вручную' "
+            "WHERE job_id=? AND firm_id=?",
+            (1 if data.fit else 0, job_id, firm_id))
+        if changed.rowcount != 1:
+            raise HTTPException(404, "Компания в результатах не найдена")
+        return _view(db, job_id)
+
+
 @router.post("/{job_id}/to-campaign")
 def to_campaign(job_id: str, data: ToCampaign, _=Depends(mail_owner)):
     with db_open() as db:
@@ -649,9 +662,16 @@ def to_campaign(job_id: str, data: ToCampaign, _=Depends(mail_owner)):
             # Its earlier addressees were added for ServGo; their letters must not start speaking for another company.
             raise HTTPException(409, "В кампании уже есть адресаты ServGo. Создайте отдельную кампанию для «"
                                 + job["company_name"] + "».")
-        rows = db.execute(
-            "SELECT * FROM search_hit WHERE job_id=? AND email!='' AND imported=0" + (" AND fit=1" if data.only_fit else ""),
-            (job_id,)).fetchall()
+        filters = "SELECT * FROM search_hit WHERE job_id=? AND email!='' AND imported=0"
+        args: list = [job_id]
+        if data.only_fit:
+            filters += " AND fit=1"
+        if data.firm_ids is not None:
+            if not data.firm_ids:
+                return {"selected": 0, "added": 0, "duplicates": 0, "invalid": 0, "excluded": 0}
+            filters += " AND firm_id IN (" + ",".join("?" for _ in data.firm_ids) + ")"
+            args.extend(data.firm_ids)
+        rows = db.execute(filters, args).fetchall()
     recipients = []
     for row in rows:
         facts = [row["rubrics"], row["address"]]
@@ -660,7 +680,7 @@ def to_campaign(job_id: str, data: ToCampaign, _=Depends(mail_owner)):
         if row["rating"] is not None:
             facts.append(f"рейтинг в 2ГИС {row['rating']}")
         recipients.append(RecipientInput(email=row["email"], company=row["name"][:160], website=row["website"][:500],
-                                         notes=("2ГИС: " + "; ".join(x for x in facts if x))[:2500]))
+                                         notes=(row["source"] + ": " + "; ".join(x for x in facts if x))[:2500]))
     totals = {"added": 0, "duplicates": 0, "invalid": 0, "excluded": 0}
     if not recipients:
         return {"selected": 0, **totals}
@@ -674,6 +694,8 @@ def to_campaign(job_id: str, data: ToCampaign, _=Depends(mail_owner)):
             # The campaign's letters now speak for this company.
             db.execute("UPDATE campaign SET company_id=?,company_brief=? WHERE id=? AND company_brief=''",
                        (job["company_id"], job["company_brief"], data.campaign_id))
-        db.executemany("UPDATE search_hit SET imported=1 WHERE job_id=? AND firm_id=?",
-                       [(job_id, row["firm_id"]) for row in rows])
+        db.executemany(
+            "UPDATE search_hit SET imported=1 WHERE job_id=? AND firm_id=? "
+            "AND LOWER(email) IN (SELECT email FROM campaign_recipient WHERE campaign_id=?)",
+            [(job_id, row["firm_id"], data.campaign_id) for row in rows])
     return {"selected": len(rows), **totals}
