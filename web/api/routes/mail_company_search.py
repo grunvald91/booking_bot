@@ -337,16 +337,15 @@ async def judge(card: dict, brief: dict) -> tuple[int | None, str]:
 async def run_job(job_id: str, niche: str, city: str, want: int | None, brief: dict | None = None) -> None:
     pause = float(os.getenv("SERVGO_SEARCH_PAUSE_SECONDS", "5"))
     brief = brief or dict(SERVGO)
-    with db_open() as db:
-        initialize(db)
-        known_ids = {r["firm_id"] for r in db.execute("SELECT firm_id FROM search_hit WHERE job_id=?", (job_id,))}
-        ready = db.execute("SELECT count(*) FROM search_hit WHERE job_id=? AND fit=1 AND email!=''",
-                           (job_id,)).fetchone()[0]
-    if want and ready >= want:
-        _finish(job_id, "done", "Подходящих компаний с почтой уже достаточно")
-        RUNNING.pop(job_id, None)
-        return
     try:
+        with db_open() as db:
+            initialize(db)
+            known_ids = {r["firm_id"] for r in db.execute("SELECT firm_id FROM search_hit WHERE job_id=?", (job_id,))}
+            ready = db.execute("SELECT count(*) FROM search_hit WHERE job_id=? AND fit=1 AND email!=''",
+                               (job_id,)).fetchone()[0]
+        if want and ready >= want:
+            _finish(job_id, "done", "Подходящих компаний с почтой уже достаточно")
+            return
         async with httpx.AsyncClient(timeout=30, headers={"User-Agent": USER_AGENT, "Accept-Language": "ru-RU,ru"},
                                      follow_redirects=False) as client:
             page, seen = 1, set(known_ids)
