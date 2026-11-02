@@ -15,7 +15,7 @@ jobs:
     env:
       PYTHONPATH: ${{ github.workspace }}
       BOT_TOKEN: test-token
-      DATABASE_URL: sqlite+aiosqlite:///:memory:
+      DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
     steps:
       - uses: actions/checkout@v4
         with:
