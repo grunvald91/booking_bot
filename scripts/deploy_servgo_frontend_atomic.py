@@ -58,16 +58,17 @@ def backend_equivalent(path: str, current: bytes | None, candidate: bytes) -> bo
     """Permit a text-only production SSO difference without overwriting it.
 
     Other backend files must remain byte-for-byte identical. Parsing *both*
-    SSO sources with type comments ensures any executable AST difference fails
-    closed. This does not write or restart the existing SSO service.
+    SSO sources without type comments ensures executable AST parity, while
+    preserving differences in runtime-ignored comments. This does not write or
+    restart the existing SSO service.
     """
     if current == candidate:
         return True
     if path != STUDIO_SSO or current is None:
         return False
     try:
-        current_tree = ast.parse(current.decode("utf-8"), filename=path, type_comments=True)
-        candidate_tree = ast.parse(candidate.decode("utf-8"), filename=path, type_comments=True)
+        current_tree = ast.parse(current.decode("utf-8"), filename=path)
+        candidate_tree = ast.parse(candidate.decode("utf-8"), filename=path)
         return ast.dump(current_tree, include_attributes=False) == ast.dump(
             candidate_tree, include_attributes=False
         )
