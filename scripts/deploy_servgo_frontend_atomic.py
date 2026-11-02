@@ -227,7 +227,6 @@ def main():
             ("servgo.ru", "/workspace/growth"): {"200"},
             ("servgo.ru", "/api/owner-mail/workspace"): {"303"},
             ("servgo.ru", "/api/owner-mail/api/company-search"): {"401", "403"},
-            ("servgo.ru", "/internal/studio/businesses?user_id=0"): {"403"},
             ("mail.servgo.ru", "/"): {"200"},
         }
         for (domain, path), expected_codes in routes.items():
@@ -239,6 +238,16 @@ def main():
             if status not in expected_codes:
                 raise RuntimeError("Post-release route verification failed: " + domain + path + " HTTP " + status)
             print("frontend_route_check=" + domain + path + " http=" + status, flush=True)
+        # The internal Studio API is NOT nginx-proxied at the public /internal/*
+        # path: that public URL resolves to the SPA (HTTP 200). Verify the
+        # actual FastAPI handler on the loopback service instead.
+        studio_code = run(
+            client, "curl -sS -o /dev/null -w '%{http_code}' --max-time 8 "
+            + sh("http://127.0.0.1:8000/internal/studio/businesses?user_id=0")
+        )
+        if studio_code != "403":
+            raise RuntimeError("Internal Studio SSO accepted unauthenticated request: HTTP " + studio_code)
+        print("frontend_studio_internal_auth_check=http_403", flush=True)
         print(f"frontend_release_ok=true commit={commit} assets_verified={len(files)} release={name}")
     except Exception:
         if switched or legacy:
