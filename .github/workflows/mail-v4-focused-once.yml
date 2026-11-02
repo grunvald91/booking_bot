@@ -62,7 +62,7 @@ jobs:
         run: |
           python -m pytest -q tests/test_mail_company_search.py tests/test_mail_campaign_safety_v4.py tests/test_mail_air_v2.py tests/test_mail_same_origin.py
 
-      - name: Check current 2GIS search and one firm (read-only, rate-limited)
+      - name: Live 2GIS sample of five firms and public site email yield (read-only)
         continue-on-error: true
         run: |
           python - <<'PY'
@@ -73,26 +73,30 @@ jobs:
 
           async def probe():
               started=time.monotonic()
+              counts={"cards":0,"websites":0,"emails_in_2gis":0,"emails_from_sites":0}
               async with httpx.AsyncClient(
                   timeout=20, follow_redirects=False,
                   headers={"User-Agent":search.USER_AGENT,"Accept-Language":"ru-RU,ru"}) as client:
-                  url=search.search_url("sochi","салон красоты",1)
-                  print("PROBE search URL:",url,flush=True)
-                  html=await search.fetch(client,url)
-                  if html is None:
-                      raise RuntimeError("2GIS search returned HTTP 404")
+                  html=await search.fetch(client,search.search_url("sochi","салон красоты",1))
+                  if html is None:raise RuntimeError("2GIS search returned HTTP 404")
                   result=search.parse_search_page(html,1)
-                  print("PROBE parsed search: page_count=",result.pages,"items=",len(result.ids),
-                        "reported_total=",result.total,"elapsed_seconds=",round(time.monotonic()-started,1),flush=True)
-                  if not result.ids:
-                      raise RuntimeError("2GIS produced no firm ids for this search")
-                  await asyncio.sleep(5)
-                  firm=await search.fetch(client,search.firm_url("sochi",result.ids[0]))
-                  card=search.parse_firm_page(firm,result.ids[0]) if firm else None
-                  if not card or not card["name"]:
-                      raise RuntimeError("2GIS firm page could not be parsed")
-                  print("PROBE first firm parsed: name_present=",bool(card["name"]),
-                        "website_present=",bool(card["website"]),"email_present=",bool(card["email"]),
-                        "elapsed_seconds=",round(time.monotonic()-started,1),flush=True)
+                  print("LIVE_SEARCH pages=",result.pages,"page_items=",len(result.ids),
+                        "total=",result.total,"seconds=",round(time.monotonic()-started,1),flush=True)
+                  if not result.ids:raise RuntimeError("2GIS returned no firm IDs")
+                  for firm_id in result.ids[:5]:
+                      await asyncio.sleep(5)
+                      html=await search.fetch(client,search.firm_url("sochi",firm_id))
+                      card=search.parse_firm_page(html,firm_id) if html else None
+                      if not card or not card["name"]:continue
+                      counts["cards"]+=1
+                      if card["email"]:counts["emails_in_2gis"]+=1
+                      if card["website"]:
+                          counts["websites"]+=1
+                          if not card["email"]:
+                              site=await asyncio.to_thread(search.research_public_site,card["website"],3_000_000,True)
+                              if search.email_from_site(site):counts["emails_from_sites"]+=1
+                  print("LIVE_SAMPLE",counts,"total_email_leads=",
+                        counts["emails_in_2gis"]+counts["emails_from_sites"],
+                        "seconds=",round(time.monotonic()-started,1),flush=True)
           asyncio.run(probe())
           PY
