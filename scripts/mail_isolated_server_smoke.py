@@ -47,7 +47,7 @@ async def run(stage):
     private_data.chmod(0o700)
     os.environ.update({
         "SERVGO_MAIL_DATA_DIR": str(private_data),
-        "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
+        "DATABASE_URL": "postgresql+asyncpg://mail_smoke:invalid@127.0.0.1:1/never_connect",
         "BOT_TOKEN": "mail-test-token",
         "SERVGO_SEARCH_PAUSE_SECONDS": "5",
         "SERVGO_2GIS_MAX_PAGES": "1",
@@ -178,5 +178,9 @@ if __name__ == "__main__":
         sys.exit(0 if passed else 2)
     except Exception as err:
         print("SMOKE_ERROR " + type(err).__name__, flush=True)
+        if isinstance(err, ModuleNotFoundError):
+            name = err.name or ""
+            if name.replace("_", "").replace(".", "").isalnum():
+                print("SMOKE_MISSING_MODULE " + name[:80], flush=True)
         print("SMOKE_STATUS FAIL", flush=True)
         sys.exit(3)
