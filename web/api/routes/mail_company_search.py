@@ -334,11 +334,19 @@ async def judge(card: dict, brief: dict) -> tuple[int | None, str]:
 async def run_job(job_id: str, niche: str, city: str, want: int | None, brief: dict | None = None) -> None:
     pause = float(os.getenv("SERVGO_SEARCH_PAUSE_SECONDS", "5"))
     brief = brief or dict(SERVGO)
-    ready = 0
+    with db_open() as db:
+        initialize(db)
+        known_ids = {r["firm_id"] for r in db.execute("SELECT firm_id FROM search_hit WHERE job_id=?", (job_id,))}
+        ready = db.execute("SELECT count(*) FROM search_hit WHERE job_id=? AND fit=1 AND email!=''",
+                           (job_id,)).fetchone()[0]
+    if want and ready >= want:
+        _finish(job_id, "done", "Подходящих компаний с почтой уже достаточно")
+        RUNNING.pop(job_id, None)
+        return
     try:
         async with httpx.AsyncClient(timeout=30, headers={"User-Agent": USER_AGENT, "Accept-Language": "ru-RU,ru"},
                                      follow_redirects=False) as client:
-            page, seen = 1, set()
+            page, seen = 1, set(known_ids)
             while True:
                 if not _is_running(job_id):
                     return
@@ -441,7 +449,11 @@ async def run_exa_job(job_id: str, niche: str, city: str, want: int | None,
         with db_open() as db:
             initialize(db)
             _touch(db, job_id, pages_total=1, found_total=len(candidates))
-        ready = 0
+        with db_open() as db:
+            initialize(db)
+            known_ids = {r["firm_id"] for r in db.execute("SELECT firm_id FROM search_hit WHERE job_id=?", (job_id,))}
+            ready = db.execute("SELECT count(*) FROM search_hit WHERE job_id=? AND fit=1 AND email!=''",
+                               (job_id,)).fetchone()[0]
 
         async def enrich(item: dict) -> bool:
             if not _is_running(job_id):
@@ -468,6 +480,7 @@ async def run_exa_job(job_id: str, niche: str, city: str, want: int | None,
             return bool(email and fit == 1)
 
         # Only three sites in parallel; a bounded result set caps costs and network load.
+        candidates = [c for c in candidates if c["id"] not in known_ids]
         for at in range(0, len(candidates), 3):
             if not _is_running(job_id):
                 return
@@ -615,6 +628,28 @@ def detail(job_id: str, _=Depends(mail_owner)):
     with db_open() as db:
         initialize(db)
         return _view(db, job_id)
+
+
+@router.post("/{job_id}/resume")
+async def resume(job_id: str, _=Depends(mail_owner)):
+    if any(not task.done() for task in RUNNING.values()):
+        raise HTTPException(409, "Другой поиск уже выполняется")
+    with db_open() as db:
+        initialize(db)
+        row = db.execute("SELECT * FROM search_job WHERE id=?", (job_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Поиск не найден")
+        if row["status"] not in ("interrupted", "error"):
+            raise HTTPException(409, "Продолжить можно только прерванный поиск")
+        company_brief = json.loads(row["company_brief"] or "{}")
+        engine = run_exa_job if row["provider"] == "exa" else run_job
+        if row["provider"] == "exa" and not os.getenv("EXA_API_KEY", "").strip():
+            raise HTTPException(503, "Exa не настроен на сервере")
+        db.execute("UPDATE search_job SET status='running',message='',updated_at=? WHERE id=?",
+                   (utcnow(), job_id))
+        params = (job_id, row["niche"], row["city"], row["want"], company_brief)
+    RUNNING[job_id] = asyncio.create_task(engine(*params))
+    return {"id": job_id, "status": "running"}
 
 
 @router.post("/{job_id}/cancel")
