@@ -1,4 +1,4 @@
-name: Inspect Telegram route and worker CLI
+name: Verify Telegram DNS routing with certificate checks
 on:
   push:
     branches: [work/ai-job-worker-20261102]
