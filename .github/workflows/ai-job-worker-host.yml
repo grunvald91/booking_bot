@@ -1,25 +1,17 @@
-name: Install AI Job background worker
+name: Diagnose AI Job worker bootstrap
 on:
   push:
     branches: [work/ai-job-worker-20261102]
     paths: [.github/workflows/ai-job-worker-host.yml]
 permissions:
   contents: read
-concurrency:
-  group: ai-job-worker-host
-  cancel-in-progress: false
 jobs:
-  install:
+  inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 7
+    timeout-minutes: 3
     env:
-      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
-      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
-      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
       SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
     steps:
-      - name: Install SSH client
-        run: python -m pip install --quiet 'paramiko==3.5.1'
+      - run: python -m pip install --quiet 'paramiko==3.5.1'
       - uses: actions/checkout@v4
-      - name: Install isolated worker and validate nginx
-        run: python scripts/install_ai_job_worker.py
+      - run: python scripts/diagnose_ai_job_worker.py
