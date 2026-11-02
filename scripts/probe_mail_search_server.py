@@ -12,7 +12,7 @@ import shlex
 import sys
 from uuid import uuid4
 
-from scripts.deploy_mail_search import connect
+from deploy_mail_search import connect
 
 
 FILES = [
