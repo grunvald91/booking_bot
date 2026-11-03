@@ -70,7 +70,7 @@ async def verify_click(engine, token: str, slug: str, module: str) -> bool:
         return False
 
 
-def register_seo_commercial_routes(app, *, engine, get_user, admin_ids, articles, public_origin):
+def register_seo_commercial_routes(app, *, engine, get_user, admin_ids, public_origin):
     """Register with existing ServGo DB and owner/admin login; no second CRM."""
     reviewers = set(int(v) for v in admin_ids)
     app["seo_click_table_ready"] = False
@@ -94,7 +94,6 @@ def register_seo_commercial_routes(app, *, engine, get_user, admin_ids, articles
             raise web.HTTPNotFound()
         # No standalone landing page is invented for a module. The currently
         # working platform request form has a concrete selector for every module.
-        from webapp.blog_content import BLOG_PUBLIC_ORIGIN
         from webapp.blog_content import BLOG_ARTICLES
         from webapp.blog_feed import all_articles
         known = await all_articles(BLOG_ARTICLES)
