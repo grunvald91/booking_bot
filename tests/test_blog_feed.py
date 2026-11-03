@@ -173,6 +173,30 @@ class BlogFeedPagesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.status, 200)
         self.assertEqual(download.call_count, 1)
 
+    async def test_old_consumer_url_redirects_after_owner_guide_goes_live(self):
+        raw = {**RAW,
+               "slug": "kak-psihologu-organizovat-zapis-klientov",
+               "title": "Как психологу организовать запись клиентов"}
+        async def owner_feed(*a, **kw):
+            return [blog_feed.normalize(raw)]
+        with patch("webapp.blog_feed.feed_articles", owner_feed):
+            async with TestClient(TestServer(create_webapp())) as c:
+                res = await c.get("/blog/zapis-k-psihologu", allow_redirects=False)
+                new = await c.get("/blog/kak-psihologu-organizovat-zapis-klientov")
+        self.assertEqual(res.status, 301)
+        self.assertEqual(res.headers["Location"],
+                         "https://servgo.ru/blog/kak-psihologu-organizovat-zapis-klientov")
+        self.assertEqual(new.status, 200)
+
+    async def test_no_redirect_before_new_page_exists(self):
+        raw = {**RAW, "slug": "zapis-k-psihologu"}
+        async def still_old_feed(*a, **kw):
+            return [blog_feed.normalize(raw)]
+        with patch("webapp.blog_feed.feed_articles", still_old_feed):
+            async with TestClient(TestServer(create_webapp())) as c:
+                res = await c.get("/blog/zapis-k-psihologu", allow_redirects=False)
+        self.assertEqual(res.status, 200)
+
     async def test_unknown_slug_404(self):
         async with TestClient(TestServer(create_webapp())) as c:
             self.assertEqual((await c.get('/blog/net-takoj')).status, 404)
