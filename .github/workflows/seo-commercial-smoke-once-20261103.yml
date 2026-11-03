@@ -1,0 +1,85 @@
+name: ServGo SEO commercial route postdeploy smoke (one time)
+on:
+  push:
+    branches: [ops/servgo-seo-commercial-smoke-20261103]
+    paths: [.github/workflows/seo-commercial-smoke-once-20261103.yml]
+permissions:
+  contents: read
+concurrency:
+  group: servgo-seo-commercial-smoke-20261103
+  cancel-in-progress: false
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      USER: ${{ vars.SERVER_USER || 'root' }}
+      PORT: ${{ vars.SERVER_PORT || '22' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Verify deployed webapp and anonymous CTA, without submitting a customer lead
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -p "$PORT" -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/keys
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/key
+            ssh-keygen -lf /tmp/key 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/keys
+          test -s ~/.ssh/known_hosts
+          sshpass -e ssh -p "$PORT" -o StrictHostKeyChecking=yes "$USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          root=/opt/booking_bot
+          for i in $(seq 1 20); do
+            if test -f "$root/webapp/seo_commercial.py" &&
+               grep -q 'servgo_seo_commercial_clicks' "$root/webapp/seo_commercial.py" &&
+               grep -q 'register_seo_commercial_routes' "$root/webapp/server.py" &&
+               systemctl is-active --quiet booking-bot; then break; fi
+            sleep 5
+          done
+          test -f "$root/webapp/seo_commercial.py"
+          grep -q 'servgo_seo_commercial_clicks' "$root/webapp/seo_commercial.py"
+          grep -q 'register_seo_commercial_routes' "$root/webapp/server.py"
+          systemctl is-active --quiet booking-bot
+          printf '%s\n' 'DEPLOYED_CODE_AND_SERVICE_CONFIRMED=1'
+          header=$(mktemp)
+          trap 'rm -f "$header"' EXIT
+          status=$(curl --max-time 10 -sS -D "$header" -o /dev/null -w '%{http_code}' \
+            'http://127.0.0.1:8080/blog/cta/ai-marketing-for-small-business?module=booking')
+          test "$status" = 303
+          grep -qi '^Location: https://servgo.ru/?' "$header"
+          grep -q 'utm_content=ai-marketing-for-small-business' "$header"
+          grep -q 'utm_campaign=seo_booking' "$header"
+          grep -q 'utm_term=' "$header"
+          printf '%s\n' 'APP_CTA_REDIRECT_AND_PERSISTED_ANONYMOUS_CLICK=1'
+          code=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' -X POST \
+            'http://127.0.0.1:8080/api/landing/connect-request?seo=report')
+          test "$code" = 403
+          printf '%s\n' 'UNAUTHENTICATED_SEO_REPORT_DENIED=1'
+          code=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' \
+            'http://127.0.0.1:8080/blog/ai-marketing-for-small-business')
+          test "$code" = 200
+          printf '%s\n' 'PUBLISHED_BLOG_ARTICLE_OK=1'
+          REMOTE
+      - name: Public HTTPS path (no user data or fake lead)
+        shell: bash
+        run: |
+          set -euo pipefail
+          header=$(mktemp)
+          trap 'rm -f "$header"' EXIT
+          code=$(curl --connect-timeout 10 --max-time 20 -sS -D "$header" -o /dev/null -w '%{http_code}' \
+            'https://servgo.ru/blog/cta/ai-marketing-for-small-business?module=booking')
+          test "$code" = 303
+          grep -qi '^location: https://servgo.ru/?' "$header"
+          grep -qi 'utm_content=ai-marketing-for-small-business' "$header"
+          grep -qi 'utm_term=' "$header"
+          printf '%s\n' 'PUBLIC_HTTPS_CTA_VERIFIED=1'
+          code=$(curl --connect-timeout 10 --max-time 20 -sS -o /dev/null -w '%{http_code}' \
+            'https://servgo.ru/')
+          test "$code" = 200
+          printf '%s\n' 'PUBLIC_FORM_LANDING_VERIFIED=1'
