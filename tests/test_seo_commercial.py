@@ -71,8 +71,9 @@ class SeoCommercialRoutesTest(unittest.IsolatedAsyncioTestCase):
             self.app, engine=self.engine, get_user=user, admin_ids=[42],
             public_origin="https://servgo.ru")
         # Existing public dispatcher proxies the private report on production.
-        self.app.router.add_post("/api/landing/connect-request",
-            lambda request: self.app["seo_report_handler"](request))
+        async def report_proxy(request):
+            return await self.app["seo_report_handler"](request)
+        self.app.router.add_post("/api/landing/connect-request", report_proxy)
         async def listed(_):
             return [{"slug": "kak-vybrat-crm"}, {"slug": "onlayn-zapis"}]
         self.patch = patch("webapp.blog_feed.all_articles", listed)
