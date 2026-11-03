@@ -69,7 +69,7 @@ class SeoCommercialRoutesTest(unittest.IsolatedAsyncioTestCase):
             return {"id": 42} if request.headers.get("X-Test-Admin") == "yes" else None
         seo_commercial.register_seo_commercial_routes(
             self.app, engine=self.engine, get_user=user, admin_ids=[42],
-            articles=None, public_origin="https://servgo.ru")
+            public_origin="https://servgo.ru")
         # Existing public dispatcher proxies the private report on production.
         self.app.router.add_post("/api/landing/connect-request",
             lambda request: self.app["seo_report_handler"](request))
