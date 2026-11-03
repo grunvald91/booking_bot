@@ -134,6 +134,9 @@ def validate_landing_request_payload(data: dict) -> dict:
     module = str(data.get("seo_module") or "platform")
     if module not in {"platform", "booking", "growth", "mail", "shifts", "seo"}:
         module = "platform"
+    requested_module = str(data.get("requested_module") or module)
+    if requested_module not in {"platform", "booking", "growth", "mail", "shifts", "seo"}:
+        requested_module = "platform"
 
     return {
         "name": name,
@@ -144,6 +147,7 @@ def validate_landing_request_payload(data: dict) -> dict:
         "experiment_id": _clean_landing_field(data.get("experiment_id"), 100),
         "utm_source": _clean_landing_field(data.get("utm_source"), 255),
         "seo_module": module if seo_source else "",
+        "requested_module": requested_module,
         "consent": data.get("consent") is True,
         "utm_medium": _clean_landing_field(data.get("utm_medium"), 255),
         "utm_campaign": _clean_landing_field(data.get("utm_campaign"), 255),
@@ -177,7 +181,7 @@ def format_landing_request_message(payload: dict) -> str:
         f"Experiment: {payload.get('experiment_id') or 'нет'}",
         f"UTM: source={payload.get('utm_source') or '-'}; medium={payload.get('utm_medium') or '-'}; campaign={payload.get('utm_campaign') or '-'}",
         f"SEO статья: {payload.get('utm_content') or '-'}" if payload.get("utm_source") == "servgo_blog" else "SEO статья: -",
-        f"Интересующий модуль: {payload.get('seo_module') or '-'}",
+        f"Интересующий модуль: {payload.get('requested_module') or '-'}",
         f"Согласие на связь: {'да' if payload.get('consent') else 'нет'}",
         f"Landing: {payload.get('landing_path') or '-'}",
         f"Referrer: {payload.get('referrer') or '-'}",
