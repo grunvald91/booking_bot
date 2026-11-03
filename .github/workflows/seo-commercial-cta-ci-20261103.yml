@@ -22,7 +22,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
       - name: Install dependencies
-        run: python -m pip install --disable-pip-version-check -r requirements.txt pytest aiosqlite jinja2 fastapi
+        run: python -m pip install --disable-pip-version-check -r requirements.txt pytest aiosqlite jinja2 fastapi PyYAML
       - name: Compile all modified Python endpoints
         run: python -m py_compile webapp/seo_commercial.py webapp/server.py webapp/blog_feed.py tests/test_seo_commercial.py
       - name: Test SEO attribution and legacy booking blog/inquiry
