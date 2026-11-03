@@ -1204,6 +1204,7 @@ async def robots_handler(request: web.Request) -> web.Response:
         "Allow: /\n"
         "Disallow: /api/\n"
         "Disallow: /auth/\n"
+        "Disallow: /blog/cta/\n"
         "\n"
         "Sitemap: https://promo.servgo.ru/sitemap.xml\n"
         f"Sitemap: {BLOG_PUBLIC_ORIGIN}/blog/sitemap.xml\n"
@@ -3748,7 +3749,7 @@ def create_webapp() -> web.Application:
     from webapp.blog_content import BLOG_PUBLIC_ORIGIN
     register_seo_commercial_routes(
         app, engine=seo_commercial_engine, get_user=get_authenticated_telegram_user,
-        admin_ids=ADMIN_IDS, articles=None, public_origin=BLOG_PUBLIC_ORIGIN,
+        admin_ids=ADMIN_IDS, public_origin=BLOG_PUBLIC_ORIGIN,
     )
 
     # SEO / индексация — регистрируем до catch-all /{slug}, иначе
