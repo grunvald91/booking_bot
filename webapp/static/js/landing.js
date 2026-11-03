@@ -168,7 +168,7 @@ connectForm?.addEventListener("submit", async (event) => {
         self_reported_source: String(formData.get("self_reported_source") || "").trim(),
         niche: String(formData.get("niche") || "").trim(),
         intent: String(formData.get("intent") || "").trim(),
-        seo_module: String(formData.get("seo_module") || "platform").trim(),
+        requested_module: String(formData.get("seo_module") || "platform").trim(),
         consent: formData.get("consent") === "yes",
         ...attribution,
     };
