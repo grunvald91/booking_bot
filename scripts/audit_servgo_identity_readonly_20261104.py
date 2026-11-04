@@ -86,14 +86,31 @@ async def run():
     # Show whether ServGo already exists as a business globally, not merely as a Growth product.
     servgo_rows = [row for row in businesses if (row.name or "").strip().casefold() == "servgo"]
     account_ids=sorted(signals)
+    primary_candidates = [uid for uid in account_ids
+                          if uid in verified_email_users and uid in yandex_users
+                          and "telegram_username_match" in signals[uid]]
     # Growth has its own company catalog. Compare it to ServGo's verified
     # business memberships without leaking any ID or sensitive user field.
     growth_code = """
-import json
+import json, sys
 from sqlalchemy import select, func
 from app.db.session import SessionLocal
 from app.sso.models import StudioBusinessLink
 from app.models.domain import Product
+from app.core.config import get_settings
+from app.core.studio_operator_links import linked_operator, _path
+from app.api.content_studio_auth import _load_users
+operator_linked = False
+operator_binding_exists = False
+if len(sys.argv) == 2:
+    uid = int(sys.argv[1])
+    settings = get_settings()
+    try:
+        raw = json.loads(_path(settings).read_text(encoding="utf-8"))
+        operator_binding_exists = isinstance(raw, dict) and str(uid) in raw
+        operator_linked = linked_operator(settings, uid, _load_users(settings)) is not None
+    except (OSError, ValueError, TypeError):
+        pass
 with SessionLocal() as db:
     rows = db.execute(select(StudioBusinessLink.servgo_business_id, Product.name)
                       .join(Product, Product.id == StudioBusinessLink.product_id)).all()
@@ -101,20 +118,26 @@ with SessionLocal() as db:
     canonical = db.scalars(select(Product).where(Product.slug == "servgo")).all()
     canonical_links = db.scalars(select(StudioBusinessLink).where(StudioBusinessLink.product_id.in_([p.id for p in canonical]))).all()
     print(json.dumps({"links": [[r[0], r[1]] for r in rows], "products": total,
-                      "servgo_product_count": len(canonical), "servgo_link_count": len(canonical_links)}, ensure_ascii=False))
+                      "servgo_product_count": len(canonical), "servgo_link_count": len(canonical_links),
+                      "operator_binding_exists_for_owner": operator_binding_exists,
+                      "operator_binding_currently_valid": operator_linked}, ensure_ascii=False))
 """
     growth_mapping = {}
     growth_products = None
     servgo_product_info = {}
     try:
         checked = subprocess.run(
-            ["docker", "exec", "ai-growth-os-api-1", "python", "-c", growth_code],
+            ["docker", "exec", "ai-growth-os-api-1", "python", "-c", growth_code]
+            + ([str(primary_candidates[0])] if len(primary_candidates) == 1 else []),
             capture_output=True, text=True, timeout=30, check=True,
         )
         info = json.loads(checked.stdout.strip().splitlines()[-1])
         growth_mapping = {int(key): name for key, name in info["links"]}
         growth_products = int(info["products"])
-        servgo_product_info = {"products_named_servgo": info.get("servgo_product_count"), "linked_to_business": info.get("servgo_link_count")}
+        servgo_product_info = {"products_named_servgo": info.get("servgo_product_count"),
+                               "linked_to_business": info.get("servgo_link_count"),
+                               "owner_growth_operator_binding_exists": info.get("operator_binding_exists_for_owner"),
+                               "owner_growth_operator_binding_valid": info.get("operator_binding_currently_valid")}
     except (subprocess.SubprocessError, ValueError, KeyError, IndexError):
         # Missing Growth DB data is *not* a reason to merge users.
         pass
