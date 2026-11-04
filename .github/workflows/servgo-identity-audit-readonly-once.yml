@@ -26,3 +26,4 @@ jobs:
         run: |
           test -n "$SERVGO_PASSWORD"
           python -m scripts.audit_servgo_identity_readonly_20261104
+# Recheck with production database config loaded without exposing secrets.
