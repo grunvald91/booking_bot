@@ -52,12 +52,12 @@ jobs:
           APPLY: 'false'
         run: |
           test -n "$SERVGO_PASSWORD"
-          python scripts/release_servgo_unified_auth_once.py
+          python -m scripts.release_servgo_unified_auth_once
       - name: Install reviewed API auth patch with backup and rollback
         if: contains(github.event.head_commit.message, '[apply-unified-auth]')
         env:
           APPLY: 'true'
-        run: python scripts/release_servgo_unified_auth_once.py
+        run: python -m scripts.release_servgo_unified_auth_once
       - uses: actions/setup-node@v4
         if: contains(github.event.head_commit.message, '[apply-unified-auth]')
         with:
