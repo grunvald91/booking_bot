@@ -68,7 +68,7 @@ dialog{border:1px solid var(--line);border-radius:19px;padding:25px;width:min(64
 </section>
 </div>
 </div>
-<section id="search-dialog" class="mail-v3-search" hidden><form id="search-form"><h2>ИИ-поиск компаний</h2><p class="hint">Поиск по 2ГИС, Exa и Яндекс Картам (при наличии лицензии). ИИ проверяет соответствие найденных организаций выбранному бизнесу. Поиск продолжается при переключении разделов.</p>
+<section id="search-dialog" class="mail-v3-search" hidden><form id="search-form"><h2>ИИ-поиск компаний</h2><p class="hint">Поиск организаций через 2ГИС, Exa и Яндекс Карты. ИИ проверяет соответствие найденных организаций выбранному бизнесу. Поиск продолжается при переключении разделов.</p>
 <label class="field"><span>Рассылка для переноса (необязательно при поиске)</span><select id="search-campaign" aria-label="Рассылка для новых адресатов"></select></label>
 <button class="btn light mail-v4-create" type="button" id="search-create-campaign">+ Новая рассылка</button>
 <label class="field"><span>Для какой компании ищем клиентов</span><select id="search-company"></select></label>
@@ -237,12 +237,12 @@ el("search-provider").querySelector('option[value="yandex"]').disabled=!status.y
 const hint=()=>{
 const viaExa=el("search-provider").value==="exa", viaYandex=el("search-provider").value==="yandex";
 el("search-help").textContent=viaYandex?
-  "Яндекс Карты: поиск организаций по городу и отрасли. Email проверяется отдельно на сайте. Доступно только при подтверждённой лицензии, разрешающей сохранять данные; расходуется суточная квота.":viaExa?
+  "Яндекс Карты: поиск организаций по городу и отрасли. Email проверяется отдельно на сайте. Используется ключ API_YANDEX из Growth; расходуется суточная квота.":viaExa?
   "Exa: платный API-запрос по квоте ключа, по умолчанию до 20 сайтов и до 3 проверок одновременно. Время зависит от сайтов и ИИ.":
   "2ГИС: по умолчанию пауза 5 секунд на карточку плюс время загрузки и ИИ. Для 100 карточек — не менее 500 секунд только пауз. "+
   (status.jev?"Первичную оценку делает Jev. ":"Оценку делает настроенный ИИ. ")+
   (status.exa?"Exa доступен как второй источник.":"Exa пока не настроен на сервере.")+
-  (status.yandex?" Яндекс Карты подключены.":" Яндекс Карты пока недоступны — проверьте лицензию и ключ в Growth.");
+  (status.yandex?" Яндекс Карты подключены.":" Яндекс Карты недоступны — проверьте подключение API_YANDEX к Growth.");
 };
 el("search-provider").onchange=hint;hint();
 }
