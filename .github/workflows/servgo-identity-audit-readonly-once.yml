@@ -28,3 +28,4 @@ jobs:
           python -m scripts.audit_servgo_identity_readonly_20261104
 # Recheck with production database config loaded without exposing secrets.
 # One-time follow-up: compare ServGo account businesses with Growth links.
+# Read-only preflight: is platform's ServGo company already present or linked?
