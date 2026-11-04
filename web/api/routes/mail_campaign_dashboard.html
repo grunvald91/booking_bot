@@ -183,6 +183,7 @@ el("search-results").innerHTML=hits.map(h=>{
   return '<div class="hit"><div class="hit-top"><label class="mail-v4-hit-choice"><input type="checkbox" class="search-pick" data-id="'+e(h.firm_id)+'" '+(found.picks.has(h.firm_id)?"checked ":"")+(canPick?"":"disabled ")+'> <b>'+e(h.name)+'</b></label>'+fitBadge(h)+'</div>'+
   '<div class="muted">'+e(h.rubrics)+(h.source?" · "+e(h.source):"")+'</div>'+
   '<div class="hit-mail">'+(h.email?e(h.email)+' <span class="muted">· '+e(h.email_source)+'</span>':'<span class="muted">Почты нет'+(h.phones?" · тел. "+e(h.phones.split("; ")[0]):"")+'</span>')+'</div>'+
+  (h.source==="Яндекс Карты" && /^yandex-\d+$/.test(h.firm_id)?'<div class="muted"><a href="https://yandex.ru/maps/org/'+encodeURIComponent(h.firm_id.slice(7))+'" target="_blank" rel="noopener noreferrer">Открыть в Картах</a></div>':"")+
   (h.fit_reason?'<div class="muted">'+e(h.fit_reason)+'</div>':"")+
   (h.imported?'<div class="muted">Уже в рассылке</div>':"")+
   '<div class="mail-v4-hit-review"><button type="button" class="search-review-yes" data-id="'+e(h.firm_id)+'" '+(h.fit===1?"disabled":"")+'>✓ Подходит</button><button type="button" class="search-review-no" data-id="'+e(h.firm_id)+'" '+(h.fit===0?"disabled":"")+'>× Не подходит</button></div></div>';
