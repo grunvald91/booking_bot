@@ -1,4 +1,4 @@
-"""Yandex Mail requires explicit storage entitlement; no live API spend in tests."""
+"""Yandex Mail availability depends on the server API, not license switches."""
 import os
 os.environ.setdefault("BOT_TOKEN", "test-token")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
@@ -9,9 +9,9 @@ from web.api.routes import mail_company_search as m
 
 
 @pytest.mark.asyncio
-async def test_yandex_provider_hidden_without_storage_rights(monkeypatch):
+async def test_yandex_provider_hidden_when_growth_api_unavailable(monkeypatch):
     async def cap(_path):
-        return {"enabled": True, "storage_allowed": False}
+        return {"enabled": False}
     monkeypatch.setattr(m, "studio_get", cap)
     assert (await m.providers(None))["yandex"] is False
     with pytest.raises(HTTPException) as err:
@@ -20,9 +20,9 @@ async def test_yandex_provider_hidden_without_storage_rights(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_yandex_provider_visible_only_with_license_and_storage(monkeypatch):
+async def test_yandex_provider_visible_with_key(monkeypatch):
     async def cap(_path):
-        return {"enabled": True, "storage_allowed": True}
+        return {"enabled": True}
     monkeypatch.setattr(m, "studio_get", cap)
     assert (await m.providers(None))["yandex"] is True
 
