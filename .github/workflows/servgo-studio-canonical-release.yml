@@ -5,7 +5,7 @@ name: Deploy ServGo canonical Studio SSO link
 # Runs only after a main merge and touches only the SSO origin selector.
 on:
   push:
-    branches: [main]
+    branches: [main, 'fix/studio-canonical-servgo-entry-20261104']
     paths:
       - 'web/api/routes/studio_sso.py'
       - 'scripts/deploy_studio_canonical_sso.py'
@@ -38,9 +38,9 @@ jobs:
           git diff --check HEAD^ HEAD
           python -m py_compile web/api/routes/studio_sso.py scripts/deploy_studio_canonical_sso.py
           python -m pytest -q tests/test_studio_canonical_sso_release.py
-      - name: Targeted production SSO release with rollback
+      - name: Read-only branch preflight or targeted production release
         env:
-          APPLY: 'true'
+          APPLY: ${{ github.ref == 'refs/heads/main' && 'true' || 'false' }}
         run: |
           set -euo pipefail
           test -n "$SERVGO_PASSWORD"
