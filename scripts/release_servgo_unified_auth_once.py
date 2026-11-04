@@ -73,6 +73,72 @@ def allowed_change(path: str, live: bytes | None, old: bytes | None, new: bytes)
     return "conflict"
 
 
+
+def patch_live_sso_without_overwriting_server_changes(
+    live: bytes, old: bytes, desired: bytes,
+) -> bytes | None:
+    """Apply only the reviewed authentication hunks to a known prior SSO shape.
+
+    The server may have moved two unchanged function definitions after an
+    earlier canonical hotfix. Preserve that layout; require all other AST
+    nodes to be equivalent to the *full* merged main source after patching.
+    Unknown semantic changes refuse deployment rather than being overwritten.
+    """
+    try:
+        content = live.decode("utf-8")
+        baseline = old.decode("utf-8")
+        merged = desired.decode("utf-8")
+        ast.parse(content)
+        ast.parse(baseline)
+        ast.parse(merged)
+        edits = (
+            (
+                "from fastapi import APIRouter, Depends, Header, HTTPException\n",
+                "from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response\n",
+            ),
+            (
+                "from ..deps import get_current_user\n",
+                "from ..deps import get_current_user\nfrom ..studio_identity import ensure_identity\n",
+            ),
+            (
+                '"v": 1, "aud": AUDIENCE, "uid": user_id,',
+                '"v": 1, "aud": AUDIENCE, "origin": CANONICAL_STUDIO_URL, "uid": user_id,',
+            ),
+            (
+                'return link.role if link.role in ("owner", "co_owner") else "co_owner"',
+                'return link.role if link.role in ("owner", "co_owner") else None',
+            ),
+            (
+                "async def studio_ticket(data: TicketIn, user: User = Depends(get_current_user),\n"
+                "                        db: AsyncSession = Depends(get_db)):",
+                "async def studio_ticket(data: TicketIn, request: Request, response: Response,\n"
+                "                        user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):",
+            ),
+            (
+                "    business = await db.get(Business, data.business_id)\n"
+                "    ticket = make_ticket(",
+                "    business = await db.get(Business, data.business_id)\n"
+                "    ensure_identity(response, user.id, request.cookies.get(\"sg_identity\"))\n"
+                "    ticket = make_ticket(",
+            ),
+        )
+        for before, after in edits:
+            # The changed text must be the exact reviewed baseline, and only
+            # one occurrence may exist in live production.
+            if baseline.count(before) != 1 or content.count(before) != 1:
+                return None
+            content = content.replace(before, after, 1)
+        result = content.encode("utf-8")
+        compile(result, "patched_studio_sso.py", "exec")
+        # This also handles the exact two reviewed relocated definitions. If
+        # any other server-only semantic change exists, it rejects the patch.
+        if not backend_equivalent("web/api/routes/studio_sso.py", result, desired):
+            return None
+        return result
+    except (UnicodeError, SyntaxError, ValueError):
+        return None
+
+
 def read(sftp, target: str) -> bytes | None:
     try:
         with sftp.open(target, "rb") as stream:
@@ -146,6 +212,14 @@ def main() -> None:
             if live is not None:
                 modes[path] = sftp.stat(target).st_mode & 0o777
             state = allowed_change(path, live, previous[path], expected[path])
+            if (state == "conflict" and path == "web/api/routes/studio_sso.py"
+                    and live is not None and previous[path] is not None):
+                patched = patch_live_sso_without_overwriting_server_changes(
+                    live, previous[path], expected[path])
+                if patched is not None:
+                    expected[path] = patched
+                    state = "update"
+                    print("studio_sso_server_layout_preserved=true", flush=True)
             actions[path] = state
             print(f"auth_backend={path} action={state} live_sha={digest(live)[:16]} "
                   f"desired_sha={digest(expected[path])[:16]}", flush=True)
