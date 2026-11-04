@@ -541,7 +541,7 @@ async def run_yandex_job(job_id: str, niche: str, city: str, want: int | None,
             ready = db.execute(
                 "SELECT count(*) FROM search_hit WHERE job_id=? AND fit=1 AND email!=''",
                 (job_id,)).fetchone()[0]
-        pages = max(1, min(8, int(os.getenv("SERVGO_YANDEX_MAIL_MAX_PAGES", "4"))))
+        pages = max(1, min(41, int(os.getenv("SERVGO_YANDEX_MAIL_MAX_PAGES", "41"))))
         count = 0
         seen = set(known_ids)
         for page in range(pages):
@@ -551,7 +551,7 @@ async def run_yandex_job(job_id: str, niche: str, city: str, want: int | None,
                 {"query": niche, "city": city, "skip": page * 25})
             data = await studio_get(url)
             if not isinstance(data, dict) or not isinstance(data.get("organizations"), list):
-                _finish(job_id, "error", "Яндекс API недоступен; лимит, лицензия или сеть")
+                _finish(job_id, "error", "Яндекс API недоступен; проверьте соединение и ответ сервиса")
                 return
             cards = data["organizations"]
             if not cards:
@@ -606,7 +606,7 @@ async def run_yandex_job(job_id: str, niche: str, city: str, want: int | None,
                         return
             if len(cards) < 25:
                 break
-        _finish(job_id, "done", "Поиск Яндекса завершён (в пределах бюджета и числа страниц)")
+        _finish(job_id, "done", "Поиск Яндекса завершён")
     except asyncio.CancelledError:
         _finish(job_id, "interrupted", "Поиск прерван")
         raise
