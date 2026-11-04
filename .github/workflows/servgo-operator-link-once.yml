@@ -53,3 +53,4 @@ jobs:
         env:
           APPLY: 'false'
         run: python -m scripts.link_existing_growth_operator_once
+# Approved: [apply-operator-link] after clean read-only run 41902283407.
