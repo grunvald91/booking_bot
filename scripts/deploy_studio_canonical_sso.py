@@ -139,11 +139,21 @@ def release() -> None:
         run(client, "systemctl restart " + service_q, timeout=70)
         if run(client, "systemctl is-active " + service_q) != "active":
             raise RuntimeError("ServGo API is not active")
-        # Check a local API route, not the nginx SPA fallback.
-        health = run(client, "curl -s -o /dev/null -w '%{http_code}' "
-                     "--max-time 8 http://127.0.0.1:8000/health", timeout=15)
+        # systemctl can return "active" before uvicorn has bound its port.
+        # A cold import may take several seconds; poll the real API health route,
+        # without weakening the 200 requirement or falling back to nginx SPA.
+        health = ""
+        for attempt in range(20):
+            try:
+                health = run(client, "curl -s -o /dev/null -w '%{http_code}' "
+                             "--max-time 3 http://127.0.0.1:8000/health", timeout=8)
+            except RuntimeError:
+                health = ""
+            if health == "200":
+                break
+            time.sleep(2)
         if health != "200":
-            raise RuntimeError("ServGo API health failed")
+            raise RuntimeError("ServGo API did not become healthy after restart")
         # Verify the actual server file still returns only the approved origin.
         with sftp.open(REMOTE, "rb") as handle:
             active = handle.read().decode("utf-8")
