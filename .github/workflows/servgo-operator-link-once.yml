@@ -1,0 +1,55 @@
+name: ServGo existing Growth operator linkage (guarded one-off)
+on:
+  push:
+    branches: [ops/servgo-identity-audit-20261104]
+    paths:
+      - '.github/workflows/servgo-operator-link-once.yml'
+permissions:
+  contents: read
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+jobs:
+  bind-existing-operator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify scripts are syntactically valid
+        run: |
+          python -m py_compile scripts/link_existing_growth_operator_once.py
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          tree=ast.parse(Path("scripts/link_existing_growth_operator_once.py").read_text())
+          literals={node.targets[0].id:node.value.value for node in tree.body
+                    if isinstance(node,ast.Assign) and len(node.targets)==1
+                    and isinstance(node.targets[0],ast.Name)
+                    and isinstance(node.value,ast.Constant) and isinstance(node.value.value,str)}
+          for key in ("OWNER_SCRIPT","GROWTH_SCRIPT"):
+              compile(literals[key],key,"exec")
+          print("operator_linkage_script_syntax_ok=true")
+          PY
+      - name: Install pinned SSH client
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Read-only verify live owner and existing Growth operator
+        env:
+          APPLY: 'false'
+        run: |
+          test -n "$SERVGO_PASSWORD"
+          python -m scripts.link_existing_growth_operator_once
+      - name: Bind verified Growth operator to current ServGo identity
+        if: contains(github.event.head_commit.message, '[apply-operator-link]')
+        env:
+          APPLY: 'true'
+        run: python -m scripts.link_existing_growth_operator_once
+      - name: Verify persisted binding using live credential
+        if: contains(github.event.head_commit.message, '[apply-operator-link]')
+        env:
+          APPLY: 'false'
+        run: python -m scripts.link_existing_growth_operator_once
