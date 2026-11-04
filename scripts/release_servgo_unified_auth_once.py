@@ -128,6 +128,19 @@ def patch_live_sso_without_overwriting_server_changes(
             if baseline.count(before) != 1 or content.count(before) != 1:
                 return None
             content = content.replace(before, after, 1)
+        # Production also retains one unused legacy-origin constant left by
+        # the previous canonical hotfix. Drop ONLY that exact declaration, and
+        # only if the AST proves nothing reads its name. The old hostname's
+        # independent Growth vhost remains untouched.
+        legacy = 'STUDIO_URL = "https://growth.servgo.ru"\n'
+        if legacy in content:
+            tree = ast.parse(content)
+            occurrences = [n for n in ast.walk(tree)
+                           if isinstance(n, ast.Name) and n.id == "STUDIO_URL"]
+            if (content.count(legacy) != 1 or len(occurrences) != 1
+                    or not isinstance(occurrences[0].ctx, ast.Store)):
+                return None
+            content = content.replace(legacy, "", 1)
         result = content.encode("utf-8")
         compile(result, "patched_studio_sso.py", "exec")
         # This also handles the exact two reviewed relocated definitions. If
