@@ -83,6 +83,8 @@ async def run():
     verified_email_users={r.user_id for r in emails if email_target(r.email)}
     yandex_users={r.user_id for r in yandex}
     all_email_users={r.user_id for r in emails}
+    # Show whether ServGo already exists as a business globally, not merely as a Growth product.
+    servgo_rows = [row for row in businesses if (row.name or "").strip().casefold() == "servgo"]
     account_ids=sorted(signals)
     # Growth has its own company catalog. Compare it to ServGo's verified
     # business memberships without leaking any ID or sensitive user field.
@@ -96,10 +98,14 @@ with SessionLocal() as db:
     rows = db.execute(select(StudioBusinessLink.servgo_business_id, Product.name)
                       .join(Product, Product.id == StudioBusinessLink.product_id)).all()
     total = db.scalar(select(func.count()).select_from(Product))
-    print(json.dumps({"links": [[r[0], r[1]] for r in rows], "products": total}, ensure_ascii=False))
+    canonical = db.scalars(select(Product).where(Product.slug == "servgo")).all()
+    canonical_links = db.scalars(select(StudioBusinessLink).where(StudioBusinessLink.product_id.in_([p.id for p in canonical]))).all()
+    print(json.dumps({"links": [[r[0], r[1]] for r in rows], "products": total,
+                      "servgo_product_count": len(canonical), "servgo_link_count": len(canonical_links)}, ensure_ascii=False))
 """
     growth_mapping = {}
     growth_products = None
+    servgo_product_info = {}
     try:
         checked = subprocess.run(
             ["docker", "exec", "ai-growth-os-api-1", "python", "-c", growth_code],
@@ -108,6 +114,7 @@ with SessionLocal() as db:
         info = json.loads(checked.stdout.strip().splitlines()[-1])
         growth_mapping = {int(key): name for key, name in info["links"]}
         growth_products = int(info["products"])
+        servgo_product_info = {"products_named_servgo": info.get("servgo_product_count"), "linked_to_business": info.get("servgo_link_count")}
     except (subprocess.SubprocessError, ValueError, KeyError, IndexError):
         # Missing Growth DB data is *not* a reason to merge users.
         pass
@@ -122,6 +129,8 @@ with SessionLocal() as db:
             verified_email_login=(uid in all_email_users),
             yandex_identity=(uid in yandex_users),
             organisations=len(ownership[uid]),
+            is_platform_owner_configured=((str(uid) == os.getenv("SERVGO_MAIL_OWNER_USER_ID") and bool(os.getenv("SERVGO_MAIL_OWNER_USER_ID"))) or (bool(os.getenv("SERVGO_MAIL_OWNER_TELEGRAM_ID")) and str(u.telegram_id) == os.getenv("SERVGO_MAIL_OWNER_TELEGRAM_ID"))),
+            servgo_named_businesses_owned=sum(b.id in ownership[uid] for b in servgo_rows),
             growth_studio_links=sum(b in growth_mapping for b in ownership[uid]),
             growth_studio_names=sorted({growth_mapping[b] for b in ownership[uid] if b in growth_mapping})[:15],
             servgo_org_names=sorted({b.name for b in businesses if b.id in ownership[uid]})[:20],
@@ -135,6 +144,8 @@ with SessionLocal() as db:
         "candidates":result,
         "candidate_count":len(result),
         "total_distinct_businesses_for_candidates":len(unique_orgs),
+        "servgo_named_businesses_in_booking_db":len(servgo_rows),
+        "growth_existing_servgo":servgo_product_info,
         "growth_catalog_product_count": growth_products,
         "growth_links_total_count": len(growth_mapping),
         "verified_email_identity_candidate_count":len(verified_email_users),
