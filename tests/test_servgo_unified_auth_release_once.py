@@ -49,3 +49,43 @@ def test_sso_patch_rejects_unknown_server_semantic_change():
     drift = old.replace(b"TICKET_TTL_SECONDS = 60", b"TICKET_TTL_SECONDS = 600")
     assert drift != old
     assert patch_live_sso_without_overwriting_server_changes(drift, old, merged) is None
+
+
+def test_production_style_relocation_and_unused_constant_are_safely_normalized():
+    """The observed production drift is only an unused constant + moved handlers."""
+    import ast
+    from pathlib import Path
+    from scripts.release_servgo_unified_auth_once import (
+        old_file, patch_live_sso_without_overwriting_server_changes,
+    )
+    from scripts.deploy_servgo_frontend_atomic import backend_equivalent
+    path = "web/api/routes/studio_sso.py"
+    old = old_file(path)
+    assert old is not None
+    desired = Path(path).read_bytes()
+    base = old.decode()
+    assert 'STUDIO_URL = "https://growth.servgo.ru"' not in base
+    tree = ast.parse(base)
+    source_lines = base.splitlines(keepends=True)
+    moved = []
+    ranges = []
+    for name in ("_businesses_for_studio", "studio_accessible_businesses"):
+        node = next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == name)
+        start = min([node.lineno] + [d.lineno for d in node.decorator_list]) - 1
+        end = node.end_lineno
+        moved.append("".join(source_lines[start:end]))
+        ranges.append((start, end))
+    for start, end in sorted(ranges, reverse=True):
+        del source_lines[start:end]
+    production = "".join(source_lines) + "\n\n" + "\n\n\n".join(moved) + "\n"
+    production = production.replace(
+        "MIN_SECRET_LENGTH = 32\n",
+        'MIN_SECRET_LENGTH = 32\nSTUDIO_URL = "https://growth.servgo.ru"\n',
+        1,
+    )
+    repaired = patch_live_sso_without_overwriting_server_changes(
+        production.encode(), old, desired,
+    )
+    assert repaired is not None
+    assert backend_equivalent(path, repaired, desired)
+    assert b'STUDIO_URL = "https://growth.servgo.ru"' not in repaired
