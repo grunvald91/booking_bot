@@ -1,0 +1,78 @@
+name: ServGo unified Studio auth - one-off guarded release
+
+# The normal frontend workflow refuses deployment until required API handlers
+# are live. This scoped release branch starts at the reviewed main merge.
+on:
+  push:
+    branches: [release/servgo-unified-studio-auth-20261104]
+    paths:
+      - .github/workflows/servgo-unified-auth-api-once.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  scoped-auth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Confirm merged-main source and release scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 2f2788f255637a51e69a40afe6b8eb68b9ea89a3 HEAD
+          current_main="$(git ls-remote origin refs/heads/main | cut -f1)"
+          test "$current_main" = "2f2788f255637a51e69a40afe6b8eb68b9ea89a3" \
+            || { echo "::error::Main has changed since the approved merge; aborting"; exit 1; }
+          python -m py_compile \
+            scripts/release_servgo_unified_auth_once.py \
+            web/api/routes/auth.py \
+            web/api/routes/email_auth.py \
+            web/api/routes/yandex_auth.py \
+            web/api/routes/studio_sso.py \
+            web/api/studio_identity.py
+      - name: Install pinned SSH library and narrow tests
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1' 'pytest>=8,<9'
+      - name: Verify rollback classification without production changes
+        run: python -m pytest -q tests/test_servgo_unified_auth_release_once.py
+      - name: Read-only production auth and same-origin gateway preflight
+        env:
+          APPLY: 'false'
+        run: |
+          test -n "$SERVGO_PASSWORD"
+          python scripts/release_servgo_unified_auth_once.py
+      - name: Install reviewed API auth patch with backup and rollback
+        if: contains(github.event.head_commit.message, '[apply-unified-auth]')
+        env:
+          APPLY: 'true'
+        run: python scripts/release_servgo_unified_auth_once.py
+      - uses: actions/setup-node@v4
+        if: contains(github.event.head_commit.message, '[apply-unified-auth]')
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: Build and test canonical PWA
+        if: contains(github.event.head_commit.message, '[apply-unified-auth]')
+        working-directory: web/frontend
+        run: |
+          npm ci --legacy-peer-deps --no-audit --no-fund
+          node --test tests/studio-workspace-entry.test.mjs tests/admin-business-switch.test.mjs tests/auth-route.test.mjs
+          npm run build
+      - name: Publish reviewed PWA atomically and smoke-test HTTPS routes
+        if: contains(github.event.head_commit.message, '[apply-unified-auth]')
+        env:
+          APPLY: 'true'
+        run: python scripts/deploy_servgo_frontend_atomic.py
