@@ -62,7 +62,7 @@ async def main():
         if not is_owner(user, verified[0], yandex):
             raise RuntimeError("Owner provider identities differ; refuse provisioning")
         # No platform organisation may already belong to someone else.
-        existing = list((await db.scalars(select(Business).where(func.lower(Business.name) == "servgo"))).all())
+        existing = list((await db.scalars(select(Business).where(func.trim(func.lower(Business.name)) == "servgo"))).all())
         if len(existing) > 1:
             raise RuntimeError("Multiple platform organisations; refuse")
         business = existing[0] if existing else None
