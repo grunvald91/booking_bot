@@ -1,4 +1,8 @@
 """Yandex Mail requires explicit storage entitlement; no live API spend in tests."""
+import os
+os.environ.setdefault("BOT_TOKEN", "test-token")
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+
 import pytest
 from fastapi import HTTPException
 from web.api.routes import mail_company_search as m
