@@ -526,17 +526,13 @@ async def run_yandex_job(job_id: str, niche: str, city: str, want: int | None,
                          brief: dict | None = None) -> None:
     """Search via Growth's single keyed Yandex gateway; never copy API keys to Mail.
 
-    Import is intentionally prohibited unless the Growth-side license configuration
-    explicitly permits storing Yandex result data. Each page uses one bounded request.
+    Each page uses one bounded request, with credentials kept on Growth.
     """
     brief = brief or dict(SERVGO)
     try:
         cap = await studio_get("/studio/internal/yandex-organizations/capabilities")
         if not isinstance(cap, dict) or not cap.get("enabled"):
-            _finish(job_id, "error", "Яндекс API не настроен или лицензия не подтверждена в Growth")
-            return
-        if not cap.get("storage_allowed"):
-            _finish(job_id, "error", "Сохранение компаний из Яндекса не разрешено настройками лицензии")
+            _finish(job_id, "error", "Яндекс API не подключён к работающему Growth")
             return
         with db_open() as db:
             initialize(db)
@@ -556,9 +552,6 @@ async def run_yandex_job(job_id: str, niche: str, city: str, want: int | None,
             data = await studio_get(url)
             if not isinstance(data, dict) or not isinstance(data.get("organizations"), list):
                 _finish(job_id, "error", "Яндекс API недоступен; лимит, лицензия или сеть")
-                return
-            if not data.get("storage_allowed"):
-                _finish(job_id, "error", "Запрещено сохранять результаты Яндекс API")
                 return
             cards = data["organizations"]
             if not cards:
@@ -685,7 +678,7 @@ async def company_brief(company_id: str) -> dict:
 async def providers(_=Depends(mail_owner)):
     use_jev = os.getenv("SERVGO_MAIL_USE_JEV", "false").lower() in ("1", "true", "yes")
     cap = await studio_get("/studio/internal/yandex-organizations/capabilities")
-    yandex = bool(isinstance(cap, dict) and cap.get("enabled") and cap.get("storage_allowed"))
+    yandex = bool(isinstance(cap, dict) and cap.get("enabled"))
     return {"2gis": True, "exa": bool(os.getenv("EXA_API_KEY", "").strip()),
             "yandex": yandex, "jev": use_jev and bool(os.getenv("OPENROUTER_API_KEY", "").strip())}
 
@@ -730,8 +723,8 @@ async def start(data: SearchInput, _=Depends(mail_owner)):
         raise HTTPException(503, "Exa не настроен на сервере; требуется EXA_API_KEY")
     if data.provider == "yandex":
         cap = await studio_get("/studio/internal/yandex-organizations/capabilities")
-        if not isinstance(cap, dict) or not cap.get("enabled") or not cap.get("storage_allowed"):
-            raise HTTPException(503, "Яндекс: требуется активная лицензия с разрешением сохранять данные")
+        if not isinstance(cap, dict) or not cap.get("enabled"):
+            raise HTTPException(503, "Яндекс API не настроен в Growth")
     if any(not task.done() for task in RUNNING.values()):
         raise HTTPException(409, "Другой поиск ещё идёт: дождитесь его или остановите")
     brief = await company_brief(data.company_id)
@@ -778,8 +771,8 @@ async def resume(job_id: str, _=Depends(mail_owner)):
             raise HTTPException(503, "Exa не настроен на сервере")
         if row["provider"] == "yandex":
             cap = await studio_get("/studio/internal/yandex-organizations/capabilities")
-            if not isinstance(cap, dict) or not cap.get("enabled") or not cap.get("storage_allowed"):
-                raise HTTPException(503, "Яндекс API или права на сохранение недоступны")
+            if not isinstance(cap, dict) or not cap.get("enabled"):
+                raise HTTPException(503, "Яндекс API не настроен в Growth")
         db.execute("UPDATE search_job SET status='running',message='',updated_at=? WHERE id=?",
                    (utcnow(), job_id))
         params = (job_id, row["niche"], row["city"], row["want"], company_brief)
