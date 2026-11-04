@@ -1,0 +1,57 @@
+name: Read-only ServGo Studio SSO health endpoint diagnostic
+on:
+  push:
+    branches: [diag/studio-health-endpoint-20261104]
+permissions:
+  contents: read
+concurrency:
+  group: servgo-studio-health-readonly
+  cancel-in-progress: true
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -q 'paramiko==3.5.1'
+      - name: Check service and local HTTP ports (read-only)
+        run: |
+          python - <<'PY'
+          import os
+          import paramiko
+          from scripts.deploy_studio_canonical_sso import HOST, PinnedHost
+          password=os.environ['SERVGO_PASSWORD']
+          if not password: raise RuntimeError('SSH secret missing')
+          client=paramiko.SSHClient()
+          client.set_missing_host_key_policy(PinnedHost())
+          client.connect(HOST,port=22,username='root',password=password,
+                         allow_agent=False,look_for_keys=False,timeout=15)
+          script="""set +e
+          echo API_STATE
+          systemctl is-active booking-web-api.service || true
+          echo LISTENERS
+          ss -ltn | grep -E ':(8000|8001|8080|8081|8090|8091) ' || true
+          echo ENDPOINTS
+          for port in 8000 8001 8080 8081 8090; do
+            for path in /health /api/health; do
+              url="http://127.0.0.1:$port$path"
+              status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$url" 2>/dev/null)
+              result=$?
+              echo "$port$path exit=$result http=$status"
+            done
+          done
+          """
+          try:
+              _,out,err=client.exec_command("bash -s",timeout=80)
+              out.channel.sendall(script.encode())
+              out.channel.shutdown_write()
+              print(out.read().decode('utf-8','replace')[:6000])
+              code=out.channel.recv_exit_status()
+              if code: raise RuntimeError('Server inspection failed')
+          finally: client.close()
+          PY
