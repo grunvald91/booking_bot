@@ -20,7 +20,7 @@ PHONE_LAST4 = "1399"
 TELEGRAM_USERNAME = "grunvald"
 
 REMOTE = r'''
-import asyncio, hashlib, json, os
+import asyncio, hashlib, json, os, subprocess
 from collections import defaultdict
 from sqlalchemy import select
 from dotenv import load_dotenv
@@ -84,6 +84,33 @@ async def run():
     yandex_users={r.user_id for r in yandex}
     all_email_users={r.user_id for r in emails}
     account_ids=sorted(signals)
+    # Growth has its own company catalog. Compare it to ServGo's verified
+    # business memberships without leaking any ID or sensitive user field.
+    growth_code = """
+import json
+from sqlalchemy import select, func
+from app.db.session import SessionLocal
+from app.sso.models import StudioBusinessLink
+from app.models.domain import Product
+with SessionLocal() as db:
+    rows = db.execute(select(StudioBusinessLink.servgo_business_id, Product.name)
+                      .join(Product, Product.id == StudioBusinessLink.product_id)).all()
+    total = db.scalar(select(func.count()).select_from(Product))
+    print(json.dumps({"links": [[r[0], r[1]] for r in rows], "products": total}, ensure_ascii=False))
+"""
+    growth_mapping = {}
+    growth_products = None
+    try:
+        checked = subprocess.run(
+            ["docker", "exec", "ai-growth-os-api-1", "python", "-c", growth_code],
+            capture_output=True, text=True, timeout=30, check=True,
+        )
+        info = json.loads(checked.stdout.strip().splitlines()[-1])
+        growth_mapping = {int(key): name for key, name in info["links"]}
+        growth_products = int(info["products"])
+    except (subprocess.SubprocessError, ValueError, KeyError, IndexError):
+        # Missing Growth DB data is *not* a reason to merge users.
+        pass
     result=[]
     for i,uid in enumerate(account_ids,1):
         u=user_data.get(uid)
@@ -95,6 +122,9 @@ async def run():
             verified_email_login=(uid in all_email_users),
             yandex_identity=(uid in yandex_users),
             organisations=len(ownership[uid]),
+            growth_studio_links=sum(b in growth_mapping for b in ownership[uid]),
+            growth_studio_names=sorted({growth_mapping[b] for b in ownership[uid] if b in growth_mapping})[:15],
+            servgo_org_names=sorted({b.name for b in businesses if b.id in ownership[uid]})[:20],
             relevant_business_tags=sorted(tags[uid]),
             redirect_from_merges=sum(src==uid for src,_ in merges),
             redirect_to_merges=sum(dst==uid for _,dst in merges),
@@ -105,6 +135,8 @@ async def run():
         "candidates":result,
         "candidate_count":len(result),
         "total_distinct_businesses_for_candidates":len(unique_orgs),
+        "growth_catalog_product_count": growth_products,
+        "growth_links_total_count": len(growth_mapping),
         "verified_email_identity_candidate_count":len(verified_email_users),
         "yandex_identity_candidate_count":sum(uid in yandex_users for uid in account_ids),
         "merged_rows_within_candidates":sum(src in account_ids or dst in account_ids for src,dst in merges),
