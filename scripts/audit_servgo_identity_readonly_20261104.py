@@ -20,9 +20,13 @@ PHONE_LAST4 = "1399"
 TELEGRAM_USERNAME = "grunvald"
 
 REMOTE = r'''
-import asyncio, hashlib, json
+import asyncio, hashlib, json, os
 from collections import defaultdict
 from sqlalchemy import select
+from dotenv import load_dotenv
+load_dotenv("/opt/booking_bot/.env")
+from bot.config import DATABASE_URL as BOT_DATABASE_URL
+os.environ.setdefault("DATABASE_URL", BOT_DATABASE_URL)
 from web.api.database import async_session
 from database.models import User, EmailIdentity, YandexIdentity, Business, BusinessOwner, UserAccountMerge
 
@@ -125,7 +129,15 @@ def main():
         content=stdout.read().decode("utf-8","replace").strip()
         code=stdout.channel.recv_exit_status()
         if code:
-            # Do not expose SQL errors or private data from the server.
+            # Only emit the exception CLASS, never the underlying SQL query,
+            # values or connection credentials.
+            detail = stderr.read().decode("utf-8", "replace")
+            for known in ("ModuleNotFoundError", "OperationalError", "ProgrammingError",
+                          "UndefinedTableError", "AttributeError", "ImportError",
+                          "SyntaxError", "TypeError", "InvalidPasswordError"):
+                if known in detail:
+                    print("readonly_audit_error_class=" + known)
+                    break
             raise RuntimeError("Read-only identity audit failed (details hidden)")
         if not content.startswith("{") or '"audit": "readonly"' not in content:
             raise RuntimeError("Unexpected production audit result")
