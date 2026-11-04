@@ -1,0 +1,28 @@
+name: ServGo identity correlation audit (read only)
+on:
+  push:
+    branches: [ops/servgo-identity-audit-20261104]
+    paths:
+      - '.github/workflows/servgo-identity-audit-readonly-once.yml'
+permissions:
+  contents: read
+concurrency:
+  group: servgo-identity-readonly
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned SSH dependency
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Read-only account-to-business and verified identity audit
+        run: |
+          test -n "$SERVGO_PASSWORD"
+          python -m scripts.audit_servgo_identity_readonly_20261104
