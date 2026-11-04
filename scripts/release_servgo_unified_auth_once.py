@@ -220,6 +220,23 @@ def main() -> None:
                     expected[path] = patched
                     state = "update"
                     print("studio_sso_server_layout_preserved=true", flush=True)
+                else:
+                    # Read-only diagnostic, limited to this reviewed Python
+                    # module. Never print runtime environment or credentials.
+                    import difflib
+                    print("studio_sso_reviewed_baseline_drift:", flush=True)
+                    diff = difflib.unified_diff(
+                        previous[path].decode("utf-8", "replace").splitlines(),
+                        live.decode("utf-8", "replace").splitlines(),
+                        fromfile="reviewed_previous_main",
+                        tofile="production_20261104",
+                        lineterm="",
+                    )
+                    for index, line in enumerate(diff):
+                        if index >= 100:
+                            print("studio_sso_diff_truncated=true", flush=True)
+                            break
+                        print(line, flush=True)
             actions[path] = state
             print(f"auth_backend={path} action={state} live_sha={digest(live)[:16]} "
                   f"desired_sha={digest(expected[path])[:16]}", flush=True)
