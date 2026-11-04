@@ -77,3 +77,4 @@ jobs:
           APPLY: 'true'
         run: python scripts/deploy_servgo_frontend_atomic.py
 # Read-only rerun after adding precise AST-preserving SSO hotfix support.
+# Strict read-only drift inspection for previously patched production Studio SSO.
