@@ -29,3 +29,4 @@ jobs:
 # Recheck with production database config loaded without exposing secrets.
 # One-time follow-up: compare ServGo account businesses with Growth links.
 # Read-only preflight: is platform's ServGo company already present or linked?
+# Read-only check of verified Growth operator binding for the existing ServGo project.
