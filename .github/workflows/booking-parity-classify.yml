@@ -1,0 +1,38 @@
+name: BookingBot classify six server source deltas
+on:
+  push:
+    branches: [ops/production-parity-audit-20261105]
+    paths: [.github/workflows/booking-parity-classify.yml]
+permissions:
+  contents: read
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Install pinned SSH library
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Classify production source changes without editing server
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/sync_server_source.py
+          python3 - <<'PY'
+          import urllib.request
+          import subprocess
+          from pathlib import Path
+          url='https://raw.githubusercontent.com/grunvald91/booking_bot/04f8e758d38543a2213d0a49e62b15423f360848/scripts/ops/classify_production_source_20261105.py'
+          # Pin script content to the committed audit branch commit SHA.
+          req=urllib.request.Request(url, headers={'User-Agent':'booking-source-audit'})
+          with urllib.request.urlopen(req,timeout=30) as r: code=r.read()
+          import hashlib
+          expected='REPLACE_SCRIPT_SHA256'
+          assert hashlib.sha256(code).hexdigest()==expected, 'Unexpected classification script content'
+          subprocess.run(['python3','-'],input=code,check=True)
+          PY
