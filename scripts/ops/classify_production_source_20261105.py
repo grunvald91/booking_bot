@@ -156,7 +156,8 @@ for root in ('/etc/systemd/system','/etc/nginx'):
     print('PROMO_CONFIG_REFERENCES',root,count)
 """
     import base64 as b64
-    cmd="python3 -c 'import base64;exec(base64.b64decode("+repr(repr(b64.b64encode(remote_code.encode()).decode()))+"))'"
+    import shlex
+    cmd="python3 -c "+shlex.quote("import base64;exec(base64.b64decode("+repr(b64.b64encode(remote_code.encode()).decode())+"))")
     _,stdout,stderr=ssh.exec_command(cmd,timeout=30)
     stdout.channel.settimeout(35)
     print(stdout.read(2048).decode("utf8",errors="replace").strip())
