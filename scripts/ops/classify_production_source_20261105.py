@@ -97,6 +97,22 @@ try:
         if local is not None and sha(local)==sha(live):
             print("CLASS",path,"IDENTICAL")
             continue
+        if path=="web/api/routes/studio_sso.py" and local is not None:
+            import ast
+            def func(node):
+                return node.name if isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef)) else None
+            raw_nodes=ast.parse(live.decode("utf-8")).body
+            main_nodes=ast.parse(local.decode("utf-8")).body
+            moved=("_businesses_for_studio","studio_accessible_businesses")
+            canonical=lambda node:ast.dump(node,include_attributes=False)
+            server_moved=list(raw_nodes[-2:])
+            target_moved=[next((node for node in main_nodes if func(node)==name),None) for name in moved]
+            same_moved=all(target_moved) and [canonical(node) for node in server_moved]==[canonical(node) for node in target_moved]
+            base_nodes=[node for node in main_nodes if func(node) not in moved]
+            server_other=raw_nodes[:-2]
+            same_rest=[canonical(node) for node in server_other]==[canonical(node) for node in base_nodes]
+            print("STUDIO_SSO_AST_EQUIVALENT",bool(
+                [func(node) for node in server_moved]==list(moved) and same_moved and same_rest))
         if local is not None:
             # Identify production files which are exact older versions from history.
             versions=git("log","--format=%H","--",path).decode().split()
@@ -116,6 +132,34 @@ try:
                   "imports="+str(sum(1 for x in text.splitlines() if re.match(r"^(from|import)\s+",x))),
                   "defines="+str(sum(1 for x in text.splitlines() if re.match(r"^(async\s+def|def|class)\s+",x))))
             print("SERVER_ONLY_NAMES",path,[x for x in re.findall(r"^(?:async\s+)?def\s+([a-zA-Z_]\w*)\s*\(",text,re.M) if not any(v in x.lower() for v in ("key","secret","token","password"))][:22])
+    # Detect whether the untracked server-only promo entrypoint is referenced
+    # by running processes or service configs. Report only booleans and counts.
+    remote_code="""import os, pathlib
+needle=b'promo_standalone'
+pids=0
+for pid in pathlib.Path('/proc').iterdir():
+    if not pid.name.isdigit():continue
+    try:
+        if needle in (pid/'cmdline').read_bytes():pids+=1
+    except (OSError,PermissionError):pass
+print('PROMO_SERVER_ACTIVE_PROCESSES',pids)
+for root in ('/etc/systemd/system','/etc/nginx'):
+    count=0
+    for base,dirs,files in os.walk(root):
+        dirs[:]=[name for name in dirs if name not in ('.git','private','secrets')]
+        for name in files:
+            path=pathlib.Path(base)/name
+            if not (path.is_file() and path.stat().st_size<300000):continue
+            try:
+                if needle in path.read_bytes():count+=1
+            except (OSError,PermissionError):pass
+    print('PROMO_CONFIG_REFERENCES',root,count)
+"""
+    import base64 as b64
+    cmd="python3 -c 'import base64;exec(base64.b64decode("+repr(repr(b64.b64encode(remote_code.encode()).decode()))+"))'"
+    _,stdout,stderr=ssh.exec_command(cmd,timeout=30)
+    stdout.channel.settimeout(35)
+    print(stdout.read(2048).decode("utf8",errors="replace").strip())
     sftp.close()
 finally:
     ssh.close()
