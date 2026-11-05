@@ -1,0 +1,53 @@
+name: Preserve active production promo source in review branch
+on:
+  push:
+    branches: [ops/production-parity-audit-20261105]
+    paths: [.github/workflows/promo-server-source-capture.yml]
+permissions:
+  contents: write
+jobs:
+  capture:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preserve only reviewed active server source without deploying
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+          git fetch origin main --no-tags
+          test "$(git rev-parse origin/main)" = 'f1529d1bf4960b5e0ad282f05eb9f651faf1cb36' || { echo '::error::BookingBot main changed since parity audit'; exit 1; }
+          git switch -c audit/server-promo-staging-20261105 origin/main
+          python - <<'PY'
+          import ast, hashlib, pathlib
+          from scripts.sync_server_source import connect, ROOT, looks_secret
+          rel='webapp/promo_standalone.py'
+          ssh=connect()
+          try:
+              sftp=ssh.open_sftp()
+              try:
+                  with sftp.open(ROOT+rel,'rb') as stream:data=stream.read()
+              finally:sftp.close()
+          finally:ssh.close()
+          sha=hashlib.sha256(data).hexdigest()
+          assert sha=='991feeab3de80d29ef88a8e39e3026b8cc199eaecb65aea2a822fe57a34d0eb0', 'Server promo source changed since audit'
+          assert len(data)<100_000 and not looks_secret(data), 'Server promo source not safe to commit'
+          text=data.decode('utf-8')
+          ast.parse(text, filename=rel)
+          pathlib.Path(rel).write_bytes(data)
+          print('PROMO_SOURCE_CAPTURED_SHA256',sha)
+          print('PROMO_SOURCE_BYTES',len(data))
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- webapp/promo_standalone.py
+          git diff --cached --quiet && { echo '::error::No server-only source captured'; exit 1; }
+          git commit -m 'ops: preserve active promo_standalone production entrypoint for source review'
+          git push origin HEAD:refs/heads/audit/server-promo-staging-20261105
+          echo 'PROMO_SOURCE_REVIEW_BRANCH=audit/server-promo-staging-20261105'
