@@ -1,5 +1,6 @@
 """Yandex Mail availability depends on the server API, not license switches."""
 import os
+import asyncio
 os.environ.setdefault("BOT_TOKEN", "test-token")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
@@ -8,23 +9,21 @@ from fastapi import HTTPException
 from web.api.routes import mail_company_search as m
 
 
-@pytest.mark.asyncio
-async def test_yandex_provider_hidden_when_growth_api_unavailable(monkeypatch):
+def test_yandex_provider_hidden_when_growth_api_unavailable(monkeypatch):
     async def cap(_path):
         return {"enabled": False}
     monkeypatch.setattr(m, "studio_get", cap)
-    assert (await m.providers(None))["yandex"] is False
+    assert asyncio.run(m.providers(None))["yandex"] is False
     with pytest.raises(HTTPException) as err:
-        await m.start(m.SearchInput(niche="салоны красоты", city="Сочи", provider="yandex"), None)
+        asyncio.run(m.start(m.SearchInput(niche="салоны красоты", city="Сочи", provider="yandex"), None))
     assert err.value.status_code == 503
 
 
-@pytest.mark.asyncio
-async def test_yandex_provider_visible_with_key(monkeypatch):
+def test_yandex_provider_visible_with_key(monkeypatch):
     async def cap(_path):
         return {"enabled": True}
     monkeypatch.setattr(m, "studio_get", cap)
-    assert (await m.providers(None))["yandex"] is True
+    assert asyncio.run(m.providers(None))["yandex"] is True
 
 
 def test_yandex_supported_as_explicit_source():
@@ -32,8 +31,7 @@ def test_yandex_supported_as_explicit_source():
     assert m.SearchInput(niche="автосервис").provider == "2gis"
 
 
-@pytest.mark.asyncio
-async def test_yandex_job_preserves_sources_and_does_not_send_mail(monkeypatch, tmp_path):
+def test_yandex_job_preserves_sources_and_does_not_send_mail(monkeypatch, tmp_path):
     """Only public-site emails can become leads; nothing enters a campaign."""
     from web.api.routes.owner_mail import db_open
     monkeypatch.setenv("SERVGO_MAIL_DATA_DIR", str(tmp_path))
@@ -64,7 +62,7 @@ async def test_yandex_job_preserves_sources_and_does_not_send_mail(monkeypatch, 
             "INSERT INTO search_job (id,niche,city,want,status,created_at,updated_at)"
             " VALUES (?,?,?,?,?,?,?)",
             ("test-yandex", "салон красоты", "Сочи", None, "running", m.utcnow(), m.utcnow()))
-    await m.run_yandex_job("test-yandex", "салон красоты", "Сочи", None)
+    asyncio.run(m.run_yandex_job("test-yandex", "салон красоты", "Сочи", None))
     with db_open() as db:
         view = m._view(db, "test-yandex")
     assert view["job"]["status"] == "done"
