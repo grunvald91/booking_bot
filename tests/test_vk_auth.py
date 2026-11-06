@@ -12,7 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from database.models import Base, Business, User, VkIdentity, VkLoginTicket, UserAccountMerge, EmailIdentity
+from database.models import Base, Business, User, VkIdentity, VkLoginTicket, UserAccountMerge, EmailIdentity, YandexIdentity
+from database.account_link import merge_yandex_account
 from web.api import deps
 from web.api.database import get_db
 from web.api.routes import vk_auth as vk
@@ -205,3 +206,22 @@ class VkAuthTests(unittest.IsolatedAsyncioTestCase):
         existing_ticket = self.oauth(auth=headers)
         self.assertEqual(self.client.post("/api/auth/vk/exchange", json={"ticket": existing_ticket},
                                           headers=headers).status_code, 409)
+
+
+    async def test_merging_legacy_yandex_account_also_preserves_vk_login(self):
+        former = self.client.post("/api/auth/vk/exchange", json={"ticket": self.oauth()}).json()
+        old_id = former["user"]["id"]
+        target_id = await self.make_user(telegram_id=33889)
+        async with self.sessions() as db:
+            db.add(YandexIdentity(yandex_id="yx-vk-combo", user_id=old_id, login="test"))
+            db.add(Business(owner_id=old_id, name="My original business", business_type="beauty"))
+            await db.commit()
+        async with self.sessions() as db:
+            await merge_yandex_account(db, old_id, target_id)
+            await db.commit()
+            vk_identity = await db.scalar(select(VkIdentity).where(VkIdentity.vk_user_id == "4242"))
+            self.assertEqual(vk_identity.user_id, target_id)
+            self.assertEqual((await db.execute(select(Business.owner_id))).scalar_one(), target_id)
+        # VK login must resolve to the owner, not the old merged account.
+        login = self.client.post("/api/auth/vk/exchange", json={"ticket": self.oauth()}).json()
+        self.assertEqual((login["user"]["id"], login["role"]), (target_id, "admin"))
