@@ -1,0 +1,40 @@
+name: MNEBYVPN Yandex broker unit tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'database/models.py'
+      - 'web/api/routes/yandex_auth.py'
+      - 'tests/test_yandex_auth.py'
+      - 'migrations/add_yandex_external_ticket.sql'
+      - '.github/workflows/mnebyvpn-yandex-broker.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mnebyvpn-yandex-broker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  yandex-broker:
+    name: ServGo Yandex broker (isolated SQLite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -q -r web/api/requirements.txt
+          python -m pip install --disable-pip-version-check -q aiosqlite python-dotenv psycopg2-binary
+      - name: Check Python syntax
+        run: python -m py_compile web/api/routes/yandex_auth.py database/models.py tests/test_yandex_auth.py
+      - name: Run Yandex OAuth regression and MNEBYVPN broker tests
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///:memory:
+          BOT_TOKEN: test-token
+        run: python -m unittest discover -s tests -p test_yandex_auth.py -v
