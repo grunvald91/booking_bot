@@ -41,6 +41,8 @@ on:
       - 'migrations/add_staff_reminder_fields.sql'
       - 'migrations/add_configurable_staff_notifications.sql'
       - 'migrations/add_user_email.sql'
+      - 'migrations/add_yandex_external_ticket.sql'
+      - 'tests/test_yandex_auth.py'
       - '.github/workflows/pwa-ci.yml'
       - '.github/workflows/servgo-offline-browser.yml'
       - 'scripts/check_servgo_offline_pwa_browser.py'
@@ -147,6 +149,13 @@ jobs:
         run: |
           python tests/test_mail_same_origin.py
           python tests/test_mail_air_v2.py
+
+      - name: Verify Yandex OAuth and MNEBYVPN one-time PKCE broker
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          BOT_TOKEN: test-token
+          DATABASE_URL: sqlite+aiosqlite:///:memory:
+        run: python -m unittest discover -s tests -p test_yandex_auth.py -v
 
       - name: Verify signed Growth SSO and role restrictions
         env:
