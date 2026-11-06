@@ -4,6 +4,8 @@ os.environ.setdefault("BOT_TOKEN", "test-token")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 import unittest
+import hashlib
+import base64
 from urllib.parse import parse_qs, urlparse
 
 from fastapi import FastAPI
@@ -401,6 +403,59 @@ class YandexAuthTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_link_start_requires_sign_in(self):
         self.assertEqual(self.client.post("/api/auth/yandex/link/start").status_code, 401)
+
+
+    def _mnebyvpn_broker_login(self, verifier="v" * 43):
+        request_state = "A" * 32
+        challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(verifier.encode()).digest()
+        ).decode().rstrip("=")
+        start = self.client.get("/api/auth/yandex/mnebyvpn/start", params={
+            "state": request_state, "code_challenge": challenge,
+        })
+        self.assertEqual(start.status_code, 302)
+        auth_url = urlparse(start.headers["location"])
+        args = parse_qs(auth_url.query)
+        self.assertEqual(args["redirect_uri"], ["https://servgo.ru/api/auth/yandex/callback"])
+        self.assertEqual(args["client_id"], ["cid"])
+        yandex_callback = self.client.get(
+            "/api/auth/yandex/callback",
+            params={"code": "verified-code", "state": args["state"][0]},
+        )
+        self.assertEqual(yandex_callback.status_code, 302)
+        redirected = urlparse(yandex_callback.headers["location"])
+        self.assertEqual(redirected.scheme + "://" + redirected.netloc,
+                         "https://mnebyvpn.site")
+        self.assertEqual(redirected.path, "/auth/yandex/callback")
+        external = parse_qs(redirected.query)
+        self.assertEqual(external["state"], [request_state])
+        return external["code"][0], verifier
+
+    async def test_mnebyvpn_uses_same_yandex_app_and_one_time_code(self):
+        code, verifier = self._mnebyvpn_broker_login()
+        endpoint = "/api/auth/yandex/mnebyvpn/exchange"
+        wrong = self.client.post(endpoint, json={"code": code, "code_verifier": "w" * 43})
+        self.assertEqual(wrong.status_code, 400)
+        ok = self.client.post(endpoint, json={"code": code, "code_verifier": verifier})
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.json(), {"yandexId": "1000"})
+        self.assertEqual(ok.headers["cache-control"], "no-store")
+        self.assertEqual(self.client.post(endpoint, json={
+            "code": code, "code_verifier": verifier,
+        }).status_code, 400)
+        self.assertEqual(await self.users(), [])
+
+    async def test_mnebyvpn_rejects_invalid_challenges_and_codes(self):
+        path = "/api/auth/yandex/mnebyvpn/start"
+        self.assertEqual(self.client.get(path, params={
+            "state": "x", "code_challenge": "z" * 43,
+        }).status_code, 400)
+        self.assertEqual(self.client.get(path, params={
+            "state": "a" * 32, "code_challenge": "z" * 10,
+        }).status_code, 400)
+        self.assertEqual(self.client.post("/api/auth/yandex/mnebyvpn/exchange", json={
+            "code": "x" * 43, "code_verifier": "v" * 43,
+        }).status_code, 400)
 
 
 if __name__ == "__main__":
