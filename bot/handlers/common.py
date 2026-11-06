@@ -339,6 +339,36 @@ async def handle_notify_deeplink(message: Message, token: str):
     await message.answer(text, parse_mode="HTML", reply_markup=get_main_menu_keyboard())
 
 
+@router.message(Command("pricing"))
+@router.message(F.text == "💳 Условия подключения")
+async def show_commercial_terms(message: Message):
+    """Актуальные цены и состав услуг — из общего конфига promo-сайта."""
+    from webapp.niches import get_offer
+    from bot.services.commercial_terms import format_commercial_terms
+
+    try:
+        offer = get_offer()
+        text = format_commercial_terms(offer)
+    except (OSError, ValueError, KeyError, TypeError):
+        await message.answer(
+            "Не удалось получить актуальные условия. "
+            "Посмотрите их на https://promo.servgo.ru/#offer",
+            disable_web_page_preview=True,
+        )
+        return
+
+    buttons = InlineKeyboardBuilder()
+    buttons.button(text="Условия на сайте", url="https://promo.servgo.ru/#offer")
+    buttons.button(text="Подать заявку", url="https://promo.servgo.ru/#launch")
+    buttons.adjust(2)
+    await message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=buttons.as_markup(),
+        disable_web_page_preview=True,
+    )
+
+
 @router.message(Command("help"))
 @router.message(F.text == "ℹ️ Помощь")
 async def cmd_help(message: Message, state: FSMContext):

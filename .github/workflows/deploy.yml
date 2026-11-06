@@ -1,11 +1,11 @@
 name: Deploy webapp to server
 
-# Экономный деплой production webapp на сервер.
-# Автодеплой запускается только при изменениях production-веба в main.
+# Экономный деплой production webapp и кода Telegram-бота на сервер.
+# Автодеплой запускается при изменениях webapp, frontend или bot в main.
 # Сервер /opt/booking_bot НЕ git-репозиторий — изменённые файлы заливаются по SCP.
 # Ручной workflow_dispatch сохранён для точечного аварийного деплоя.
 #
-# Деплоятся ТОЛЬКО файлы, изменённые в коммите (под webapp/**), чтобы не затирать
+# Деплоятся ТОЛЬКО файлы, изменённые в коммите (под webapp/** и bot/**), чтобы не затирать
 # серверные файлы, которые могли расходиться с git. Для ручного деплоя конкретных
 # файлов — запустить workflow вручную и передать их в поле "files".
 #
@@ -20,6 +20,7 @@ on:
       - 'webapp/server.py'
       - 'webapp/templates/**'
       - 'webapp/static/**'
+      - 'bot/**'
       - 'webapp/niches/**'
       - 'web/frontend/**'
   workflow_dispatch:
@@ -84,19 +85,19 @@ jobs:
           if [ -n "${MANUAL// /}" ]; then
             CHANGED=$(printf '%s\n' $MANUAL)
           elif [ -n "$BEFORE" ]; then
-            CHANGED=$(git diff --name-only --diff-filter=ACMR "$BEFORE" "$AFTER" -- 'webapp/**' 'web/frontend/**' || true)
+            CHANGED=$(git diff --name-only --diff-filter=ACMR "$BEFORE" "$AFTER" -- 'webapp/**' 'web/frontend/**' 'bot/**' || true)
           else
-            CHANGED=$(git ls-files 'webapp/**' 'web/frontend/**')
+            CHANGED=$(git ls-files 'webapp/**' 'web/frontend/**' 'bot/**')
           fi
 
-          WEBAPP_FILES=$(printf '%s\n' "$CHANGED" | grep '^webapp/' || true)
+          WEBAPP_FILES=$(printf '%s\n' "$CHANGED" | grep -E '^(webapp/|bot/)' || true)
           if printf '%s\n' "$CHANGED" | grep -q '^web/frontend/'; then
             FRONTEND_CHANGED=1
           else
             FRONTEND_CHANGED=0
           fi
 
-          echo "Webapp files to upload:"
+          echo "Webapp/bot files to upload:"
           printf '%s\n' "$WEBAPP_FILES"
           echo "Frontend changed: $FRONTEND_CHANGED"
           {
@@ -105,6 +106,34 @@ jobs:
             echo '__EOF__'
             echo "frontend_changed=$FRONTEND_CHANGED"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Validate changed bot code and shared prices
+        if: contains(steps.pick.outputs.files, 'bot/')
+        run: |
+          set -euo pipefail
+          python -m py_compile bot/handlers/common.py bot/keyboards/client_kb.py bot/keyboards/admin_kb.py bot/services/commercial_terms.py
+          python - <<'PY'
+          import json
+          import runpy
+          from pathlib import Path
+
+          offer = json.loads(Path("webapp/niches/_offer.yaml").read_text(encoding="utf-8"))
+          money = lambda amount: f"{amount:,}".replace(",", "\u00a0") + "\u00a0₽"
+          format_terms = runpy.run_path("bot/services/commercial_terms.py")["format_commercial_terms"]
+          html = format_terms({
+              "entry_price_text": money(offer["entry_price"]),
+              "studio_price_text": money(offer["studio_price_month"]),
+              "seats_total": offer["seats_total"],
+          })
+          assert money(offer["entry_price"]) in html
+          assert money(offer["studio_price_month"]) in html
+          assert str(offer["seats_total"]) in html
+          assert "&lt;script&gt;" in format_terms({
+              "entry_price_text": "<script>",
+              "studio_price_text": "1 ₽",
+              "seats_total": 1,
+          })
+          PY
 
       - name: Set up Node for frontend build
         if: steps.pick.outputs.frontend_changed == '1'
