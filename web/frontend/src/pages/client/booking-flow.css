@@ -458,7 +458,7 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
   .bf-device { max-width: none; height: 100%; border-radius: 0; box-shadow: none; }
   .bf-topbar { height: 64px; flex-basis: 64px; gap: 14px; padding: 0 24px; border-bottom: 1px solid var(--bf-line); }
   .bf-topnav { display: flex; align-items: center; gap: 2px; }
-  .bf-topnav-link { display: inline-flex; align-items: center; min-height: 40px; padding: 0 9px; border-radius: 20px; color: #4d6178; font-size: 13px; text-decoration: none; }
+  .bf-topnav-link { display: inline-flex; align-items: center; min-height: 40px; padding: 0 9px; border-radius: 20px; color: var(--bf-muted); font-size: 13px; text-decoration: none; }
   .bf-topnav-link.active { color: var(--bf-blue-deep); font-weight: 550; background: var(--bf-tint); }
   .bf-tabbar { display: none; }
   .bf-screen--home .bf-inner { padding: 28px 28px 40px; }
@@ -481,8 +481,8 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
   .bf-device { max-width: none; height: 100%; border-radius: 0; box-shadow: none; }
   .bf-topbar { height: 68px; flex-basis: 68px; gap: 28px; padding: 0 max(32px, calc((100% - 1180px) / 2)); border-bottom: 1px solid var(--bf-line); }
   .bf-topnav { display: flex; align-items: center; gap: 4px; }
-  .bf-topnav-link { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 20px; color: #4d6178; font-size: 15px; text-decoration: none; transition: background 0.15s, color 0.15s; }
-  .bf-topnav-link:hover { background: #f3f7fc; color: var(--bf-ink); }
+  .bf-topnav-link { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 20px; color: var(--bf-muted); font-size: 15px; text-decoration: none; transition: background 0.15s, color 0.15s; }
+  .bf-topnav-link:hover { background: var(--bf-tint); color: var(--bf-ink); }
   .bf-topnav-link.active { color: var(--bf-blue-deep); font-weight: 550; background: var(--bf-tint); }
   .bf-top-link { font-size: 14px; padding: 0 14px; }
   .bf-tabbar { display: none; }
