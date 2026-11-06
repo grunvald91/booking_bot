@@ -20,6 +20,7 @@ on:
       - 'webapp/server.py'
       - 'webapp/templates/**'
       - 'webapp/static/**'
+      - 'bot/**'
       - 'webapp/niches/**'
       - 'web/frontend/**'
   workflow_dispatch:
@@ -84,19 +85,19 @@ jobs:
           if [ -n "${MANUAL// /}" ]; then
             CHANGED=$(printf '%s\n' $MANUAL)
           elif [ -n "$BEFORE" ]; then
-            CHANGED=$(git diff --name-only --diff-filter=ACMR "$BEFORE" "$AFTER" -- 'webapp/**' 'web/frontend/**' || true)
+            CHANGED=$(git diff --name-only --diff-filter=ACMR "$BEFORE" "$AFTER" -- 'webapp/**' 'web/frontend/**' 'bot/**' || true)
           else
-            CHANGED=$(git ls-files 'webapp/**' 'web/frontend/**')
+            CHANGED=$(git ls-files 'webapp/**' 'web/frontend/**' 'bot/**')
           fi
 
-          WEBAPP_FILES=$(printf '%s\n' "$CHANGED" | grep '^webapp/' || true)
+          WEBAPP_FILES=$(printf '%s\n' "$CHANGED" | grep -E '^(webapp/|bot/)' || true)
           if printf '%s\n' "$CHANGED" | grep -q '^web/frontend/'; then
             FRONTEND_CHANGED=1
           else
             FRONTEND_CHANGED=0
           fi
 
-          echo "Webapp files to upload:"
+          echo "Webapp/bot files to upload:"
           printf '%s\n' "$WEBAPP_FILES"
           echo "Frontend changed: $FRONTEND_CHANGED"
           {
