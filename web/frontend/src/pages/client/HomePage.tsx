@@ -151,6 +151,7 @@ export function HomePage() {
               <a href="tel:+79023911399">8 902 391-13-99</a>
               <a href="https://t.me/servgo_smena_bot" target="_blank" rel="noopener noreferrer">Смены и зарплата — @servgo_smena_bot</a>
             </div>
+            <p className="bf-foot-legal">Исполнитель: Кунавина Анна Александровна · ИНН 745214444705</p>
           </footer>
         </div>
       </section>
