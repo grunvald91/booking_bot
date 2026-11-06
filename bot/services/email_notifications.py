@@ -44,12 +44,18 @@ async def send_email(
     subject: str,
     text_body: str,
     html_body: str | None = None,
+    from_override: str | None = None,
 ) -> bool:
     """Send one message through configured SMTP without blocking the event loop."""
     host = os.getenv("SMTP_HOST")
     from_email = os.getenv("SMTP_FROM_EMAIL")
     if not host or not from_email or not to_email:
         return False
+    # Only the dedicated MNEBYVPN authentication mail is allowed to override the
+    # global ServGo sender. Do not accept a caller-controlled From address.
+    if from_override is not None and from_override != "mnebyvpn@servgo.ru":
+        return False
+    from_email = from_override or from_email
 
     port = int(os.getenv("SMTP_PORT", "587"))
     username = os.getenv("SMTP_USERNAME")
