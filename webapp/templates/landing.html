@@ -83,7 +83,7 @@
             <nav class="nav" aria-label="Главная навигация">
                 <a href="#how">Как это работает</a>
                 <a href="#calculator">Ваша база</a>
-                <a href="#offer">Условия</a>
+                <a href="#offer">Цены</a>
                 <a href="/roadmap">Дорожная карта</a>
                 <a href="https://servgo.ru/admin">Войти</a>
             </nav>
@@ -232,11 +232,19 @@
                         {% endif %}
                         <button class="btn" type="button" data-open-connect-form data-connect-intent="free_seat">Занять бесплатное место</button>
                     </div>
-                    <div class="price-card" aria-label="Условия ServGo">
-                        <span class="label">Студия маркетинга</span>
-                        <strong>{{ offer.studio_price_text }}</strong>
-                        <span class="period">в месяц</span>
-                        {% if niches | selectattr('studio_free_left') | list %}<p>Первому бизнесу в каждой нише студия бесплатна на ближайшее время. Остальным — по этой цене.</p>{% endif %}
+                    <div class="price-card" aria-label="Цены ServGo">
+                        <span class="label">Стоимость услуг</span>
+                        <div class="price-tier">
+                            <span class="price-title">Подключение бизнеса</span>
+                            <strong>{{ offer.entry_price_text }}</strong>
+                            <span class="period">разово, после окончания бесплатных мест в нише</span>
+                        </div>
+                        <div class="price-tier">
+                            <span class="price-title">Студия маркетинга</span>
+                            <strong>{{ offer.studio_price_text }}</strong>
+                            <span class="period">в месяц</span>
+                            {% if niches | selectattr('studio_free_left') | list %}<p>Первому бизнесу в каждой нише студия бесплатна на ближайшее время. Остальным — по указанной цене.</p>{% endif %}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -311,7 +319,7 @@
                 <a href="mailto:grunvaldlab@gmail.com">grunvaldlab@gmail.com</a>
                 <a href="tel:+79023911399">8 902 391-13-99</a>
             </div>
-            <p class="note">ServGo · онлайн-запись и бронирование для сервисного бизнеса</p>
+            <p class="note">ServGo · онлайн-запись и бронирование для сервисного бизнеса<br><span class="legal-requisites">Исполнитель: Кунавина Анна Александровна · ИНН 745214444705</span></p>
         </div>
     </footer>
 
