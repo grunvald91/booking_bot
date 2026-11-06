@@ -27,7 +27,7 @@ router = APIRouter()
 _FROM = "mnebyvpn@servgo.ru"
 _NONCE = re.compile(r"^[A-Za-z0-9_-]{24,64}$")
 _SIGNATURE = re.compile(r"^[a-f0-9]{64}$")
-_CODE = re.compile(r"^\\d{6}$")
+_CODE = re.compile(r"^\d{6}$")
 
 
 def configured() -> bool:
@@ -58,6 +58,8 @@ async def send_mnebyvpn_code(request: Request, db: AsyncSession = Depends(get_db
         data = json.loads(raw)
         if not isinstance(data, dict) or set(data) != {"email", "code"}:
             raise ValueError("Bad payload")
+        if not isinstance(data["email"], str):
+            raise ValueError("Invalid recipient")
         email = normalize_optional_email(data["email"])
         code = data["code"]
         if (not email or email != str(data["email"]).lower().strip()
@@ -82,9 +84,9 @@ async def send_mnebyvpn_code(request: Request, db: AsyncSession = Depends(get_db
         to_email=email,
         subject="MNEBYVPN — код для входа",
         text_body=(
-            f"Код для входа в MNEBYVPN: {code}\\n"
-            "Код действует 10 минут. Никому его не сообщайте.\\n"
-            "Если вы не запрашивали вход, просто игнорируйте письмо.\\n"
+            f"Код для входа в MNEBYVPN: {code}\n"
+            "Код действует 10 минут. Никому его не сообщайте.\n"
+            "Если вы не запрашивали вход, просто игнорируйте письмо.\n"
         ),
         from_override=_FROM,
     )
