@@ -20,13 +20,14 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
+from fastapi.responses import JSONResponse
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime_utils import utc_now
 from database.account_link import AccountLinkError, merge_yandex_account, phone_spellings, phones_match
-from database.models import EmailIdentity, User, YandexIdentity, YandexTicket
+from database.models import EmailIdentity, User, YandexIdentity, YandexTicket, YandexExternalTicket
 from email_utils import normalize_optional_email
 from .. import deps
 from ..database import get_db
@@ -49,6 +50,10 @@ FLOW_MINUTES = 10
 CODE_MINUTES = 5
 MAX_ATTEMPTS = 5
 MAX_SENDS = 3
+VPN_RETURN = "https://mnebyvpn.site/auth/yandex/callback"
+VPN_STATE_RE = re.compile(r"^[A-Za-z0-9_-]{32}$")
+VPN_CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
+VPN_VERIFIER_RE = re.compile(r"^[A-Za-z0-9_-]{43,128}$")
 RESEND_SECONDS = 60
 
 
@@ -102,10 +107,10 @@ def _authorize_url(state: str, verifier: str) -> str:
     })
 
 
-def _start_flow(response: Response, link_user_id: Optional[int]) -> str:
+def _start_flow(response: Response, link_user_id: Optional[int], external: Optional[dict] = None) -> str:
     state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(48)
     response.set_cookie(
-        COOKIE, _seal({"s": state, "v": verifier, "u": link_user_id, "exp": int(utc_now().timestamp()) + FLOW_MINUTES * 60}),
+        COOKIE, _seal({"s": state, "v": verifier, "u": link_user_id, "external": external, "exp": int(utc_now().timestamp()) + FLOW_MINUTES * 60}),
         max_age=FLOW_MINUTES * 60, httponly=True, secure=True, samesite="lax", path=COOKIE_PATH,
     )
     return _authorize_url(state, verifier)
@@ -172,6 +177,51 @@ async def start():
     return redirect
 
 
+@router.get("/yandex/mnebyvpn/start")
+async def start_mnebyvpn(state: str = "", code_challenge: str = ""):
+    """Existing ServGo Yandex OAuth app; fixed external callback, never user-supplied."""
+    if not configured():
+        raise HTTPException(503, "Yandex ID login is not configured")
+    if not VPN_STATE_RE.fullmatch(state) or not VPN_CHALLENGE_RE.fullmatch(code_challenge):
+        raise HTTPException(400, "Invalid authorization challenge")
+    redirect = RedirectResponse("/", status_code=302)
+    redirect.headers["Location"] = _start_flow(
+        redirect, None, {"state": state, "challenge": code_challenge}
+    )
+    redirect.headers["Cache-Control"] = "no-store"
+    redirect.headers["Referrer-Policy"] = "no-referrer"
+    return redirect
+
+
+class MnebyVpnExchange(BaseModel):
+    code: str = Field(min_length=43, max_length=43, pattern=r"^[A-Za-z0-9_-]{43}$")
+    code_verifier: str = Field(min_length=43, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+@router.post("/yandex/mnebyvpn/exchange")
+async def exchange_mnebyvpn(body: MnebyVpnExchange, db: AsyncSession = Depends(get_db)):
+    """Atomic, single-use PKCE exchange. Never return an access token or ServGo session."""
+    if not VPN_VERIFIER_RE.fullmatch(body.code_verifier):
+        raise HTTPException(400, "Invalid exchange verifier")
+    digest = _ticket_hash(body.code)
+    ticket = await db.scalar(
+        select(YandexExternalTicket).where(YandexExternalTicket.id == digest).with_for_update()
+    )
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(body.code_verifier.encode("ascii")).digest()
+    ).decode("ascii").rstrip("=")
+    if (ticket is None or ticket.consumed or ticket.expires_at <= utc_now()
+            or not hmac.compare_digest(ticket.pkce_challenge, challenge)):
+        raise HTTPException(400, "Invalid or expired exchange")
+    if not re.fullmatch(r"[0-9]{1,32}", ticket.yandex_id):
+        raise HTTPException(400, "Invalid verified subject")
+    ticket.consumed = True
+    await db.commit()
+    return JSONResponse({"yandexId": ticket.yandex_id}, headers={
+        "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+    })
+
+
 @router.post("/yandex/link/start")
 async def link_start(response: Response, user: User = Depends(deps.get_current_user)):
     if not configured():
@@ -207,6 +257,26 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         # Never log the exception text: it can carry request details.
         logger.warning("yandex_login_failed: %s", type(exc).__name__)
         return _back("/login?yandex=failed")
+    external = flow.get("external")
+    if external is not None:
+        if (not isinstance(external, dict)
+            or not VPN_STATE_RE.fullmatch(str(external.get("state", "")))
+            or not VPN_CHALLENGE_RE.fullmatch(str(external.get("challenge", "")))
+            or not re.fullmatch(r"[0-9]{1,32}", str(profile.get("id", "")))):
+            return _back("/login?yandex=failed")
+        await db.execute(delete(YandexExternalTicket).where(
+            YandexExternalTicket.expires_at < utc_now()
+        ))
+        ticket = secrets.token_urlsafe(32)
+        db.add(YandexExternalTicket(
+            id=_ticket_hash(ticket), yandex_id=str(profile["id"]),
+            pkce_challenge=external["challenge"],
+            expires_at=utc_now() + timedelta(minutes=5),
+            consumed=False,
+        ))
+        await db.commit()
+        url = VPN_RETURN + "?" + urlencode({"code": ticket, "state": external["state"]})
+        return _back(url)
     await db.execute(delete(YandexTicket).where(YandexTicket.expires_at < utc_now()))
     ticket = secrets.token_urlsafe(32)
     db.add(YandexTicket(id=_ticket_hash(ticket), payload=json.dumps(profile, ensure_ascii=False),
