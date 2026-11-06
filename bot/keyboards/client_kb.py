@@ -47,7 +47,7 @@ def get_main_menu_keyboard(show_owner_button: bool = False, show_employee_button
     buttons = [
         [KeyboardButton(text="📅 Записаться"), KeyboardButton(text="🔄 Повторить запись")],
         [KeyboardButton(text="📋 Мои записи"), KeyboardButton(text="🎫 Мои абонементы")],
-        [KeyboardButton(text="ℹ️ Помощь")],
+        [KeyboardButton(text="ℹ️ Помощь"), KeyboardButton(text="💳 Условия подключения")],
     ]
 
     # Добавляем кнопки переключения режима
