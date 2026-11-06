@@ -131,6 +131,15 @@ class YandexTicket(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     consumed: Mapped[bool] = mapped_column(Boolean, default=False)
 
+class YandexExternalTicket(Base):
+    """One-use PKCE-bound ticket for MNEBYVPN; no shared OAuth secret leaves ServGo."""
+    __tablename__ = "yandex_external_tickets"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    yandex_id: Mapped[str] = mapped_column(String(32))
+    pkce_challenge: Mapped[str] = mapped_column(String(43))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False)
+
 
 class EmailChallenge(Base):
     __tablename__ = "email_challenges"
