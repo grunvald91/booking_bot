@@ -148,7 +148,18 @@ async def move_account_data(db, source, target):
     """Move businesses, bookings, subscriptions and chats from source to target and record the merge.
 
     Both users must already be locked by the caller. Source stays as a redirect to target."""
+    # Any merge path (Telegram/email/Yandex/VK) must carry an existing VK ID
+    # binding along with business ownership. Never silently overwrite another ID.
+    from database.models import VkIdentity
+    vk_source = await db.scalar(select(VkIdentity).where(
+        VkIdentity.user_id == source.id).with_for_update())
+    vk_target = await db.scalar(select(VkIdentity).where(
+        VkIdentity.user_id == target.id).with_for_update())
+    if vk_source is not None and vk_target is not None:
+        raise AccountLinkError("У обоих аккаунтов уже разные VK ID. Объединение должен проверить оператор")
     await move_crm_contacts(db, source, target)
+    if vk_source is not None:
+        vk_source.user_id = target.id
     # Preserve an existing paid/manual-owner entitlement; don't guess between two paid plans.
     if source.subscription_status != "none" or source.is_manual_owner:
         if target.subscription_status != "none" or target.is_manual_owner:
