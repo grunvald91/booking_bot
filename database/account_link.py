@@ -214,3 +214,36 @@ async def merge_yandex_account(db, source_user_id, target_user_id):
                                                     YandexTicket.code_user_id == source.id)).values(consumed=True))
     await db.flush()
     return target
+
+
+
+async def merge_vk_account(db, source_user_id: int, target_user_id: int):
+    """Explicitly attach a previously VK-only account after proving both logins.
+
+    Never merge an account with Telegram, email-password, or Yandex sign-in;
+    those require independent review and must remain accessible.
+    """
+    from database.models import VkIdentity, VkLoginTicket
+    users = list((await db.execute(select(User).where(
+        User.id.in_([source_user_id, target_user_id])
+    ).order_by(User.id).with_for_update().execution_options(populate_existing=True))).scalars())
+    by_id = {u.id: u for u in users}
+    source, target = by_id.get(source_user_id), by_id.get(target_user_id)
+    if source is None or target is None or source.id == target.id or source.telegram_id > 0:
+        raise AccountLinkError("Объединение этих аккаунтов недоступно")
+    vk = await db.scalar(select(VkIdentity).where(VkIdentity.user_id == source.id).with_for_update())
+    if vk is None:
+        raise AccountLinkError("Исходный аккаунт не создан через VK ID")
+    if await db.scalar(select(EmailIdentity.user_id).where(EmailIdentity.user_id == source.id)):
+        raise AccountLinkError("В другом аккаунте есть вход по почте. Свяжитесь с поддержкой")
+    if await db.scalar(select(YandexIdentity.user_id).where(YandexIdentity.user_id == source.id)):
+        raise AccountLinkError("В другом аккаунте есть Яндекс ID. Свяжитесь с поддержкой")
+    if await db.scalar(select(VkIdentity.user_id).where(VkIdentity.user_id == target.id)):
+        raise AccountLinkError("У текущего аккаунта уже есть другой VK ID")
+    if await db.get(UserAccountMerge, source.id) or await db.get(UserAccountMerge, target.id):
+        raise AccountLinkError("Аккаунт уже объединён. Войдите заново")
+    await move_account_data(db, source, target)
+    vk.user_id = target.id
+    await db.execute(update(VkLoginTicket).where(VkLoginTicket.link_user_id == source.id).values(consumed=True))
+    await db.flush()
+    return target
