@@ -1,0 +1,37 @@
+name: Verify MNEBYVPN HTTPS from independent ServGo server
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/mnebyvpn-external-https-multi-origin.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install approved SSH client
+        run: python -m pip install -q 'paramiko==3.5.1'
+      - name: Probe website and Telegram webhook from ServGo 155 (read-only)
+        run: |
+          python - <<'PY'
+          from scripts.deploy_business_creation_and_reminders import connect,run
+          client=connect(__import__('os').environ['SERVGO_PASSWORD'])
+          try:
+              for label,url in [
+                ('site','https://mnebyvpn.site/'),
+                ('telegram_webhook','https://cdn.servgo.ru:8443/mnebyvpn-telegram/webhook'),
+              ]:
+                  command="curl --noproxy '*' -sS -o /dev/null -w '%{http_code} ssl=%{ssl_verify_result}' --connect-timeout 7 --max-time 12 "+url
+                  try: result=run(client,command,18).strip()
+                  except Exception: result='timeout_or_blocked'
+                  print(label+'_from_servgo155='+result[:80])
+              print('read_only=true')
+          finally:client.close()
+          PY
