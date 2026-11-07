@@ -77,6 +77,39 @@ def main(candidate):
     assert not monitor.healthy_http_code("servgo.ru", "000", False)
     assert "длительность" in queue["down"][0][1] or "длится" in queue["down"][0][1]
     json.dumps(state, ensure_ascii=False)
+
+    # End-to-end monitor delivery simulation with isolated state and fake sender.
+    import asyncio
+    import tempfile
+    import contextlib
+    import io
+    from pathlib import Path
+    events = iter([
+        {"proxy:telegram-egress": (False, "curl exit 28: timeout")},
+        {"proxy:telegram-egress": (False, "curl exit 28: timeout")},
+        {"proxy:telegram-egress": (True, "Telegram через SOCKS5 HTTP 200")},
+        {"proxy:telegram-egress": (True, "Telegram через SOCKS5 HTTP 200")},
+    ])
+    sent = []
+    async def fake_sender(value):
+        sent.append(value)
+        return True
+    original_path = monitor.STATE_PATH
+    with tempfile.TemporaryDirectory() as td:
+        monitor.STATE_PATH = Path(td) / "monitor-state.json"
+        with patch.object(monitor, "collect_checks", side_effect=lambda: next(events)), \
+             patch.object(monitor, "send_message", side_effect=fake_sender), \
+             patch.object(monitor.time, "time", side_effect=[1000, 1120, 1240, 1360]), \
+             contextlib.redirect_stdout(io.StringIO()):
+            for _ in range(4):
+                assert asyncio.run(monitor.run())
+        assert len(sent) == 2
+        assert "curl exit 28" in sent[0] and "первый сбой" in sent[0]
+        assert "4 мин" in sent[1] and "последняя ошибка" in sent[1]
+        saved = json.loads(monitor.STATE_PATH.read_text())
+        assert saved["checks"]["proxy:telegram-egress"]["pending"] == ""
+    monitor.STATE_PATH = original_path
+
     print("PASS: detailed curl exit errors, URL redaction, down/recovery timestamps, "
           "duration, delivery retry, deduplication, legacy state compatibility.")
     print("NETWORK_CALLS=0 TELEGRAM_MESSAGES=0 STATE_WRITES=0")
