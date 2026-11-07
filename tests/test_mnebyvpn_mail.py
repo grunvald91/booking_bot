@@ -5,6 +5,7 @@ import json
 import os
 import time
 import unittest
+from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -74,6 +75,18 @@ class MailRelayTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("123456", self.sent[0]["text_body"])
         self.assertEqual(self.client.post(url, content=raw, headers=headers).status_code, 409)
         self.assertEqual(len(self.sent), 1)
+
+    async def test_nonce_cleanup_failure_does_not_block_otp_delivery(self):
+        raw, headers = self.sign(
+            {"email": "test@example.org", "code": "543210"}, nonce="b" * 32
+        )
+        with patch.object(relay, "delete", side_effect=RuntimeError("cleanup down")):
+            result = self.client.post(
+                "/api/auth/mnebyvpn/email-code", content=raw, headers=headers
+            )
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.sent[0]["from_override"], "mnebyvpn@servgo.ru")
 
     async def test_wrong_signature_expired_and_invalid_payload(self):
         url = "/api/auth/mnebyvpn/email-code"
