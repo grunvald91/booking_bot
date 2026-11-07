@@ -60,7 +60,7 @@ async def send_email(
     port = int(os.getenv("SMTP_PORT", "587"))
     username = os.getenv("SMTP_USERNAME")
     password = os.getenv("SMTP_PASSWORD")
-    from_name = os.getenv("SMTP_FROM_NAME", "ServGo")
+    from_name = "MNEBYVPN" if from_override == "mnebyvpn@servgo.ru" else os.getenv("SMTP_FROM_NAME", "ServGo")
     use_ssl = _truthy(os.getenv("SMTP_USE_SSL"), False)
     # Почтовый сервер на этой же машине (127.0.0.1): трафик не покидает сервер, а сертификат выписан
     # на имя (mail.servgo.ru), поэтому проверка при STARTTLS по IP всегда падала с «IP address mismatch».
@@ -103,7 +103,11 @@ async def send_email(
         await asyncio.to_thread(_send_sync)
         return True
     except Exception as exc:
-        logger.warning("Email delivery to %s failed: %s", to_email, exc)
+        if from_override:
+            # Authentication mail logs must not expose personal addresses.
+            logger.warning("MNEBYVPN OTP delivery failed: %s", type(exc).__name__)
+        else:
+            logger.warning("Email delivery to %s failed: %s", to_email, exc)
         return False
 
 
