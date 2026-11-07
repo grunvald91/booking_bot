@@ -64,6 +64,15 @@ def backend_equivalent(path: str, current: bytes | None, candidate: bytes) -> bo
     """
     if current == candidate:
         return True
+    # VK ORM classes were inserted surgically on production. Allow only
+    # semantically identical ORM source: every Python AST node must match.
+    # This accepts comments/whitespace, never changes in columns or imports.
+    if path == "database/models.py" and current is not None:
+        try:
+            canonical = lambda data: ast.dump(ast.parse(data.decode("utf-8")), include_attributes=False)
+            return canonical(current) == canonical(candidate)
+        except (SyntaxError, UnicodeError, ValueError):
+            return False
     if path != STUDIO_SSO or current is None:
         return False
     try:

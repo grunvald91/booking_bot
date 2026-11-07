@@ -107,6 +107,22 @@ def main():
             "print('STUDIO_SSO_SECRET_IN_PROCESS='+str('STUDIO_SSO_SECRET' in keys).lower())"
         )
         print(run(client, "python3 -c " + shlex.quote(process_check), 30))
+        import ast
+        local_models = ast.parse((repo / "database/models.py").read_text("utf-8"))
+        with sftp.open(ROOT + "/database/models.py", "rb") as handle:
+            live_models = ast.parse(handle.read().decode("utf-8"))
+        canonical = lambda node: ast.dump(node, include_attributes=False)
+        print("MODELS_AST_EQUAL=" + str(canonical(local_models) == canonical(live_models)).lower())
+        top_key = lambda node, index: (
+            type(node).__name__ + ":" +
+            str(getattr(node, "name", getattr(node, "id", index))))
+        source_nodes = {top_key(n, i): canonical(n) for i, n in enumerate(local_models.body)}
+        live_nodes = {top_key(n, i): canonical(n) for i, n in enumerate(live_models.body)}
+        differences = sorted(k for k in source_nodes.keys() | live_nodes.keys()
+                             if source_nodes.get(k) != live_nodes.get(k))
+        print("MODELS_AST_DIFF_NODES=" + json.dumps(differences))
+        print("MODELS_AST_ORDER_EQUAL=" + str(
+            list(source_nodes.keys()) == list(live_nodes.keys())).lower())
         print("PRODUCTION_MUTATED=false")
     finally:
         sftp.close()
