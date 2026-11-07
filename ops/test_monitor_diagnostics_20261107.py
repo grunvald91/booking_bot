@@ -97,8 +97,11 @@ def main(candidate):
     original_path = monitor.STATE_PATH
     with tempfile.TemporaryDirectory() as td:
         monitor.STATE_PATH = Path(td) / "monitor-state.json"
+        def fake_save(snapshot):
+            monitor.STATE_PATH.write_text(json.dumps(snapshot, ensure_ascii=False))
         with patch.object(monitor, "collect_checks", side_effect=lambda: next(events)), \
              patch.object(monitor, "send_message", side_effect=fake_sender), \
+             patch.object(monitor, "save_state", side_effect=fake_save), \
              patch.object(monitor.time, "time", side_effect=[1000, 1120, 1240, 1360]), \
              contextlib.redirect_stdout(io.StringIO()):
             for _ in range(4):
