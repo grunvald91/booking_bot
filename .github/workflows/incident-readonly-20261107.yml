@@ -110,5 +110,25 @@ jobs:
                       count+=1
                       if count>=65: break
           PY
+          heading 'CURRENT FAILING CHECK LABELS ONLY'
+          python3 - <<'PY'
+          import json,re
+          state=json.load(open('/var/lib/servgo-monitor/state.json',encoding='utf8'))
+          print('state_sections',list(state))
+          for section,entries in state.items():
+              if not isinstance(entries,dict):
+                  continue
+              match=0
+              for key,entry in entries.items():
+                  if not isinstance(entry,dict):
+                      continue
+                  ok=entry.get('healthy',entry.get('ok'))
+                  if ok is False:
+                      safe=re.sub('[^a-zA-Z0-9_.:-]','_',str(key))[:80]
+                      print('failing_check',safe,'section',section)
+                      match+=1
+              if match:
+                  print('failed_count',match)
+          PY
           heading 'AUDIT COMPLETE - NO SERVER CHANGES'
           REMOTE
