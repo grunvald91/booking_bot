@@ -41,11 +41,12 @@ jobs:
               return proxy_ok, proxy_detail
           def update_states(item, now):
               if True:
-                  if item.get("alarm"):
-                      if item["good"] >= RECOVER_THRESHOLD:
-                          item["alarm"] = False
-                  info = (f"Восстановлено: {item['detail']}; "
-                          f"первый успешный замер")
+                  if True:
+                      if item.get("alarm"):
+                          if item["good"] >= RECOVER_THRESHOLD:
+                              item["alarm"] = False
+                      info = (f"Восстановлено: {item['detail']}; "
+                              f"первый успешный замер")
                   return info
           '''
           candidate=patch(source)
