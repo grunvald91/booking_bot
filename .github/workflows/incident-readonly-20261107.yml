@@ -82,28 +82,11 @@ jobs:
             sed -E 's/request: "[^"]*"/request: [REDACTED]/g; s/host: "[^"]*"/host: [REDACTED]/g; s/(token|secret|password)=[^ ,]+/\1=REDACTED/g' | tail -65
           heading 'MONITOR SCRIPT LOCATIONS'
           find /opt /usr/local -maxdepth 6 -type f \( -iname '*health*monitor*.py' -o -iname '*health*monitor*.sh' \) -print 2>/dev/null | head -20
-          heading 'MONITOR SERVICE SOURCE AND STATE PATH DISCOVERY'
-          python3 - <<'PY'
-          import subprocess,re,pathlib
-          sp=subprocess.run(['systemctl','show','servgo-health-monitor.service','-p','FragmentPath','-p','ExecStart','-p','WorkingDirectory'],capture_output=True,text=True).stdout
-          for k in ['FragmentPath','WorkingDirectory']:
-              m=re.search(r'(?m)^'+k+r'=(.*)
-          REMOTE
-,sp)
-              if m: print(k+'='+m.group(1)[:160])
-          scripts=list(dict.fromkeys(re.findall(r'/[A-Za-z0-9_./-]+\.(?:py|sh)',sp)))
-          print('script_count=',len(scripts))
-          for fn in scripts[:5]:
-              print('script=',fn)
-              p=pathlib.Path(fn)
-              if not p.is_file(): continue
-              src=p.read_text(errors='ignore')[:200000]
-              paths=list(dict.fromkeys(re.findall(r'/(?:var/lib|opt|run|tmp)/[A-Za-z0-9_./-]+\.(?:db|sqlite3?|jsonl?|log)',src)))
-              for v in paths[:20]: print('embedded_state_candidate=',v)
-              for name in ['STATE_PATH','STATE_FILE','INCIDENTS_PATH','INCIDENTS_FILE','CHECKS_PATH']:
-                  print(name+'_mentioned=',bool(re.search(r'\b'+name+r'\b',src)))
-          PY
-          heading 'STATE AND INCIDENT FILE NAMES (NO CONTENTS)'
-          find /var/lib /opt /run -maxdepth 5 -type f \( -iname '*health*state*' -o -iname '*health*incident*' -o -iname '*health*monitor*' -o -iname '*servgo*health*' \) -printf '%p\n' 2>/dev/null | head -45
+          heading 'MONITOR SERVICE SOURCE FILES'
+          systemctl show servgo-health-monitor.service -p FragmentPath -p WorkingDirectory --no-pager
+          systemctl show servgo-health-monitor.service -p ExecStart --value |
+            grep -oE '/[a-zA-Z0-9_./-]+[.](py|sh)' | head -5
+          heading 'MONITOR STATE AND INCIDENT FILE NAMES (NO CONTENT)'
+          find /var/lib /opt /run -maxdepth 5 -type f -iname '*health*' -print 2>/dev/null | head -60
           heading 'AUDIT COMPLETE - NO SERVER CHANGES'
           REMOTE
