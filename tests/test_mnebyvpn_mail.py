@@ -13,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 from database.models import Base
 from web.api.database import get_db
 from web.api.routes import mnebyvpn_mail as relay
+from bot.services import email_notifications as smtp_module
 
 
 class MailRelayTest(unittest.IsolatedAsyncioTestCase):
@@ -87,6 +88,21 @@ class MailRelayTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status_code, 200, result.text)
         self.assertEqual(len(self.sent), 1)
         self.assertEqual(self.sent[0]["from_override"], "mnebyvpn@servgo.ru")
+
+    async def test_smtp_rejected_recipient_cannot_be_reported_as_delivered(self):
+        class RejectingSMTP:
+            def __init__(self, *args, **kwargs): pass
+            def ehlo(self): pass
+            def login(self, *args): pass
+            def send_message(self, message):
+                return {message["To"]: (550, b"Address rejected")}
+            def quit(self): pass
+        with patch.dict(os.environ, {"SMTP_USERNAME": "", "SMTP_STARTTLS": "no"}), \
+             patch.object(smtp_module.smtplib, "SMTP", RejectingSMTP):
+            success = await smtp_module.send_email(
+                to_email="test@example.org", subject="MNEBYVPN login",
+                text_body="000001", from_override="mnebyvpn@servgo.ru")
+        self.assertFalse(success)
 
     async def test_oversized_request_rejected_without_sending_email(self):
         raw, headers = self.sign({"email": "test@example.org", "code": "123456"})
