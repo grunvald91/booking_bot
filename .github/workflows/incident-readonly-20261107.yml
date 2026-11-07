@@ -166,5 +166,20 @@ jobs:
                   safe=re.sub('[^a-zA-Z0-9_.:-]','_',str(name))[:80]
                   print('check_label',safe,'last_sent',last if isinstance(last,(float,int)) else str(last)[:30],'bad',item.get('bad'),'good',item.get('good'),'notified',item.get('notified'),'alarm',item.get('alarm'),'pending',bool(item.get('pending')))
           PY
+          heading 'CURRENT MONITOR STATE AFTER FAILED TEST (READ ONLY)'
+          python3 - <<'PY'
+          import json, pathlib, time
+          p=pathlib.Path('/var/lib/servgo-monitor/state.json')
+          try:
+              state=json.loads(p.read_text())
+              checks=state.get('checks',{})
+              print('check_count',len(checks))
+              print('age_seconds',round(time.time()-p.stat().st_mtime))
+              print('open_incidents',sum(bool(x.get('alarm')) for x in checks.values()))
+              print('failed_check_names',[k for k,v in checks.items() if v.get('alarm')])
+              print('telegram_proxy_state', {k:v for k,v in checks.get('proxy:telegram-egress',{}).items() if k in ('bad','good','alarm','notified','last_sent')})
+          except Exception as exc:
+              print('state_unreadable',type(exc).__name__)
+          PY
           heading 'AUDIT COMPLETE - NO SERVER CHANGES'
           REMOTE
