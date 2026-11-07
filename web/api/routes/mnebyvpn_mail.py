@@ -39,8 +39,17 @@ def configured() -> bool:
 async def send_mnebyvpn_code(request: Request, db: AsyncSession = Depends(get_db)):
     if not configured():
         raise HTTPException(503, "MNEBYVPN mail service is not configured")
-    raw = await request.body()
-    if len(raw) > 512 or not raw:
+    # Stream with a hard byte limit: request.body() would first buffer an
+    # arbitrarily large unauthenticated payload in memory.
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > 512:
+            raise HTTPException(413, "Request too large")
+        chunks.append(chunk)
+    raw = b"".join(chunks)
+    if not raw:
         raise HTTPException(400, "Invalid request")
     timestamp = request.headers.get("x-mnebyvpn-timestamp", "")
     nonce = request.headers.get("x-mnebyvpn-nonce", "")
