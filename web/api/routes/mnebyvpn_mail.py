@@ -75,11 +75,15 @@ async def send_mnebyvpn_code(request: Request, db: AsyncSession = Depends(get_db
     except IntegrityError:
         await db.rollback()
         raise HTTPException(409, "Duplicate request") from None
-    # Best-effort cleanup ONLY this dedicated nonce table.
-    await db.execute(delete(MnebyvpnEmailDispatchNonce).where(
-        MnebyvpnEmailDispatchNonce.created_at < utc_now() - timedelta(days=2)
-    ))
-    await db.commit()
+    # Nonce cleanup is maintenance, not a prerequisite to mail delivery.
+    # If the maintenance query fails, a valid signed code must still be sent.
+    try:
+        await db.execute(delete(MnebyvpnEmailDispatchNonce).where(
+            MnebyvpnEmailDispatchNonce.created_at < utc_now() - timedelta(days=2)
+        ))
+        await db.commit()
+    except Exception:
+        await db.rollback()
     delivered = await send_email(
         to_email=email,
         subject="MNEBYVPN — код для входа",
