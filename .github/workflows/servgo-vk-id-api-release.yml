@@ -1,0 +1,33 @@
+name: ServGo VK ID API guarded release
+on:
+  push:
+    branches: [ops/vk-id-guarded-release-20261107, main]
+    paths:
+      - 'scripts/deploy_vk_id_guarded.py'
+      - '.github/workflows/servgo-vk-id-api-release.yml'
+permissions:
+  contents: read
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+jobs:
+  vk-api-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      APPLY: ${{ github.ref == 'refs/heads/main' && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile release operator and reject unfinished code
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/deploy_vk_id_guarded.py
+          python -m py_compile web/api/routes/vk_auth.py database/account_link.py database/models.py
+      - name: Install pinned SSH client
+        run: python -m pip install -q 'paramiko==3.5.1'
+      - name: Deploy reviewed VK patch with backup or dry-run on branch
+        run: python -m scripts.deploy_vk_id_guarded
