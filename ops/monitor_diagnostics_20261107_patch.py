@@ -97,6 +97,8 @@ TRANSITIONS = r'''def update_states(
                     item["recovered_at"] = end
                     start = float(item.get("down_since") or 0)
                     item["outage_seconds"] = max(0, end - start) if start else None
+                    item["closed_start"] = start
+                    item["closed_error"] = item.get("last_error", "не сохранена")
             elif item.get("pending") != "up":
                 # An isolated failed probe did not become a confirmed incident.
                 item["down_since"] = 0
@@ -104,7 +106,10 @@ TRANSITIONS = r'''def update_states(
                 item["start_late"] = False
         else:
             old_bad = int(item.get("bad", 0))
-            if not item.get("down_since"):
+            if old_bad == 0 and not item.get("alarm"):
+                item["down_since"] = now
+                item["start_late"] = False
+            elif not item.get("down_since"):
                 item["down_since"] = now
                 # Older active incident records have no timestamp to migrate.
                 item["start_late"] = bool(item.get("alarm"))
@@ -130,14 +135,14 @@ TRANSITIONS = r'''def update_states(
             pending["down"].append((key, info))
 
         if item.get("pending") == "up" and not item.get("alarm"):
-            start = float(item.get("down_since") or 0)
+            start = float(item.get("closed_start") or item.get("down_since") or 0)
             end = float(item.get("recovered_at") or now)
             seconds = item.get("outage_seconds")
             elapsed = ("~" + _incident_duration(float(seconds))
                        if seconds is not None else "неизвестна")
             legacy = " (отсчёт не раньше обновления)" if item.get("start_late") else ""
             info = (f"Восстановлено: {item['detail']}; "
-                    f"последняя ошибка: {item.get('last_error', 'не сохранена')}; "
+                    f"последняя ошибка: {item.get('closed_error', item.get('last_error', 'не сохранена'))}; "
                     f"длительность по замерам: {elapsed}{legacy}; "
                     f"с {_incident_clock(start)} до {_incident_clock(end)}")
             pending["up"].append((key, info))
