@@ -1,4 +1,5 @@
 name: Deploy ServGo monitor detailed Telegram incident alerts (server 155)
+# Release attempt 2: fixed isolated state writes in offline integration test
 on:
   push:
     branches: ['ops/incident-readonly-20261107']
