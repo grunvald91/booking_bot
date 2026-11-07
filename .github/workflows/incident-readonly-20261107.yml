@@ -63,5 +63,24 @@ jobs:
           heading 'CONTAINER PROCESS STATES'
           docker ps -a --format '{{.Names}} | {{.Status}}' 2>/dev/null |
             grep -Ei 'nginx|proxy|mt|telegram|servgo|vpn|xray|bot|growth' | head -55
+          heading 'ALERT MONITOR EVENTS'
+          journalctl -u servgo-health-monitor --since '2026-11-06 00:00:00 UTC' -o short-iso --no-pager --quiet 2>/dev/null |
+            grep -Ei 'nginx|proxy|telegram|failed|recover|down|up|error|timeout|502|503|504|alert|unavailable|health|warning' |
+            grep -Evi 'token=|secret=|password=|authorization:|bearer ' | tail -80
+          heading 'PROXY 155 SERVICE STATUS'
+          systemctl show elitles-tg-proxy -p LoadState -p ActiveState -p SubState -p NRestarts -p Result -p ExecMainStatus -p ActiveEnterTimestamp -p InactiveEnterTimestamp --no-pager
+          heading 'PROXY 155 SERVICE JOURNAL'
+          journalctl -u elitles-tg-proxy --since '2026-11-06 00:00:00 UTC' -o short-iso --no-pager --quiet 2>/dev/null |
+            grep -Ei 'failed|start|stop|error|restart|timeout|kill|signal|exit|refused' | tail -60
+          heading 'CONTAINER START AND EXIT INFORMATION'
+          docker inspect --format '{{.Name}} started={{.State.StartedAt}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restart={{.RestartCount}} state={{.State.Status}}' ai-growth-os-api-1 ai-growth-os-telegram-1 ai-growth-os-worker-1 2>/dev/null
+          heading 'RECENT CONTAINER START AND DIE EVENTS'
+          timeout 12 docker events --since '2026-11-07T00:00:00+03:00' --until "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --filter type=container --format '{{.Time}} {{.Action}} {{.Actor.Attributes.name}} exit={{.Actor.Attributes.exitCode}}' 2>/dev/null |
+            grep -Ei 'ai-growth|nginx|proxy|telegram' | tail -55
+          heading 'NGINX UPSTREAM ERRORS - PATH AND HOST REDACTED'
+          grep -Eih 'upstream timed out|connect\(\) failed|upstream prematurely closed|no live upstreams|worker_connections|too many open files|no space left|out of memory' /var/log/nginx/error.log /var/log/nginx/error.log.1 2>/dev/null |
+            sed -E 's/request: "[^"]*"/request: [REDACTED]/g; s/host: "[^"]*"/host: [REDACTED]/g; s/(token|secret|password)=[^ ,]+/\1=REDACTED/g' | tail -65
+          heading 'MONITOR SCRIPT LOCATIONS'
+          find /opt /usr/local -maxdepth 6 -type f \( -iname '*health*monitor*.py' -o -iname '*health*monitor*.sh' \) -print 2>/dev/null | head -20
           heading 'AUDIT COMPLETE - NO SERVER CHANGES'
           REMOTE
