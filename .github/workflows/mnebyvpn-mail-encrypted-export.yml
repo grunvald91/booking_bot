@@ -1,0 +1,59 @@
+name: MNEBYVPN encrypt and publish mail bridge (ciphertext only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/mnebyvpn-mail-encrypted-export.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+jobs:
+  encrypt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install SSH client
+        run: python -m pip install --disable-pip-version-check -q 'paramiko==3.5.1'
+      - name: Retrieve PUBLIC key from reviewed MNEBYVPN infrastructure repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 755 ops
+          curl -fLsS --retry 3 --max-time 25 \
+            https://raw.githubusercontent.com/grunvald91/telegram-proxy-infra/main/ops/mnebyvpn-mail-bridge.pub.pem \
+            -o ops/mnebyvpn-mail-bridge.pub.pem
+          openssl pkey -pubin -in ops/mnebyvpn-mail-bridge.pub.pem -noout
+          echo 'public_key_verified=true'
+      - name: Configure ServGo HMAC secret, create RSA-OAEP ciphertext
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SERVGO_PASSWORD"
+          python -m py_compile scripts/provision_mnebyvpn_mail_secret.py
+          python -m scripts.provision_mnebyvpn_mail_secret
+          test "$(base64 -d ops/mnebyvpn-mail-bridge.enc.b64 | wc -c)" -eq 384
+          echo 'ciphertext_length_verified=true'
+      - name: Publish ONLY encrypted blob, never public/private credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- ops/mnebyvpn-mail-bridge.enc.b64
+          if git diff --cached --quiet; then
+            echo 'encrypted_blob_already_current=true'
+            exit 0
+          fi
+          git commit -m 'Stage RSA-OAEP encrypted MNEBYVPN mail secret (ciphertext only)'
+          git pull --rebase origin main
+          git push origin HEAD:main
+          echo 'encrypted_handoff_ready=true'
