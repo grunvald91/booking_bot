@@ -181,5 +181,31 @@ jobs:
           except Exception as exc:
               print('state_unreadable',type(exc).__name__)
           PY
+          heading 'POST DEPLOY MONITOR VALIDATION'
+          python3 - <<'PY'
+          import json,pathlib,subprocess,datetime,re
+          p=pathlib.Path('/var/lib/servgo-monitor/state.json')
+          state=json.loads(p.read_text()) if p.exists() else {}
+          checks=state.get('checks',{})
+          print('recorded_checks',len(checks))
+          print('active_alerts',[k for k,v in checks.items() if v.get('alarm')])
+          print('telegram_state',{k:v for k,v in checks.get('proxy:telegram-egress',{}).items()
+                                 if k in ('bad','good','alarm','notified','last_sent','down_since','last_error','recovered_at')})
+          script=pathlib.Path('/opt/booking_bot/ops/servgo_monitor.py')
+          print('new_version_installed','ServGo monitor diagnostics v1' in script.read_text())
+          print('backup_count',len(list(script.parent.glob('servgo_monitor.py.backup-monitor-diag-*'))))
+          r=subprocess.run(['python3',str(script),'--check'],capture_output=True,text=True,timeout=65)
+          try:
+              data=json.loads(r.stdout)
+              proxy=data.get('proxy:telegram-egress',{})
+              text=proxy.get('detail','')
+              text=re.sub(r'https?://\S+','[URL]',text)
+              text=re.sub(r'\b\d{7,12}:[A-Za-z0-9_-]{20,}\b','[TOKEN]',text)
+              print('live_checks',len(data),'live_healthy',sum(v.get('ok') is True for v in data.values()))
+              print('proxy_check_ok',proxy.get('ok'))
+              print('proxy_check_error',text[:260])
+          except (ValueError,KeyError):
+              print('read_only_probe_parse_failed',r.returncode)
+          PY
           heading 'AUDIT COMPLETE - NO SERVER CHANGES'
           REMOTE
