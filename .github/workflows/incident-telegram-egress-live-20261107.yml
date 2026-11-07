@@ -1,0 +1,78 @@
+name: Diagnose Telegram SOCKS5 egress flapping (read only)
+on:
+  push:
+    branches: ['ops/incident-readonly-20261107']
+    paths: ['.github/workflows/incident-telegram-egress-live-20261107.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnosis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      TARGET: '155.212.162.47'
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Install SSH client helper
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          sudo apt-get update -qq
+          sudo apt-get install -qq -y sshpass
+      - name: Inspect egress and compare proxy timeouts without modifying runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12 -o ServerAliveInterval=8 -o ServerAliveCountMax=2 "root@$TARGET" 'python3 -' <<'PY'
+          import datetime, json, pathlib, re, subprocess, time, collections
+          def run(args, timeout=20):
+              try:
+                  p=subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+                  return p.returncode, p.stdout, p.stderr
+              except subprocess.TimeoutExpired:
+                  return 124, '', 'subprocess-timeout'
+          def clean(s):
+              s=re.sub(r'https?://\S+','[URL]',s,flags=re.I)
+              s=re.sub(r'\b\d{7,12}:[A-Za-z0-9_-]{20,}\b','[TOKEN]',s)
+              s=re.sub(r'(?i)(token|password|secret|key|auth)\s*[:=]\s*\S+',r'\1=[REDACTED]',s)
+              return re.sub(r'[A-Za-z0-9_./+=-]{65,}','[LONG REDACTED]',s)[:220]
+          print('UTC_NOW', datetime.datetime.now(datetime.timezone.utc).isoformat())
+          print('LOCAL_NOW',datetime.datetime.now().astimezone().isoformat())
+          for command in [
+              ['uptime'],
+              ['free','-m'],
+              ['systemctl','show','elitles-tg-proxy.service','-p','LoadState,ActiveState,SubState,NRestarts,Result,ExecMainStatus,ActiveEnterTimestamp'],
+              ['systemctl','show','servgo-health-monitor.timer','-p','ActiveState,NextElapseUSecRealtime'],
+              ['ss','-lntp'],
+          ]:
+              status, out, err=run(command)
+              if command[0]=='ss':
+                  out='\n'.join(row for row in out.splitlines() if ':1089' in row or ':1088' in row or 'State ' in row)
+              print('COMMAND',command[:2],status,clean(out[:2000]))
+          path=pathlib.Path('/var/lib/servgo-monitor/state.json')
+          if path.is_file():
+              try:
+                  s=json.loads(path.read_text()).get('checks',{}).get('proxy:telegram-egress',{})
+                  safe={k: v for k,v in s.items() if k in ('bad','good','alarm','notified','last_sent','down_since','first_good_at','recovered_at','last_error','detail','pending')}
+                  print('PROXY_MONITOR_STATE',clean(json.dumps(safe,ensure_ascii=False)))
+              except Exception as e: print('STATE_READ_ERROR',type(e).__name__)
+          for unit in ['elitles-tg-proxy','booking-bot-relay89','servgo-health-monitor']:
+              code,out,err=run(['journalctl','-u',unit,'--since','2026-11-07 08:30:00','--no-pager','--quiet','-o','short-iso'],timeout=15)
+              chosen=[line for line in out.splitlines() if re.search(r'fail|error|timeout|closed|reset|disconnect|restart|start|stop|socks|proxy|oom|down|up|healthy|checks',line,re.I)]
+              print('JOURNAL',unit,'lines=',len(out.splitlines()))
+              for line in chosen[-25:]:print(clean(line))
+          target='https://api.telegram.org/'
+          results=collections.defaultdict(list)
+          for i in range(12):
+              for label,conn,total in [('proxy4',4,8),('proxy10',10,18)]:
+                  cmd=['curl','-ksS','-o','/dev/null','-w','%{http_code} %{time_connect} %{time_appconnect} %{time_total}','--connect-timeout',str(conn),'--max-time',str(total),'--proxy','socks5h://127.0.0.1:1089',target]
+                  started=time.monotonic()
+                  code,out,err=run(cmd,timeout=total+3)
+                  results[label].append((code,out.strip(),round(time.monotonic()-started,2)))
+                  print('PROBE',i,label,'exit',code,'timing',out.strip(),'elapsed',round(time.monotonic()-started,2),'error',clean(err))
+              time.sleep(0.8)
+          for key,rows in results.items():
+              print('SUMMARY',key,'total',len(rows),'successful_http',sum(code==0 and re.match(r'^[23]\d\d ',out) is not None for code,out,secs in rows),'curl_exit_counts',dict(collections.Counter(code for code,out,secs in rows)))
+          print('READ_ONLY',True)
+          PY
