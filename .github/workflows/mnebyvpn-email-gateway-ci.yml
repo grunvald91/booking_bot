@@ -17,7 +17,18 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: servgo_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U test -d servgo_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,3 +45,28 @@ jobs:
           DATABASE_URL: "sqlite+aiosqlite:///:memory:"
           PYTHONPATH: ${{ github.workspace }}
         run: python -m unittest discover -s tests -p test_mnebyvpn_mail.py -v
+      - name: Validate nonce migration twice on real PostgreSQL
+        run: |
+          python - <<'PY'
+          import pathlib
+          import psycopg2
+          conn=psycopg2.connect(host='127.0.0.1',port=5432,dbname='servgo_test',user='test',password='test')
+          sql=pathlib.Path('migrations/add_mnebyvpn_email_gateway.sql').read_text()
+          for _ in range(2):
+              with conn.cursor() as c:
+                  c.execute(sql)
+          with conn.cursor() as c:
+              c.execute("SELECT to_regclass('public.mnebyvpn_email_dispatch_nonces')")
+              assert c.fetchone()[0] is not None
+              c.execute("INSERT INTO mnebyvpn_email_dispatch_nonces(nonce_hash) VALUES(%s)",('0'*64,))
+          conn.commit()
+          try:
+              with conn.cursor() as c:
+                  c.execute("INSERT INTO mnebyvpn_email_dispatch_nonces(nonce_hash) VALUES(%s)",('0'*64,))
+          except psycopg2.errors.UniqueViolation:
+              conn.rollback()
+          else:
+              raise AssertionError('Nonce anti-replay uniqueness missing')
+          conn.close()
+          print('PostgreSQL migration idempotent, nonce primary key enforced')
+          PY
