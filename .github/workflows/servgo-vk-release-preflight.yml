@@ -1,0 +1,30 @@
+name: VK ID production release preflight (read only)
+on:
+  push:
+    branches: [ops/vk-id-guarded-release-20261107]
+    paths:
+      - 'scripts/servgo_vk_release_preflight.py'
+      - '.github/workflows/servgo-vk-release-preflight.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: servgo-vk-release-readonly
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check syntax before connecting
+        run: python -m py_compile scripts/servgo_vk_release_preflight.py
+      - name: Install pinned SSH client
+        run: python -m pip install -q 'paramiko==3.5.1'
+      - name: Read-only production inventory; never print secrets
+        run: python -m scripts.servgo_vk_release_preflight
