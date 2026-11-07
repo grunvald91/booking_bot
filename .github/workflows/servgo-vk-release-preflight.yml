@@ -4,6 +4,7 @@ on:
     branches: [ops/vk-id-guarded-release-20261107]
     paths:
       - 'scripts/servgo_vk_release_preflight.py'
+      - 'scripts/deploy_vk_id_guarded.py'
       - '.github/workflows/servgo-vk-release-preflight.yml'
   workflow_dispatch:
 permissions:
@@ -23,8 +24,10 @@ jobs:
         with:
           python-version: '3.12'
       - name: Check syntax before connecting
-        run: python -m py_compile scripts/servgo_vk_release_preflight.py
+        run: python -m py_compile scripts/servgo_vk_release_preflight.py scripts/deploy_vk_id_guarded.py
       - name: Install pinned SSH client
         run: python -m pip install -q 'paramiko==3.5.1'
       - name: Read-only production inventory; never print secrets
-        run: python -m scripts.servgo_vk_release_preflight
+        run: |
+          python -m scripts.servgo_vk_release_preflight
+          APPLY=false python -m scripts.deploy_vk_id_guarded
