@@ -92,7 +92,9 @@ async def send_email(
                 smtp.ehlo()
             if username:
                 smtp.login(username, password or "")
-            smtp.send_message(message)
+            rejected = smtp.send_message(message)
+            if rejected:
+                raise smtplib.SMTPRecipientsRefused(rejected)
         finally:
             try:
                 smtp.quit()
