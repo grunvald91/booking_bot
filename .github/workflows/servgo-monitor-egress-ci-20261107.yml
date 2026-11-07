@@ -1,0 +1,68 @@
+name: ServGo monitor egress stability patch CI
+on:
+  push:
+    paths:
+      - 'ops/monitor_diagnostics_20261107_patch.py'
+      - 'ops/monitor_egress_stability_20261107_patch.py'
+      - 'ops/test_monitor_diagnostics_20261107.py'
+      - 'ops/test_monitor_egress_stability_20261107.py'
+      - '.github/workflows/servgo-monitor-egress-ci-20261107.yml'
+  pull_request:
+    paths:
+      - 'ops/monitor_diagnostics_20261107_patch.py'
+      - 'ops/monitor_egress_stability_20261107_patch.py'
+      - 'ops/test_monitor_diagnostics_20261107.py'
+      - 'ops/test_monitor_egress_stability_20261107.py'
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile maintenance scripts
+        run: python -m py_compile ops/monitor_diagnostics_20261107_patch.py ops/monitor_egress_stability_20261107_patch.py ops/test_monitor_diagnostics_20261107.py ops/test_monitor_egress_stability_20261107.py
+      - name: Exercise guarded transformation on isolated fixture
+        run: |
+          python - <<'PY'
+          from ops.monitor_egress_stability_20261107_patch import patch,MARKER
+          source='''# ServGo monitor diagnostics v1 (2026-11-07)
+          import time
+          RECOVER_THRESHOLD = 2
+          def command_diagnostic(args, timeout=7):
+              return True, "302", ""
+          def collect_checks():
+              ok, code, error = command_diagnostic([
+                  "curl", "--proxy", "socks5h://127.0.0.1:1089", "--connect-timeout", "4",
+                  "--max-time", "8", "https://api.telegram.org/"
+              ], timeout=11)
+              proxy_ok = ok and code.isdigit() and 200 <= int(code) < 400
+              proxy_detail = f"Telegram через SOCKS5 HTTP {code or 'нет ответа'}"
+              return proxy_ok, proxy_detail
+          def update_states(item, now):
+              if True:
+                  if True:
+                      if item.get("alarm"):
+                          if item["good"] >= RECOVER_THRESHOLD:
+                              item["alarm"] = False
+                      info = (f"Восстановлено: {item['detail']}; "
+                              f"первый успешный замер")
+                  return info
+          '''
+          candidate=patch(source)
+          assert MARKER in candidate
+          assert '"--connect-timeout", "10"' in candidate
+          assert '"--max-time", "18"' in candidate
+          assert 'RECOVERY_STABLE_SECONDS = 15 * 60' in candidate
+          assert 'command_diagnostic(proxy_command, timeout=21)' in candidate
+          assert 'proxy_retried = True' in candidate
+          assert '15 минут устойчивой доступности' in candidate
+          compile(candidate,'fixture','exec')
+          try:
+              patch(candidate)
+          except ValueError:
+              pass
+          else:
+              raise AssertionError('double patch was not rejected')
+          print('PATCH_TRANSFORMATION_PASS')
+          PY

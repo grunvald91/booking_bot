@@ -1,0 +1,36 @@
+name: Validate monitor egress patch against production source (no release)
+on:
+  push:
+    paths:
+      - '.github/workflows/servgo-monitor-candidate-integration-ci-20261107.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      TARGET: '155.212.162.47'
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check password and install SSH helper
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          sudo apt-get update -qq
+          sudo apt-get install -qq -y sshpass
+      - name: Copy only running monitor source to ephemeral runner for offline regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e scp -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12 \
+            "root@$TARGET:/opt/booking_bot/ops/servgo_monitor.py" \
+            "$RUNNER_TEMP/monitor-original.py"
+          python3 ops/monitor_egress_stability_20261107_patch.py "$RUNNER_TEMP/monitor-original.py" "$RUNNER_TEMP/monitor-candidate.py"
+          python3 -m py_compile "$RUNNER_TEMP/monitor-candidate.py"
+          python3 ops/test_monitor_egress_stability_20261107.py "$RUNNER_TEMP/monitor-candidate.py"
+          echo 'PRODUCTION_SOURCE_COMPATIBLE=YES'
+          echo 'LIVE_SERVER_CHANGES=NONE'
+          echo 'TELEGRAM_MESSAGES_SENT=0'
