@@ -152,6 +152,13 @@ class YandexTicket(Base):
     consumed: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class MnebyvpnEmailDispatchNonce(Base):
+    """Unique request nonce to make the VPN mail gateway replay resistant."""
+    __tablename__ = "mnebyvpn_email_dispatch_nonces"
+    nonce_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
 class EmailChallenge(Base):
     __tablename__ = "email_challenges"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)

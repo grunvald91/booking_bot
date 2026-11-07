@@ -1,0 +1,39 @@
+name: MNEBYVPN guarded ServGo SMTP relay release
+on:
+  push:
+    branches: [feat/reviewed-mnebyvpn-mail-rebased-20261107, main]
+    paths:
+      - 'scripts/deploy_mnebyvpn_mail_guarded.py'
+      - '.github/workflows/servgo-mnebyvpn-mail-guarded-release.yml'
+      - 'releases/mnebyvpn-mail-20261107.trigger'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Apply only after green CI and dry-run'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+jobs:
+  rollout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 13
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      APPLY: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' && inputs.apply || github.event_name == 'push' && contains(github.event.head_commit.message, '[apply-mnebyvpn-mail]')) && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax check the guarded installer and mail source
+        run: python -m py_compile scripts/deploy_mnebyvpn_mail_guarded.py web/api/routes/mnebyvpn_mail.py bot/services/email_notifications.py database/models.py
+      - name: Install pinned SSH and API libraries
+        run: python -m pip install -q 'paramiko==3.5.1' 'sqlalchemy>=2,<3'
+      - name: Protected preflight or apply with backup and automatic file rollback
+        run: python -m scripts.deploy_mnebyvpn_mail_guarded

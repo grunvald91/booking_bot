@@ -41,6 +41,9 @@ on:
       - 'migrations/add_staff_reminder_fields.sql'
       - 'migrations/add_configurable_staff_notifications.sql'
       - 'migrations/add_user_email.sql'
+      - 'migrations/add_mnebyvpn_email_gateway.sql'
+      - 'tests/test_mnebyvpn_mail.py'
+      - 'bot/services/email_notifications.py'
       - '.github/workflows/pwa-ci.yml'
       - '.github/workflows/servgo-offline-browser.yml'
       - 'scripts/check_servgo_offline_pwa_browser.py'
@@ -147,6 +150,13 @@ jobs:
         run: |
           python tests/test_mail_same_origin.py
           python tests/test_mail_air_v2.py
+
+      - name: Validate MNEBYVPN mail relay against SQLite (never send real mail)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+          BOT_TOKEN: test-token
+        run: python -m unittest discover -s tests -p test_mnebyvpn_mail.py -v
 
       - name: Verify signed Growth SSO and role restrictions
         env:
