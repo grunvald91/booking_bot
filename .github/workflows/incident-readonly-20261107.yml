@@ -151,5 +151,20 @@ jobs:
                   safe=re.sub('[^a-zA-Z0-9_.:-]','_',str(name))[:70]
                   print('recent_check',safe,'event_fields',values[:12])
           PY
+          heading 'RECENT ALERT IDENTIFIERS ONLY'
+          python3 - <<'PY'
+          import json,re,datetime
+          c=json.load(open('/var/lib/servgo-monitor/state.json',encoding='utf8'))['checks']
+          for name,item in c.items():
+              last=item.get('last_sent')
+              isrecent=False
+              if isinstance(last,(float,int)):
+                  isrecent=1793900000<int(last)<1794100000
+              elif isinstance(last,str):
+                  isrecent='2026-11-07' in last or '2026-11-06' in last
+              if isrecent or item.get('alarm') or item.get('notified'):
+                  safe=re.sub('[^a-zA-Z0-9_.:-]','_',str(name))[:80]
+                  print('check_label',safe,'last_sent',last if isinstance(last,(float,int)) else str(last)[:30],'bad',item.get('bad'),'good',item.get('good'),'notified',item.get('notified'),'alarm',item.get('alarm'),'pending',bool(item.get('pending')))
+          PY
           heading 'AUDIT COMPLETE - NO SERVER CHANGES'
           REMOTE
