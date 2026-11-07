@@ -65,7 +65,36 @@ def main():
             local = (repo / path).read_bytes()
             status = "ABSENT" if current is None else ("CURRENT_MAIN" if sha(current) == sha(local) else "DRIFT_FROM_MAIN")
             print("SOURCE_" + path.replace("/", "_").replace(".", "_") + "=" + status)
-        print(run(client, "cd " + shlex.quote(ROOT) + " && ./venv/bin/python -c " + shlex.quote(CHECK_DB), 45))
+        # The SSH shell does not inherit systemd EnvironmentFile values.
+        # Bring the live API process environment into this one probe process;
+        # never send its values back to the runner or print them.
+        db_probe = (
+            "import os,pathlib,subprocess,shutil,ast; "
+            "pid=subprocess.check_output(['systemctl','show','-p','MainPID','--value',"
+            "'booking-web-api.service'],text=True).strip(); "
+            "pairs=pathlib.Path('/proc/'+pid+'/environ').read_bytes().split(bytes([0])); "
+            "[(os.environ.__setitem__(k.decode(),v.decode())) for p in pairs "
+            "if b'=' in p for k,_,v in [p.partition(b'=')] "
+            "if k.decode() in {'DATABASE_URL','DB_TYPE','DB_HOST','DB_PORT',"
+            "'DB_NAME','DB_USER','DB_PASSWORD','BOT_TOKEN','JWT_SECRET'}]; "
+            "print('DB_ENV_AVAILABLE='+str(bool(os.environ.get('DATABASE_URL') "
+            "or os.environ.get('DB_PASSWORD'))).lower()); "
+            "print('PG_DUMP_AVAILABLE='+str(bool(shutil.which('pg_dump'))).lower())"
+            + "\ntry:\n" + "\n".join("    " + line for line in CHECK_DB.strip().splitlines())
+            + "\nexcept Exception as exc:\n    print('DB_PROBE_ERROR='+type(exc).__name__)\n"
+        )
+        print(run(client, "cd " + shlex.quote(ROOT) + " && ./venv/bin/python -c " + shlex.quote(db_probe), 45))
+        structure_probe = (
+            "import ast,pathlib; root=pathlib.Path('/opt/booking_bot'); "
+            "plans=[('database/models.py',('VkIdentity','VkLoginTicket','YandexIdentity')), "
+            "('database/account_link.py',('move_account_data','merge_vk_account','merge_yandex_account')), "
+            "('web/api/main.py',('vk_auth','yandex_auth'))]; "
+            "[(print('CODE_'+p.replace('/','_')+'_'+name+'='+str(name in "
+            "ast.parse((root/p).read_text()).__dict__.get('body',[]) or "
+            "name in (root/p).read_text()).lower())) "
+            "for p,names in plans for name in names]"
+        )
+        print(run(client, "python3 -c " + shlex.quote(structure_probe), 30))
         # Query only booleans: secrets are neither printed nor copied to Actions.
         process_check = (
             "import pathlib,subprocess; "
