@@ -1,0 +1,33 @@
+name: ServGo outbound SMTP HELO alignment with guarded rollback
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/servgo-smtp-helo-alignment.yml']
+permissions:
+  contents: read
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+jobs:
+  change:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check guarded Postfix patch and SSH dependencies
+        run: |
+          python -m py_compile scripts/fix_servgo_outbound_helo.py
+          python -m pip install --disable-pip-version-check -q 'paramiko==3.5.1'
+      - name: Verify current mail hostname and HELO without making changes
+        env:
+          APPLY: 'false'
+        run: python -m scripts.fix_servgo_outbound_helo
+      - name: Update only smtp_helo_name with backup, validate and reload Postfix
+        env:
+          APPLY: 'true'
+        run: python -m scripts.fix_servgo_outbound_helo
