@@ -31,6 +31,6 @@ jobs:
       - name: Run isolated mail relay tests
         env:
           BOT_TOKEN: test-token
-          DATABASE_URL: sqlite+aiosqlite:///:memory:
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
           PYTHONPATH: ${{ github.workspace }}
         run: python -m unittest discover -s tests -p test_mnebyvpn_mail.py -v
