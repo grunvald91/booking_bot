@@ -32,6 +32,11 @@ jobs:
                   try: result=run(client,command,18).strip()
                   except Exception: result='timeout_or_blocked'
                   print(label+'_from_servgo155='+result[:80])
+              # A synthetic unsigned Telegram update must NOT be accepted.
+              command="curl --noproxy '*' -sS -o /dev/null -w '%{http_code} ssl=%{ssl_verify_result}' --connect-timeout 7 --max-time 12 -X POST -H 'Content-Type: application/json' -d '{\"update_id\":100}' https://cdn.servgo.ru:8443/mnebyvpn-telegram/webhook"
+              try: result=run(client,command,18).strip()
+              except Exception: result='timeout_or_blocked'
+              print('telegram_webhook_unsigned_POST_from_servgo155='+result[:80])
               print('read_only=true')
           finally:client.close()
           PY
