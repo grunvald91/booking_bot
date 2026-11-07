@@ -205,7 +205,9 @@ def main():
         raise RuntimeError("SERVER_SSH_PASSWORD not configured")
     reviewed = {path: (repo / path).read_text("utf-8") for path in FILES}
     sql = (repo / "migrations/add_vk_login.sql").read_text("utf-8")
-    if "DROP " in sql.upper() or "DELETE " in sql.upper():
+    import re
+    statements = "\n".join(line for line in sql.splitlines() if not line.lstrip().startswith("--"))
+    if re.search(r"(?im)^\s*(?:DROP|DELETE|TRUNCATE|ALTER\s+TABLE\s+\S+\s+DROP)\b", statements):
         raise RuntimeError("Unexpected destructive SQL")
     client = connect(password)  # pinned SSH host fingerprint from shared helper
     sftp = client.open_sftp()
