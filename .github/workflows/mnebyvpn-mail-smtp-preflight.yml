@@ -1,0 +1,32 @@
+name: Verify live MNEBYVPN sender on existing ServGo SMTP
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/mnebyvpn_mail_preflight.py
+      - .github/workflows/mnebyvpn-mail-smtp-preflight.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: servgo-mnebyvpn-mail-test-20261107
+  cancel-in-progress: false
+jobs:
+  smtp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      MNEBYVPN_MAIL_TEST_RECIPIENT: Grunvaldlab@gmail.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate test source and install pinned SSH client
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/mnebyvpn_mail_preflight.py
+          python -m pip install -q 'paramiko==3.5.1'
+      - name: Check existing sender by submitting exactly one test email
+        run: python -m scripts.mnebyvpn_mail_preflight
