@@ -88,6 +88,15 @@ class MailRelayTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.sent), 1)
         self.assertEqual(self.sent[0]["from_override"], "mnebyvpn@servgo.ru")
 
+    async def test_oversized_request_rejected_without_sending_email(self):
+        raw, headers = self.sign({"email": "test@example.org", "code": "123456"})
+        oversized = raw + b" " * 600
+        result = self.client.post(
+            "/api/auth/mnebyvpn/email-code", content=oversized, headers=headers
+        )
+        self.assertEqual(result.status_code, 413)
+        self.assertEqual(self.sent, [])
+
     async def test_wrong_signature_expired_and_invalid_payload(self):
         url = "/api/auth/mnebyvpn/email-code"
         raw, h = self.sign({"email": "a@example.com", "code": "000001"}, mutate=True)
