@@ -48,7 +48,7 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- ops/mnebyvpn-mail-bridge.enc.b64
+          git add -f -- ops/mnebyvpn-mail-bridge.enc.b64
           if git diff --cached --quiet; then
             echo 'encrypted_blob_already_current=true'
             exit 0
