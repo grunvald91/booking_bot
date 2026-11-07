@@ -88,5 +88,27 @@ jobs:
             grep -oE '/[a-zA-Z0-9_./-]+[.](py|sh)' | head -5
           heading 'MONITOR STATE AND INCIDENT FILE NAMES (NO CONTENT)'
           find /var/lib /opt /run -maxdepth 5 -type f -iname '*health*' -print 2>/dev/null | head -60
+          heading 'MONITOR STATE STORAGE CODE STRUCTURE (STRING VALUES HIDDEN)'
+          python3 - <<'PY'
+          import pathlib,re
+          source=pathlib.Path('/opt/booking_bot/ops/servgo_monitor.py')
+          print('script_exists=',source.is_file())
+          if source.is_file():
+              src=source.read_text(errors='ignore')
+              print('script_lines=',len(src.splitlines()))
+              paths=[]
+              for m in re.findall(r'''["']([^"'\n]{1,180})["']''',src):
+                  if m.startswith(('/var/','/opt/','/run/')) and ('state' in m.lower() or 'incident' in m.lower() or m.endswith(('.db','.json','.sqlite','.sqlite3'))):
+                      paths.append(m)
+              for p in sorted(set(paths))[:18]:
+                  print('literal_local_state_path=',p)
+              count=0
+              for n,line in enumerate(src.splitlines(),1):
+                  if re.search(r'state_path|state_file|state_dir|incident|history|sqlite|json[.]load|json[.]dump',line,re.I):
+                      sanitized=re.sub(r'''(["'])(?:[^"']{1,300})\1''','STRING',line.strip())
+                      print('source_line',n,sanitized[:160])
+                      count+=1
+                      if count>=65: break
+          PY
           heading 'AUDIT COMPLETE - NO SERVER CHANGES'
           REMOTE
