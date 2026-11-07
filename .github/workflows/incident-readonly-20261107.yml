@@ -130,5 +130,26 @@ jobs:
               if match:
                   print('failed_count',match)
           PY
+          heading 'INCIDENT STATE TIMESTAMP FIELD SUMMARY ONLY'
+          python3 - <<'PY'
+          import json,re
+          checks=json.load(open('/var/lib/servgo-monitor/state.json',encoding='utf8')).get('checks',{})
+          print('check_count',len(checks))
+          for key,item in list(checks.items())[:1]:
+              print('status_field_names',sorted(item.keys()) if isinstance(item,dict) else type(item).__name__)
+          for name,item in checks.items():
+              if not isinstance(item,dict):
+                  continue
+              values=[]
+              for field,v in item.items():
+                  if not re.search('fail|change|incident|recover|notify|alert|down|up|transition|last',field,re.I):
+                      continue
+                  if isinstance(v,(str,int,float,bool)) and len(str(v))<80 and '://' not in str(v) and '@' not in str(v):
+                      values.append((field,v))
+              recent=any('2026-11-07' in str(v) or '08:2' in str(v) or '07:4' in str(v) for _,v in values)
+              if recent:
+                  safe=re.sub('[^a-zA-Z0-9_.:-]','_',str(name))[:70]
+                  print('recent_check',safe,'event_fields',values[:12])
+          PY
           heading 'AUDIT COMPLETE - NO SERVER CHANGES'
           REMOTE
