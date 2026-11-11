@@ -1,0 +1,57 @@
+name: ServGo 155 read-only incident diagnosis
+on:
+  push:
+    branches: ['diagnostic/servgo-155-20261111']
+  pull_request:
+    branches: [main]
+    paths: ['.github/workflows/servgo-live-diagnostic.yml']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: '155.212.162.47'
+    steps:
+      - name: External DNS HTTPS and origin checks
+        shell: bash
+        run: |
+          set +e
+          date -u
+          echo DNS; getent ahostsv4 servgo.ru | head -n 3
+          for url in https://servgo.ru/ https://servgo.ru/studio https://promo.servgo.ru/; do
+            echo PUBLIC "$url"
+            curl -sS -o /dev/null --connect-timeout 6 --max-time 12 -w 'http=%{http_code} ip=%{remote_ip} dns=%{time_namelookup} connect=%{time_connect} tls=%{time_appconnect} total=%{time_total}\n' "$url"
+            echo "exit=$?"
+          done
+          echo ORIGIN_DIRECT
+          curl -sS -o /dev/null --resolve "servgo.ru:443:${HOST}" --connect-timeout 6 --max-time 12 -w 'http=%{http_code} ip=%{remote_ip} connect=%{time_connect} tls=%{time_appconnect} total=%{time_total}\n' https://servgo.ru/
+          echo "exit=$?"
+      - name: Read-only SSH tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$SSHPASS" ]; then echo NO_SSH_PASSWORD_SECRET; exit 1; fi
+          command -v sshpass >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq sshpass; }
+          ssh-keyscan -T 8 -t ed25519 "$HOST" > /tmp/servgo155_hosts 2>/dev/null
+          ssh-keygen -lf /tmp/servgo155_hosts -E sha256 | grep -F 'SHA256:uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU' >/dev/null
+          sshpass -e ssh -T -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/tmp/servgo155_hosts -o ConnectTimeout=10 root@"$HOST" 'bash -s' <<'REMOTE'
+          set +e
+          echo SERVER_TIME=$(date -Is)
+          echo UPTIME; uptime
+          echo ROOT_DISK; df -h / | tail -1
+          echo MEMORY; free -m | grep -E 'Mem:|Swap:'
+          for u in nginx booking-web-api booking-bot; do
+            echo "SYSTEMD $u $(systemctl is-active "$u") $(systemctl is-enabled "$u" 2>/dev/null)"
+          done
+          echo NGINX_CONFIG_TEST; nginx -t 2>&1 | tail -6
+          echo LISTENERS; ss -lnt | grep -E ':(80|443|8000|8080|8091)\b' | head -15 || true
+          for path in / /studio /api/health; do
+            echo "LOCAL_HTTPS $path"
+            curl -ksS -o /dev/null --resolve 'servgo.ru:443:127.0.0.1' --connect-timeout 3 --max-time 8 -w 'http=%{http_code} total=%{time_total}\n' "https://servgo.ru$path"; echo "exit=$?"
+          done
+          echo FAILED_UNITS; systemctl --failed --no-pager --no-legend | head -15
+          echo NGINX_ERRORS_LAST_HOUR_COUNT; journalctl -u nginx -p err --since '1 hour ago' --no-pager -q | wc -l
+          REMOTE
