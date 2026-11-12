@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="650" viewBox="0 0 1200 650" role="img"><defs>
+<linearGradient id="blue" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#2F5BEB"/><stop offset="1" stop-color="#7C3AED"/></linearGradient>
+<linearGradient id="fade" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#E9EEFD"/></linearGradient>
+<filter id="shadow" x="-25%" y="-30%" width="150%" height="170%"><feDropShadow dx="0" dy="16" stdDeviation="19" flood-color="#0D1B2A" flood-opacity=".15"/></filter>
+</defs><rect width="1200" height="650" fill="#F3F5FC"/>
+<rect width="1200" height="650" fill="#0D1B2A"/>
+<circle cx="1160" cy="55" r="340" fill="#1D3363" opacity=".7"/><circle cx="0" cy="610" r="260" fill="#1B2F56" opacity=".9"/>
+<text x="75" y="86" fill="#B1C8FF" font-size="20" letter-spacing="3" font-weight="700" font-family="Arial,sans-serif">ПУТЬ ОТ КОНТЕНТА К ЗАПИСИ</text>
+<text x="75" y="138" fill="#fff" font-size="42" font-weight="700" font-family="Arial,sans-serif">Каждый шаг имеет значение</text>
+<g filter="url(#shadow)">
+<rect x="71" y="193" width="248" height="297" rx="25" fill="#F2F5FF"/><rect x="340" y="193" width="248" height="297" rx="25" fill="#E5E8FF"/><rect x="609" y="193" width="248" height="297" rx="25" fill="#DCE8F6"/><rect x="878" y="193" width="248" height="297" rx="25" fill="#DFF6EB"/>
+</g>
+<g font-family="Arial,sans-serif" font-weight="700">
+<text x="94" y="253" font-size="20" fill="#2F5BEB">01</text><text x="94" y="429" font-size="27" fill="#0D1B2A">Просмотры</text>
+<text x="363" y="253" font-size="20" fill="#7C3AED">02</text><text x="363" y="429" font-size="27" fill="#0D1B2A">Переходы</text>
+<text x="632" y="253" font-size="20" fill="#2F5BEB">03</text><text x="632" y="429" font-size="27" fill="#0D1B2A">Заявки</text>
+<text x="901" y="253" font-size="20" fill="#1B9E54">04</text><text x="901" y="429" font-size="27" fill="#0D1B2A">Записи</text>
+</g>
+<g fill="none" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
+<path d="M102 334c44-58 98-54 145-8" stroke="#2F5BEB"/><path d="M112 352h155" stroke="#BDCDF7" stroke-width="6"/>
+<path d="M377 344h157m-36-23l36 23-36 23" stroke="#7C3AED"/>
+<path d="M651 367c33-77 72-30 99-78s55-7 65-30" stroke="#2F5BEB"/>
+<circle cx="1010" cy="323" r="59" stroke="#1B9E54"/><path d="M982 322l20 20 38-43" stroke="#1B9E54" stroke-width="12"/>
+</g>
+<g font-family="Arial,sans-serif" font-size="15" fill="#7A889F"><text x="94" y="457">Увидели материал</text><text x="363" y="457">Открыли страницу</text><text x="632" y="457">Оставили контакт</text><text x="901" y="457">Подтвердили визит</text></g>
+<path d="M185 535h839" stroke="#607297" stroke-width="3" stroke-dasharray="5 14"/><circle cx="187" cy="535" r="8" fill="#4F85FF"/><circle cx="458" cy="535" r="8" fill="#9866FB"/><circle cx="729" cy="535" r="8" fill="#5AA0EB"/><circle cx="1021" cy="535" r="8" fill="#58CEA0"/>
+<rect x="384" y="565" width="432" height="43" rx="19" fill="#223958"/><text x="600" y="594" text-anchor="middle" font-size="17" fill="#CEDAF4" font-family="Arial,sans-serif">Без придуманных показателей</text>
+</svg>
