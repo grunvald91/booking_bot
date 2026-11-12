@@ -1,0 +1,12 @@
+[Unit]
+Description=ServGo independent health check and Telegram incident alerts
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/booking_bot
+StateDirectory=servgo-monitor
+ExecStart=/opt/booking_bot/venv/bin/python /opt/booking_bot/ops/servgo_monitor.py
+TimeoutStartSec=90
+NoNewPrivileges=true

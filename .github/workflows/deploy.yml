@@ -176,6 +176,31 @@ jobs:
           python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
           python scripts/deploy_servgo_frontend_atomic.py
 
+      # Promotion pages have their own process after the isolated rollout.
+      # Restart them independently before touching Telegram polling.
+      - name: Restart independent promo runtime (if installed)
+        if: env.ANY == '1'
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh -n $SSH_OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" '
+            set -e
+            if systemctl is-enabled --quiet servgo-promo-web.service; then
+              systemctl restart servgo-promo-web.service
+              for attempt in 1 2 3 4 5 6 7 8 9 10; do
+                code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:18080/_promo_health 2>/dev/null || true)
+                [ "$code" = "200" ] && break
+                sleep 2
+              done
+              [ "$code" = "200" ] || { echo "Isolated promo failed health check"; exit 1; }
+              for route in / /beauty /robots.txt; do
+                code=$(curl -ksS -o /dev/null -w "%{http_code}" --max-time 5 --resolve promo.servgo.ru:443:127.0.0.1 "https://promo.servgo.ru$route" || true)
+                [ "$code" = "200" ] || { echo "Isolated promo $route failed: HTTP $code"; exit 1; }
+              done
+              echo "independent_promo_http_routes=200"
+            fi
+          '
+
       - name: Restart service and verify
         if: env.ANY == '1'
         run: |

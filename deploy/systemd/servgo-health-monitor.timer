@@ -1,0 +1,11 @@
+[Unit]
+Description=Run independent ServGo checks every two minutes
+
+[Timer]
+OnBootSec=75sec
+OnUnitActiveSec=2min
+AccuracySec=15sec
+Unit=servgo-health-monitor.service
+
+[Install]
+WantedBy=timers.target

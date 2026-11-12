@@ -1,0 +1,20 @@
+[Unit]
+Description=ServGo Promo website (independent of Telegram polling)
+After=network.target postgresql.service
+Wants=postgresql.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/booking_bot
+Environment=PYTHONUNBUFFERED=1
+Environment=PROMO_WEBAPP_HOST=127.0.0.1
+Environment=PROMO_WEBAPP_PORT=18080
+ExecStart=/opt/booking_bot/venv/bin/python -m webapp.promo_standalone
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
