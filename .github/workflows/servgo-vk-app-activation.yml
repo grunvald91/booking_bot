@@ -1,0 +1,37 @@
+name: ServGo VK ID App ID guarded activation
+on:
+  push:
+    branches: [ops/servgo-vk-app-54898639-20261115, main]
+    paths:
+      - 'scripts/activate_servgo_vk_id.py'
+      - '.github/workflows/servgo-vk-app-activation.yml'
+permissions:
+  contents: read
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+jobs:
+  app-id:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      APPLY: ${{ github.ref == 'refs/heads/main' && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check activation script syntax and existing VK OAuth tests
+        run: |
+          python -m py_compile scripts/activate_servgo_vk_id.py
+          python - <<'PY'
+          from scripts.activate_servgo_vk_id import APP_ID, CALLBACK, CONTENT
+          assert APP_ID == '54898639'
+          assert CALLBACK == 'https://servgo.ru/api/auth/vk/callback'
+          assert b'SERVGO_VK_ID_APP_ID=54898639' in CONTENT
+          PY
+      - name: Install pinned SSH client
+        run: python -m pip install -q 'paramiko==3.5.1'
+      - name: Verify live DB, OAuth route and configuration; activate only on main
+        run: python -m scripts.activate_servgo_vk_id
