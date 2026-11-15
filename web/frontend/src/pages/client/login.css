@@ -34,7 +34,7 @@
   color: var(--s-muted);
   font-size: 12.5px;
   line-height: 1.5;
-  text-align: center;
+  text-align: left;
 }
 .sg-login__notice {
   margin: 0 0 12px;
