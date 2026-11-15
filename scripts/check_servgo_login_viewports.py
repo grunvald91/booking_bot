@@ -66,6 +66,8 @@ def check_page(page, label, theme, url):
 
     rect = page.locator(".sg-login").bounding_box()
     assert rect and rect["width"] <= 421, (label, rect)
+    header_rect = page.locator(".bf-shell-head").bounding_box()
+    assert header_rect and abs(header_rect["x"] - rect["x"]) <= 2, (label, header_rect, rect)
     assert rect["x"] >= 0 and rect["x"] + rect["width"] <= page.viewport_size["width"] + 1, (label, rect)
     actual = page.evaluate("""() => {
       const root = document.querySelector('.sg-login');
@@ -98,6 +100,12 @@ def check_page(page, label, theme, url):
     page.get_by_label("Номер телефона").fill("+79000000000")
     page.get_by_role("button", name="Получить код").click()
     page.get_by_label("Цифра кода 6").wait_for(timeout=8000)
+    assert page.locator(".sg-login__code-fields input").count() == 6
+    contrast = page.evaluate("""() => ({
+      panel: getComputedStyle(document.querySelector('.sg-login__phone')).backgroundColor,
+      digit: getComputedStyle(document.querySelector('.sg-login__code-fields input:nth-child(2)')).backgroundColor,
+    })""")
+    assert contrast["panel"] != contrast["digit"], (label, theme, contrast)
     code = page.locator(".sg-login__code-fields").bounding_box()
     assert code and code["x"] >= 0 and code["x"] + code["width"] <= page.viewport_size["width"] + 1, (label, code)
     page.screenshot(path=str(SCREENSHOTS / f"{label}-{theme}-phone-code.png"), full_page=True)
