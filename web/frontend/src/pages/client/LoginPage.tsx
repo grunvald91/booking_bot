@@ -207,7 +207,7 @@ export function LoginPage() {
   }
 
   return (
-    <ClientShell backTo="/" title="Вход">
+    <ClientShell backTo="/" title="Вход" tabs={false}>
       <div className="sg-login ds-form-narrow">
         <p className="sg-login__intro">Один аккаунт для ServGo и Студии.</p>
         {studioNext === STUDIO_ENTRY && (
