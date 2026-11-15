@@ -19,8 +19,8 @@ def check(path: str, host: str = "servgo.ru") -> None:
     body, code = cp.stdout.rsplit("__CODE__", 1)
     print(f"probe={host}{path} code={code.strip()} "
           f"xml={body.lstrip().startswith('<?xml')} "
-          f"spa={'id=\"seo-route-bootstrap\"' in body} "
-          f"canonical={'rel=\"canonical\"' in body} "
+          f"spa={int('seo-route-bootstrap' in body)} "
+          f"canonical={int('rel=\"canonical\"' in body)} "
           f"bytes={len(body.encode('utf-8'))}")
 
 
