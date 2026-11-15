@@ -3,7 +3,9 @@ name: ServGo SEO live audit (read-only)
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/servgo-seo-live-audit.yml']
+    paths:
+      - '.github/workflows/servgo-seo-live-audit.yml'
+      - 'scripts/ops/servgo_seo_live_audit.py'
   workflow_run:
     workflows: ['Deploy webapp to server']
     types: [completed]
