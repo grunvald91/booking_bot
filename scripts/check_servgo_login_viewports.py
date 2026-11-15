@@ -53,10 +53,10 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
 
 
-def check_page(page, label, theme):
+def check_page(page, label, theme, url):
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
-    page.goto(page.context._sg_url + "/login", wait_until="domcontentloaded")
+    page.goto(url + "/login", wait_until="domcontentloaded")
     page.get_by_role("link", name="Войти через VK ID").wait_for(timeout=12000)
     page.get_by_role("link", name="Войти через Яндекс").wait_for(timeout=12000)
     page.evaluate("(theme) => document.documentElement.dataset.theme = theme", theme)
@@ -120,12 +120,10 @@ def main():
             for label, width, height in (("phone320", 320, 700), ("phone390", 390, 844), ("desktop", 1440, 900)):
                 for theme in ("light", "dark"):
                     context = browser.new_context(viewport={"width": width, "height": height}, reduced_motion="reduce")
-                    # Local fixture URL; not persisted in Chromium storage.
-                    context._sg_url = url
                     page = context.new_page()
                     page.route("https://tg.servgo.ru/**", lambda route: route.abort())
                     page.route("https://telegram.org/**", lambda route: route.abort())
-                    check_page(page, label, theme)
+                    check_page(page, label, theme, url)
                     context.close()
             context = browser.new_context(viewport={"width": 390, "height": 844})
             page = context.new_page()
