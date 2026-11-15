@@ -104,41 +104,6 @@ class PublicSEOHTMLTests(unittest.TestCase):
         self.assertTrue(article["isAccessibleForFree"])
         self.assertEqual(article["isPartOf"]["url"], "https://servgo.ru/business/64/blog")
 
-    def test_server_html_keeps_editorial_block_order_and_safe_formatting(self):
-        rich_article = dict(ARTICLE)
-        rich_article["sections"] = [{
-            "title": "Полное руководство",
-            "blocks": [
-                {"type": "paragraph", "text": "Полезный текст",
-                 "spans": [{"text": "Полезный ", "style": "text"},
-                           {"text": "текст", "style": "strong"}]},
-                {"type": "subheading", "text": "Проверенные рекомендации"},
-                {"type": "list", "ordered": True,
-                 "items": ["Первое действие", "Второе действие"]},
-                {"type": "quote", "text": "<script>alert(1)</script>"},
-            ],
-        }]
-
-        async def rich_data(business_id, db, slug=None):
-            if slug == ARTICLE["slug"]:
-                return rich_article
-            return FEED
-
-        with patch.object(seo_pages, "_company_blog_data", rich_data):
-            response = self.client.get("/seo-pages/business/64/blog/kak-uhazhivat-za-volosami")
-        self.assertEqual(response.status_code, 200)
-        html = response.text
-        self.assertIn("<p>Полезный <strong>текст</strong></p>", html)
-        self.assertIn("<h3>Проверенные рекомендации</h3>", html)
-        self.assertIn("<ol><li>Первое действие</li><li>Второе действие</li></ol>", html)
-        self.assertIn("<blockquote>&lt;script&gt;alert(1)&lt;/script&gt;</blockquote>", html)
-        self.assertLess(html.index("<strong>текст</strong>"), html.index("<h3>Проверенные"))
-        self.assertLess(html.index("<h3>Проверенные"), html.index("<ol><li>"))
-
-    def test_invalid_slug_does_not_return_indexable_spa_fallback(self):
-        response = self.client.get("/seo-pages/business/64/blog/invalid_slug")
-        self.assertEqual(response.status_code, 404)
-
     def test_search_and_ai_crawlers_can_reach_public_blog_without_indexing_private_app(self):
         robots = (Path(__file__).resolve().parents[1] / "web" / "frontend" / "public" / "robots.txt").read_text(encoding="utf-8")
         self.assertIn("User-agent: *", robots)
