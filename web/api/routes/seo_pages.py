@@ -138,56 +138,12 @@ def _contacts(business: Business) -> str:
     return '<footer class="contact">' + "".join(items) + '</footer>' if items else ""
 
 
-def _rich_text(value: object, spans: object = None) -> str:
-    """Render only whitelisted inline formatting; escape every source text."""
-    if not isinstance(spans, list) or not spans:
-        return _text(value)
-    rendered: list[str] = []
-    for part in spans:
-        if not isinstance(part, dict) or not isinstance(part.get("text"), str):
-            return _text(value)
-        safe = _text(part["text"])
-        style = part.get("style")
-        if style == "strong":
-            safe = f"<strong>{safe}</strong>"
-        elif style == "em":
-            safe = f"<em>{safe}</em>"
-        elif style == "strong_em":
-            safe = f"<strong><em>{safe}</em></strong>"
-        rendered.append(safe)
-    return "".join(rendered)
-
-
-def _paragraphs(section: dict) -> str:
-    """Preserve the exact reader article block order in server-rendered HTML."""
-    blocks = section.get("blocks")
-    if isinstance(blocks, list) and blocks:
-        output: list[str] = []
-        for block in blocks:
-            if not isinstance(block, dict):
-                continue
-            kind = block.get("type")
-            if kind == "paragraph":
-                output.append(f'<p>{_rich_text(block.get("text"), block.get("spans"))}</p>')
-            elif kind == "subheading":
-                output.append(f'<h3>{_text(block.get("text"))}</h3>')
-            elif kind == "quote":
-                output.append(f'<blockquote>{_rich_text(block.get("text"), block.get("spans"))}</blockquote>')
-            elif kind == "list" and isinstance(block.get("items"), list):
-                tag = "ol" if block.get("ordered") else "ul"
-                spans = block.get("item_spans")
-                items = []
-                for index, item in enumerate(block["items"]):
-                    rich = spans[index] if isinstance(spans, list) and index < len(spans) else None
-                    items.append(f"<li>{_rich_text(item, rich)}</li>")
-                output.append(f"<{tag}>" + "".join(items) + f"</{tag}>")
-        return "".join(output)
-
-    output: list[str] = []
-    for part in section.get("paragraphs", []):
+def _paragraphs(block: dict) -> str:
+    output = []
+    for part in block.get("paragraphs", []):
         if isinstance(part, str) and part.strip():
             output.append(f"<p>{_text(part)}</p>")
-    bullets = section.get("bullets", [])
+    bullets = block.get("bullets", [])
     if isinstance(bullets, list) and bullets:
         output.append("<ul>" + "".join(f"<li>{_text(item)}</li>" for item in bullets) + "</ul>")
     return "".join(output)
