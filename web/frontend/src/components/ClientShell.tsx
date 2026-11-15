@@ -14,6 +14,8 @@ export function ClientShell({
   headerExtra,
   studioEntry,
   tabs = true,
+  screenClassName,
+  screenLabel,
   children,
 }: {
   title?: string
@@ -24,11 +26,14 @@ export function ClientShell({
   studioEntry?: boolean
   /** Public auth may omit the unrelated booking navigation. */
   tabs?: boolean
+  /** Page-specific responsive layout without modifying shared booking screens. */
+  screenClassName?: string
+  screenLabel?: string
   children: ReactNode
 }) {
   return (
     <AirFrame label={title || 'ServGo'} backTo={backTo} topExtra={headerExtra} tabs={tabs}>
-      <section className="bf-screen" aria-label={title}>
+      <section className={screenClassName ? `bf-screen ${screenClassName}` : "bf-screen"} aria-label={screenLabel || title}>
         <div className="bf-inner bf-page bf-shell-page">
           {(title || subtitle != null) && (
             <header className="bf-shell-head">
