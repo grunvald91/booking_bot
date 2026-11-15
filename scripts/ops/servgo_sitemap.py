@@ -53,7 +53,7 @@ def fetch_company_blog_sitemap(api_url: str, timeout: float = 15.0) -> str:
         loc = sitemap.find(f"{{{SITEMAP_NAMESPACE}}}loc")
         if loc is None or not isinstance(loc.text, str):
             raise ValueError("Company sitemap entry missing URL")
-        if not re.fullmatch(r"https://servgo\\.ru/business/[1-9][0-9]*/blog/sitemap\\.xml", loc.text.strip()):
+        if not re.fullmatch(r"https://servgo\.ru/business/[1-9][0-9]*/blog/sitemap\.xml", loc.text.strip()):
             raise ValueError("Company sitemap has an unexpected URL")
     return xml
 
