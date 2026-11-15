@@ -40,3 +40,37 @@ def test_main_rejects_non_list_payload(tmp_path):
     out.write_text("PREVIOUS", encoding="utf-8")
     assert sm.main(["--api-url", api.as_uri(), "--out", str(out)]) == 1
     assert out.read_text(encoding="utf-8") == "PREVIOUS"
+
+
+
+def test_company_sitemap_index_written_with_primary_sitemap(tmp_path):
+    businesses = tmp_path / "businesses.json"
+    businesses.write_text('[{"id": 7}]', encoding="utf-8")
+    index = tmp_path / "company-source.xml"
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>'
+           '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+           '<sitemap><loc>https://servgo.ru/business/7/blog/sitemap.xml</loc></sitemap>'
+           '</sitemapindex>')
+    index.write_text(xml, encoding="utf-8")
+    out = tmp_path / "sitemap.xml"
+    assert sm.main(["--api-url", businesses.as_uri(), "--out", str(out),
+                    "--with-company", "--company-api-url", index.as_uri()]) == 0
+    assert "https://servgo.ru/business/7" in out.read_text(encoding="utf-8")
+    assert (tmp_path / "business-blog-sitemap.xml").read_text(encoding="utf-8") == xml
+
+
+def test_company_sitemap_rejects_html_and_foreign_hosts(tmp_path):
+    index = tmp_path / "source.xml"
+    for content in (
+        "<!doctype html><html><body>SPA</body></html>",
+        ('<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+         '<sitemap><loc>https://other.example/business/1/blog/sitemap.xml</loc></sitemap>'
+         '</sitemapindex>'),
+    ):
+        index.write_text(content, encoding="utf-8")
+        try:
+            sm.fetch_company_blog_sitemap(index.as_uri())
+        except (ValueError, ET.ParseError):
+            pass
+        else:
+            raise AssertionError("HTML and foreign URL must not be accepted as company sitemap")
