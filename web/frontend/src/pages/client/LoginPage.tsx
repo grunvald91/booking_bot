@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Phone, Send } from 'lucide-react'
+import { ChevronDown, Mail, Phone, Send } from 'lucide-react'
+import './login.css'
 import { consumeLoginDestination, pendingLoginDestination, postLoginPath, rememberLoginDestination, STUDIO_ENTRY } from '../../utils/postLogin'
 import { api, type TelegramLoginPayload } from '../../api/client'
 import { errorMessage, saveLogin } from '../../authUtils'
@@ -48,6 +49,8 @@ export function LoginPage() {
   const [widget, setWidget] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [widgetAttempt, setWidgetAttempt] = useState(0)
   const [widgetSource, setWidgetSource] = useState(0)
+  const [emailOpen, setEmailOpen] = useState(false)
+  const [legacyOpen, setLegacyOpen] = useState(joinTelegram)
 
   useEffect(() => {
     if (studioNext !== STUDIO_ENTRY) return
@@ -83,7 +86,7 @@ export function LoginPage() {
   }, [mode])
 
   useEffect(() => {
-    if (mode !== 'phone' || !telegramWidgetRef.current) return
+    if (!legacyOpen || mode !== 'phone' || !telegramWidgetRef.current) return
     const host = telegramWidgetRef.current
     const callbackWindow = window as Window & {
       servgoTelegramWidgetAuth?: (data: TelegramLoginPayload) => void
@@ -144,7 +147,7 @@ export function LoginPage() {
       host.replaceChildren()
       delete callbackWindow.servgoTelegramWidgetAuth
     }
-  }, [mode, navigate, widgetAttempt, widgetSource])
+  }, [legacyOpen, mode, navigate, widgetAttempt, widgetSource])
 
   const handleSendCode = async () => {
     if (!phone) return
@@ -205,19 +208,33 @@ export function LoginPage() {
 
   return (
     <ClientShell backTo="/" title="Вход">
-      <div className="ds-form-narrow" style={{ paddingTop: 4 }}>
+      <div className="sg-login ds-form-narrow">
+        <p className="sg-login__intro">Один аккаунт для ServGo и Студии.</p>
         {studioNext === STUDIO_ENTRY && (
-          <p role="status" className="ds-hint" style={{ marginBottom: 16 }}>
-            Войдите в ваш аккаунт ServGo. После входа откроется Studio для доступной компании.
+          <p role="status" className="ds-hint sg-login__notice">
+            После входа откроется Студия для доступной компании.
           </p>
         )}
-        {yandexProblem && <p role="alert" style={{ color: 'var(--s-danger)', marginBottom: 12 }}>{yandexProblem}</p>}
-        {vkProblem && <p role="alert" style={{ color: 'var(--s-danger)', marginBottom: 12 }}>{vkProblem}</p>}
-        <div style={{ marginBottom: 12 }}><YandexLoginButton /></div>
-        <div style={{ marginBottom: 16 }}><VkLoginButton /></div>
-        <EmailAuthForm />
-        <p className="ds-hint" style={{ margin: '16px 0' }}>Для аккаунтов с привязанным Telegram доступны прежние способы входа:</p>
-        {joinTelegram && <p className="ds-hint" role="status" style={{ marginBottom: 12, fontWeight: 600 }}>Войдите через Telegram — если номер телефона в нём тот же, что в Яндексе, аккаунты объединятся автоматически.</p>}
+        {yandexProblem && <p role="alert" className="sg-login__error">{yandexProblem}</p>}
+        {vkProblem && <p role="alert" className="sg-login__error">{vkProblem}</p>}
+        <div className="sg-login__social" aria-label="Вход через сервисы">
+          <YandexLoginButton />
+          <VkLoginButton />
+        </div>
+        <div className="sg-login__methods">
+          <button type="button" className="sg-login__method" aria-expanded={emailOpen}
+            aria-controls="sg-login-email" onClick={() => setEmailOpen(open => !open)}>
+            <Mail size={17} aria-hidden="true" /><span>Войти по email</span>
+            <ChevronDown className={emailOpen ? 'sg-login__chevron is-open' : 'sg-login__chevron'} size={16} aria-hidden="true" />
+          </button>
+          {emailOpen && <div id="sg-login-email" className="sg-login__details"><EmailAuthForm /></div>}
+          <button type="button" className="sg-login__method" aria-expanded={legacyOpen}
+            aria-controls="sg-login-legacy" onClick={() => setLegacyOpen(open => !open)}>
+            <Send size={17} aria-hidden="true" /><span>Telegram или номер телефона</span>
+            <ChevronDown className={legacyOpen ? 'sg-login__chevron is-open' : 'sg-login__chevron'} size={16} aria-hidden="true" />
+          </button>
+          {legacyOpen && <div id="sg-login-legacy" className="sg-login__details sg-login__legacy">
+            {joinTelegram && <p className="ds-hint" role="status">Войдите через Telegram. Если номер совпадает с подтверждённым в Яндексе, аккаунты могут объединиться.</p>}
         {mode === 'phone' && (
           <div>
             <div className="ds-card" style={{ padding: 16, marginBottom: 14, textAlign: 'center' }}>
@@ -344,6 +361,8 @@ export function LoginPage() {
             </button>
           </div>
         )}
+          </div>}
+        </div>
       </div>
     </ClientShell>
   )
