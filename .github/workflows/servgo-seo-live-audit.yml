@@ -1,0 +1,54 @@
+name: ServGo SEO live audit (read-only)
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/servgo-seo-live-audit.yml']
+  workflow_run:
+    workflows: ['Deploy webapp to server']
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: servgo-seo-live-audit
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    if: ${{ github.event_name == 'push' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin SSH host key and establish read-only transport
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD unavailable"; exit 1; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -d -m 700 ~/.ssh
+          ssh-keyscan -T 15 -p "$SERVER_PORT" -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/seo-scanned
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/seo-key
+            if ssh-keygen -lf /tmp/seo-key 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/seo-scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Production host key mismatch"; exit 1; }
+      - name: Audit production HTTPS virtual host, canonical and sitemaps
+        run: |
+          set -euo pipefail
+          sshpass -e ssh \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
+            -p "$SERVER_PORT" "$SERVER_USER@$HOST" \
+            'python3 -' < scripts/ops/servgo_seo_live_audit.py
