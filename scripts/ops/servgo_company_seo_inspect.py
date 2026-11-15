@@ -41,6 +41,12 @@ with SessionLocal() as db:
     print('growth_linked_published_products=' + str(len(prods & links)))
     print('growth_unlinked_published_products=' + str(len(prods - links)))
     print('growth_studio_links_total=' + str(len(links)))
+    article_states = db.execute(select(Artifact.product_id, Artifact.status)
+        .where(Artifact.kind == 'article')).all()
+    tenant_artifacts = [(p, state) for p, state in article_states if p in links]
+    print('linked_company_article_artifacts=' + str(len(tenant_artifacts)))
+    print('linked_company_published_article_artifacts=' + str(sum(
+        state == ArtifactStatus.PUBLISHED for _, state in tenant_artifacts)))
 """
     result = subprocess.run(["docker", "exec", "-i", "ai-growth-os-api-1",
                             "python", "-c", code],
