@@ -1,7 +1,7 @@
-"""Real Chromium responsive smoke for the shared ServGo/Studio login.
+"""Chromium responsive and route-flow smoke for shared ServGo login / Studio.
 
-Uses the built PWA in an isolated loopback fixture. Never calls production APIs
-or creates a live account. Saves viewport screenshots for manual UX review.
+The built PWA is served on loopback with fixed test API responses. No production
+API, provider OAuth, emails, actual companies, or user sessions are modified.
 """
 from __future__ import annotations
 
@@ -15,6 +15,16 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "web" / "frontend" / "dist"
 SCREENSHOTS = ROOT / "artifacts" / "login-viewports"
+
+WIDTHS = (
+    ("phone320", 320, 700),
+    ("phone390", 390, 844),
+    ("tablet768", 768, 950),
+    ("desktop1024", 1024, 768),
+    ("desktop1280", 1280, 800),
+    ("desktop1440", 1440, 900),
+    ("wide1920", 1920, 1080),
+)
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -31,12 +41,22 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_response(401)
                 self.end_headers()
                 return
-            data = {"available": True} if route.endswith("/capabilities") else {}
+            if route == "/api/auth/me":
+                data = {"id": 9, "full_name": "Тестовый администратор", "role": "admin"}
+            elif route == "/api/studio/businesses":
+                data = [
+                    {"id": 42, "name": "Тестовая компания А", "role": "owner"},
+                    {"id": 43, "name": "Тестовая компания Б", "role": "owner"},
+                ]
+            elif route.endswith("/capabilities"):
+                data = {"available": True}
+            else:
+                data = {}
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
-            self.wfile.write(json.dumps(data).encode())
+            self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
             return
         if route != "/" and not (DIST / route.lstrip("/")).is_file():
             self.path = "/index.html"
@@ -53,49 +73,91 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
 
 
-def check_page(page, label, theme, url):
+def geometry(page, css):
+    return page.locator(css).bounding_box()
+
+
+def layout_assertions(page, label, width, *, studio=False):
+    root = ".sg-studio-layout" if studio else ".sg-login-layout"
+    left = ".sg-studio-intro" if studio else ".sg-login__brand-panel"
+    right = ".sg-studio-businesses" if studio else ".sg-login"
+    outer = geometry(page, root)
+    panel = geometry(page, right)
+    assert outer and panel, (label, root, right)
+    assert outer["x"] >= 0 and outer["x"] + outer["width"] <= width + 1, (label, outer)
+    assert panel["x"] >= 0 and panel["x"] + panel["width"] <= width + 1, (label, panel)
+    overflow = page.evaluate("""() => {
+      const offenders = [...document.querySelectorAll('*')].filter(el => {
+        const style = getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        const box = el.getBoundingClientRect();
+        return box.width > 0 && (box.right > innerWidth + 1 || box.left < -1);
+      }).slice(0, 18).map(el => ({
+        tag: el.tagName.toLowerCase(),
+        className: typeof el.className === 'string' ? el.className : '',
+        x: Math.round(el.getBoundingClientRect().x),
+        right: Math.round(el.getBoundingClientRect().right),
+        width: Math.round(el.getBoundingClientRect().width),
+      }));
+      return {
+        scrollWidth: document.documentElement.scrollWidth,
+        innerWidth, offenders
+      };
+    }""")
+    assert overflow["scrollWidth"] <= width + 1, (label, "horizontal overflow", overflow)
+    if width >= 1024:
+        brand = geometry(page, left)
+        assert brand and brand["width"] >= 300, (label, brand)
+        assert brand["x"] + brand["width"] + 10 <= panel["x"], (label, brand, panel)
+        assert outer["width"] >= 850, (label, outer)
+        assert 385 <= panel["width"] <= 560, (label, panel)
+        assert page.locator(left).is_visible(), (label, "desktop brand panel hidden")
+    else:
+        assert page.locator(left).is_visible() == studio, (label, "tablet/mobile presentation")
+        if not studio:
+            assert panel["width"] <= 421, (label, panel)
+    return outer, panel
+
+
+def check_login(page, label, width, theme, url):
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.goto(url + "/login", wait_until="domcontentloaded")
     page.get_by_role("link", name="Войти через VK ID").wait_for(timeout=12000)
     page.get_by_role("link", name="Войти через Яндекс").wait_for(timeout=12000)
     page.evaluate("(theme) => document.documentElement.dataset.theme = theme", theme)
+    assert page.get_by_role("heading", name="Вход в ServGo", level=1).is_visible()
+    for caption in ("Войти по email", "Войти через Telegram", "Войти по номеру телефона"):
+        assert page.get_by_role("button", name=caption).is_visible(), (label, caption)
+    assert page.get_by_role("link", name="Войти через VK ID").get_attribute("href") == "/api/auth/vk/start"
+    assert page.get_by_role("link", name="Войти через Яндекс").get_attribute("href") == "/api/auth/yandex/start"
+    outer, panel = layout_assertions(page, label, width)
+    assert page.locator(".servgo-shell-header").count() == 0, (label, "duplicate public nav")
+    if width < 1024:
+        assert panel["y"] < 150, (label, "mobile login must start near header", panel)
 
-    for label_text in ("Войти по email", "Войти через Telegram", "Войти по номеру телефона"):
-        assert page.get_by_role("button", name=label_text).is_visible(), (label, label_text)
-
-    rect = page.locator(".sg-login").bounding_box()
-    assert rect and rect["width"] <= 421, (label, rect)
-    header_rect = page.locator(".bf-shell-head").bounding_box()
-    assert header_rect and abs(header_rect["x"] - rect["x"]) <= 2, (label, header_rect, rect)
-    assert rect["x"] >= 0 and rect["x"] + rect["width"] <= page.viewport_size["width"] + 1, (label, rect)
-    actual = page.evaluate("""() => {
-      const root = document.querySelector('.sg-login');
-      return {overflow: document.documentElement.scrollWidth > innerWidth + 1,
-              root: root.getBoundingClientRect().toJSON(),
-              rows: [...root.querySelectorAll('.sg-login__provider,.sg-login__method')]
-                 .map(e => ({width:e.getBoundingClientRect().width,
-                             left:e.getBoundingClientRect().left,
-                             right:e.getBoundingClientRect().right}))};
-    }""")
-    assert not actual["overflow"], (label, actual)
-    assert all(0 <= row["left"] and row["right"] <= page.viewport_size["width"] + 1
-               for row in actual["rows"]), (label, actual)
+    rows = page.locator(".sg-login__provider, .sg-login__method").all()
+    assert len(rows) == 5, (label, len(rows))
+    min_height = 46 if width >= 1024 else 40
+    for row in rows:
+        rect = row.bounding_box()
+        assert rect and rect["height"] >= min_height, (label, "short auth action", rect)
+        assert rect["x"] >= panel["x"] - 1 and rect["x"] + rect["width"] <= panel["x"] + panel["width"] + 1
+    if width >= 1024:
+        font_size = page.locator(".sg-login__method").first.evaluate(
+            "(el) => parseFloat(getComputedStyle(el).fontSize)")
+        assert font_size >= 14, (label, font_size)
+        assert panel["width"] >= 385, (label, "desktop form too narrow", panel)
 
     page.screenshot(path=str(SCREENSHOTS / f"{label}-{theme}-closed.png"), full_page=True)
     page.get_by_role("button", name="Войти по email").click()
     assert page.get_by_label("Email", exact=True).is_visible()
     assert page.get_by_label("Пароль", exact=True).is_visible()
-    assert page.locator("#sg-login-email").is_visible()
     page.screenshot(path=str(SCREENSHOTS / f"{label}-{theme}-email.png"), full_page=True)
-
     page.get_by_role("button", name="Войти через Telegram").click()
-    assert page.locator("#sg-login-telegram").is_visible()
     assert page.locator(".sg-login__telegram-widget").count() == 1
     assert not page.locator("#sg-login-email").is_visible()
-
     page.get_by_role("button", name="Войти по номеру телефона").click()
-    assert page.locator("#sg-login-phone").is_visible()
     assert page.get_by_label("Номер телефона").is_visible()
     page.get_by_label("Номер телефона").fill("+79000000000")
     page.get_by_role("button", name="Получить код").click()
@@ -106,13 +168,41 @@ def check_page(page, label, theme, url):
       digit: getComputedStyle(document.querySelector('.sg-login__code-fields input:nth-child(2)')).backgroundColor,
     })""")
     assert contrast["panel"] != contrast["digit"], (label, theme, contrast)
-    code = page.locator(".sg-login__code-fields").bounding_box()
-    assert code and code["x"] >= 0 and code["x"] + code["width"] <= page.viewport_size["width"] + 1, (label, code)
+    code = geometry(page, ".sg-login__code-fields")
+    assert code and code["x"] >= panel["x"] and code["x"] + code["width"] <= panel["x"] + panel["width"] + 1
     page.screenshot(path=str(SCREENSHOTS / f"{label}-{theme}-phone-code.png"), full_page=True)
     assert not errors, (label, errors)
-    print("AUTH_VIEWPORT_OK", json.dumps({"viewport": label, "theme": theme,
-        "width": rect["width"], "rows": len(actual["rows"]), "phone_code_width": code["width"]},
-        ensure_ascii=False), flush=True)
+    print("AUTH_RESPONSIVE_OK", json.dumps({
+        "viewport": label, "theme": theme, "layout_width": round(outer["width"]),
+        "form_width": round(panel["width"]), "providers": len(rows),
+    }, ensure_ascii=False), flush=True)
+
+
+def check_studio(browser, url, label, width, height, theme):
+    context = browser.new_context(viewport={"width": width, "height": height}, reduced_motion="reduce")
+    context.add_init_script("""
+        localStorage.setItem('token', 'servgo-browser-only-fixture');
+        localStorage.setItem('userRole', 'admin');
+        localStorage.setItem('userName', 'Тестовый администратор');
+    """)
+    page = context.new_page()
+    page.goto(url + "/workspace/studio-entry", wait_until="domcontentloaded")
+    page.get_by_role("heading", name="Ваши компании", level=2).wait_for(timeout=14000)
+    page.get_by_role("button", name="Маркетинг — Тестовая компания А").wait_for(timeout=12000)
+    page.evaluate("(theme) => document.documentElement.dataset.theme = theme", theme)
+    assert page.get_by_role("button", name="Маркетинг — Тестовая компания Б").is_visible()
+    assert page.get_by_role("link", name="Мой аккаунт").is_visible()
+    outer, panel = layout_assertions(page, label, width, studio=True)
+    assert page.locator(".servgo-shell-header").count() == 0, (label, "duplicate Studio nav")
+    if width < 1024:
+        intro = geometry(page, ".sg-studio-intro")
+        assert intro and intro["y"] < 150, (label, "mobile Studio intro too low", intro)
+    page.screenshot(path=str(SCREENSHOTS / f"{label}-{theme}-studio.png"), full_page=True)
+    print("STUDIO_RESPONSIVE_OK", json.dumps({
+        "viewport": label, "theme": theme, "layout_width": round(outer["width"]),
+        "panel_width": round(panel["width"]), "companies": 2,
+    }, ensure_ascii=False), flush=True)
+    context.close()
 
 
 def main():
@@ -125,14 +215,15 @@ def main():
     try:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch()
-            for label, width, height in (("phone320", 320, 700), ("phone390", 390, 844), ("desktop", 1440, 900)):
+            for label, width, height in WIDTHS:
                 for theme in ("light", "dark"):
                     context = browser.new_context(viewport={"width": width, "height": height}, reduced_motion="reduce")
                     page = context.new_page()
                     page.route("https://tg.servgo.ru/**", lambda route: route.abort())
                     page.route("https://telegram.org/**", lambda route: route.abort())
-                    check_page(page, label, theme, url)
+                    check_login(page, label, width, theme, url)
                     context.close()
+                    check_studio(browser, url, label, width, height, theme)
             context = browser.new_context(viewport={"width": 390, "height": 844})
             page = context.new_page()
             page.route("**/api/auth/vk/capabilities", lambda route: route.fulfill(
@@ -145,6 +236,17 @@ def main():
             assert page.get_by_role("button", name="Войти по email").is_visible()
             print("AUTH_UNAVAILABLE_PROVIDER_FALLBACK_OK", flush=True)
             context.close()
+
+            # A Studio deep link must use the same login page and all five providers.
+            guest = browser.new_context(viewport={"width": 1280, "height": 800})
+            page = guest.new_page()
+            page.goto(url + "/workspace/studio-entry", wait_until="domcontentloaded")
+            page.get_by_role("heading", name="Вход в ServGo", level=1).wait_for(timeout=12000)
+            assert page.get_by_text("После входа откроется Студия", exact=False).is_visible()
+            assert page.get_by_role("link", name="Войти через VK ID").is_visible()
+            assert "/login?next=" in page.url, page.url
+            print("STUDIO_CANONICAL_LOGIN_REDIRECT_OK", flush=True)
+            guest.close()
             browser.close()
     finally:
         server.shutdown()

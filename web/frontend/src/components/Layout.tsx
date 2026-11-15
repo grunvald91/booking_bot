@@ -85,6 +85,13 @@ export function Layout() {
     window.location.href = '/'
   }
 
+  // These screens own their complete AirFrame shell. Rendering the public site's
+  // desktop nav underneath it caused hidden horizontal overflow at tablet widths.
+  // Keep the surrounding route/identity logic; omit only redundant presentation.
+  if (location.pathname === '/login' || location.pathname === '/workspace/studio-entry') {
+    return <Outlet />
+  }
+
   return (
     <div className="min-h-screen bg-apple-bg">
       {/* Header */}

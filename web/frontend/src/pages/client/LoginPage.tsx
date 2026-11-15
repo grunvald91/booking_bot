@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ChevronDown, Mail, Phone, Send } from 'lucide-react'
+import { CalendarCheck2, ChevronDown, Mail, Phone, Send, Sparkles, Users } from 'lucide-react'
+import { Logo } from '../../components/Logo'
 import './login.css'
 import { consumeLoginDestination, pendingLoginDestination, postLoginPath, rememberLoginDestination, STUDIO_ENTRY } from '../../utils/postLogin'
 import { api, type TelegramLoginPayload } from '../../api/client'
@@ -212,9 +213,28 @@ export function LoginPage() {
   }
 
   return (
-    <ClientShell backTo="/" title="Вход в ServGo" tabs={false}>
-      <div className="sg-login ds-form-narrow">
-        <p className="sg-login__intro">Один аккаунт для ServGo и Студии.</p>
+    <ClientShell backTo="/" tabs={false} screenClassName="bf-screen--auth" screenLabel="Вход в ServGo">
+      <div className="sg-login-layout">
+        <aside className="sg-login__brand-panel" aria-label="Возможности ServGo">
+          <div className="sg-login__brand-top"><Logo size={39} light /></div>
+          <div className="sg-login__brand-message">
+            <p className="sg-login__brand-kicker">РАБОЧЕЕ ПРОСТРАНСТВО</p>
+            <h2>Ваш бизнес. Одна платформа.</h2>
+            <p>Запись клиентов, управление командой и маркетинг — в одном пространстве.</p>
+          </div>
+          <div className="sg-login__brand-features" aria-label="Разделы платформы">
+            <div><CalendarCheck2 size={19} aria-hidden="true" /><span>Онлайн-запись</span></div>
+            <div><Users size={19} aria-hidden="true" /><span>Команда</span></div>
+            <div><Sparkles size={19} aria-hidden="true" /><span>Studio</span></div>
+          </div>
+          <div className="sg-login__brand-glow" aria-hidden="true" />
+        </aside>
+        <section className="sg-login ds-form-narrow" aria-labelledby="sg-login-title">
+          <header className="sg-login__form-head">
+            <p className="sg-login__form-kicker">SERVGO ACCOUNT</p>
+            <h1 id="sg-login-title">Вход в ServGo</h1>
+            <p className="sg-login__intro">Один аккаунт для ServGo и Studio. Выберите удобный способ входа.</p>
+          </header>
         {studioNext === STUDIO_ENTRY && (
           <p role="status" className="sg-login__notice">
             После входа откроется Студия для доступной компании.
@@ -315,6 +335,7 @@ export function LoginPage() {
             ))}
           </div>
         </div>
+        </section>
       </div>
     </ClientShell>
   )
