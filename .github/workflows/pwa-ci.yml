@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'web/frontend/**'
+      - 'scripts/check_servgo_login_viewports.py'
       - 'web/api/**'
       - 'deploy/nginx/**'
       - 'tests/test_studio_sso.py'
@@ -200,3 +201,15 @@ jobs:
 
       - name: Verify installed PWA offline, owner login/logout, and booking SEO referral
         run: python scripts/check_servgo_offline_pwa_browser.py
+
+      - name: Check ServGo login in real mobile and desktop Chromium
+        run: python scripts/check_servgo_login_viewports.py
+
+      - name: Upload responsive auth screenshots for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: servgo-login-viewports
+          path: artifacts/login-viewports/*.png
+          if-no-files-found: ignore
+          retention-days: 7

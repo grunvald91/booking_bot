@@ -49,8 +49,7 @@ export function LoginPage() {
   const [widget, setWidget] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [widgetAttempt, setWidgetAttempt] = useState(0)
   const [widgetSource, setWidgetSource] = useState(0)
-  const [emailOpen, setEmailOpen] = useState(false)
-  const [legacyOpen, setLegacyOpen] = useState(joinTelegram)
+  const [method, setMethod] = useState<'email' | 'telegram' | 'phone' | null>(joinTelegram ? 'telegram' : null)
 
   useEffect(() => {
     if (studioNext !== STUDIO_ENTRY) return
@@ -86,7 +85,7 @@ export function LoginPage() {
   }, [mode])
 
   useEffect(() => {
-    if (!legacyOpen || mode !== 'phone' || !telegramWidgetRef.current) return
+    if (method !== 'telegram' || !telegramWidgetRef.current) return
     const host = telegramWidgetRef.current
     const callbackWindow = window as Window & {
       servgoTelegramWidgetAuth?: (data: TelegramLoginPayload) => void
@@ -147,7 +146,7 @@ export function LoginPage() {
       host.replaceChildren()
       delete callbackWindow.servgoTelegramWidgetAuth
     }
-  }, [legacyOpen, mode, navigate, widgetAttempt, widgetSource])
+  }, [method, navigate, widgetAttempt, widgetSource])
 
   const handleSendCode = async () => {
     if (!phone) return
@@ -156,6 +155,7 @@ export function LoginPage() {
     try {
       const res = await api.loginPhone(phone)
       setCodeSentVia(res.fallback ? 'fallback' : 'telegram')
+      setMethod('phone')
       setMode('code')
     } catch (err) {
       setError(errorMessage(err))
@@ -206,12 +206,17 @@ export function LoginPage() {
     window.open('https://t.me/Sochiservice_bot', '_blank', 'noopener,noreferrer')
   }
 
+
+  const toggleMethod = (next: 'email' | 'telegram' | 'phone') => {
+    setMethod(current => current === next ? null : next)
+  }
+
   return (
-    <ClientShell backTo="/" title="Вход" tabs={false}>
+    <ClientShell backTo="/" title="Вход в ServGo" tabs={false}>
       <div className="sg-login ds-form-narrow">
         <p className="sg-login__intro">Один аккаунт для ServGo и Студии.</p>
         {studioNext === STUDIO_ENTRY && (
-          <p role="status" className="ds-hint sg-login__notice">
+          <p role="status" className="sg-login__notice">
             После входа откроется Студия для доступной компании.
           </p>
         )}
@@ -221,147 +226,94 @@ export function LoginPage() {
           <YandexLoginButton />
           <VkLoginButton />
         </div>
-        <div className="sg-login__methods">
-          <button type="button" className="sg-login__method" aria-expanded={emailOpen}
-            aria-controls="sg-login-email" onClick={() => setEmailOpen(open => !open)}>
-            <Mail size={17} aria-hidden="true" /><span>Войти по email</span>
-            <ChevronDown className={emailOpen ? 'sg-login__chevron is-open' : 'sg-login__chevron'} size={16} aria-hidden="true" />
-          </button>
-          {emailOpen && <div id="sg-login-email" className="sg-login__details"><EmailAuthForm /></div>}
-          <button type="button" className="sg-login__method" aria-expanded={legacyOpen}
-            aria-controls="sg-login-legacy" onClick={() => setLegacyOpen(open => !open)}>
-            <Send size={17} aria-hidden="true" /><span>Telegram или номер телефона</span>
-            <ChevronDown className={legacyOpen ? 'sg-login__chevron is-open' : 'sg-login__chevron'} size={16} aria-hidden="true" />
-          </button>
-          {legacyOpen && <div id="sg-login-legacy" className="sg-login__details sg-login__legacy">
-            {joinTelegram && <p className="ds-hint" role="status">Войдите через Telegram. Если номер совпадает с подтверждённым в Яндексе, аккаунты могут объединиться.</p>}
-        {mode === 'phone' && (
-          <div>
-            <div className="ds-card" style={{ padding: 16, marginBottom: 14, textAlign: 'center' }}>
-              <p className="ds-text" style={{ marginBottom: 12, fontWeight: 600 }}>Войти через Telegram</p>
-              <div ref={telegramWidgetRef} style={{ minHeight: widget === 'failed' ? 0 : 40, display: 'flex', justifyContent: 'center' }} />
-              {widget === 'loading' && <p className="ds-hint" style={{ marginTop: 6 }}>Загружаем кнопку Telegram…</p>}
-              {widget === 'failed' ? (
-                <div role="status">
-                  <p className="ds-hint" style={{ marginTop: 6 }}>
-                    Кнопка Telegram не открылась ни через наш сервер, ни напрямую: возможно, её блокирует
-                    расширение браузера или сеть. Войдите по номеру телефона ниже (код придёт в бота)
-                    или по email выше.
-                  </p>
-                  <button type="button" onClick={() => { setWidget('loading'); setWidgetSource(0); setWidgetAttempt((n) => n + 1) }}
-                    className="ds-btn ds-btn--ghost ds-btn--sm" style={{ marginTop: 8 }}>
-                    Попробовать ещё раз
-                  </button>
-                </div>
-              ) : (
-                <p className="ds-hint" style={{ marginTop: 10 }}>
-                  Авторизуйтесь кнопкой Telegram выше. Простое открытие бота не выполняет вход на сайт.
-                </p>
-              )}
-              <button type="button" onClick={handleTelegramLogin}
-                className="ds-btn ds-btn--ghost ds-btn--sm" style={{ marginTop: 8 }}>
-                <Send size={16} /> Открыть бота
-              </button>
-            </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '16px 0' }}>
-              <div style={{ flex: 1, height: 1, background: 'var(--s-line)' }} />
-              <span className="ds-sub">или</span>
-              <div style={{ flex: 1, height: 1, background: 'var(--s-line)' }} />
-            </div>
+        <div className="sg-login__methods" aria-label="Другие способы входа">
+          <button type="button" className="sg-login__method" aria-expanded={method === 'email'}
+            aria-controls="sg-login-email" onClick={() => toggleMethod('email')}>
+            <Mail size={17} aria-hidden="true" />
+            <span>Войти по email</span>
+            <ChevronDown className={method === 'email' ? 'sg-login__chevron is-open' : 'sg-login__chevron'} size={16} aria-hidden="true" />
+          </button>
+          <div id="sg-login-email" className="sg-login__details" hidden={method !== 'email'}>
+            {method === 'email' && <EmailAuthForm />}
+          </div>
 
-            <div className="ds-field">
-              <label className="ds-label">Номер телефона</label>
-              <div style={{ position: 'relative' }}>
-                <Phone
-                  size={18}
-                  style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: 'var(--s-muted)' }}
-                />
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+7 (___) ___-__-__"
-                  className="ds-input"
-                  style={{ paddingLeft: 40 }}
-                />
+          <button type="button" className="sg-login__method" aria-expanded={method === 'telegram'}
+            aria-controls="sg-login-telegram" onClick={() => toggleMethod('telegram')}>
+            <Send size={17} aria-hidden="true" />
+            <span>Войти через Telegram</span>
+            <ChevronDown className={method === 'telegram' ? 'sg-login__chevron is-open' : 'sg-login__chevron'} size={16} aria-hidden="true" />
+          </button>
+          <div id="sg-login-telegram" className="sg-login__details" hidden={method !== 'telegram'}>
+            {method === 'telegram' && (
+              <div className="sg-login__telegram">
+                {joinTelegram && <p className="ds-hint" role="status">Войдите через Telegram для подтверждения объединения аккаунтов.</p>}
+                <div ref={telegramWidgetRef} className="sg-login__telegram-widget" />
+                {widget === 'loading' && <p className="ds-hint" role="status">Загружаем кнопку Telegram…</p>}
+                {widget === 'failed' && (
+                  <div role="status">
+                    <p className="ds-hint">Кнопка Telegram не загрузилась. Можно попробовать ещё раз или войти по телефону либо email.</p>
+                    <button type="button" className="ds-btn ds-btn--ghost ds-btn--sm"
+                      onClick={() => { setWidget('loading'); setWidgetSource(0); setWidgetAttempt(n => n + 1) }}>
+                      Повторить загрузку
+                    </button>
+                  </div>
+                )}
+                {error && <p role="alert" className="sg-login__error">{error}</p>}
+                <p className="ds-hint">Вход выполняется кнопкой Telegram. Простое открытие бота не авторизует на сайте.</p>
+                <button type="button" className="sg-login__bot-link" onClick={handleTelegramLogin}>
+                  Открыть @Sochiservice_bot
+                </button>
               </div>
-            </div>
-
-            <button
-              onClick={handleSendCode}
-              disabled={loading || !phone}
-              className="ds-btn ds-btn--primary ds-btn--block"
-            >
-              {loading ? 'Отправляем...' : 'Получить код'}
-            </button>
-
-            {error && <p className="ds-error" style={{ justifyContent: 'center', marginTop: 10 }}>{error}</p>}
-
-            <p className="ds-hint" style={{ textAlign: 'center', marginTop: 14 }}>
-              Код придёт через @Sochiservice_bot, только если этот номер уже привязан к вашему аккаунту.
-              При отсутствии кода используйте прежний подтверждённый email или кнопку Telegram выше, если она открылась.
-            </p>
+            )}
           </div>
-        )}
 
-        {mode === 'code' && (
-          <div>
-            <div style={{ textAlign: 'center', marginBottom: 20 }}>
-              {codeSentVia === 'telegram' ? (
-                <p className="ds-sub">
-                  Код отправлен в <span style={{ fontWeight: 600, color: '#0088cc' }}>Telegram</span> на аккаунт с номером{' '}
-                  <span style={{ fontWeight: 600, color: 'var(--s-text)' }}>{phone}</span>
+          <button type="button" className="sg-login__method" aria-expanded={method === 'phone'}
+            aria-controls="sg-login-phone" onClick={() => toggleMethod('phone')}>
+            <Phone size={17} aria-hidden="true" />
+            <span>Войти по номеру телефона</span>
+            <ChevronDown className={method === 'phone' ? 'sg-login__chevron is-open' : 'sg-login__chevron'} size={16} aria-hidden="true" />
+          </button>
+          <div id="sg-login-phone" className="sg-login__details" hidden={method !== 'phone'}>
+            {method === 'phone' && (mode === 'phone' ? (
+              <div className="sg-login__phone">
+                <label htmlFor="sg-login-phone-number" className="ds-label">Номер телефона</label>
+                <input id="sg-login-phone-number" type="tel" autoComplete="tel"
+                  value={phone} onChange={e => setPhone(e.target.value)}
+                  placeholder="+7 (___) ___-__-__" className="ds-input" />
+                <button type="button" onClick={handleSendCode}
+                  disabled={loading || !phone.trim()} className="ds-btn ds-btn--primary ds-btn--block">
+                  {loading ? 'Отправляем…' : 'Получить код'}
+                </button>
+                {error && <p role="alert" className="sg-login__error">{error}</p>}
+                <p className="ds-hint">Код придёт через @Sochiservice_bot, если номер привязан к вашему аккаунту.</p>
+              </div>
+            ) : (
+              <div className="sg-login__phone">
+                <p role="status" className="ds-hint">
+                  {codeSentVia === 'telegram'
+                    ? 'Код отправлен в Telegram для номера ' + phone
+                    : 'Не удалось отправить код в Telegram. Проверьте, что номер зарегистрирован в боте.'}
                 </p>
-              ) : (
-                <p className="ds-sub">
-                  Не удалось отправить код в Telegram. Убедитесь, что вы зарегистрированы через бот{' '}
-                  <a href="https://t.me/Sochiservice_bot" target="_blank" rel="noopener noreferrer" style={{ color: '#0088cc', fontWeight: 600 }}>@Sochiservice_bot</a>
-                </p>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginBottom: 20 }}>
-              {code.map((digit, i) => (
-                <input
-                  key={i}
-                  ref={(el) => { codeRefs.current[i] = el }}
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={1}
-                  value={digit}
-                  onChange={(e) => handleCodeInput(i, e.target.value)}
-                  onKeyDown={(e) => handleCodeKeyDown(i, e)}
-                  className="ds-input"
-                  style={{
-                    width: 48,
-                    height: 48,
-                    padding: 0,
-                    textAlign: 'center',
-                    fontSize: 22,
-                    fontWeight: 700,
-                  }}
-                />
-              ))}
-            </div>
-
-            {loading && <p className="ds-sub" style={{ textAlign: 'center' }}>Проверяем...</p>}
-
-            {error && <p className="ds-error" style={{ justifyContent: 'center' }}>{error}</p>}
-
-            <button
-              onClick={() => {
-                setMode('phone')
-                setCode(['', '', '', '', '', ''])
-              }}
-              className="ds-btn ds-btn--block"
-              style={{ background: 'none', border: 'none', color: 'var(--s-accent)' }}
-            >
-              Изменить номер
-            </button>
+                <div className="sg-login__code-fields" aria-label="Шестизначный код">
+                  {code.map((digit, i) => (
+                    <input key={i} ref={el => { codeRefs.current[i] = el }}
+                      type="text" inputMode="numeric" maxLength={1}
+                      aria-label={'Цифра кода ' + (i + 1)} autoComplete={i === 0 ? 'one-time-code' : 'off'}
+                      value={digit} onChange={e => handleCodeInput(i, e.target.value)}
+                      onKeyDown={e => handleCodeKeyDown(i, e)} className="ds-input" />
+                  ))}
+                </div>
+                {loading && <p className="ds-hint" role="status">Проверяем код…</p>}
+                {error && <p role="alert" className="sg-login__error">{error}</p>}
+                <button type="button" className="sg-login__bot-link" onClick={() => {
+                  setMode('phone')
+                  setCode(['', '', '', '', '', ''])
+                  setError('')
+                }}>Изменить номер</button>
+              </div>
+            ))}
           </div>
-        )}
-          </div>}
         </div>
       </div>
     </ClientShell>

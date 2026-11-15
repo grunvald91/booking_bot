@@ -1,23 +1,32 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 
-// Both the public site and Studio start this same canonical ServGo login flow.
+// A failed capabilities request must not silently remove a supported login choice.
 export function YandexLoginButton() {
-  const [available, setAvailable] = useState(false)
+  const [status, setStatus] = useState<'checking' | 'ready' | 'unavailable'>('checking')
+
   useEffect(() => {
     let active = true
     api.yandexCapabilities()
-      .then(result => { if (active) setAvailable(result.available) })
-      .catch(() => { if (active) setAvailable(false) })
+      .then(result => { if (active) setStatus(result.available ? 'ready' : 'unavailable') })
+      .catch(() => { if (active) setStatus('unavailable') })
     return () => { active = false }
   }, [])
 
-  if (!available) return null
+  const mark = <span className="sg-login__yandex-mark" aria-hidden="true">Я</span>
+  if (status !== 'ready') {
+    return (
+      <div className="sg-login__provider sg-login__provider--inactive" role="status"
+        aria-label={status === 'checking' ? 'Проверяем доступность Яндекса' : 'Вход через Яндекс недоступен'}>
+        {mark}<span>{status === 'checking' ? 'Проверяем Яндекс…' : 'Яндекс — пока недоступен'}</span>
+      </div>
+    )
+  }
+
   return (
     <div className="sg-login__provider-group">
       <a href="/api/auth/yandex/start" className="sg-login__provider sg-login__provider--yandex">
-        <span className="sg-login__yandex-mark" aria-hidden="true">Я</span>
-        <span>Войти через Яндекс</span>
+        {mark}<span>Войти через Яндекс</span>
       </a>
       <details className="sg-login__data-note">
         <summary>Какие данные передаются?</summary>

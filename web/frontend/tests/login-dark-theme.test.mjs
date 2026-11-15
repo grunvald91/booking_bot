@@ -35,7 +35,7 @@ test('VK sign-in and explicit identity linking are exposed in the current accoun
   assert.doesNotMatch(vkLink, /background:\s*['\"](?:white|#fff)/i)
 })
 
-test('public ServGo sign-in stays compact and hides only optional forms', () => {
+test('all five ServGo login methods remain discoverable on site and Studio', () => {
   const layout = readFileSync(new URL('../src/pages/client/login.css', import.meta.url), 'utf8')
   const vk = readFileSync(new URL('../src/components/VkLoginButton.tsx', import.meta.url), 'utf8')
   const yandex = readFileSync(new URL('../src/components/YandexLoginButton.tsx', import.meta.url), 'utf8')
@@ -43,14 +43,23 @@ test('public ServGo sign-in stays compact and hides only optional forms', () => 
 
   assert.match(login, /className="sg-login ds-form-narrow"/)
   assert.match(layout, /max-width:\s*420px/)
-  assert.match(login, /useState\(joinTelegram\)/)
-  assert.match(login, /aria-expanded=\{emailOpen\}/)
-  assert.match(login, /aria-expanded=\{legacyOpen\}/)
-  assert.match(login, /\{legacyOpen && <div id="sg-login-legacy"/)
-  assert.match(login, /if \(!legacyOpen \|\| mode !== 'phone'/)
+  assert.match(login, /title="Вход в ServGo" tabs=\{false\}/)
+  assert.match(login, /useState<('email' \| 'telegram' \| 'phone' \| null)>/)
+  for (const caption of ['Войти по email', 'Войти через Telegram', 'Войти по номеру телефона']) {
+    assert.ok(login.includes(caption), caption)
+  }
+  assert.match(login, /<YandexLoginButton \/>/)
+  assert.match(login, /<VkLoginButton \/>/)
+  assert.match(login, /id="sg-login-email"/)
+  assert.match(login, /id="sg-login-telegram"/)
+  assert.match(login, /id="sg-login-phone"/)
+  assert.match(login, /mode === 'phone'/)
+  assert.match(login, /autoComplete=\{i === 0 \? 'one-time-code'/)
   assert.match(vk, /status === 'ready'/)
   assert.match(vk, /\/api\/auth\/vk\/start/)
   assert.match(vk, /VK ID — пока недоступен/)
+  assert.match(yandex, /status !== 'ready'/)
+  assert.match(yandex, /Яндекс — пока недоступен/)
   assert.match(yandex, /\/api\/auth\/yandex\/start/)
   assert.match(routes, /path="\/login" element=\{<LoginPage \/>\}/)
   assert.match(routes, /path="\/workspace\/studio-entry"/)
