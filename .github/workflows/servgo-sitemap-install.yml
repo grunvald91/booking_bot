@@ -1,10 +1,8 @@
 name: Install dynamic sitemap generator on ServGo server
 
-# Ставит scripts/ops/servgo_sitemap.py на сервер и cron, который раз в час
-# пересобирает dist/sitemap.xml из живого списка бизнесов (локальный API).
-# Запускается только при изменении генератора или этого файла, либо вручную.
-# Дальше sitemap обновляется на сервере сам — минуты Actions не тратятся.
-# Откат: rm /etc/cron.d/servgo-sitemap (статичный sitemap.xml останется как есть).
+# Ставит генератор двух sitemap.xml и отдельный системный таймер на сервер.
+# Публикует валидный XML сразу и обновляет обе карты каждый час в 07 минут.
+# Изменение изолировано от остальных cron-заданий; nginx и API не меняются.
 
 on:
   push:
@@ -99,22 +97,6 @@ jobs:
                   raise RuntimeError('Could not place generator: ' + err)
               print('generator_installed=yes; sha256=' + hashlib.sha256(data).hexdigest())
 
-              cron_body = (
-                  'SHELL=/bin/sh\n'
-                  'PATH=/usr/sbin:/usr/bin:/sbin:/bin\n'
-                  f'7 * * * * root {py} {DEST} --with-company >> /var/log/servgo-sitemap.log 2>&1\n'
-              )
-              sftp = ssh.open_sftp()
-              with sftp.open(CRON + '.tmp', 'w') as f:
-                  f.write(cron_body)
-              sftp.chmod(CRON + '.tmp', 0o644)
-              sftp.close()
-              status, _, err = run(f'mv -f {CRON}.tmp {CRON}')
-              if status:
-                  raise RuntimeError('Could not install cron: ' + err)
-              _, state, _ = run('systemctl is-active cron 2>/dev/null || systemctl is-active crond 2>/dev/null || true')
-              print('cron_installed=hourly; cron_service=' + (state.strip() or 'unknown'))
-
               status, out, err = run(f'{py} {DEST} --with-company')
               print((out or err).strip())
               if status:
@@ -131,6 +113,57 @@ jobs:
               if status or '<sitemapindex' not in company_xml or 'seo-route-bootstrap' in company_xml:
                   raise RuntimeError('Company sitemap verification failed')
               print('public_company_sitemap_ok=true; entries=' + str(company_xml.count('<loc>')))
+              # Use a dedicated systemd timer: cron is not active on this host.
+              # Do not start a global cron service that could activate unrelated jobs.
+              service_body = (
+                  '[Unit]\n'
+                  'Description=ServGo XML sitemap regeneration\n'
+                  'Wants=network-online.target\n'
+                  'After=network-online.target\n'
+                  '[Service]\n'
+                  'Type=oneshot\n'
+                  f'ExecStart={py} {DEST} --with-company\n'
+              )
+              timer_body = (
+                  '[Unit]\n'
+                  'Description=Hourly ServGo sitemap refresh\n'
+                  '[Timer]\n'
+                  'OnCalendar=*-*-* *:07:00\n'
+                  'Persistent=true\n'
+                  'Unit=servgo-sitemap.service\n'
+                  '[Install]\n'
+                  'WantedBy=timers.target\n'
+              )
+              units = (
+                  ('/etc/systemd/system/servgo-sitemap.service', service_body),
+                  ('/etc/systemd/system/servgo-sitemap.timer', timer_body),
+              )
+              sftp = ssh.open_sftp()
+              for unit, body in units:
+                  with sftp.open(unit + '.tmp', 'w') as f:
+                      f.write(body)
+                  sftp.chmod(unit + '.tmp', 0o644)
+              sftp.close()
+              for unit, _ in units:
+                  status, _, err = run(f"mv -f '{unit}.tmp' '{unit}'")
+                  if status:
+                      raise RuntimeError('Could not install sitemap unit: ' + err)
+              status, _, err = run('systemctl daemon-reload && systemctl enable --now servgo-sitemap.timer')
+              if status:
+                  raise RuntimeError('Could not activate sitemap timer: ' + err)
+              status, state, _ = run('systemctl is-active servgo-sitemap.timer')
+              if status or state.strip() != 'active':
+                  raise RuntimeError('Sitemap timer is not active')
+              print('sitemap_systemd_timer=active; next=hourly_at_minute_07')
+              # Retire obsolete cron entry only once the dedicated timer is active.
+              status, _, err = run(
+                  'if [ -f /etc/cron.d/servgo-sitemap ]; then '
+                  'mv -f /etc/cron.d/servgo-sitemap '
+                  '/etc/cron.d/servgo-sitemap.disabled; fi'
+              )
+              if status:
+                  raise RuntimeError('Could not retire redundant sitemap cron: ' + err)
+
           finally:
               ssh.close()
           PY
