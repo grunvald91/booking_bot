@@ -2,6 +2,8 @@
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import re
+import shutil
+import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 PATH = ROOT / "scripts/ops/servgo_company_blog_nginx_release.py"
@@ -32,3 +34,26 @@ def test_only_public_company_blog_route_changes():
     assert "SERVGO_COMPANY_SEO_SSR_BEGIN" in release.SNIPPET
     assert "location = /blog" in release.ANCHOR
     assert "proxy_pass" not in release.SNIPPET
+
+
+def test_nginx_accepts_public_seo_location_in_isolated_config(tmp_path):
+    """The real nginx parser must accept our regex and rewrite directives."""
+    nginx = shutil.which("nginx")
+    if nginx is None:
+        return  # Non-nginx developer systems; the PWA CI installs nginx before this test.
+    path = tmp_path / "nginx.conf"
+    path.write_text(
+        "worker_processes 1;\n"
+        "error_log stderr notice;\n"
+        f"pid {tmp_path / 'nginx.pid'};\n"
+        "events { worker_connections 128; }\n"
+        "http { server { listen 127.0.0.1:18080; server_name servgo.ru;\n"
+        + release.SNIPPET +
+        "location /api/ { return 200; }\n"
+        "location / { return 200; }\n"
+        "} }\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run([nginx, "-t", "-p", str(tmp_path) + "/", "-c", str(path)],
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr[-1200:]
