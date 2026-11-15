@@ -1,0 +1,42 @@
+name: ServGo company SEO route preflight (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/servgo-company-seo-preflight.yml'
+      - 'scripts/ops/servgo_company_seo_inspect.py'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      PIN: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify pinned production SSH key
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          sudo apt-get update -qq
+          sudo apt-get install -qq -y sshpass >/dev/null
+          install -d -m 700 ~/.ssh
+          ssh-keyscan -T 15 -p "$SERVER_PORT" -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/keys
+          while IFS= read -r key; do
+            printf '%s\n' "$key" > /tmp/key
+            if ssh-keygen -lf /tmp/key 2>/dev/null | grep -Fq "SHA256:$PIN "; then
+              printf '%s\n' "$key" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/keys
+          test -s ~/.ssh/known_hosts
+      - name: Inspect nginx and published company SEO without changes
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
+            -p "$SERVER_PORT" "$SERVER_USER@$HOST" 'python3 -' \
+            < scripts/ops/servgo_company_seo_inspect.py
