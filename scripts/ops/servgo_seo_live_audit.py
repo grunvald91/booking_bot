@@ -142,6 +142,13 @@ def main() -> int:
           f"dist_is_symlink:{live_map.parent.is_symlink()} "
           f"cron_file_exists:{Path('/etc/cron.d/servgo-sitemap').exists()}", flush=True)
 
+    timer = subprocess.run(["systemctl", "is-active", "servgo-sitemap.timer"],
+                           capture_output=True, text=True, timeout=10, check=False)
+    timer_state = timer.stdout.strip()
+    print("sitemap_timer_state=" + timer_state, flush=True)
+    require(timer.returncode == 0 and timer_state == "active",
+            "Dedicated ServGo sitemap update timer is not active")
+
     print(f"seo_audit_ok={str(not errors).lower()} company_samples={min(len(company_paths), 3)} "
           f"article_samples={min(len(article_paths), 3)}")
     for error in errors:
