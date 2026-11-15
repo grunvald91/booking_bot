@@ -80,3 +80,10 @@ test('Studio company selection uses the same protected ServGo identity and deskt
   assert.match(shell, /screenClassName\?: string/)
   assert.match(shell, /aria-label=\{screenLabel \|\| title\}/)
 })
+
+test('standalone canonical login and Studio do not mount duplicate public navbar', () => {
+  const appLayout = readFileSync(new URL('../src/components/Layout.tsx', import.meta.url), 'utf8')
+  assert.match(appLayout, /location\.pathname === '\/login'/)
+  assert.match(appLayout, /location\.pathname === '\/workspace\/studio-entry'/)
+  assert.match(appLayout, /return <Outlet \/>/)
+})
