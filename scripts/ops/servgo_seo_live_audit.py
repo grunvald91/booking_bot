@@ -66,10 +66,10 @@ def xml_locs(path: str, *, expect_index: bool = False) -> list[str]:
 
 
 def canonical(html: str) -> str | None:
-    tag = re.search(r"<link\\b[^>]*\\brel=['\\\"]canonical['\\\"][^>]*>", html, re.I)
+    tag = re.search(r'<link\b[^>]*\brel=["\']canonical["\'][^>]*>', html, re.I)
     if not tag:
         return None
-    href = re.search(r"\\bhref=['\\\"]([^'\\\"]+)['\\\"]", tag.group(), re.I)
+    href = re.search(r'\bhref=["\']([^"\']+)["\']', tag.group(), re.I)
     return href.group(1) if href else None
 
 
