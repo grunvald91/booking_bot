@@ -1,17 +1,36 @@
 /* Compact public ServGo sign-in: shared by homepage and Studio redirect. */
-.bf-screen[aria-label='Вход в ServGo'] .bf-shell-head {
+/* Page-scoped layout: booking screens keep their existing responsive rules. */
+.sg-login-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   width: 100%;
-  max-width: 420px;
-  margin: 0 auto;
+  max-width: 1120px;
+  margin: auto;
+}
+.sg-login__brand-panel { display: none; }
+.sg-login__form-head { margin: 0 0 20px; }
+.sg-login__form-kicker {
+  margin-bottom: 9px;
+  color: var(--s-accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .13em;
+}
+.sg-login__form-head h1 {
+  color: var(--s-text);
+  font-size: clamp(23px, 4vw, 28px);
+  line-height: 1.12;
+  font-weight: 650;
+  letter-spacing: -.04em;
 }
 .sg-login.ds-form-narrow {
   width: 100%;
   max-width: 420px;
-  margin: 2px auto 24px;
+  margin: 0 auto 24px;
   color: var(--s-text);
 }
 .sg-login__intro {
-  margin: 2px 0 14px;
+  margin: 9px 0 0;
   color: var(--s-muted);
   font-size: 12.5px;
   line-height: 1.5;
@@ -178,6 +197,126 @@ html[data-theme='dark'] .bf-shell-page .sg-login__code-fields .ds-input:focus {
   .sg-login__telegram, .sg-login__phone { padding: 12px; }
   .sg-login__code-fields { gap: 4px; }
 }
+
+/* Desktop is a genuine two-column product/login composition, not a phone card. */
+@media (min-width: 1024px) {
+  .bf-screen--auth {
+    --bf-w: 1120px;
+    background:
+      radial-gradient(ellipse at 10% 80%, rgba(47,91,235,.055), transparent 55%),
+      var(--s-surface, #fff);
+  }
+  .bf-screen--auth .bf-inner {
+    justify-content: center;
+    padding-top: 32px;
+    padding-bottom: 32px;
+  }
+  .sg-login-layout {
+    grid-template-columns: minmax(0, 1.08fr) minmax(390px, .92fr);
+    align-items: stretch;
+    gap: 18px;
+    min-height: min(630px, calc(100vh - 150px));
+  }
+  .sg-login__brand-panel {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    overflow: hidden;
+    min-width: 0;
+    padding: clamp(30px, 3.8vw, 52px);
+    border-radius: 24px;
+    background: linear-gradient(145deg, #122843 0%, #0d1b2a 62%, #183765 100%);
+    color: #fff;
+    isolation: isolate;
+  }
+  .sg-login__brand-top,
+  .sg-login__brand-message,
+  .sg-login__brand-features { position: relative; z-index: 1; }
+  .sg-login__brand-kicker {
+    margin: 0 0 18px;
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: .14em;
+    color: #a7c6ff;
+  }
+  .sg-login__brand-message h2 {
+    max-width: 470px;
+    font-size: clamp(34px, 3.4vw, 48px);
+    font-weight: 650;
+    line-height: 1.08;
+    letter-spacing: -.055em;
+  }
+  .sg-login__brand-message > p:last-child {
+    margin: 18px 0 0;
+    max-width: 400px;
+    font-size: 16px;
+    line-height: 1.6;
+    color: #c4d5eb;
+  }
+  .sg-login__brand-features {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .sg-login__brand-features div {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    padding: 8px 12px;
+    border: 1px solid rgba(171,202,246,.2);
+    border-radius: 12px;
+    background: rgba(255,255,255,.07);
+    font-size: 12px;
+    font-weight: 550;
+    color: #f5f8ff;
+  }
+  .sg-login__brand-features svg { color: #92b3ff; }
+  .sg-login__brand-glow {
+    position: absolute;
+    right: -120px;
+    top: 10%;
+    width: 390px;
+    height: 390px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(56,116,239,.27), transparent 70%);
+    pointer-events: none;
+  }
+  .sg-login.ds-form-narrow {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    max-width: none;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: clamp(26px, 3.1vw, 46px);
+    border: 1px solid var(--s-line);
+    border-radius: 24px;
+    background: var(--s-surface);
+    box-shadow: 0 16px 58px rgba(17,34,57,.055);
+  }
+  .sg-login__form-head { margin-bottom: 25px; }
+  .sg-login__form-head h1 { font-size: 31px; }
+  .sg-login__intro { font-size: 14px; line-height: 1.55; }
+  .sg-login__provider, .sg-login__method {
+    min-height: 48px;
+    padding: 11px 14px;
+    border-radius: 12px;
+    font-size: 14.5px;
+  }
+  .sg-login__provider { min-height: 48px; }
+  .sg-login__methods { gap: 10px; margin-top: 16px; }
+  .sg-login__details .ds-btn { min-height: 42px; font-size: 14px; }
+  .sg-login__details .ds-h3 { font-size: 17px; }
+  .sg-login__code-fields .ds-input { height: 48px; }
+}
+@media (min-width: 1024px) and (max-height: 650px) {
+  .sg-login-layout { min-height: 0; }
+  .sg-login__brand-panel { min-height: 480px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sg-login__chevron { transition: none; }
 }
