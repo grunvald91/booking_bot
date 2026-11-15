@@ -47,7 +47,7 @@ def test_nginx_accepts_public_seo_location_in_isolated_config(tmp_path):
         "error_log stderr notice;\n"
         f"pid {tmp_path / 'nginx.pid'};\n"
         "events { worker_connections 128; }\n"
-        "http { server { listen 127.0.0.1:18080; server_name servgo.ru;\n"
+        "http { access_log off; server { listen 127.0.0.1:18080; server_name servgo.ru;\n"
         + release.SNIPPET +
         "location /api/ { return 200; }\n"
         "location / { return 200; }\n"
