@@ -60,9 +60,9 @@ def request(path: str) -> tuple[int, str, str]:
 def preflight(content: str) -> bool:
     if content.count(ANCHOR) != 1:
         raise RuntimeError("Blog location anchor changed; refusing nginx edit")
-    if len(re.findall(r"server_name\\s+servgo\\.ru", content)) != 2:
+    if len(re.findall(r"server_name\s+servgo\.ru", content)) != 2:
         raise RuntimeError("Unexpected number of servgo.ru vhosts")
-    if re.search(r"location\\s+\\^~\\s+/business/", content):
+    if re.search(r"location\s+\^~\s+/business/", content):
         raise RuntimeError("Higher-priority company location would bypass SSR")
     if content.count(MARK) not in (0, 1):
         raise RuntimeError("SEO SSR marker duplicated")
