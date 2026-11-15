@@ -102,7 +102,7 @@ jobs:
               cron_body = (
                   'SHELL=/bin/sh\n'
                   'PATH=/usr/sbin:/usr/bin:/sbin:/bin\n'
-                  f'7 * * * * root {py} {DEST} >> /var/log/servgo-sitemap.log 2>&1\n'
+                  f'7 * * * * root {py} {DEST} --with-company >> /var/log/servgo-sitemap.log 2>&1\n'
               )
               sftp = ssh.open_sftp()
               with sftp.open(CRON + '.tmp', 'w') as f:
@@ -115,7 +115,7 @@ jobs:
               _, state, _ = run('systemctl is-active cron 2>/dev/null || systemctl is-active crond 2>/dev/null || true')
               print('cron_installed=hourly; cron_service=' + (state.strip() or 'unknown'))
 
-              status, out, err = run(f'{py} {DEST}')
+              status, out, err = run(f'{py} {DEST} --with-company')
               print((out or err).strip())
               if status:
                   raise RuntimeError('Generator run failed')
@@ -124,6 +124,13 @@ jobs:
               if status or '<urlset' not in body or '/business/' not in body:
                   raise RuntimeError('Public sitemap verification failed')
               print('public_sitemap_urls=' + str(body.count('<loc>')))
+              status, company_xml, _ = run(
+                  'curl -kfsS --max-time 15 --resolve servgo.ru:443:127.0.0.1 '
+                  'https://servgo.ru/business-blog-sitemap.xml'
+              )
+              if status or '<sitemapindex' not in company_xml or 'seo-route-bootstrap' in company_xml:
+                  raise RuntimeError('Company sitemap verification failed')
+              print('public_company_sitemap_ok=true; entries=' + str(company_xml.count('<loc>')))
           finally:
               ssh.close()
           PY
