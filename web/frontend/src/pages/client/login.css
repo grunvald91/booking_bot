@@ -1,5 +1,5 @@
 /* Compact public ServGo sign-in: shared by homepage and Studio redirect. */
-.sg-login {
+.sg-login.ds-form-narrow {
   width: 100%;
   max-width: 420px;
   margin: 2px auto 24px;
