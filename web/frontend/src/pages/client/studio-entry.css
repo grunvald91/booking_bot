@@ -4,7 +4,7 @@
   grid-template-columns: minmax(0, 1fr);
   width: 100%;
   max-width: 1050px;
-  margin: auto;
+  margin: 12px auto 24px;
   gap: 18px;
 }
 .sg-studio-intro { padding: 18px 0 4px; }
@@ -81,6 +81,7 @@
     grid-template-columns: minmax(0, .96fr) minmax(400px, 1.04fr);
     align-items: stretch;
     gap: 24px;
+    margin: auto;
     min-height: min(540px, calc(100vh - 150px));
   }
   .sg-studio-intro {
