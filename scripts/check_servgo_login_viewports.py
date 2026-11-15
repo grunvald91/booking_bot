@@ -132,6 +132,9 @@ def check_login(page, label, width, theme, url):
     assert page.get_by_role("link", name="Войти через VK ID").get_attribute("href") == "/api/auth/vk/start"
     assert page.get_by_role("link", name="Войти через Яндекс").get_attribute("href") == "/api/auth/yandex/start"
     outer, panel = layout_assertions(page, label, width)
+    assert page.locator(".servgo-shell-header").count() == 0, (label, "duplicate public nav")
+    if width < 1024:
+        assert panel["y"] < 150, (label, "mobile login must start near header", panel)
 
     rows = page.locator(".sg-login__provider, .sg-login__method").all()
     assert len(rows) == 5, (label, len(rows))
@@ -190,6 +193,10 @@ def check_studio(browser, url, label, width, height, theme):
     assert page.get_by_role("button", name="Маркетинг — Тестовая компания Б").is_visible()
     assert page.get_by_role("link", name="Мой аккаунт").is_visible()
     outer, panel = layout_assertions(page, label, width, studio=True)
+    assert page.locator(".servgo-shell-header").count() == 0, (label, "duplicate Studio nav")
+    if width < 1024:
+        intro = geometry(page, ".sg-studio-intro")
+        assert intro and intro["y"] < 150, (label, "mobile Studio intro too low", intro)
     page.screenshot(path=str(SCREENSHOTS / f"{label}-{theme}-studio.png"), full_page=True)
     print("STUDIO_RESPONSIVE_OK", json.dumps({
         "viewport": label, "theme": theme, "layout_width": round(outer["width"]),
