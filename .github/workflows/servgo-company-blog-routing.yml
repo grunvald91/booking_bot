@@ -1,0 +1,51 @@
+name: ServGo company blog nginx (inspect / apply)
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Read-only inspection or guarded production apply"
+        required: true
+        type: choice
+        default: inspect
+        options: [inspect, apply]
+permissions:
+  contents: read
+concurrency:
+  group: servgo-company-seo-routing
+  cancel-in-progress: false
+jobs:
+  run:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 8
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      USER_NAME: ${{ vars.SERVER_USER || 'root' }}
+      PORT: ${{ vars.SERVER_PORT || '22' }}
+      FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+      MODE: ${{ inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate change before connecting
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ops/servgo_company_blog_nginx_release.py
+      - name: Check SSH identity
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -d -m 700 ~/.ssh
+          ssh-keyscan -T 15 -p "$PORT" -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/ssh_keys
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/ssh_key
+            ssh-keygen -lf /tmp/ssh_key 2>/dev/null | grep -Fq "SHA256:$FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts || true
+          done < /tmp/ssh_keys
+          test -s ~/.ssh/known_hosts
+      - name: Run guarded inspection or apply
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -p "$PORT" "$USER_NAME@$HOST" "python3 - $MODE" < scripts/ops/servgo_company_blog_nginx_release.py
