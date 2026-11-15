@@ -129,6 +129,19 @@ def main() -> int:
         except ET.ParseError:
             errors.append("Company sitemap invalid XML")
 
+    # Diagnostic-only probes for public routing and sitemap generation.
+    from pathlib import Path
+    for path in ("/api/seo-pages/sitemap.xml",
+                 "/business/1/blog", "/business/1/blog/sitemap.xml"):
+        diag_status, diag_body = request(path)
+        print(f"diagnostic={path} http={diag_status} "
+              f"xml={diag_body.lstrip().startswith('<?xml')} "
+              f"spa={'seo-route-bootstrap' in diag_body}", flush=True)
+    live_map = Path("/opt/booking_bot/web/frontend/dist/sitemap.xml")
+    print(f"diagnostic=sitemap_file_exists:{live_map.exists()} "
+          f"dist_is_symlink:{live_map.parent.is_symlink()} "
+          f"cron_file_exists:{Path('/etc/cron.d/servgo-sitemap').exists()}", flush=True)
+
     print(f"seo_audit_ok={str(not errors).lower()} company_samples={min(len(company_paths), 3)} "
           f"article_samples={min(len(article_paths), 3)}")
     for error in errors:
