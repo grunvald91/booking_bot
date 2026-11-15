@@ -5,7 +5,7 @@
   grid-template-columns: minmax(0, 1fr);
   width: 100%;
   max-width: 1120px;
-  margin: auto;
+  margin: 10px auto 24px;
 }
 .sg-login__brand-panel { display: none; }
 .sg-login__form-head { margin: 0 0 20px; }
@@ -215,6 +215,7 @@ html[data-theme='dark'] .bf-shell-page .sg-login__code-fields .ds-input:focus {
     grid-template-columns: minmax(0, 1.08fr) minmax(390px, .92fr);
     align-items: stretch;
     gap: 18px;
+    margin: auto;
     min-height: min(630px, calc(100vh - 150px));
   }
   .sg-login__brand-panel {
