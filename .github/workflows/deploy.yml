@@ -148,6 +148,7 @@ jobs:
         working-directory: web/frontend
         run: |
           npm ci --legacy-peer-deps
+          node --test tests/seo-bootstrap.test.mjs
           npm run build
 
       - name: Upload changed files (SCP)
