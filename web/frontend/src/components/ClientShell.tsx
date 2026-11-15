@@ -13,6 +13,7 @@ export function ClientShell({
   backTo,
   headerExtra,
   studioEntry,
+  tabs = true,
   children,
 }: {
   title?: string
@@ -21,10 +22,12 @@ export function ClientShell({
   headerExtra?: ReactNode
   /** Показать вход в маркетинговую студию (если он открыт этому человеку). */
   studioEntry?: boolean
+  /** Public auth may omit the unrelated booking navigation. */
+  tabs?: boolean
   children: ReactNode
 }) {
   return (
-    <AirFrame label={title || 'ServGo'} backTo={backTo} topExtra={headerExtra} tabs>
+    <AirFrame label={title || 'ServGo'} backTo={backTo} topExtra={headerExtra} tabs={tabs}>
       <section className="bf-screen" aria-label={title}>
         <div className="bf-inner bf-page bf-shell-page">
           {(title || subtitle != null) && (

@@ -1,20 +1,37 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 
-// The canonical ServGo sign-in also grants access to Studio via existing SSO.
+// VK ID uses the same ServGo account and Studio SSO as other login methods.
+// An unconfigured provider is visible but never starts a broken OAuth flow.
 export function VkLoginButton() {
-  const [available, setAvailable] = useState(false)
+  const [status, setStatus] = useState<'checking' | 'ready' | 'unconfigured' | 'error'>('checking')
+
   useEffect(() => {
-    api.vkCapabilities().then(result => setAvailable(result.available)).catch(() => setAvailable(false))
+    let active = true
+    api.vkCapabilities()
+      .then(result => { if (active) setStatus(result.available ? 'ready' : 'unconfigured') })
+      .catch(() => { if (active) setStatus('error') })
+    return () => { active = false }
   }, [])
-  if (!available) return null
+
+  const mark = <span className="sg-login__vk-mark" aria-hidden="true">VK</span>
+  if (status === 'ready') {
+    return (
+      <a href="/api/auth/vk/start" className="sg-login__provider sg-login__provider--vk">
+        {mark}<span>Войти через VK ID</span>
+      </a>
+    )
+  }
   return (
-    <a href="/api/auth/vk/start" className="ds-btn ds-btn--primary"
-      style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'center',
-        minHeight: 48, gap: 10, background: '#0077ff', color: '#fff', textDecoration: 'none' }}>
-      <span aria-hidden="true" style={{ display: 'grid', placeItems: 'center', width: 26, height: 26,
-        borderRadius: 8, background: 'rgba(255,255,255,.18)', fontWeight: 800 }}>VK</span>
-      Войти через VK ID
-    </a>
+    <div className="sg-login__provider sg-login__provider--inactive" role="status"
+      aria-label={status === 'checking' ? 'Проверяем доступность VK ID' : 'Вход через VK ID недоступен'}>
+      {mark}
+      <span>{status === 'checking' ? 'Проверяем VK ID…' : 'VK ID — пока недоступен'}</span>
+      {status !== 'checking' && (
+        <span className="sg-login__provider-help" title={status === 'unconfigured'
+          ? 'VK ID не настроен на сервере ServGo'
+          : 'Не удалось проверить доступность VK ID'} aria-label="Информация о доступности">i</span>
+      )}
+    </div>
   )
 }
