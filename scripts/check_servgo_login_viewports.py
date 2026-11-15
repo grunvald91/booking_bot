@@ -86,7 +86,25 @@ def layout_assertions(page, label, width, *, studio=False):
     assert outer and panel, (label, root, right)
     assert outer["x"] >= 0 and outer["x"] + outer["width"] <= width + 1, (label, outer)
     assert panel["x"] >= 0 and panel["x"] + panel["width"] <= width + 1, (label, panel)
-    assert not page.evaluate("document.documentElement.scrollWidth > innerWidth + 1"), (label, "horizontal overflow")
+    overflow = page.evaluate("""() => {
+      const offenders = [...document.querySelectorAll('*')].filter(el => {
+        const style = getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        const box = el.getBoundingClientRect();
+        return box.width > 0 && (box.right > innerWidth + 1 || box.left < -1);
+      }).slice(0, 18).map(el => ({
+        tag: el.tagName.toLowerCase(),
+        className: typeof el.className === 'string' ? el.className : '',
+        x: Math.round(el.getBoundingClientRect().x),
+        right: Math.round(el.getBoundingClientRect().right),
+        width: Math.round(el.getBoundingClientRect().width),
+      }));
+      return {
+        scrollWidth: document.documentElement.scrollWidth,
+        innerWidth, offenders
+      };
+    }""")
+    assert overflow["scrollWidth"] <= width + 1, (label, "horizontal overflow", overflow)
     if width >= 1024:
         brand = geometry(page, left)
         assert brand and brand["width"] >= 300, (label, brand)
