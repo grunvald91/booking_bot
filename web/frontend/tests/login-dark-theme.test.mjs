@@ -87,3 +87,13 @@ test('standalone canonical login and Studio do not mount duplicate public navbar
   assert.match(appLayout, /location\.pathname === '\/workspace\/studio-entry'/)
   assert.match(appLayout, /return <Outlet \/>/)
 })
+
+
+test('Telegram login widget and support links use the verified active bot', () => {
+  assert.match(login, /const LOGIN_BOT_USERNAME = 'sochi_servgo_bot'/)
+  assert.match(login, /script\.setAttribute\('data-telegram-login', LOGIN_BOT_USERNAME\)/)
+  assert.match(login, /window\.open\(\x60https:\/\/t\.me\/\$\{LOGIN_BOT_USERNAME\}\x60/)
+  assert.match(login, /Открыть @\{LOGIN_BOT_USERNAME\}/)
+  assert.match(login, /Код придёт через @\{LOGIN_BOT_USERNAME\}/)
+  assert.doesNotMatch(login, /Sochiservice_bot/i)
+})
