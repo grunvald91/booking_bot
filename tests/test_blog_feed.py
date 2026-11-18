@@ -36,6 +36,16 @@ class NormalizeTest(unittest.TestCase):
         self.assertEqual(a["updated"], "2026-10-28")
         self.assertEqual(a["date_label"], "28 октября 2026")
         self.assertTrue(a["from_feed"])
+        self.assertEqual(a["published_timestamp"], RAW["published_at"])
+        self.assertEqual(a["updated_timestamp"], RAW["updated_at"])
+        self.assertTrue(a["modified_since_published"])
+        self.assertEqual(a["published_label"], "28 октября 2026")
+
+    def test_unchanged_publication_keeps_original_date(self):
+        raw = {**RAW, "updated_at": RAW["published_at"]}
+        result = blog_feed.normalize(raw)
+        self.assertFalse(result["modified_since_published"])
+        self.assertEqual(result["updated_timestamp"], result["published_timestamp"])
 
     def test_verified_company_facts_pass_through_without_html(self):
         raw = {**RAW, "company_facts": [
@@ -114,6 +124,19 @@ class BlogFeedPagesTest(unittest.IsolatedAsyncioTestCase):
         types = [json.loads(m)["@type"] for m in re.findall(r'<script type="application/ld\+json">(.*?)</script>', html, re.S)]
         self.assertEqual(types, ["BlogPosting", "FAQPage"])
         self.assertIn('rel="canonical" href="https://servgo.ru/blog/kak-vybrat-crm"', html)
+
+    async def test_schema_dates_match_source_and_visible_date_labels(self):
+        async with TestClient(TestServer(create_webapp())) as c:
+            response = await c.get('/blog/kak-vybrat-crm')
+            body = await response.text()
+        self.assertEqual(response.status, 200)
+        ld = [json.loads(x) for x in re.findall(
+            r'<script type="application/ld\+json">(.*?)</script>', body, re.S)]
+        article = next(x for x in ld if x["@type"] == "BlogPosting")
+        self.assertEqual(article["datePublished"], RAW["published_at"])
+        self.assertEqual(article["dateModified"], RAW["updated_at"])
+        self.assertIn('Опубликовано 28 октября 2026', body)
+        self.assertIn('Обновлено 28 октября 2026', body)
 
     async def test_live_article_renders_verified_facts_as_escaped_text(self):
         raw = {**RAW, "company_facts": [
