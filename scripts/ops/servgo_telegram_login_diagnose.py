@@ -52,6 +52,10 @@ def unit(name):
           "BOT_TOKEN=" + ("present" if env.get("BOT_TOKEN") else "missing"),
           "TELEGRAM_LOGIN_BOT_TOKEN=" + ("present" if env.get("TELEGRAM_LOGIN_BOT_TOKEN") else "missing"),
           "BOT_USERNAME=" + (env.get("BOT_USERNAME", "").lstrip("@").lower() or "unset"))
+    _, unit_files = run(["systemctl", "show", name, "-p", "EnvironmentFiles", "-p", "FragmentPath", "-p", "DropInPaths"])
+    for entry in unit_files.splitlines():
+        if "=" in entry:
+            print("UNIT_ENV_PATH", name, entry[:300])
     return env
 
 api = unit("booking-web-api.service")
@@ -94,6 +98,9 @@ for filename in ("/opt/booking_bot/.env", "/opt/booking_bot/.env.production"):
             candidate = line.split("=", 1)[1].strip().strip("'").strip('"')
             break
     print("BOT_TOKEN_SOURCE", filename, "present" if candidate else "empty")
+    for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.strip().startswith("BOT_USERNAME="):
+            print("BOT_USERNAME_FILE", filename, line.strip().split("=", 1)[1][:40])
     if candidate:
         print("API_MATCHES_LOCAL_BOT_TOKEN", filename, api_token == candidate)
         try:
