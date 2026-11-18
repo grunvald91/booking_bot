@@ -106,6 +106,89 @@ for filename in ("/opt/booking_bot/.env", "/opt/booking_bot/.env.production"):
         except Exception as exc:
             print("LOCAL_BOT_TOKEN_GETME_STATUS", filename, "unavailable_" + type(exc).__name__)
 
+
+# Read-only OAuth and login capability probe; never follow an OAuth login or print codes.
+from urllib.parse import parse_qs, urlparse
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+def local_probe(path):
+    url = "http://127.0.0.1:8000" + path
+    try:
+        request = urllib.request.Request(url, method="GET")
+        with urllib.request.build_opener(NoRedirect(), urllib.request.ProxyHandler({})).open(request, timeout=6) as resp:
+            return resp.status, resp.headers, resp.read(4096)
+    except urllib.error.HTTPError as ex:
+        return ex.code, ex.headers, ex.read(4096)
+    except Exception as ex:
+        print("LOCAL_PROBE_FAILED", path, type(ex).__name__)
+        return 0, {}, b""
+
+print("YANDEX_ENV", "id=" + ("present" if api.get("YANDEX_CLIENT_ID") else "missing"),
+      "secret=" + ("present" if api.get("YANDEX_CLIENT_SECRET") else "missing"),
+      "jwt=" + ("long" if len(api.get("JWT_SECRET", "")) >= 32 else "short_or_missing"))
+status, headers, body = local_probe("/auth/yandex/capabilities")
+try:
+    available = json.loads(body).get("available")
+except Exception:
+    available = "unknown"
+print("YANDEX_CAPABILITIES", "http=" + str(status), "available=" + str(available))
+status, headers, body = local_probe("/auth/yandex/start")
+url = urlparse(headers.get("Location", ""))
+params = parse_qs(url.query)
+print("YANDEX_START", "http=" + str(status), "oauth_host_ok=" + str(url.netloc == "oauth.yandex.ru"),
+      "client_id_present=" + str(bool(params.get("client_id"))),
+      "callback_ok=" + str(params.get("redirect_uri") == ["https://servgo.ru/api/auth/yandex/callback"]),
+      "pkce_ok=" + str(params.get("code_challenge_method") == ["S256"]),
+      "cookie=" + str("servgo_yx" in headers.get("set-cookie", "")))
+status, headers, body = local_probe("/auth/yandex/callback?state=invalid")
+print("YANDEX_INVALID_CALLBACK", "http=" + str(status),
+      "safe_redirect=" + str(headers.get("Location", "").startswith("/login?yandex=")))
+
+for label, path in (("EMAIL", "/auth/email/capabilities"), ("VK", "/auth/vk/capabilities")):
+    status, headers, body = local_probe(path)
+    print(label + "_CAPABILITIES", "http=" + str(status))
+rc, logs = run(["journalctl", "-u", "booking-web-api.service", "--since", "-12 hours", "-n", "2500", "--no-pager", "-o", "cat"])
+if rc == 0:
+    lines = logs.splitlines()
+    for marker in ("yandex_login_failed:", "yandex_code_send_failed:", "Invalid Telegram auth payload",
+                   "yandex", "/auth/yandex/callback"):
+        print("AUTH_LOG_COUNT", marker.replace(" ", "_"), sum(marker.lower() in line.lower() for line in lines))
+else:
+    print("AUTH_LOG_COUNTS_UNAVAILABLE")
+
+# This is aggregate only; it cannot identify the owner of a specific Telegram or Yandex account.
+# No user, business, phone, login, e-mail or token data is returned.
+db_code = """
+import asyncio
+from sqlalchemy import select, func
+from database.models import User, YandexIdentity, EmailIdentity, Business, BusinessOwner, UserAccountMerge
+from database.database import engine
+async def main():
+    async with engine.connect() as db:
+        for name, statement in (
+            ("yandex_total", select(func.count()).select_from(YandexIdentity)),
+            ("yandex_on_telegram_user", select(func.count()).select_from(YandexIdentity).join(User, YandexIdentity.user_id == User.id).where(User.telegram_id > 0)),
+            ("yandex_on_business_owner", select(func.count(func.distinct(YandexIdentity.user_id))).select_from(YandexIdentity).join(Business, Business.owner_id == YandexIdentity.user_id)),
+            ("yandex_on_business_coowner", select(func.count(func.distinct(YandexIdentity.user_id))).select_from(YandexIdentity).join(BusinessOwner, BusinessOwner.user_id == YandexIdentity.user_id)),
+            ("email_total", select(func.count()).select_from(EmailIdentity)),
+            ("merged_accounts_total", select(func.count()).select_from(UserAccountMerge)),
+        ):
+            print("AUTH_DB_AGG", name, (await db.execute(statement)).scalar_one())
+    await engine.dispose()
+asyncio.run(main())
+"""
+try:
+    proc = subprocess.run(["/opt/booking_bot/venv/bin/python", "-c", db_code],
+        cwd="/opt/booking_bot", env={**os.environ, **api}, capture_output=True, text=True, timeout=15)
+    if proc.returncode == 0:
+        print(proc.stdout)
+    else:
+        print("AUTH_DB_AGG", "unavailable", "exit_code=" + str(proc.returncode))
+except Exception as exc:
+    print("AUTH_DB_AGG", "unavailable_" + type(exc).__name__)
+
+
 utc = datetime.datetime.now(datetime.timezone.utc)
 print("SERVER_UTC", utc.strftime("%Y-%m-%dT%H:%M:%SZ"))
 _, ntp = run(["timedatectl", "show", "-p", "NTPSynchronized"])
