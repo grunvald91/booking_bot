@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/servgo-telegram-login-diagnose.yml'
+      - 'scripts/ops/servgo_telegram_login_diagnose.py'
   workflow_dispatch:
 permissions:
   contents: read
