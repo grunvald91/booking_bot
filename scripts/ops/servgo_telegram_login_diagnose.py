@@ -72,6 +72,7 @@ if api_token:
         username = str((payload.get("result") or {}).get("username") or "").lower()
         print("TELEGRAM_GETME_STATUS", "ok" if payload.get("ok") else "not_ok")
         print("LOGIN_TOKEN_MATCHES_WIDGET_BOT", username == EXPECTED_WIDGET_BOT)
+        print("ACTIVE_BOT_USERNAME", username or "unknown")
     except Exception as exc:
         # Exceptions can include URLs containing credentials: print type only.
         print("TELEGRAM_GETME_STATUS", "unavailable_" + type(exc).__name__)
