@@ -150,7 +150,8 @@ def check_login(page, label, width, theme, url):
         assert panel["width"] >= 385, (label, "desktop form too narrow", panel)
 
     page.screenshot(path=str(SCREENSHOTS / f"{label}-{theme}-closed.png"), full_page=True)
-    page.get_by_role("button", name="Войти по email").click()
+    if not page.get_by_label("Email", exact=True).is_visible():
+        page.get_by_role("button", name="Войти по email").click()
     assert page.get_by_label("Email", exact=True).is_visible()
     assert page.get_by_label("Пароль", exact=True).is_visible()
     page.screenshot(path=str(SCREENSHOTS / f"{label}-{theme}-email.png"), full_page=True)
