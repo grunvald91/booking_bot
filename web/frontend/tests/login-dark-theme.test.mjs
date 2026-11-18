@@ -97,3 +97,20 @@ test('Telegram login widget and support links use the verified active bot', () =
   assert.match(login, /Код придёт через @\{LOGIN_BOT_USERNAME\}/)
   assert.doesNotMatch(login, /Sochiservice_bot/i)
 })
+
+
+test('temporarily disabled Telegram login widget has a working phone fallback', () => {
+  assert.match(login, /const TELEGRAM_WIDGET_DOMAIN_VERIFIED = false/)
+  assert.match(login, /if \(!TELEGRAM_WIDGET_DOMAIN_VERIFIED \|\| method !== 'telegram'/)
+  assert.match(login, /TELEGRAM_WIDGET_DOMAIN_VERIFIED && <>/)
+  assert.match(login, /setMethod\('phone'\)/)
+  assert.match(login, /Прямой вход через Telegram временно недоступен/)
+  assert.match(login, /joinTelegram \? 'phone' : 'email'/)
+})
+
+test('Yandex explanation does not require a third-party browser installation', () => {
+  const yandex = readFileSync(new URL('../src/components/YandexLoginButton.tsx', import.meta.url), 'utf8')
+  assert.match(yandex, /ServGo не требует устанавливать браузер или расширение/)
+  assert.match(yandex, /используйте тот же Яндекс ID/)
+  assert.match(yandex, /восстановите пароль/)
+})
