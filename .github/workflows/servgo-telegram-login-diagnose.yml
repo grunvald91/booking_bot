@@ -1,0 +1,27 @@
+name: ServGo Telegram login auth diagnostic (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/servgo-telegram-login-diagnose.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: servgo-telegram-login-readonly
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SERVER_SSH_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned SSH dependency
+        run: python -m pip install --disable-pip-version-check paramiko==3.5.1
+      - name: Inspect Telegram login without exposing auth payloads or secrets
+        run: python scripts/ops/servgo_telegram_login_diagnose.py
