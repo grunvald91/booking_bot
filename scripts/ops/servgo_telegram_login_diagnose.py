@@ -141,6 +141,35 @@ print("YANDEX_START", "http=" + str(status), "oauth_host_ok=" + str(url.netloc =
       "callback_ok=" + str(params.get("redirect_uri") == ["https://servgo.ru/api/auth/yandex/callback"]),
       "pkce_ok=" + str(params.get("code_challenge_method") == ["S256"]),
       "cookie=" + str("servgo_yx" in headers.get("set-cookie", "")))
+# Public OAuth page must accept the registered client/redirect; this never signs in.
+if status == 302 and url.netloc == "oauth.yandex.ru":
+    try:
+        target = headers.get("Location", "")
+        req = urllib.request.Request(target, headers={"User-Agent": "Mozilla/5.0"}, method="GET")
+        with urllib.request.build_opener(NoRedirect(), urllib.request.ProxyHandler({})).open(req, timeout=10) as response:
+            upstream_status = response.status
+            response_type = response.headers.get("content-type", "").split(";")[0]
+            print("YANDEX_OAUTH_AUTHORIZATION_PAGE", "http=" + str(upstream_status), "content_type=" + response_type)
+    except urllib.error.HTTPError as ex:
+        print("YANDEX_OAUTH_AUTHORIZATION_PAGE", "http=" + str(ex.code))
+    except Exception as ex:
+        print("YANDEX_OAUTH_AUTHORIZATION_PAGE", "unavailable_" + type(ex).__name__)
+
+# Non-personal login widget iframe diagnostic; inspect only provider error markers.
+try:
+    import urllib.parse
+    tg_url = "https://tg.servgo.ru/embed/sochi_servgo_bot?origin=" + urllib.parse.quote("https://servgo.ru", safe="") + "&size=large"
+    req = urllib.request.Request(tg_url, headers={"User-Agent": "Mozilla/5.0"}, method="GET")
+    with urllib.request.build_opener(NoRedirect(), urllib.request.ProxyHandler({})).open(req, timeout=9) as response:
+        snippet = response.read(120000).decode("utf-8", "replace").lower()
+        print("TELEGRAM_WIDGET_IFRAME", "http=" + str(response.status),
+              "bot_domain_invalid_marker=" + str("bot domain invalid" in snippet),
+              "contains_authorization_ui=" + str("telegram" in snippet))
+except urllib.error.HTTPError as ex:
+    print("TELEGRAM_WIDGET_IFRAME", "http=" + str(ex.code))
+except Exception as ex:
+    print("TELEGRAM_WIDGET_IFRAME", "unavailable_" + type(ex).__name__)
+
 status, headers, body = local_probe("/auth/yandex/callback?state=invalid")
 print("YANDEX_INVALID_CALLBACK", "http=" + str(status),
       "safe_redirect=" + str(headers.get("Location", "").startswith("/login?yandex=")))
@@ -171,6 +200,8 @@ async def main():
             ("yandex_on_telegram_user", select(func.count()).select_from(YandexIdentity).join(User, YandexIdentity.user_id == User.id).where(User.telegram_id > 0)),
             ("yandex_on_business_owner", select(func.count(func.distinct(YandexIdentity.user_id))).select_from(YandexIdentity).join(Business, Business.owner_id == YandexIdentity.user_id)),
             ("yandex_on_business_coowner", select(func.count(func.distinct(YandexIdentity.user_id))).select_from(YandexIdentity).join(BusinessOwner, BusinessOwner.user_id == YandexIdentity.user_id)),
+            ("yandex_and_email_on_same_user", select(func.count()).select_from(YandexIdentity).join(EmailIdentity, EmailIdentity.user_id == YandexIdentity.user_id)),
+            ("yandex_telegram_owner_named_artur", select(func.count()).select_from(YandexIdentity).join(User, User.id == YandexIdentity.user_id).join(Business, Business.owner_id == User.id).where(User.telegram_id > 0, User.full_name.ilike("%артур%"))),
             ("email_total", select(func.count()).select_from(EmailIdentity)),
             ("merged_accounts_total", select(func.count()).select_from(UserAccountMerge)),
         ):
