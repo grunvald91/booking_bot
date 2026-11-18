@@ -87,3 +87,29 @@ test('standalone canonical login and Studio do not mount duplicate public navbar
   assert.match(appLayout, /location\.pathname === '\/workspace\/studio-entry'/)
   assert.match(appLayout, /return <Outlet \/>/)
 })
+
+
+test('Telegram login widget and support links use the verified active bot', () => {
+  assert.match(login, /const LOGIN_BOT_USERNAME = 'sochi_servgo_bot'/)
+  assert.match(login, /script\.setAttribute\('data-telegram-login', LOGIN_BOT_USERNAME\)/)
+  assert.match(login, /window\.open\(\x60https:\/\/t\.me\/\$\{LOGIN_BOT_USERNAME\}\x60/)
+  assert.match(login, /Открыть @\{LOGIN_BOT_USERNAME\}/)
+  assert.match(login, /Код придёт через @\{LOGIN_BOT_USERNAME\}/)
+  assert.doesNotMatch(login, /Sochiservice_bot/i)
+})
+
+
+test('Telegram widget is available after the BotFather domain was verified', () => {
+  assert.match(login, /if \(method !== 'telegram' \|\| !telegramWidgetRef\.current\) return/)
+  assert.match(login, /script\.setAttribute\('data-telegram-login', LOGIN_BOT_USERNAME\)/)
+  assert.doesNotMatch(login, /TELEGRAM_WIDGET_DOMAIN_VERIFIED|Bot domain invalid|временно недоступен/)
+  assert.match(login, /joinTelegram \? 'telegram' : 'email'/)
+  assert.match(login, /сначала откройте его и нажмите «Старт»/)
+})
+
+test('Yandex explanation does not require a third-party browser installation', () => {
+  const yandex = readFileSync(new URL('../src/components/YandexLoginButton.tsx', import.meta.url), 'utf8')
+  assert.match(yandex, /ServGo не требует устанавливать браузер или расширение/)
+  assert.match(yandex, /используйте тот же Яндекс ID/)
+  assert.match(yandex, /восстановите пароль/)
+})

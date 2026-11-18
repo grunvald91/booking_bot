@@ -1,0 +1,35 @@
+name: ServGo login bot name guarded release
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/ops/servgo_bot_username_release.py'
+      - '.github/workflows/servgo-bot-username-release.yml'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Apply verified bot name to production (manual default is read-only)'
+        type: boolean
+        required: true
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+jobs:
+  guarded-release:
+    if: github.repository == 'grunvald91/booking_bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_SSH_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      APPLY: ${{ github.event_name == 'push' && 'true' || (inputs.apply && 'true' || 'false') }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned SSH library
+        run: python -m pip install --disable-pip-version-check paramiko==3.5.1
+      - name: Offline unit tests (no production access)
+        run: python -m unittest discover -s tests -p 'test_servgo_bot_username_release.py' -v
+      - name: Guarded bot config release and API health check
+        run: python scripts/ops/servgo_bot_username_release.py

@@ -15,6 +15,10 @@ import { VkLoginButton } from '../../components/VkLoginButton'
 // telegram.org и oauth.telegram.org у многих не открываются. Скрипт кнопки сам берёт адрес рамки и окна
 // входа с того хоста, откуда загружен; прокси отдаёт /widget.js, /embed, /auth и статику с переписанными
 // ссылками. Если прокси не отвечает, пробуем напрямую telegram.org.
+// Match the active bot verified by Telegram getMe in the production login preflight.
+const LOGIN_BOT_USERNAME = 'sochi_servgo_bot'
+// Telegram Login Widget domain was verified on 2026-11-18 against tg.servgo.ru for servgo.ru.
+
 const WIDGET_SOURCES = [
   'https://tg.servgo.ru/widget.js',
   'https://telegram.org/js/telegram-widget.js?22',
@@ -50,7 +54,7 @@ export function LoginPage() {
   const [widget, setWidget] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [widgetAttempt, setWidgetAttempt] = useState(0)
   const [widgetSource, setWidgetSource] = useState(0)
-  const [method, setMethod] = useState<'email' | 'telegram' | 'phone' | null>(joinTelegram ? 'telegram' : null)
+  const [method, setMethod] = useState<'email' | 'telegram' | 'phone' | null>(joinTelegram ? 'telegram' : 'email')
 
   useEffect(() => {
     if (studioNext !== STUDIO_ENTRY) return
@@ -108,7 +112,7 @@ export function LoginPage() {
     const script = document.createElement('script')
     script.async = true
     script.src = WIDGET_SOURCES[widgetSource]
-    script.setAttribute('data-telegram-login', 'Sochiservice_bot')
+    script.setAttribute('data-telegram-login', LOGIN_BOT_USERNAME)
     script.setAttribute('data-size', 'large')
     script.setAttribute('data-onauth', 'window.servgoTelegramWidgetAuth(user)')
     // Этот источник не сработал: берём следующий, а если их не осталось, сообщаем об этом.
@@ -204,7 +208,7 @@ export function LoginPage() {
   }
 
   const handleTelegramLogin = () => {
-    window.open('https://t.me/Sochiservice_bot', '_blank', 'noopener,noreferrer')
+    window.open(`https://t.me/${LOGIN_BOT_USERNAME}`, '_blank', 'noopener,noreferrer')
   }
 
 
@@ -267,7 +271,7 @@ export function LoginPage() {
           <div id="sg-login-telegram" className="sg-login__details" hidden={method !== 'telegram'}>
             {method === 'telegram' && (
               <div className="sg-login__telegram">
-                {joinTelegram && <p className="ds-hint" role="status">Войдите через Telegram для подтверждения объединения аккаунтов.</p>}
+                {joinTelegram && <p className="ds-hint" role="status">Если у вас уже есть аккаунт, войдите сначала по привязанному email или номеру. Не создавайте отдельный аккаунт.</p>}
                 <div ref={telegramWidgetRef} className="sg-login__telegram-widget" />
                 {widget === 'loading' && <p className="ds-hint" role="status">Загружаем кнопку Telegram…</p>}
                 {widget === 'failed' && (
@@ -282,7 +286,7 @@ export function LoginPage() {
                 {error && <p role="alert" className="sg-login__error">{error}</p>}
                 <p className="ds-hint">Вход выполняется кнопкой Telegram. Простое открытие бота не авторизует на сайте.</p>
                 <button type="button" className="sg-login__bot-link" onClick={handleTelegramLogin}>
-                  Открыть @Sochiservice_bot
+                  Открыть @{LOGIN_BOT_USERNAME}
                 </button>
               </div>
             )}
@@ -306,7 +310,8 @@ export function LoginPage() {
                   {loading ? 'Отправляем…' : 'Получить код'}
                 </button>
                 {error && <p role="alert" className="sg-login__error">{error}</p>}
-                <p className="ds-hint">Код придёт через @Sochiservice_bot, если номер привязан к вашему аккаунту.</p>
+                <p className="ds-hint">Код придёт через @{LOGIN_BOT_USERNAME}, если номер привязан к вашему аккаунту. Если бот новый, сначала откройте его и нажмите «Старт», затем вернитесь сюда.</p>
+                <a className="sg-login__bot-link" href={`https://t.me/${LOGIN_BOT_USERNAME}`} target="_blank" rel="noopener noreferrer">Открыть @{LOGIN_BOT_USERNAME}</a>
               </div>
             ) : (
               <div className="sg-login__phone">
