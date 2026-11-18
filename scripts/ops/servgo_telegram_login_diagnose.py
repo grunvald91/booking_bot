@@ -158,7 +158,7 @@ if status == 302 and url.netloc == "oauth.yandex.ru":
 # Non-personal login widget iframe diagnostic; inspect only provider error markers.
 try:
     import urllib.parse
-    tg_url = "https://tg.servgo.ru/embed/sochi_servgo_bot?origin=" + urllib.parse.quote("https://servgo.ru", safe="") + "&size=large"
+    tg_url = "https://tg.servgo.ru/embed/sochi_servgo_bot?origin=" + urllib.parse.quote("https://servgo.ru", safe="") + "&size=large&check=20261118-domain-confirmed"
     req = urllib.request.Request(tg_url, headers={"User-Agent": "Mozilla/5.0"}, method="GET")
     with urllib.request.build_opener(NoRedirect(), urllib.request.ProxyHandler({})).open(req, timeout=9) as response:
         snippet = response.read(120000).decode("utf-8", "replace").lower()
