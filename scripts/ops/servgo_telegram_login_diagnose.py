@@ -21,7 +21,7 @@ from pathlib import Path
 import subprocess
 import urllib.request
 
-EXPECTED_WIDGET_BOT = "sochiservice_bot"
+EXPECTED_WIDGET_BOT = "sochi_servgo_bot"
 
 def run(args):
     try:
