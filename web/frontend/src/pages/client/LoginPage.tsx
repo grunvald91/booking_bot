@@ -15,6 +15,9 @@ import { VkLoginButton } from '../../components/VkLoginButton'
 // telegram.org и oauth.telegram.org у многих не открываются. Скрипт кнопки сам берёт адрес рамки и окна
 // входа с того хоста, откуда загружен; прокси отдаёт /widget.js, /embed, /auth и статику с переписанными
 // ссылками. Если прокси не отвечает, пробуем напрямую telegram.org.
+// Match the active bot verified by Telegram getMe in the production login preflight.
+const LOGIN_BOT_USERNAME = 'sochi_servgo_bot'
+
 const WIDGET_SOURCES = [
   'https://tg.servgo.ru/widget.js',
   'https://telegram.org/js/telegram-widget.js?22',
@@ -108,7 +111,7 @@ export function LoginPage() {
     const script = document.createElement('script')
     script.async = true
     script.src = WIDGET_SOURCES[widgetSource]
-    script.setAttribute('data-telegram-login', 'Sochiservice_bot')
+    script.setAttribute('data-telegram-login', LOGIN_BOT_USERNAME)
     script.setAttribute('data-size', 'large')
     script.setAttribute('data-onauth', 'window.servgoTelegramWidgetAuth(user)')
     // Этот источник не сработал: берём следующий, а если их не осталось, сообщаем об этом.
@@ -204,7 +207,7 @@ export function LoginPage() {
   }
 
   const handleTelegramLogin = () => {
-    window.open('https://t.me/Sochiservice_bot', '_blank', 'noopener,noreferrer')
+    window.open(`https://t.me/${LOGIN_BOT_USERNAME}`, '_blank', 'noopener,noreferrer')
   }
 
 
@@ -282,7 +285,7 @@ export function LoginPage() {
                 {error && <p role="alert" className="sg-login__error">{error}</p>}
                 <p className="ds-hint">Вход выполняется кнопкой Telegram. Простое открытие бота не авторизует на сайте.</p>
                 <button type="button" className="sg-login__bot-link" onClick={handleTelegramLogin}>
-                  Открыть @Sochiservice_bot
+                  Открыть @{LOGIN_BOT_USERNAME}
                 </button>
               </div>
             )}
@@ -306,7 +309,7 @@ export function LoginPage() {
                   {loading ? 'Отправляем…' : 'Получить код'}
                 </button>
                 {error && <p role="alert" className="sg-login__error">{error}</p>}
-                <p className="ds-hint">Код придёт через @Sochiservice_bot, если номер привязан к вашему аккаунту.</p>
+                <p className="ds-hint">Код придёт через @{LOGIN_BOT_USERNAME}, если номер привязан к вашему аккаунту.</p>
               </div>
             ) : (
               <div className="sg-login__phone">
