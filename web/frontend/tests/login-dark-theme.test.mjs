@@ -99,13 +99,12 @@ test('Telegram login widget and support links use the verified active bot', () =
 })
 
 
-test('temporarily disabled Telegram login widget has a working phone fallback', () => {
-  assert.match(login, /const TELEGRAM_WIDGET_DOMAIN_VERIFIED = false/)
-  assert.match(login, /if \(!TELEGRAM_WIDGET_DOMAIN_VERIFIED \|\| method !== 'telegram'/)
-  assert.match(login, /TELEGRAM_WIDGET_DOMAIN_VERIFIED && <>/)
-  assert.match(login, /setMethod\('phone'\)/)
-  assert.match(login, /Прямой вход через Telegram временно недоступен/)
-  assert.match(login, /joinTelegram \? 'phone' : 'email'/)
+test('Telegram widget is available after the BotFather domain was verified', () => {
+  assert.match(login, /if \(method !== 'telegram' \|\| !telegramWidgetRef\.current\) return/)
+  assert.match(login, /script\.setAttribute\('data-telegram-login', LOGIN_BOT_USERNAME\)/)
+  assert.doesNotMatch(login, /TELEGRAM_WIDGET_DOMAIN_VERIFIED|Bot domain invalid|временно недоступен/)
+  assert.match(login, /joinTelegram \? 'telegram' : 'email'/)
+  assert.match(login, /сначала откройте его и нажмите «Старт»/)
 })
 
 test('Yandex explanation does not require a third-party browser installation', () => {
