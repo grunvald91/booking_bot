@@ -170,6 +170,49 @@ except urllib.error.HTTPError as ex:
 except Exception as ex:
     print("TELEGRAM_WIDGET_IFRAME", "unavailable_" + type(ex).__name__)
 
+
+try:
+    old_url = "https://tg.servgo.ru/embed/Sochiservice_bot?origin=" + urllib.parse.quote("https://servgo.ru", safe="") + "&size=large"
+    req = urllib.request.Request(old_url, headers={"User-Agent": "Mozilla/5.0"}, method="GET")
+    with urllib.request.build_opener(NoRedirect(), urllib.request.ProxyHandler({})).open(req, timeout=9) as response:
+        old_snippet = response.read(120000).decode("utf-8", "replace").lower()
+        print("LEGACY_TELEGRAM_WIDGET_IFRAME", "http=" + str(response.status),
+              "bot_domain_invalid_marker=" + str("bot domain invalid" in old_snippet))
+except Exception as exc:
+    print("LEGACY_TELEGRAM_WIDGET_IFRAME", "unavailable_" + type(exc).__name__)
+
+# Search only known application-managed configuration locations; never output or store secrets.
+import glob
+candidates = set(glob.glob("/opt/booking_bot/.env*") + glob.glob("/etc/servgo/*bot*.env") +
+                 glob.glob("/etc/servgo/*telegram*.env"))
+available_bots = set()
+for filename in sorted(candidates)[:35]:
+    try:
+        f = Path(filename)
+        if not f.is_file() or f.stat().st_size > 100000:
+            continue
+        for line in f.read_text(errors="replace").splitlines():
+            entry = line.strip()
+            if entry.startswith("export "):
+                entry = entry[7:]
+            if not entry.startswith(("BOT_TOKEN=", "TELEGRAM_LOGIN_BOT_TOKEN=")):
+                continue
+            candidate = entry.split("=", 1)[1].strip().strip("'").strip('"')
+            if not candidate:
+                continue
+            # Only Telegram API sees the supplied token in HTTPS; exceptions never print URLs.
+            url = "https://api.telegram.org/bot" + candidate + "/getMe"
+            req = urllib.request.Request(url)
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(req, timeout=5) as resp:
+                doc = json.load(resp)
+            who = (doc.get("result") or {}).get("username", "").lower()
+            if who in ("sochiservice_bot", "sochi_servgo_bot"):
+                available_bots.add(who)
+    except Exception:
+        pass
+print("AVAILABLE_LEGACY_LOGIN_BOT_TOKEN", "sochiservice_bot" in available_bots)
+
 status, headers, body = local_probe("/auth/yandex/callback?state=invalid")
 print("YANDEX_INVALID_CALLBACK", "http=" + str(status),
       "safe_redirect=" + str(headers.get("Location", "").startswith("/login?yandex=")))
