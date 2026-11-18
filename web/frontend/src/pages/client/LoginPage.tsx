@@ -320,7 +320,8 @@ export function LoginPage() {
                   {loading ? 'Отправляем…' : 'Получить код'}
                 </button>
                 {error && <p role="alert" className="sg-login__error">{error}</p>}
-                <p className="ds-hint">Код придёт через @{LOGIN_BOT_USERNAME}, если номер привязан к вашему аккаунту.</p>
+                <p className="ds-hint">Код придёт через @{LOGIN_BOT_USERNAME}, если номер привязан к вашему аккаунту. Если бот новый, сначала откройте его и нажмите «Старт», затем вернитесь сюда.</p>
+                <a className="sg-login__bot-link" href={`https://t.me/${LOGIN_BOT_USERNAME}`} target="_blank" rel="noopener noreferrer">Открыть @{LOGIN_BOT_USERNAME}</a>
               </div>
             ) : (
               <div className="sg-login__phone">
