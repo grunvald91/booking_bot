@@ -17,9 +17,7 @@ import { VkLoginButton } from '../../components/VkLoginButton'
 // ссылками. Если прокси не отвечает, пробуем напрямую telegram.org.
 // Match the active bot verified by Telegram getMe in the production login preflight.
 const LOGIN_BOT_USERNAME = 'sochi_servgo_bot'
-// Live Telegram embed returned "Bot domain invalid" for this bot and servgo.ru (2026-11-18).
-// Don't offer a button that can only fail. Re-enable after BotFather /setdomain and a verified live probe.
-const TELEGRAM_WIDGET_DOMAIN_VERIFIED = false
+// Telegram Login Widget domain was verified on 2026-11-18 against tg.servgo.ru for servgo.ru.
 
 const WIDGET_SOURCES = [
   'https://tg.servgo.ru/widget.js',
@@ -56,7 +54,7 @@ export function LoginPage() {
   const [widget, setWidget] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [widgetAttempt, setWidgetAttempt] = useState(0)
   const [widgetSource, setWidgetSource] = useState(0)
-  const [method, setMethod] = useState<'email' | 'telegram' | 'phone' | null>(joinTelegram ? 'phone' : 'email')
+  const [method, setMethod] = useState<'email' | 'telegram' | 'phone' | null>(joinTelegram ? 'telegram' : 'email')
 
   useEffect(() => {
     if (studioNext !== STUDIO_ENTRY) return
@@ -92,7 +90,7 @@ export function LoginPage() {
   }, [mode])
 
   useEffect(() => {
-    if (!TELEGRAM_WIDGET_DOMAIN_VERIFIED || method !== 'telegram' || !telegramWidgetRef.current) return
+    if (method !== 'telegram' || !telegramWidgetRef.current) return
     const host = telegramWidgetRef.current
     const callbackWindow = window as Window & {
       servgoTelegramWidgetAuth?: (data: TelegramLoginPayload) => void
@@ -273,13 +271,6 @@ export function LoginPage() {
           <div id="sg-login-telegram" className="sg-login__details" hidden={method !== 'telegram'}>
             {method === 'telegram' && (
               <div className="sg-login__telegram">
-                {!TELEGRAM_WIDGET_DOMAIN_VERIFIED && <div role="status" className="ds-hint">
-                  Прямой вход через Telegram временно недоступен: для бота не подтверждён домен сайта.
-                  Войдите по номеру телефона — код придёт через @{LOGIN_BOT_USERNAME}, если вы уже общались с ботом.
-                  <button type="button" className="ds-btn ds-btn--primary ds-btn--block" style={{ marginTop: 12 }}
-                    onClick={() => { setError(''); setMethod('phone') }}>Войти по номеру телефона</button>
-                </div>}
-                {TELEGRAM_WIDGET_DOMAIN_VERIFIED && <>
                 {joinTelegram && <p className="ds-hint" role="status">Если у вас уже есть аккаунт, войдите сначала по привязанному email или номеру. Не создавайте отдельный аккаунт.</p>}
                 <div ref={telegramWidgetRef} className="sg-login__telegram-widget" />
                 {widget === 'loading' && <p className="ds-hint" role="status">Загружаем кнопку Telegram…</p>}
@@ -297,7 +288,6 @@ export function LoginPage() {
                 <button type="button" className="sg-login__bot-link" onClick={handleTelegramLogin}>
                   Открыть @{LOGIN_BOT_USERNAME}
                 </button>
-                </>}
               </div>
             )}
           </div>
