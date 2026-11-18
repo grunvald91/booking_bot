@@ -1,0 +1,37 @@
+name: GEO company SSR API — guarded single-file preflight
+
+on:
+  push:
+    branches: [ops/geo-single-backend-route-20261119]
+    paths:
+      - .github/workflows/geo-single-backend-route-20261119.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  geo-single-route:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: production
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      APPLY: "false"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install narrow SSH dependencies
+        run: python -m pip install --disable-pip-version-check "paramiko==3.5.1" "pytest>=8,<9"
+      - name: Validate single-file deployment guards
+        run: python -m pytest -q tests/test_geo_single_backend_route_release.py
+      - name: Read-only production fingerprint and health preflight
+        run: python scripts/geo_single_backend_route_release.py
