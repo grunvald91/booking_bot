@@ -78,6 +78,33 @@ if api_token:
 else:
     print("TELEGRAM_GETME_STATUS", "token_not_found")
 
+# Compare against an existing local .env file without exposing tokens.
+for filename in ("/opt/booking_bot/.env", "/opt/booking_bot/.env.production"):
+    f = Path(filename)
+    if not f.is_file():
+        print("BOT_TOKEN_SOURCE", filename, "not_found")
+        continue
+    candidate = ""
+    for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if line.startswith("export "):
+            line = line[7:].strip()
+        if line.startswith("BOT_TOKEN="):
+            candidate = line.split("=", 1)[1].strip().strip("'").strip('"')
+            break
+    print("BOT_TOKEN_SOURCE", filename, "present" if candidate else "empty")
+    if candidate:
+        print("API_MATCHES_LOCAL_BOT_TOKEN", filename, api_token == candidate)
+        try:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            request = urllib.request.Request("https://api.telegram.org/bot" + candidate + "/getMe")
+            with opener.open(request, timeout=7) as response:
+                result = json.load(response)
+            username = str((result.get("result") or {}).get("username") or "").lower()
+            print("LOCAL_BOT_TOKEN_MATCHES_WIDGET", filename, username == EXPECTED_WIDGET_BOT)
+        except Exception as exc:
+            print("LOCAL_BOT_TOKEN_GETME_STATUS", filename, "unavailable_" + type(exc).__name__)
+
 utc = datetime.datetime.now(datetime.timezone.utc)
 print("SERVER_UTC", utc.strftime("%Y-%m-%dT%H:%M:%SZ"))
 _, ntp = run(["timedatectl", "show", "-p", "NTPSynchronized"])
