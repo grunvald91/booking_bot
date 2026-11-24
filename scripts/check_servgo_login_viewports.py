@@ -105,6 +105,10 @@ def layout_assertions(page, label, width, *, studio=False):
       };
     }""")
     assert overflow["scrollWidth"] <= width + 1, (label, "horizontal overflow", overflow)
+    if studio:
+        assert panel["width"] <= 460, (label, "Studio status must be compact", panel)
+        assert abs(panel["x"] + panel["width"] / 2 - width / 2) <= 3, (label, "Studio status not centered", panel)
+        return outer, panel
     if width >= 1024:
         brand = geometry(page, left)
         assert brand and brand["width"] >= 300, (label, brand)
@@ -187,21 +191,40 @@ def check_studio(browser, url, label, width, height, theme):
         localStorage.setItem('userName', 'Тестовый администратор');
     """)
     page = context.new_page()
+    requests = []
+    booking_requests = []
+    def ticket(route):
+        requests.append(route.request.method)
+        if len(requests) == 1:
+            route.fulfill(status=503, content_type="application/json", body='{"detail":"fixture outage"}')
+        else:
+            route.fulfill(status=200, content_type="application/json",
+                          body='{"url":"https://servgo.ru/studio/sso?t=fixture.ticket","expires_in":60}')
+    def booking(route):
+        booking_requests.append(route.request.url)
+        route.abort()
+    page.route("**/api/studio/account-ticket", ticket)
+    page.route("**/api/studio/businesses", booking)
+    # Never navigate to production: the expected canonical SSO handoff is a
+    # local Playwright response. The actual backend is tested separately.
+    page.route("https://servgo.ru/studio/sso?*", lambda route: route.fulfill(
+        status=200, content_type="text/html", body="<h1>Fixture Studio reached</h1>"))
     page.goto(url + "/workspace/studio-entry", wait_until="domcontentloaded")
-    page.get_by_role("heading", name="Ваши компании", level=2).wait_for(timeout=14000)
-    page.get_by_role("button", name="Маркетинг — Тестовая компания А").wait_for(timeout=12000)
+    page.get_by_role("button", name="Повторить вход").wait_for(timeout=14000)
     page.evaluate("(theme) => document.documentElement.dataset.theme = theme", theme)
-    assert page.get_by_role("button", name="Маркетинг — Тестовая компания Б").is_visible()
+    assert page.get_by_role("heading", name="Студия ServGo", level=1).is_visible()
     assert page.get_by_role("link", name="Мой аккаунт").is_visible()
     outer, panel = layout_assertions(page, label, width, studio=True)
     assert page.locator(".servgo-shell-header").count() == 0, (label, "duplicate Studio nav")
-    if width < 1024:
-        intro = geometry(page, ".sg-studio-intro")
-        assert intro and intro["y"] < 150, (label, "mobile Studio intro too low", intro)
     page.screenshot(path=str(SCREENSHOTS / f"{label}-{theme}-studio.png"), full_page=True)
+    page.get_by_role("button", name="Повторить вход").click()
+    page.get_by_role("heading", name="Fixture Studio reached").wait_for(timeout=12000)
+    assert page.url == "https://servgo.ru/studio/sso?t=fixture.ticket"
+    assert requests == ["POST", "POST"], (label, requests)
+    assert not booking_requests, (label, booking_requests)
     print("STUDIO_RESPONSIVE_OK", json.dumps({
         "viewport": label, "theme": theme, "layout_width": round(outer["width"]),
-        "panel_width": round(panel["width"]), "companies": 2,
+        "panel_width": round(panel["width"]), "account_handoff": True,
     }, ensure_ascii=False), flush=True)
     context.close()
 
