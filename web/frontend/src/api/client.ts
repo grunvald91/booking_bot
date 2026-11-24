@@ -1015,6 +1015,8 @@ export const api = {
   getBusinessDetail: (bizId: number) =>
     request<BusinessAdminDetail>(`/admin/businesses/${bizId}/detail`),
   studioBusinesses: () => request<{ id: number; name: string; role: string }[]>('/studio/businesses'),
+  studioAccountTicket: () =>
+    request<{ url: string; expires_in: number }>('/studio/account-ticket', { method: 'POST' }),
   studioTicket: (businessId: number) =>
     request<{ url: string; expires_in: number }>('/studio/ticket', { method: 'POST', body: JSON.stringify({ business_id: businessId }) }),
 

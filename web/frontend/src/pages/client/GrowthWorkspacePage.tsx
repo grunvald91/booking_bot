@@ -1,6 +1,5 @@
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useSearchParams } from 'react-router-dom'
 import { AdminShell } from '../../components/AdminShell'
-import { StudioEntry } from '../../components/StudioEntry'
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
 import { useOpenStudio } from '../../hooks/useOpenStudio'
 
@@ -56,6 +55,7 @@ export function GrowthWorkspacePage() {
   const { businesses, selectedId } = useAdminBusiness()
   const { open, busy, error } = useOpenStudio(selectedId)
   const businessName = businesses.find((b) => b.id === businessId)?.name
+  if (!issue && !setup) return <Navigate to="/workspace/studio-entry" replace />
 
   return (
     <AdminShell title="AI Growth OS" subtitle="Маркетинг вашего бизнеса">
@@ -97,15 +97,7 @@ export function GrowthWorkspacePage() {
               Подтверждение действует ограниченное время. Если оно устарело, повторите вход из админки.
             </p>
           </section>
-        ) : (
-          <section className="ds-card" style={{ padding: 16 }}>
-            <h2 className="ds-h3">Открыть маркетинг для бизнеса</h2>
-            <p className="ds-sub">Выберите бизнес. ServGo проверит ваши права и откроет его студию.</p>
-            <StudioEntry showUnavailable />
-            <Link to="/admin" className="ds-btn ds-btn--ghost"
-              style={{ display: 'inline-flex', marginTop: 10 }}>К управлению записями</Link>
-          </section>
-        )}
+        ) : null}
       </div>
     </AdminShell>
   )

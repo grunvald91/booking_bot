@@ -147,6 +147,26 @@ class TicketOut(BaseModel):
     expires_in: int = TICKET_TTL_SECONDS
 
 
+@router.post("/studio/account-ticket", response_model=TicketOut)
+async def studio_account_ticket(request: Request, response: Response,
+                                user: User = Depends(get_current_user)):
+    """Authenticate Studio itself, independently of the online-booking module."""
+    _secret("STUDIO_INTERNAL_KEY")
+    ensure_identity(response, user.id, request.cookies.get("sg_identity"))
+    ticket = make_ticket(user_id=user.id, business_id=0, role="account", name="")
+    return TicketOut(url=f"{studio_public_url()}/studio/sso?t={ticket}")
+
+
+@router.get("/internal/studio/account")
+async def studio_account_active(user_id: int, x_studio_key: str = Header(default=""),
+                                db: AsyncSession = Depends(get_db)):
+    """Server-only confirmation that the central account still exists."""
+    expected = _secret("STUDIO_INTERNAL_KEY")
+    if not hmac.compare_digest(x_studio_key.encode(), expected):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return {"allowed": user_id > 0 and await db.get(User, user_id) is not None}
+
+
 @router.post("/studio/ticket", response_model=TicketOut)
 async def studio_ticket(data: TicketIn, request: Request, response: Response,
                         user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):

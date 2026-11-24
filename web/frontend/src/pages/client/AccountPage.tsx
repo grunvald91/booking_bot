@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CalendarDays, LayoutDashboard, LogOut } from 'lucide-react'
+import { CalendarDays, LayoutDashboard, LogOut, Sparkles } from 'lucide-react'
 import { api } from '../../api/client'
 import { EmailAuthForm } from '../../components/EmailAuthForm'
 import { clearLogin, errorMessage } from '../../authUtils'
 import { TelegramAccountLink } from '../../components/TelegramAccountLink'
 import { ClientShell } from '../../components/ClientShell'
-import { StudioEntry } from '../../components/StudioEntry'
 import { YandexAccountLink } from '../../components/YandexAccountLink'
 import { VkAccountLink } from '../../components/VkAccountLink'
 
@@ -38,7 +37,7 @@ export function AccountPage() {
       <YandexAccountLink />
       <VkAccountLink />
       <div className="bf-account-actions">
-        <StudioEntry />
+        <Link to="/workspace/studio-entry" className="bf-account-row"><Sparkles /><span>ServGo Studio</span></Link>
         {isMaster && <Link to="/master" className="bf-account-row"><CalendarDays /><span>Моё расписание мастера</span></Link>}
         {isAdmin && <Link to="/admin" className="bf-account-row"><LayoutDashboard /><span>Кабинет бизнеса</span></Link>}
         <button type="button" className="bf-account-row danger" onClick={logout}><LogOut /><span>Выйти</span></button>
