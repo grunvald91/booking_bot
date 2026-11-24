@@ -19,11 +19,14 @@ CLIENT = ROOT + "/bot/handlers/client.py"
 TRANSPORT = ROOT + "/bot/telegram_transport.py"
 DROPIN = "/etc/systemd/system/booking-bot.service.d/relay89.conf"
 DROPIN_TEXT = """[Unit]
-Requires=booking-bot-relay89.service
+Wants=booking-bot-relay89.service
 After=booking-bot-relay89.service
+StartLimitIntervalSec=0
 
 [Service]
 Environment=BOT_PROXY_URL=socks5://127.0.0.1:1089
+Restart=always
+RestartSec=20s
 """
 logging.getLogger("paramiko").setLevel(logging.CRITICAL)
 
