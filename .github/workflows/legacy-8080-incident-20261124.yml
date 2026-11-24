@@ -1,0 +1,126 @@
+name: Legacy 8080 incident read-only
+on:
+  push:
+    branches: ['ops/legacy-8080-incident-20261124']
+    paths: ['.github/workflows/legacy-8080-incident-20261124.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Install SSH library
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Read-only incident inspection
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, shlex, paramiko
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self, client, hostname, key):
+                  fp=base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  if fp!='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU':
+                      raise paramiko.SSHException('Host key mismatch')
+                  client.get_host_keys().add(hostname,key.get_name(),key)
+          if not os.environ.get('SERVER_PASSWORD'):
+              raise RuntimeError('Missing configured SSH secret')
+          source=r'''
+          import json, re, subprocess, pathlib, datetime, os, collections
+          def run(args, timeout=20):
+              p=subprocess.run(args,capture_output=True,text=True,timeout=timeout)
+              return p.returncode,p.stdout,p.stderr
+          units=('booking-bot.service','booking-web-api.service','booking-bot-relay89.service','nginx.service','servgo-health-monitor.timer','servgo-promo.service','booking-promo.service')
+          props=('LoadState','ActiveState','SubState','Result','MainPID','NRestarts','ExecMainCode','ExecMainStatus','ExecMainStartTimestamp','StateChangeTimestamp')
+          for unit in units:
+              rc,out,_=run(['systemctl','show',unit,*sum((['-p',x] for x in props),[])])
+              print('UNIT',unit,rc,out.strip().replace('\n','; '),flush=True)
+          rc,out,_=run(['ss','-H','-lntp'])
+          for line in out.splitlines():
+              if re.search(r':(?:8000|8080|8081|8091|18080)\s',line):
+                  print('LISTENER',line,flush=True)
+          for url in ('http://127.0.0.1:8080/','http://127.0.0.1:8000/businesses','http://127.0.0.1:18080/_promo_health','http://127.0.0.1:8091/health','https://servgo.ru/blog','https://servgo.ru/blog/sitemap.xml','https://promo.servgo.ru/'):
+              args=['curl','--noproxy','*','-sS','--max-time','8','-o','/dev/null','-w','%{http_code}']
+              if url.startswith('https://'):
+                  args+=['--resolve',url.split('/')[2]+':443:127.0.0.1']
+              rc,out,_=run(args+[url],12)
+              print('PROBE',url,'exit',rc,'HTTP',out,flush=True)
+          rc,out,_=run(['systemctl','show','booking-bot.service','-p','MainPID','--value'])
+          pid=out.strip()
+          if pid.isdigit() and int(pid)>0:
+              try:
+                  env=dict(x.split(b'=',1) for x in pathlib.Path('/proc/'+pid+'/environ').read_bytes().split(b'\0') if b'=' in x)
+                  print('PROCESS_WEBAPP_URL', 'set' if env.get(b'WEBAPP_URL') else 'unset')
+                  for key in (b'WEBAPP_PORT',b'WEBAPP_HOST'):
+                      val=env.get(key,b'').decode(errors='replace')
+                      print(key.decode(), val if re.fullmatch(r'[0-9.:]+',val) else ('unset' if not val else 'configured'))
+              except OSError as e: print('PROCESS_ENV',type(e).__name__)
+          rc,out,_=run(['nginx','-T'])
+          for line in out.splitlines():
+              if re.search(r'proxy_pass\s+http://(?:127\.0\.0\.1|localhost):(?:8080|18080)(?:[/;]|$)',line):
+                  print('NGINX_LEGACY_UPSTREAM',re.search(r'http://(?:127\.0\.0\.1|localhost):\d+',line).group())
+          # Never print arbitrary journal content, environment values, messages, or credentials.
+          rules={
+              'webapp_start_failed':r'Ошибка запуска WebApp сервера|WebApp.*(?:failed|error)|webapp.*(?:failed to start|startup failed)',
+              'webapp_url_missing':r'WEBAPP_URL не указан|WEBAPP_URL.*(?:missing|not set)',
+              'webapp_started':r'WebApp сервер запущен|WebApp server started',
+              'address_in_use':r'address already in use|EADDRINUSE|Errno 98',
+              'permission_denied':r'permission denied|EACCES|Errno 13',
+              'address_unavailable':r'cannot assign requested address|EADDRNOTAVAIL|Errno 99',
+              'import_error':r'ModuleNotFoundError|ImportError',
+              'syntax_error':r'SyntaxError|IndentationError',
+              'database_error':r'OperationalError|asyncpg.*Error|database.*(?:failed|unavailable)|connection.*database',
+              'telegram_auth_error':r'TelegramUnauthorizedError|Unauthorized|invalid token',
+              'telegram_network_error':r'TelegramNetworkError|TelegramConflictError|TelegramRetryAfter',
+              'traceback':r'Traceback \(most recent call last\)',
+              'service_stop':r'Stopping |Stopped |Deactivated successfully',
+              'service_start':r'Starting |Started |Запуск бота',
+              'service_failed':r'Main process exited|Failed with result|Failed to start|Scheduled restart job',
+              'oom':r'Out of memory|Killed process|oom-kill|OOM killer',
+              'connection_refused':r'connection refused|Errno 111',
+              'timeout':r'TimeoutError|timed out',
+              'runtime_error':r'RuntimeError|AttributeError|TypeError|ValueError|NameError|FileNotFoundError',
+          }
+          for unit in ('booking-bot.service','booking-web-api.service','booking-bot-relay89.service','nginx.service','servgo-health-monitor.service'):
+              rc,out,_=run(['journalctl','-u',unit,'--since','2026-11-24 08:45:00 UTC','--no-pager','-o','json'],45)
+              events=[]; counts=collections.Counter()
+              for line in out.splitlines():
+                  try:
+                      j=json.loads(line); msg=j.get('MESSAGE','')
+                      if not isinstance(msg,str):continue
+                      tags=[k for k,v in rules.items() if re.search(v,msg,re.I)]
+                      if not tags:continue
+                      t=datetime.datetime.fromtimestamp(int(j['__REALTIME_TIMESTAMP'])/1e6,datetime.timezone.utc).isoformat()
+                      counts.update(tags)
+                      cls=re.search(r'\b(ModuleNotFoundError|ImportError|SyntaxError|IndentationError|OSError|RuntimeError|AttributeError|TypeError|ValueError|NameError|FileNotFoundError|OperationalError|TimeoutError|ConnectionRefusedError|TelegramUnauthorizedError)\b',msg)
+                      mod=re.search(r"No module named ['\"]([a-zA-Z_][a-zA-Z0-9_.]{0,100})['\"]",msg)
+                      events.append((t,','.join(tags),cls.group(1) if cls else '',mod.group(1) if mod else ''))
+                  except (ValueError,KeyError,TypeError):continue
+              print('JOURNAL',unit,'rc',rc,'lines',len(out.splitlines()),'counts',dict(counts),flush=True)
+              near=[e for e in events if e[0]<'2026-11-24T10:00:00']
+              for e in near[-70:]+[e for e in events if e[0]>='2026-11-24T10:00:00'][-25:]:
+                  print('EVENT',unit,*e,flush=True)
+          rc,out,_=run(['journalctl','-k','--since','2026-11-24 08:45:00 UTC','--no-pager','-o','json'],25)
+          for line in out.splitlines():
+              try:
+                  j=json.loads(line)
+                  if re.search(r'Out of memory|Killed process|oom-kill',str(j.get('MESSAGE','')),re.I):
+                      print('KERNEL_OOM',datetime.datetime.fromtimestamp(int(j['__REALTIME_TIMESTAMP'])/1e6,datetime.timezone.utc).isoformat())
+              except (ValueError,KeyError,TypeError):pass
+          print('READ_ONLY_COMPLETE',flush=True)
+          '''
+          ssh=paramiko.SSHClient()
+          ssh.set_missing_host_key_policy(Pinned())
+          try:
+              ssh.connect('155.212.162.47',username='root',password=os.environ['SERVER_PASSWORD'],look_for_keys=False,allow_agent=False,timeout=15,banner_timeout=25,auth_timeout=15)
+              cmd='python3 -c '+shlex.quote("import base64;exec(base64.b64decode("+repr(base64.b64encode(source.encode()).decode())+"))")
+              _,stdout,stderr=ssh.exec_command(cmd,timeout=150)
+              result=stdout.read().decode('utf-8','replace')
+              rc=stdout.channel.recv_exit_status()
+              print(result)
+              if rc: raise RuntimeError('Remote diagnostic failed; details withheld')
+          finally: ssh.close()
+          PY
