@@ -175,6 +175,10 @@ jobs:
           APPLY: 'true'
         run: |
           python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+          # Both workflows share deploy-server concurrency. Install the
+          # reviewed additive SSO patch here first, so frontend does not race
+          # the independently triggered canonical backend workflow.
+          python -m scripts.deploy_studio_canonical_sso
           python scripts/deploy_servgo_frontend_atomic.py
 
       - name: Restart service and verify

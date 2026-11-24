@@ -47,7 +47,7 @@ def _canonical_constant(source: str) -> bool:
     )
 
 
-def patch(source: str, target: str) -> tuple[str, bool]:
+def _patch_origin(source: str, target: str) -> tuple[str, bool]:
     """Replace only the reviewed function; preserve every other remote line."""
     if not _canonical_constant(source) or not _canonical_constant(target):
         raise ValueError("Canonical SSO origin is not the expected host")
@@ -82,6 +82,60 @@ def patch(source: str, target: str) -> tuple[str, bool]:
     return result, True
 
 
+ACCOUNT_ROUTES = ("studio_account_ticket", "studio_account_active")
+
+
+def patch(source: str, target: str) -> tuple[str, bool]:
+    """Preserve the live file; add only the reviewed account-level routes.
+
+    Refuse partial deployments, changed definitions or unexpected route
+    collisions. Compare the complete AST against the tested release, including
+    the two known production-only declaration order differences.
+    """
+    revised, origin_changed = _patch_origin(source, target)
+    desired = ast.parse(target)
+    live = ast.parse(revised)
+    def named(tree, name):
+        return [n for n in tree.body
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name]
+    wanted = [named(desired, name) for name in ACCOUNT_ROUTES]
+    if not any(wanted):
+        return revised, origin_changed  # old canonical-only target / regression fixture
+    if any(len(nodes) != 1 for nodes in wanted):
+        raise ValueError("Unexpected account route definitions in candidate")
+    existing = [named(live, name) for name in ACCOUNT_ROUTES]
+    if any(existing):
+        if any(len(nodes) != 1 for nodes in existing):
+            raise ValueError("Partial or duplicate account route deployment")
+        if any(ast.dump(a[0]) != ast.dump(b[0]) for a, b in zip(existing, wanted)):
+            raise ValueError("Unexpected live account route definition")
+    else:
+        anchors = named(live, "studio_ticket")
+        if len(anchors) != 1 or not anchors[0].decorator_list:
+            raise ValueError("Unexpected live studio ticket route")
+        target_lines = target.splitlines(keepends=True)
+        blocks = []
+        for nodes in wanted:
+            node = nodes[0]
+            if len(node.decorator_list) != 1:
+                raise ValueError("Unexpected account route decorator")
+            blocks.append("".join(target_lines[node.decorator_list[0].lineno - 1:node.end_lineno]))
+        lines = revised.splitlines(keepends=True)
+        start = anchors[0].decorator_list[0].lineno - 1
+        revised = "".join(lines[:start]) + "\n\n".join(blocks) + "\n\n\n" + "".join(lines[start:])
+    # Import from the same reviewed release (not from remote production).
+    # Support both `python -m scripts...` and the existing direct script invocation.
+    try:
+        from scripts.deploy_servgo_frontend_atomic import backend_equivalent, STUDIO_SSO
+    except ModuleNotFoundError as exc:
+        if exc.name != 'scripts':
+            raise
+        from deploy_servgo_frontend_atomic import backend_equivalent, STUDIO_SSO
+    if not backend_equivalent(STUDIO_SSO, revised.encode(), target.encode()):
+        raise ValueError("Unexpected live SSO drift; refusing to install account routes")
+    return revised, revised != source
+
+
 class PinnedHost(paramiko.MissingHostKeyPolicy):
     def missing_host_key(self, client, hostname, key):
         actual = base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip("=")
@@ -113,6 +167,22 @@ def wait_for_api_health(client, *, attempts: int = 20, delay_seconds: float = 2)
     raise RuntimeError("ServGo API did not become healthy after restart")
 
 
+def verify_account_routes(client, target: str) -> None:
+    """No credentials or real tickets: verify registered routes fail closed."""
+    if not any(isinstance(n, ast.AsyncFunctionDef) and n.name == "studio_account_ticket"
+               for n in ast.parse(target).body):
+        return
+    for method, route, expected in (
+        ("POST", "/studio/account-ticket", {"401", "403"}),
+        ("GET", "/internal/studio/account?user_id=0", {"403"}),
+    ):
+        code = run(client, "curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X "
+                   + method + " " + shlex.quote("http://127.0.0.1:8000" + route), timeout=10)
+        if code not in expected:
+            raise RuntimeError("Studio account endpoint is not registered or not protected: " + route)
+    print("STUDIO_ACCOUNT_ROUTES=PROTECTED")
+
+
 def release() -> None:
     password = os.environ.get("SERVGO_PASSWORD", "")
     if not password:
@@ -137,6 +207,8 @@ def release() -> None:
         live = live_bytes.decode("utf-8")
         revised, changed = patch(live, target)
         if not changed:
+            wait_for_api_health(client)
+            verify_account_routes(client, target)
             print("STUDIO_CANONICAL_SSO=ALREADY_ACTIVE")
             return
         if os.environ.get("APPLY") != "true":
@@ -156,6 +228,7 @@ def release() -> None:
             raise RuntimeError("ServGo API is not active")
         # systemctl "active" can precede uvicorn readiness after a cold start.
         wait_for_api_health(client)
+        verify_account_routes(client, target)
         # Verify the actual server file still returns only the approved origin.
         with sftp.open(REMOTE, "rb") as handle:
             active = handle.read().decode("utf-8")
