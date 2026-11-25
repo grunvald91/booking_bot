@@ -11,6 +11,7 @@ import base64
 import os
 from pathlib import Path
 import shlex
+import subprocess
 import time
 
 from scripts.deploy_business_creation_and_reminders import ROOT, WEB_SERVICE, connect, run, wait_web_ready
@@ -172,7 +173,12 @@ def main() -> None:
         staged[API]=patch_api(originals[API].decode(),reviewed[API]).encode()
         staged[EMAIL]=patch_email(originals[EMAIL].decode(),reviewed[EMAIL]).encode()
         if originals[RELAY] is not None and not _equivalent(originals[RELAY].decode(),reviewed[RELAY]):
-            raise RuntimeError("Unknown live MNEBYVPN relay module")
+            # Allow only the reviewed OTP-only predecessor, not arbitrary live drift.
+            previous = subprocess.check_output(
+                ["git", "show", "fd2d8079b0450bd917449f048f3b8496e00bcf17:" + RELAY],
+                cwd=repo, text=True, timeout=10)
+            if not _equivalent(originals[RELAY].decode(),previous):
+                raise RuntimeError("Unknown live MNEBYVPN relay module")
         staged[RELAY]=reviewed[RELAY].encode()
         for path in FILES:
             compile(staged[path],path,"exec")
