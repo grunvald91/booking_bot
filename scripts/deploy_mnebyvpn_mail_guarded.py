@@ -175,7 +175,7 @@ def main() -> None:
         if originals[RELAY] is not None and not _equivalent(originals[RELAY].decode(),reviewed[RELAY]):
             # Allow only the reviewed OTP-only predecessor, not arbitrary live drift.
             previous = subprocess.check_output(
-                ["git", "show", "fd2d8079b0450bd917449f048f3b8496e00bcf17:" + RELAY],
+                ["git", "show", "82db4069b8f4a0c3ecbf7a9b9ca3fcded90865dd:" + RELAY],
                 cwd=repo, text=True, timeout=10)
             if not _equivalent(originals[RELAY].decode(),previous):
                 raise RuntimeError("Unknown live MNEBYVPN relay module")

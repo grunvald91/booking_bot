@@ -93,6 +93,20 @@ class MailRelayTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.client.post(url, content=raw, headers=headers).status_code, 400)
         self.assertEqual(len(self.sent), 1)
 
+    async def test_recovery_invitation_fixed_template_and_replay(self):
+        payload = {"email": "test@example.org", "kind": "vpn_trial_recovery_invite"}
+        raw, headers = self.sign(payload, nonce="i" * 32)
+        url = "/api/auth/mnebyvpn/email-code"
+        result = self.client.post(url, content=raw, headers=headers)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertIn("https://mnebyvpn.site/#account", self.sent[0]["text_body"])
+        self.assertIn("после активации", self.sent[0]["text_body"])
+        self.assertNotIn("активирован", self.sent[0]["text_body"])
+        self.assertEqual(self.client.post(url, content=raw, headers=headers).status_code, 409)
+        raw, headers = self.sign({**payload, "url": "https://evil.example"}, nonce="j" * 32)
+        self.assertEqual(self.client.post(url, content=raw, headers=headers).status_code, 400)
+        self.assertEqual(len(self.sent), 1)
+
     async def test_nonce_cleanup_failure_does_not_block_otp_delivery(self):
         raw, headers = self.sign(
             {"email": "test@example.org", "code": "543210"}, nonce="b" * 32
