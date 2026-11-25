@@ -1,4 +1,5 @@
 """Install the ServGo bot SOCKS transport or update its deployed systemd drop-in."""
+import argparse
 import base64
 import hashlib
 import logging
@@ -149,7 +150,10 @@ wants=$(systemctl show -p Wants --value "$unit")
 [[ " $requires " != *" $relay "* && " $wants " == *" $relay "* ]]
 [[ $(systemctl show -p Restart --value "$unit") == always ]]
 [[ $(systemctl show -p RestartUSec --value "$unit") == 20s ]]
-[[ $(systemctl show -p StartLimitIntervalUSec --value "$unit") == 0 ]]
+case $(systemctl show -p StartLimitIntervalUSec --value "$unit") in
+    0|0s|0us) ;;
+    *) echo 'Unexpected BookingBot restart rate limit'; exit 1 ;;
+esac
 
 if [[ $changed == true || $was_active == false ]]; then
     systemctl reset-failed "$unit"
@@ -178,6 +182,10 @@ echo 'BookingBot lifecycle deployed and verified'
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--recover-lifecycle", action="store_true",
+                        help="Update an existing relay drop-in and verify port 8080")
+    args = parser.parse_args()
     password = os.environ.get("SERVGO_PASSWORD")
     if not password:
         raise RuntimeError("Missing SERVER_SSH_PASSWORD GitHub secret")
@@ -195,19 +203,18 @@ def main():
             if attempt == 2:
                 raise RuntimeError("ServGo SSH unavailable") from None
             time.sleep(3)
+    if args.recover_lifecycle:
+        try:
+            update_existing_dropin(client)
+        finally:
+            client.close()
+        return
+
     sftp = client.open_sftp()
     deployed = False
     backup = None
     client_backup = None
     try:
-        try:
-            sftp.lstat(DROPIN)
-        except FileNotFoundError:
-            pass
-        else:
-            update_existing_dropin(client)
-            return
-
         if run(client, "systemctl is-active booking-bot-relay89.service") != "active":
             raise RuntimeError("Private SSH tunnel is not active")
         probe = "curl -4 -sS --proxy socks5h://127.0.0.1:1089 --noproxy '' --max-time 12 -o /dev/null -w '%{http_code}' https://api.telegram.org/"
