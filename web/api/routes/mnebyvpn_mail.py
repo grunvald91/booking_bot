@@ -65,7 +65,7 @@ async def send_mnebyvpn_code(request: Request, db: AsyncSession = Depends(get_db
         raise HTTPException(401, "Unauthorized")
     try:
         data = json.loads(raw)
-        if not isinstance(data, dict) or set(data) not in ({"email", "code"}, {"email", "kind", "expiresAt"}):
+        if not isinstance(data, dict) or set(data) not in ({"email", "code"}, {"email", "kind", "expiresAt"}, {"email", "kind"}):
             raise ValueError("Bad payload")
         if not isinstance(data["email"], str):
             raise ValueError("Invalid recipient")
@@ -81,6 +81,17 @@ async def send_mnebyvpn_code(request: Request, db: AsyncSession = Depends(get_db
                 f"Код для входа в MNEBYVPN: {code}\n"
                 "Код действует 10 минут. Никому его не сообщайте.\n"
                 "Если вы не запрашивали вход, просто игнорируйте письмо.\n"
+            )
+        elif set(data) == {"email", "kind"}:
+            if data["kind"] != "vpn_trial_recovery_invite":
+                raise ValueError("Bad trial invitation")
+            subject = "MNEBYVPN — завершите получение бесплатного VPN"
+            body = (
+                "Если при оформлении пробного VPN произошла ошибка, теперь вы можете завершить оформление.\n"
+                "Откройте личный кабинет с ранее подтверждённым email:\n"
+                "https://mnebyvpn.site/#account\n\n"
+                "Нажмите «Получить бесплатный VPN на 24 часа». Повторная регистрация не нужна.\n"
+                "Пробный период начнётся только после активации. Если доступ не нужен, просто игнорируйте письмо.\n"
             )
         else:
             if data["kind"] != "vpn_trial_ready" or not isinstance(data["expiresAt"], str):
