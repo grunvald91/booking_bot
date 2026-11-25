@@ -10,7 +10,7 @@ import json
 import os
 import re
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import delete
@@ -65,15 +65,41 @@ async def send_mnebyvpn_code(request: Request, db: AsyncSession = Depends(get_db
         raise HTTPException(401, "Unauthorized")
     try:
         data = json.loads(raw)
-        if not isinstance(data, dict) or set(data) != {"email", "code"}:
+        if not isinstance(data, dict) or set(data) not in ({"email", "code"}, {"email", "kind", "expiresAt"}):
             raise ValueError("Bad payload")
         if not isinstance(data["email"], str):
             raise ValueError("Invalid recipient")
         email = normalize_optional_email(data["email"])
-        code = data["code"]
-        if (not email or email != str(data["email"]).lower().strip()
-                or not isinstance(code, str) or not _CODE.fullmatch(code)):
-            raise ValueError("Bad email or code")
+        if not email or email != str(data["email"]).lower().strip():
+            raise ValueError("Bad email")
+        if set(data) == {"email", "code"}:
+            code = data["code"]
+            if not isinstance(code, str) or not _CODE.fullmatch(code):
+                raise ValueError("Bad code")
+            subject = "MNEBYVPN — код для входа"
+            body = (
+                f"Код для входа в MNEBYVPN: {code}\n"
+                "Код действует 10 минут. Никому его не сообщайте.\n"
+                "Если вы не запрашивали вход, просто игнорируйте письмо.\n"
+            )
+        else:
+            if data["kind"] != "vpn_trial_ready" or not isinstance(data["expiresAt"], str):
+                raise ValueError("Bad trial notice")
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", data["expiresAt"]):
+                raise ValueError("Bad deadline")
+            expires = datetime.fromisoformat(data["expiresAt"].replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            if not now < expires <= now + timedelta(hours=24, minutes=1):
+                raise ValueError("Bad deadline")
+            deadline = (expires.astimezone(timezone(timedelta(hours=3)))).strftime("%d.%m.%Y %H:%M")
+            subject = "MNEBYVPN — бесплатный VPN готов"
+            body = (
+                "Ваш пробный VPN на 24 часа активирован.\n"
+                f"Доступ действует до {deadline} (МСК).\n\n"
+                "Откройте личный кабинет и выберите своё устройство:\n"
+                "https://mnebyvpn.site/#account\n\n"
+                "Если потребуется, войдите с помощью кода из письма.\n"
+            )
     except (ValueError, KeyError, TypeError):
         raise HTTPException(400, "Invalid request") from None
 
@@ -95,12 +121,8 @@ async def send_mnebyvpn_code(request: Request, db: AsyncSession = Depends(get_db
         await db.rollback()
     delivered = await send_email(
         to_email=email,
-        subject="MNEBYVPN — код для входа",
-        text_body=(
-            f"Код для входа в MNEBYVPN: {code}\n"
-            "Код действует 10 минут. Никому его не сообщайте.\n"
-            "Если вы не запрашивали вход, просто игнорируйте письмо.\n"
-        ),
+        subject=subject,
+        text_body=body,
         from_override=_FROM,
     )
     if not delivered:
