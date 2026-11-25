@@ -1,4 +1,5 @@
-"""Manually deploy only ServGo bot SOCKS transport with pinned host and backups."""
+"""Install the ServGo bot SOCKS transport or update its deployed systemd drop-in."""
+import argparse
 import base64
 import hashlib
 import logging
@@ -18,12 +19,22 @@ MAIN = ROOT + "/bot/main.py"
 CLIENT = ROOT + "/bot/handlers/client.py"
 TRANSPORT = ROOT + "/bot/telegram_transport.py"
 DROPIN = "/etc/systemd/system/booking-bot.service.d/relay89.conf"
-DROPIN_TEXT = """[Unit]
+PREVIOUS_DROPIN_TEXT = """[Unit]
 Requires=booking-bot-relay89.service
 After=booking-bot-relay89.service
 
 [Service]
 Environment=BOT_PROXY_URL=socks5://127.0.0.1:1089
+"""
+DROPIN_TEXT = """[Unit]
+Wants=booking-bot-relay89.service
+After=booking-bot-relay89.service
+StartLimitIntervalSec=0
+
+[Service]
+Environment=BOT_PROXY_URL=socks5://127.0.0.1:1089
+Restart=always
+RestartSec=20s
 """
 logging.getLogger("paramiko").setLevel(logging.CRITICAL)
 
@@ -36,10 +47,12 @@ class PinnedKey(paramiko.MissingHostKeyPolicy):
         client.get_host_keys().add(hostname, key.get_name(), key)
 
 
-def run(client, command, timeout=40):
+def run(client, command, timeout=40, report_failure=False):
     _, output, _ = client.exec_command(command, timeout=timeout)
     body = output.read().decode("utf-8", "replace").strip()
     if output.channel.recv_exit_status():
+        if report_failure and body:
+            print(body)
         raise RuntimeError("Deployment remote command failed; stderr suppressed")
     return body
 
@@ -66,7 +79,113 @@ asyncio.run(verify())"""
     return run(client, "cd /opt/booking_bot && ./venv/bin/python -c " + shlex.quote(code), timeout=35)
 
 
+def update_existing_dropin(client):
+    command = r"""
+set -euo pipefail
+dropin=$1
+previous=$2
+desired=$3
+unit=booking-bot.service
+relay=booking-bot-relay89.service
+exec 9>/run/lock/booking-bot-relay89-dropin.lock
+flock -n 9
+
+if [[ ! -f $dropin || -L $dropin ]]; then
+    echo 'Expected a regular BookingBot relay drop-in'
+    exit 1
+fi
+if ! cmp -s "$dropin" <(printf '%s' "$previous") &&
+   ! cmp -s "$dropin" <(printf '%s' "$desired"); then
+    echo 'Production relay drop-in differs from both reviewed versions'
+    exit 1
+fi
+if ! systemctl is-active --quiet "$relay"; then
+    echo 'BookingBot relay is inactive'
+    exit 1
+fi
+proxy_code=$(curl -4 -s --proxy socks5h://127.0.0.1:1089 --noproxy '' \
+    --max-time 12 -o /dev/null -w '%{http_code}' https://api.telegram.org/ || true)
+echo "Telegram through SOCKS HTTP $proxy_code"
+[[ $proxy_code == 302 ]]
+
+backup=''
+staged=''
+changed=false
+was_active=false
+systemctl is-active --quiet "$unit" && was_active=true
+cleanup() {
+    status=$?
+    if [[ $status != 0 && $changed == true ]]; then
+        if cp -p "$backup" "$staged" && mv -f "$staged" "$dropin" &&
+           systemctl daemon-reload; then
+            echo 'Previous BookingBot drop-in restored'
+            if [[ $was_active == true ]]; then
+                systemctl reset-failed "$unit" && systemctl restart "$unit" ||
+                    echo 'Could not restart BookingBot after rollback'
+            else
+                systemctl stop "$unit" || echo 'Could not stop BookingBot after rollback'
+            fi
+        else
+            echo 'BookingBot drop-in rollback failed'
+        fi
+    fi
+    if [[ -n $staged ]]; then rm -f "$staged"; fi
+    exit "$status"
+}
+trap cleanup EXIT
+
+if ! cmp -s "$dropin" <(printf '%s' "$desired"); then
+    backup=$(mktemp "${dropin}.before-lifecycle.XXXXXX")
+    staged=$(mktemp "${dropin}.pending.XXXXXX")
+    cp -p "$dropin" "$backup"
+    cp -p "$dropin" "$staged"
+    printf '%s' "$desired" >"$staged"
+    mv -f "$staged" "$dropin"
+    changed=true
+fi
+
+systemctl daemon-reload
+requires=$(systemctl show -p Requires --value "$unit")
+wants=$(systemctl show -p Wants --value "$unit")
+[[ " $requires " != *" $relay "* && " $wants " == *" $relay "* ]]
+[[ $(systemctl show -p Restart --value "$unit") == always ]]
+[[ $(systemctl show -p RestartUSec --value "$unit") == 20s ]]
+case $(systemctl show -p StartLimitIntervalUSec --value "$unit") in
+    0|0s|0us) ;;
+    *) echo 'Unexpected BookingBot restart rate limit'; exit 1 ;;
+esac
+
+if [[ $changed == true || $was_active == false ]]; then
+    systemctl reset-failed "$unit"
+    systemctl restart "$unit"
+fi
+for attempt in {1..15}; do
+    legacy=$(curl -s --noproxy '*' --max-time 3 -o /dev/null \
+        -w '%{http_code}' http://127.0.0.1:8080/ || true)
+    if [[ $legacy == 200 ]] && systemctl is-active --quiet "$unit"; then break; fi
+    sleep 2
+done
+echo "BookingBot legacy 8080 HTTP $legacy"
+[[ $legacy == 200 ]]
+systemctl is-active --quiet "$unit"
+for path in /blog /blog/sitemap.xml; do
+    status=$(curl -s --noproxy '*' --resolve servgo.ru:443:127.0.0.1 \
+        --max-time 8 -o /dev/null -w '%{http_code}' "https://servgo.ru$path" || true)
+    echo "ServGo $path HTTP $status"
+    [[ $status == 200 ]]
+done
+echo 'BookingBot lifecycle deployed and verified'
+"""
+    argv = ["bash", "-c", command, "booking-bot-relay89", DROPIN,
+            PREVIOUS_DROPIN_TEXT, DROPIN_TEXT]
+    print(run(client, shlex.join(argv), timeout=160, report_failure=True))
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--recover-lifecycle", action="store_true",
+                        help="Update an existing relay drop-in and verify port 8080")
+    args = parser.parse_args()
     password = os.environ.get("SERVGO_PASSWORD")
     if not password:
         raise RuntimeError("Missing SERVER_SSH_PASSWORD GitHub secret")
@@ -84,6 +203,13 @@ def main():
             if attempt == 2:
                 raise RuntimeError("ServGo SSH unavailable") from None
             time.sleep(3)
+    if args.recover_lifecycle:
+        try:
+            update_existing_dropin(client)
+        finally:
+            client.close()
+        return
+
     sftp = client.open_sftp()
     deployed = False
     backup = None
