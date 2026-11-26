@@ -134,12 +134,26 @@ async def send_mnebyvpn_code(request: Request, db: AsyncSession = Depends(get_db
     except (ValueError, KeyError, TypeError):
         raise HTTPException(400, "Invalid request") from None
 
+    # Only ready notices may opt into stable delivery identity. The ordinary
+    # OTP and invite replay contract is unchanged. A second durable marker is
+    # bound to the exact signed payload; no schema change or recipient storage.
+    stable_ready = (
+        data.get("kind") in ("vpn_trial_ready", "bundle_trial_ready")
+        and re.fullmatch(r"trial_[a-f0-9]{56}", nonce) is not None
+    )
     digest = hashlib.sha256(nonce.encode("ascii")).hexdigest()
+    success_digest = hashlib.sha256(b"sent:" + nonce.encode("ascii") + b":" + raw).hexdigest()
     db.add(MnebyvpnEmailDispatchNonce(nonce_hash=digest))
     try:
         await db.commit()
     except IntegrityError:
         await db.rollback()
+        if stable_ready:
+            accepted = await db.get(MnebyvpnEmailDispatchNonce, success_digest)
+            if accepted is not None:
+                return {"sent": True}
+            # In-flight/crashed/ambiguous SMTP outcomes must not resend.
+            raise HTTPException(409, "Delivery not confirmed") from None
         raise HTTPException(409, "Duplicate request") from None
     # Nonce cleanup is maintenance, not a prerequisite to mail delivery.
     # If the maintenance query fails, a valid signed code must still be sent.
@@ -158,4 +172,7 @@ async def send_mnebyvpn_code(request: Request, db: AsyncSession = Depends(get_db
     )
     if not delivered:
         raise HTTPException(503, "Email delivery unavailable")
+    if stable_ready:
+        db.add(MnebyvpnEmailDispatchNonce(nonce_hash=success_digest))
+        await db.commit()
     return {"sent": True}
