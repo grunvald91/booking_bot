@@ -83,7 +83,7 @@ async def send_mnebyvpn_code(request: Request, db: AsyncSession = Depends(get_db
                 "Если вы не запрашивали вход, просто игнорируйте письмо.\n"
             )
         elif set(data) == {"email", "kind"}:
-            if data["kind"] != "vpn_trial_recovery_invite":
+            if data["kind"] not in ("vpn_trial_recovery_invite", "bundle_trial_recovery_invite"):
                 raise ValueError("Bad trial invitation")
             subject = "MNEBYVPN — завершите получение бесплатного VPN"
             body = (
@@ -93,8 +93,18 @@ async def send_mnebyvpn_code(request: Request, db: AsyncSession = Depends(get_db
                 "Нажмите «Получить бесплатный VPN на 24 часа». Повторная регистрация не нужна.\n"
                 "Пробный период начнётся только после активации. Если доступ не нужен, просто игнорируйте письмо.\n"
             )
+            if data["kind"] == "bundle_trial_recovery_invite":
+                subject = "MNEBYVPN — завершите получение бесплатного пакета «3 в 1»"
+                body = (
+                    "Если при оформлении бесплатного доступа произошла ошибка, откройте личный кабинет:\n"
+                    "https://mnebyvpn.site/#account\n\n"
+                    "Войдите с ранее подтверждённым email и нажмите «Попробовать 3 в 1 бесплатно».\n"
+                    "VPN и Smart DNS предоставляются на 24 часа после активации. "
+                    "Общий Telegram-прокси не ограничен пробными сутками.\n"
+                    "Если доступ не нужен, просто игнорируйте письмо.\n"
+                )
         else:
-            if data["kind"] != "vpn_trial_ready" or not isinstance(data["expiresAt"], str):
+            if data["kind"] not in ("vpn_trial_ready", "bundle_trial_ready") or not isinstance(data["expiresAt"], str):
                 raise ValueError("Bad trial notice")
             if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", data["expiresAt"]):
                 raise ValueError("Bad deadline")
@@ -111,15 +121,39 @@ async def send_mnebyvpn_code(request: Request, db: AsyncSession = Depends(get_db
                 "https://mnebyvpn.site/#account\n\n"
                 "Если потребуется, войдите с помощью кода из письма.\n"
             )
+            if data["kind"] == "bundle_trial_ready":
+                subject = "MNEBYVPN — бесплатный пакет «3 в 1» готов"
+                body = (
+                    "Ваши VPN и Smart DNS активированы.\n"
+                    f"Доступ действует до {deadline} (МСК).\n"
+                    "Общий Telegram-прокси не ограничен пробными сутками.\n\n"
+                    "Откройте личный кабинет, чтобы получить инструкции и подключения:\n"
+                    "https://mnebyvpn.site/#account\n\n"
+                    "При необходимости войдите с помощью кода из письма.\n"
+                )
     except (ValueError, KeyError, TypeError):
         raise HTTPException(400, "Invalid request") from None
 
+    # Only ready notices may opt into stable delivery identity. The ordinary
+    # OTP and invite replay contract is unchanged. A second durable marker is
+    # bound to the exact signed payload; no schema change or recipient storage.
+    stable_ready = (
+        data.get("kind") in ("vpn_trial_ready", "bundle_trial_ready")
+        and re.fullmatch(r"trial_[a-f0-9]{56}", nonce) is not None
+    )
     digest = hashlib.sha256(nonce.encode("ascii")).hexdigest()
+    success_digest = hashlib.sha256(b"sent:" + nonce.encode("ascii") + b":" + raw).hexdigest()
     db.add(MnebyvpnEmailDispatchNonce(nonce_hash=digest))
     try:
         await db.commit()
     except IntegrityError:
         await db.rollback()
+        if stable_ready:
+            accepted = await db.get(MnebyvpnEmailDispatchNonce, success_digest)
+            if accepted is not None:
+                return {"sent": True}
+            # In-flight/crashed/ambiguous SMTP outcomes must not resend.
+            raise HTTPException(409, "Delivery not confirmed") from None
         raise HTTPException(409, "Duplicate request") from None
     # Nonce cleanup is maintenance, not a prerequisite to mail delivery.
     # If the maintenance query fails, a valid signed code must still be sent.
@@ -138,4 +172,7 @@ async def send_mnebyvpn_code(request: Request, db: AsyncSession = Depends(get_db
     )
     if not delivered:
         raise HTTPException(503, "Email delivery unavailable")
+    if stable_ready:
+        db.add(MnebyvpnEmailDispatchNonce(nonce_hash=success_digest))
+        await db.commit()
     return {"sent": True}
