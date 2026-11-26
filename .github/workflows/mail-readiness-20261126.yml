@@ -29,12 +29,14 @@ jobs:
               for path in ("/health", "/owner-mail/api/company-search/providers", "/owner-mail/api/campaigns/automation"):
                   print(path, release.check_http(ssh, path))
               source = r'''
-          import datetime, json, os, smtplib, sqlite3, subprocess, urllib.request, urllib.parse
+          import datetime, json, os, smtplib, sqlite3, subprocess, urllib.request, urllib.parse, urllib.error
           from pathlib import Path
           out = {}
           def check(name, fn):
               try:
                   out[name] = fn()
+              except urllib.error.HTTPError as e:
+                  out[name] = {"error_type": type(e).__name__, "http":e.code}
               except Exception as e:
                   out[name] = {"error_type": type(e).__name__}
           def service_env():
