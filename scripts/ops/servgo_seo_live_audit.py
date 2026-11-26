@@ -9,12 +9,14 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import time
 import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit
 from html.parser import HTMLParser
 from email.parser import Parser
 
 MAX_URLS = 200
+DEADLINE = time.monotonic() + 240
 
 ROOT = "https://servgo.ru"
 errors: list[str] = []
@@ -23,8 +25,12 @@ errors: list[str] = []
 def request(path: str, *, indexable: bool = False) -> tuple[int, str]:
     if not path.startswith("/") or path.startswith("//"):
         raise ValueError("Unsafe path")
+    if time.monotonic() >= DEADLINE:
+        if "Audit time budget exhausted; coverage incomplete" not in errors:
+            errors.append("Audit time budget exhausted; coverage incomplete")
+        return 0, ""
     proc = subprocess.run(
-        ["curl", "-ksS", "--include", "--max-time", "15",
+        ["curl", "-ksS", "--include", "--noproxy", "*", "--max-time", "15",
          "--resolve", "servgo.ru:443:127.0.0.1",
          "-w", "\\n__HTTP_STATUS__=%{http_code}", ROOT + path],
         capture_output=True, text=True, timeout=20, check=False,
@@ -162,16 +168,26 @@ def main() -> int:
     for path in article_paths:
         inspect_html(path, expected=ROOT + path, require_ssr=True)
 
-    # Company blog index is advertised by robots.txt; it must be served as XML.
-    company_index_status, company_index = request("/business-blog-sitemap.xml")
-    if company_index_status != 200:
-        errors.append("/business-blog-sitemap.xml: advertised sitemap not HTTP 200")
-    else:
-        try:
-            root = ET.fromstring(company_index)
-            require(root.tag.endswith("sitemapindex"), "Company sitemap is not sitemapindex XML")
-        except ET.ParseError:
-            errors.append("Company sitemap invalid XML")
+    # Check every advertised tenant blog sitemap within the bounded audit.
+    company_sitemaps = []
+    for url in xml_locs("/business-blog-sitemap.xml", expect_index=True):
+        path = urlsplit(url).path
+        if re.fullmatch(r"/business/[1-9][0-9]*/blog/sitemap\.xml", path) and url == ROOT + path:
+            company_sitemaps.append(path)
+        else:
+            errors.append("Company sitemap index contains an unexpected URL")
+    tenant_paths = []
+    for sitemap in bounded(company_sitemaps, "company sitemap index"):
+        base = sitemap.removesuffix("/sitemap.xml")
+        for url in xml_locs(sitemap):
+            path = urlsplit(url).path
+            if url == ROOT + path and (path == base or re.fullmatch(re.escape(base) + r"/[a-z0-9]+(?:-[a-z0-9]+)*", path)):
+                tenant_paths.append(path)
+            else:
+                errors.append("Company sitemap contains an unexpected or cross-company URL")
+    tenant_paths = bounded(tenant_paths, "tenant blog pages")
+    for path in tenant_paths:
+        inspect_html(path, expected=ROOT + path, require_ssr=True)
 
     # Diagnostic-only probes for public routing and sitemap generation.
     from pathlib import Path
@@ -194,7 +210,7 @@ def main() -> int:
             "Dedicated ServGo sitemap update timer is not active")
 
     print(f"seo_audit_ok={str(not errors).lower()} company_samples={len(company_paths)} "
-          f"article_samples={len(article_paths)}")
+          f"article_samples={len(article_paths)} tenant_blog_samples={len(tenant_paths)}")
     for error in errors:
         print("SEO_ERROR=" + error)
     return 0 if not errors else 1
