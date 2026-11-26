@@ -173,11 +173,16 @@ def main() -> None:
         staged[API]=patch_api(originals[API].decode(),reviewed[API]).encode()
         staged[EMAIL]=patch_email(originals[EMAIL].decode(),reviewed[EMAIL]).encode()
         if originals[RELAY] is not None and not _equivalent(originals[RELAY].decode(),reviewed[RELAY]):
-            # Allow only the reviewed OTP-only predecessor, not arbitrary live drift.
-            previous = subprocess.check_output(
-                ["git", "show", "82db4069b8f4a0c3ecbf7a9b9ca3fcded90865dd:" + RELAY],
-                cwd=repo, text=True, timeout=10)
-            if not _equivalent(originals[RELAY].decode(),previous):
+            # Keep the existing exact-source drift guard. Accept only the
+            # original reviewed OTP predecessor or the reviewed VPN trial
+            # mail gateway from main before the bundle extension.
+            predecessors = (
+                "82db4069b8f4a0c3ecbf7a9b9ca3fcded90865dd",
+                "74acf46a143e910003f898083337100255b4cf56",
+            )
+            if not any(_equivalent(originals[RELAY].decode(), subprocess.check_output(
+                ["git", "show", commit + ":" + RELAY],
+                cwd=repo, text=True, timeout=10)) for commit in predecessors):
                 raise RuntimeError("Unknown live MNEBYVPN relay module")
         staged[RELAY]=reviewed[RELAY].encode()
         for path in FILES:
