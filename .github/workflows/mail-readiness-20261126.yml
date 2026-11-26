@@ -1,0 +1,78 @@
+name: Mail production readiness read-only
+on:
+  push:
+    branches: [diagnostics/mail-readiness-20261126]
+    paths: ['.github/workflows/mail-readiness-20261126.yml']
+permissions:
+  contents: read
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Read-only checks on pinned production host
+        run: |
+          python - <<'PY'
+          import importlib.util, json, shlex
+          spec = importlib.util.spec_from_file_location("release", "scripts/release_yandex_mail.py")
+          release = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(release)
+          ssh = release.connect()
+          try:
+              for path in ("/health", "/owner-mail/api/company-search/providers", "/owner-mail/api/campaigns/automation"):
+                  print(path, release.check_http(ssh, path))
+              source = r'''
+          import datetime, json, os, smtplib, sqlite3, subprocess, urllib.request, urllib.parse
+          from pathlib import Path
+          out = {}
+          def check(name, fn):
+              try:
+                  out[name] = fn()
+              except Exception as e:
+                  out[name] = {"error_type": type(e).__name__}
+          def service_env():
+              pid = int(subprocess.check_output(["systemctl","show","booking-web-api.service","-p","MainPID","--value"], text=True).strip())
+              if pid <= 0:
+                  raise RuntimeError("inactive")
+              return dict(p.split("=",1) for p in Path(f"/proc/{pid}/environ").read_bytes().decode(errors="replace").split("\0") if "=" in p)
+          env = service_env()
+          out["configured"] = {k: bool(env.get(k,"").strip()) for k in ("EXA_API_KEY","STUDIO_INTERNAL_KEY","CLAUDEHUB_API_KEY","XAI_API_KEY","SERVGO_MAIL_FROM")}
+          def yandex():
+              key = env.get("STUDIO_INTERNAL_KEY","")
+              if len(key)<32: return {"configured":False}
+              base = env.get("GROWTH_INTERNAL_URL","https://growth.servgo.ru").rstrip("/")
+              req = urllib.request.Request(base+"/studio/internal/yandex-organizations/capabilities",headers={"X-Studio-Key":key})
+              with urllib.request.urlopen(req, timeout=15) as resp:
+                  return {"http":resp.status,"enabled":json.load(resp).get("enabled") is True}
+          def smtp():
+              with smtplib.SMTP("127.0.0.1",25,timeout=10) as s:
+                  code,_ = s.ehlo()
+                  return {"ehlo":code}
+          def heartbeat():
+              dbpath = Path(env.get("SERVGO_MAIL_DATA_DIR","/var/lib/servgo-owner-mail"))/"mail.sqlite"
+              with sqlite3.connect(dbpath.as_uri()+"?mode=ro",uri=True,timeout=5) as db:
+                  rows = {k:(v,t) for k,v,t in db.execute("SELECT key,value,updated_at FROM mail_setting WHERE key IN ('worker_heartbeat','automation_enabled')")}
+              beat = rows.get("worker_heartbeat")
+              age = (datetime.datetime.now(datetime.timezone.utc)-datetime.datetime.fromisoformat(beat[1])).total_seconds() if beat else None
+              return {"worker_alive":age is not None and 0<=age<120,"automation_enabled":rows.get("automation_enabled",("", ""))[0]=="on"}
+          def two_gis():
+              url = "https://2gis.ru/sochi/search/"+urllib.parse.quote("салон красоты")
+              req = urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0"})
+              with urllib.request.urlopen(req, timeout=15) as resp:
+                  data = resp.read(2000000)
+                  return {"http":resp.status,"profile_marker":b'profile' in data,"pagination_marker":b'pagination' in data}
+          for name,fn in (("yandex_capability",yandex),("smtp",smtp),("worker",heartbeat),("2gis_transport",two_gis)):
+              check(name,fn)
+          print(json.dumps(out,ensure_ascii=True))
+          '''
+              result = release.run(ssh, "python3 -c "+shlex.quote(source), timeout=90)
+              print(result)
+          finally:
+              ssh.close()
+          PY
