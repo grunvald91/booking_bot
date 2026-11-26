@@ -82,5 +82,40 @@ class SeoPublicSmokeTests(unittest.TestCase):
             verify(data.__getitem__)
 
 
+
+class SeoLiveAuditTests(unittest.TestCase):
+    def setUp(self):
+        from scripts.ops import servgo_seo_live_audit as audit
+        self.audit = audit
+        audit.errors.clear()
+        audit.DEADLINE = audit.time.monotonic() + 240
+
+    def tearDown(self):
+        self.audit.errors.clear()
+
+    def test_header_blocks_indexing_even_with_indexable_html(self):
+        from unittest.mock import patch
+        from subprocess import CompletedProcess
+        output = ("HTTP/2 200\ncontent-type: text/html; charset=utf-8\n"
+                  "X-Robots-Tag: index, follow\nX-Robots-Tag: googlebot: noindex\n\n"
+                  + HTML + "\n__HTTP_STATUS__=200")
+        with patch.object(self.audit.subprocess, "run", return_value=CompletedProcess([], 0, output)):
+            self.audit.inspect_html(f"/business/{BID}/blog/{SLUG}", expected=ARTICLE, require_ssr=True)
+        self.assertTrue(any("X-Robots-Tag" in e for e in self.audit.errors))
+
+    def test_meta_is_parsed_not_raw_word_search(self):
+        parser = self.audit.IndexingMeta()
+        parser.feed('<html><script>var x = "noindex";</script><p>noindex</p></html>')
+        self.assertFalse(parser.blocked)
+        parser.feed("<meta content='none' name='Googlebot'>")
+        self.assertTrue(parser.blocked)
+
+    def test_limit_does_not_report_complete_coverage(self):
+        from unittest.mock import patch
+        with patch.object(self.audit, "MAX_URLS", 1):
+            self.assertEqual(self.audit.bounded(["/a", "/a", "/b"], "test"), ["/a"])
+        self.assertTrue(any("coverage incomplete" in e for e in self.audit.errors))
+
+
 if __name__ == "__main__":
     unittest.main()
