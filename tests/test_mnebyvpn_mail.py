@@ -107,6 +107,28 @@ class MailRelayTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.client.post(url, content=raw, headers=headers).status_code, 400)
         self.assertEqual(len(self.sent), 1)
 
+    async def test_bundle_trial_templates_are_distinct_and_signed(self):
+        from datetime import datetime, timedelta, timezone
+        deadline = (datetime.now(timezone.utc) + timedelta(hours=23)).isoformat(
+            timespec="milliseconds").replace("+00:00", "Z")
+        url = "/api/auth/mnebyvpn/email-code"
+        payload = {"email": "test@example.org", "kind": "bundle_trial_ready", "expiresAt": deadline}
+        raw, headers = self.sign(payload, nonce="r" * 32)
+        result = self.client.post(url, content=raw, headers=headers)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertIn("«3 в 1» готов", self.sent[0]["subject"])
+        self.assertIn("VPN и Smart DNS активированы", self.sent[0]["text_body"])
+        self.assertIn("не ограничен пробными сутками", self.sent[0]["text_body"])
+        self.assertEqual(self.client.post(url, content=raw, headers=headers).status_code, 409)
+        raw, headers = self.sign({"email": "test@example.org", "kind": "bundle_trial_recovery_invite"}, nonce="v" * 32)
+        result = self.client.post(url, content=raw, headers=headers)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertIn("после активации", self.sent[1]["text_body"])
+        self.assertNotIn("активированы", self.sent[1]["text_body"])
+        raw, headers = self.sign({**payload, "url": "https://evil.example"}, nonce="w" * 32)
+        self.assertEqual(self.client.post(url, content=raw, headers=headers).status_code, 400)
+        self.assertEqual(len(self.sent), 2)
+
     async def test_nonce_cleanup_failure_does_not_block_otp_delivery(self):
         raw, headers = self.sign(
             {"email": "test@example.org", "code": "543210"}, nonce="b" * 32
