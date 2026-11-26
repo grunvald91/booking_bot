@@ -71,3 +71,20 @@ def test_yandex_job_preserves_sources_and_does_not_send_mail(monkeypatch, tmp_pa
     assert all(hit["email"] == "hello@example.org" for hit in view["hits"])
     assert all(hit["fit"] == 1 for hit in view["hits"])
     assert any("skip=25" in path for path in asked)
+
+
+def test_exa_is_optional_and_does_not_disable_other_sources(monkeypatch):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    async def cap(_path):
+        return {"enabled": True}
+    monkeypatch.setattr(m, "studio_get", cap)
+    status = asyncio.run(m.providers(None))
+    assert status["exa"] is False
+    assert status["2gis"] is True
+    assert status["yandex"] is True
+    assert m.SearchInput(niche="автосервис", city="Сочи").provider == "2gis"
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(m.start(m.SearchInput(niche="автосервис", city="Сочи", provider="exa"), None))
+    assert err.value.status_code == 503
+    monkeypatch.setenv("EXA_API_KEY", "fixture-only-not-a-real-key")
+    assert asyncio.run(m.providers(None))["exa"] is True
