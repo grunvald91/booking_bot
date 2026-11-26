@@ -11,16 +11,20 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit
+from html.parser import HTMLParser
+from email.parser import Parser
+
+MAX_URLS = 200
 
 ROOT = "https://servgo.ru"
 errors: list[str] = []
 
 
-def request(path: str) -> tuple[int, str]:
+def request(path: str, *, indexable: bool = False) -> tuple[int, str]:
     if not path.startswith("/") or path.startswith("//"):
         raise ValueError("Unsafe path")
     proc = subprocess.run(
-        ["curl", "-ksS", "--max-time", "15",
+        ["curl", "-ksS", "--include", "--max-time", "15",
          "--resolve", "servgo.ru:443:127.0.0.1",
          "-w", "\\n__HTTP_STATUS__=%{http_code}", ROOT + path],
         capture_output=True, text=True, timeout=20, check=False,
@@ -34,6 +38,18 @@ def request(path: str) -> tuple[int, str]:
     except ValueError:
         errors.append(f"{path}: invalid HTTP status")
         return 0, body
+    # curl does not follow redirects; split the single HTTPS response head.
+    head, sep, body = body.partition("\n\n")
+    if not sep or not head.startswith("HTTP/"):
+        errors.append(f"{path}: missing HTTP response headers")
+        return 0, ""
+    headers = Parser().parsestr(head.partition("\n")[2])
+    if indexable:
+        for directive in headers.get_all("X-Robots-Tag", []):
+            if re.search(r"\b(?:noindex|none)\b", directive, re.I):
+                errors.append(f"{path}: X-Robots-Tag prohibits indexing")
+        require(headers.get_content_type() == "text/html",
+                f"{path}: expected HTML content type")
     print(f"{path} HTTP={code} bytes={len(body.encode('utf-8'))}", flush=True)
     return code, body
 
@@ -73,8 +89,22 @@ def canonical(html: str) -> str | None:
     return href.group(1) if href else None
 
 
+class IndexingMeta(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.blocked = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "meta":
+            return
+        values = dict(attrs)
+        if (values.get("name") or "").lower() in {"robots", "googlebot"}:
+            if re.search(r"\b(?:noindex|none)\b", values.get("content") or "", re.I):
+                self.blocked = True
+
+
 def inspect_html(path: str, *, expected: str, require_ssr: bool = False) -> None:
-    status, body = request(path)
+    status, body = request(path, indexable=True)
     require(status == 200, f"{path}: expected HTTP 200")
     if status != 200:
         return
@@ -88,8 +118,16 @@ def inspect_html(path: str, *, expected: str, require_ssr: bool = False) -> None
         print(f"{path} route_canonical_bootstrap={'seo-route-bootstrap' in body}", flush=True)
     else:
         errors.append(f"{path}: missing server-rendered canonical")
-    require("noindex" not in re.sub(r"<script.*?</script>", "", body, flags=re.S | re.I).lower(),
-            f"{path}: noindex in original HTML outside scripts")
+    meta = IndexingMeta()
+    meta.feed(body)
+    require(not meta.blocked, f"{path}: robots/Googlebot meta prohibits indexing")
+
+
+def bounded(paths: list[str], label: str) -> list[str]:
+    unique = list(dict.fromkeys(paths))
+    require(len(unique) <= MAX_URLS,
+            f"{label}: {len(unique)} URLs exceed audit limit {MAX_URLS}; coverage incomplete")
+    return unique[:MAX_URLS]
 
 
 def main() -> int:
@@ -103,9 +141,12 @@ def main() -> int:
     company_paths = []
     for url in locs:
         path = urlsplit(url).path
-        if re.fullmatch(r"/business/[1-9][0-9]*", path):
+        if re.fullmatch(r"/business/[1-9][0-9]*", path) and url == ROOT + path:
             company_paths.append(path)
-    for path in company_paths[:3]:
+        elif path != "/" or url != ROOT + "/":
+            errors.append("Primary sitemap contains a URL outside the public route contract")
+    company_paths = bounded(company_paths, "primary sitemap")
+    for path in company_paths:
         inspect_html(path, expected=ROOT + path)
 
     inspect_html("/blog", expected=ROOT + "/blog", require_ssr=True)
@@ -113,9 +154,12 @@ def main() -> int:
     article_paths = []
     for url in blog_locs:
         path = urlsplit(url).path
-        if re.fullmatch(r"/blog/[a-z0-9-]+", path):
+        if re.fullmatch(r"/blog/[a-z0-9-]+", path) and url == ROOT + path:
             article_paths.append(path)
-    for path in article_paths[:3]:
+        elif path != "/blog" or url != ROOT + "/blog":
+            errors.append("Blog sitemap contains a URL outside the public route contract")
+    article_paths = bounded(article_paths, "blog sitemap")
+    for path in article_paths:
         inspect_html(path, expected=ROOT + path, require_ssr=True)
 
     # Company blog index is advertised by robots.txt; it must be served as XML.
@@ -149,8 +193,8 @@ def main() -> int:
     require(timer.returncode == 0 and timer_state == "active",
             "Dedicated ServGo sitemap update timer is not active")
 
-    print(f"seo_audit_ok={str(not errors).lower()} company_samples={min(len(company_paths), 3)} "
-          f"article_samples={min(len(article_paths), 3)}")
+    print(f"seo_audit_ok={str(not errors).lower()} company_samples={len(company_paths)} "
+          f"article_samples={len(article_paths)}")
     for error in errors:
         print("SEO_ERROR=" + error)
     return 0 if not errors else 1
