@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from urllib.parse import urlsplit
 
 SITE = Path("/etc/nginx/sites-enabled/webapp")
@@ -31,7 +32,14 @@ SNIPPET = """
     }
     location ~ ^/business/([0-9]+)/blog(?:/|$) {
         limit_except GET HEAD { deny all; }
-        rewrite ^/business/([0-9]+)/blog(.*)$ /api/seo-pages/business/$1/blog$2 last;
+        rewrite ^/business/([0-9]+)/blog(.*)$ /seo-pages/business/$1/blog$2 break;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_intercept_errors off;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
     }
     # SERVGO_COMPANY_SEO_SSR_END
 
@@ -46,7 +54,7 @@ def run(*args: str) -> subprocess.CompletedProcess[str]:
 def request(path: str) -> tuple[int, str, str]:
     if not path.startswith("/") or path.startswith("//"):
         raise ValueError("Untrusted route")
-    cp = run("curl", "-ksS", "--max-time", "12", "--resolve",
+    cp = run("curl", "-ksS", "--noproxy", "*", "--max-time", "12", "--resolve",
              "servgo.ru:443:127.0.0.1", "-w",
              "\\n__STATUS__=%{http_code}:%{content_type}",
              "https://servgo.ru" + path)
@@ -91,8 +99,9 @@ def smoke() -> None:
         public = "/business/99999999/" + suffix
         backend_code, _, _ = request(internal)
         public_code, _, public_html = request(public)
-        if backend_code != public_code or public_code != 404 or "seo-route-bootstrap" in public_html:
-            raise RuntimeError("SSR path failed: " + public)
+        spa = "seo-route-bootstrap" in public_html
+        if backend_code != public_code or public_code != 404 or spa:
+            raise RuntimeError(f"SSR path failed: {public} upstream={backend_code} public={public_code} spa={spa}")
         print(f"public_company_seo_check={public} status={public_code}", flush=True)
     for path, root in (("/sitemap.xml", "<urlset"),
                        ("/business-blog-sitemap.xml", "<sitemapindex")):
@@ -104,6 +113,20 @@ def smoke() -> None:
         if code != 200:
             raise RuntimeError("Existing public page affected: " + path)
     print("company_seo_nginx_smoke=passed", flush=True)
+
+
+def smoke_after_reload() -> None:
+    # Reload signals the master; new workers may not be accepting yet.
+    # Retry the complete smoke, never accept a mismatched final result.
+    for attempt in range(1, 7):
+        try:
+            smoke()
+            return
+        except RuntimeError as exc:
+            print(f"company_seo_smoke_attempt={attempt} error={exc}", flush=True)
+            if attempt == 6:
+                raise
+            time.sleep(2)
 
 
 def apply() -> None:
@@ -137,7 +160,7 @@ def apply() -> None:
             raise RuntimeError("nginx -t failed after SEO location update")
         if run("systemctl", "reload", "nginx").returncode:
             raise RuntimeError("nginx reload failed")
-        smoke()
+        smoke_after_reload()
     except BaseException:
         if replaced:
             shutil.copy2(backup, SITE)
