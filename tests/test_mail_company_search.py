@@ -557,3 +557,39 @@ def test_missing_email_is_kept_without_paying_for_ai(env):
     assert no_email["fit"] is None
     assert "Email не найден" in no_email["fit_reason"]
     assert len(env.prompts) == 2
+
+
+@pytest.mark.parametrize("verdicts,expected_status,expected_calls", [
+    ([{"critical": False}], "review", 2),
+    ([{"critical": True, "reason": "Ошибка"}, {"critical": False}], "review", 4),
+    ([{"critical": True, "reason": "Ошибка"}, {"critical": True, "reason": "Осталась ошибка"}], "draft_error", 4),
+    ([{"critical": "false"}], "draft_error", 2),
+    ([{"critical": True, "reason": ""}], "draft_error", 2),
+    ([{"critical": True, "reason": "Ошибка"}, {}], "draft_error", 4),
+])
+def test_campaign_critic_rechecks_and_fails_closed(env, monkeypatch, verdicts, expected_status, expected_calls):
+    from web.api.routes import mail_campaign_research as research
+    from web.api.routes.mail_campaign_api import RecipientInput, RecipientList, add_recipients
+    from web.api.routes.mail_campaign_review import prepare
+
+    cid = create_campaign(CampaignInput(name="Тест критика"), None)["id"]
+    add_recipients(cid, RecipientList(recipients=[RecipientInput(email="test@example.org")]), None)
+    assert prepare(cid, None)["queued"] == 1
+    draft = {"subject": "Тестовое предложение", "body": "Это тестовый текст для проверки черновика без отправки."}
+    sequence = [draft, verdicts[0]]
+    if len(verdicts) == 2:
+        sequence += [dict(draft, subject="Исправленное предложение"), verdicts[1]]
+    calls = []
+    async def fake_hub(prompt):
+        calls.append(prompt)
+        return sequence[len(calls)-1]
+    monkeypatch.setattr(research, "hub", fake_hub)
+    monkeypatch.setattr(research, "research_public_site", lambda url: {})
+    assert asyncio.run(research.prepare_one())
+    with owner_mail.db_open() as db:
+        row = db.execute("SELECT status,subject FROM campaign_recipient WHERE campaign_id=?", (cid,)).fetchone()
+        assert row["status"] == expected_status
+        if expected_status == "review" and expected_calls == 4:
+            assert row["subject"] == "Исправленное предложение"
+            assert "Исправленное предложение" in calls[-1]
+    assert len(calls) == expected_calls
