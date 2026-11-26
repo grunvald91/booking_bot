@@ -51,6 +51,20 @@ jobs:
               req = urllib.request.Request(base+"/studio/internal/yandex-organizations/capabilities",headers={"X-Studio-Key":key})
               with urllib.request.urlopen(req, timeout=15) as resp:
                   return {"http":resp.status,"enabled":json.load(resp).get("enabled") is True}
+          def navigation():
+              req = urllib.request.Request("https://servgo.ru/studio/assets/servgo-organisations.js?v=3",headers={"Cache-Control":"no-cache"})
+              with urllib.request.urlopen(req,timeout=15) as resp:
+                  raw = resp.read(1000000)
+                  return {"http":resp.status,"owner_mail_gate":b"revealOwnerMail" in raw and b"/api/owner-mail/permission" in raw}
+          def yandex_sample():
+              key = env.get("STUDIO_INTERNAL_KEY","")
+              if len(key)<32: return {"configured":False}
+              base = env.get("GROWTH_INTERNAL_URL","https://growth.servgo.ru").rstrip("/")
+              query = urllib.parse.urlencode({"query":"салон красоты","city":"Сочи","skip":0})
+              req = urllib.request.Request(base+"/studio/internal/yandex-organizations/search?"+query,headers={"X-Studio-Key":key})
+              with urllib.request.urlopen(req,timeout=20) as resp:
+                  cards = json.load(resp).get("organizations")
+                  return {"http":resp.status,"count":len(cards) if isinstance(cards,list) else None,"with_website":sum(bool(c.get("website")) for c in cards if isinstance(c,dict)) if isinstance(cards,list) else None}
           def smtp():
               with smtplib.SMTP("127.0.0.1",25,timeout=10) as s:
                   code,_ = s.ehlo()
@@ -68,7 +82,7 @@ jobs:
               with urllib.request.urlopen(req, timeout=15) as resp:
                   data = resp.read(2000000)
                   return {"http":resp.status,"profile_marker":b'profile' in data,"pagination_marker":b'pagination' in data}
-          for name,fn in (("yandex_capability",yandex),("smtp",smtp),("worker",heartbeat),("2gis_transport",two_gis)):
+          for name,fn in (("yandex_capability",yandex),("navigation",navigation),("yandex_sample",yandex_sample),("smtp",smtp),("worker",heartbeat),("2gis_transport",two_gis)):
               check(name,fn)
           print(json.dumps(out,ensure_ascii=True))
           '''
