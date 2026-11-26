@@ -60,6 +60,28 @@ def valid_draft(data) -> tuple[str, str]:
     return subject, body
 
 
+class CriticBlocked(ValueError):
+    """No approval when a critic verdict is invalid or still critical."""
+
+
+async def critique(context: str, draft: dict) -> str:
+    feedback = await hub(
+        "Независимый критик. Найди только критические фактические ошибки, "
+        "ложную персонализацию и неподтверждённые обещания. "
+        "Не переписывай хороший текст ради стиля. "
+        'Ответ JSON {"critical":true/false,"reason":"..."}:\n'
+        + context + "\nТекст:\n" + json.dumps(draft, ensure_ascii=False)
+    )
+    if not isinstance(feedback, dict) or type(feedback.get("critical")) is not bool:
+        raise CriticBlocked("Invalid critic verdict")
+    if not feedback["critical"]:
+        return ""
+    reason = feedback.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        raise CriticBlocked("Critical verdict without reason")
+    return reason.strip()[:350]
+
+
 async def prepare_one() -> bool:
     row = reserve_for_research()
     if not row:
@@ -88,14 +110,7 @@ async def prepare_one() -> bool:
         )
         subject, body = valid_draft(data)
 
-        feedback = await hub(
-            "Независимый критик. Найди только критические фактические ошибки, "
-            "ложную персонализацию и неподтверждённые обещания. "
-            "Не переписывай хороший текст ради стиля. "
-            'Ответ JSON {"critical":true/false,"reason":"..."}:\n'
-            + context + "\nТекст:\n" + json.dumps(data, ensure_ascii=False)
-        )
-        reason = str(feedback.get("reason", ""))[:350] if feedback.get("critical") is True else ""
+        reason = await critique(context, data)
         if reason:
             corrected = await hub(
                 "Перепиши лишь фразы с действительно критической ошибкой, "
@@ -106,6 +121,8 @@ async def prepare_one() -> bool:
                 + "\nКритика:\n" + reason
             )
             subject, body = valid_draft(corrected)
+            if await critique(context, corrected):
+                raise CriticBlocked("Critical issue remains after one correction")
 
         with db_open() as db:
             initialize(db)
