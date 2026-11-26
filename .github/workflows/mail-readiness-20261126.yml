@@ -1,12 +1,13 @@
 name: Mail production readiness read-only
 on:
-  push:
-    branches: [diagnostics/mail-readiness-20261126]
+  pull_request:
+    branches: [main]
     paths: ['.github/workflows/mail-readiness-20261126.yml']
 permissions:
   contents: read
 jobs:
   readiness:
+    if: github.head_ref == 'diagnostics/mail-readiness-20261126' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
