@@ -30,7 +30,7 @@ test('PWA Growth entry issues fresh ticket, not an unauthenticated /studio redir
   const entry = readFileSync(new URL('components/StudioEntry.tsx', root), 'utf8')
   const screen = readFileSync(new URL('pages/client/GrowthWorkspacePage.tsx', root), 'utf8')
   assert.match(app, /path="\/workspace\/growth" element=\{<AdminRoute/)
-  assert.match(screen, /<StudioEntry showUnavailable/)
+  assert.match(screen, /<Navigate to="\/workspace\/studio-entry" replace/)
   assert.match(screen, /<AdminShell title="AI Growth OS"/)
   assert.doesNotMatch(screen, /<ClientShell/)
   assert.match(entry, /api\.studioTicket\(id\)/)
@@ -80,4 +80,16 @@ test('admin mail item requires server-confirmed platform owner permission', () =
   assert.match(admin, /to: '\/workspace\/mail', label: 'Почта ServGo'/)
   assert.match(admin, /MORE\.filter\(item => mailAllowed \|\| item\.to !== '\/workspace\/mail'\)/)
   assert.doesNotMatch(admin, /localStorage\.getItem\('userRole'\).*mailAllowed/)
+})
+
+
+test('general Studio entry never depends on a booking company', () => {
+  const entry = readFileSync(new URL('pages/client/StudioSignInPage.tsx', root), 'utf8')
+  const account = readFileSync(new URL('pages/client/AccountPage.tsx', root), 'utf8')
+  const admin = readFileSync(new URL('components/AdminShell.tsx', root), 'utf8')
+  assert.match(entry, /api\.studioAccountTicket\(\)/)
+  assert.match(entry, /isTrustedStudioTicketUrl\(url\)/)
+  assert.doesNotMatch(entry, /StudioEntry|studioBusinesses|businessId/)
+  assert.match(account, /to="\/workspace\/studio-entry"/)
+  assert.match(admin, /to="\/workspace\/studio-entry"/)
 })

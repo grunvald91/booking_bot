@@ -233,6 +233,22 @@ class StudioSsoTest(unittest.IsolatedAsyncioTestCase):
             self.current = who
             self.assertEqual(self.client.get('/studio/businesses').json(), [])
 
+    async def test_studio_account_ticket_does_not_require_booking_access(self):
+        self.current = 'stranger'
+        response = self.client.post('/studio/account-ticket')
+        self.assertEqual(response.status_code, 200)
+        claims = read_ticket(response.json()['url'])
+        self.assertEqual((claims['uid'], claims['biz'], claims['role']),
+                         (self.u['stranger'], 0, 'account'))
+        self.assertIn('sg_identity=', response.headers.get('set-cookie', ''))
+        endpoint = '/internal/studio/account'
+        params = {'user_id': self.u['stranger']}
+        self.assertEqual(self.client.get(endpoint, params=params).status_code, 403)
+        headers = {'X-Studio-Key': KEY}
+        self.assertEqual(self.client.get(endpoint, params=params, headers=headers).json(), {'allowed': True})
+        self.assertEqual(self.client.get(endpoint, params={'user_id': 999999}, headers=headers).json(),
+                         {'allowed': False})
+
     async def test_internal_business_list_is_server_only_and_rechecks_roles(self):
         endpoint = '/internal/studio/businesses'
         params = {'user_id': self.u['owner']}

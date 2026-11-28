@@ -93,3 +93,33 @@ def test_api_readiness_fails_closed_after_bounded_attempts(monkeypatch):
     with pytest.raises(RuntimeError, match="did not become healthy"):
         deploy.wait_for_api_health(object(), attempts=3, delay_seconds=0.25)
     assert sleeps == [0.25, 0.25]
+
+
+def test_account_routes_patch_is_additive_idempotent_and_refuses_drift():
+    target = (Path(__file__).resolve().parents[1] / "web/api/routes/studio_sso.py").read_text()
+    tree = ast.parse(target)
+    lines = target.splitlines(keepends=True)
+    nodes = [n for n in tree.body if isinstance(n, ast.AsyncFunctionDef)
+             and n.name in deploy.ACCOUNT_ROUTES]
+    assert len(nodes) == 2
+    for node in reversed(nodes):
+        del lines[node.decorator_list[0].lineno - 1:node.end_lineno]
+    old = "".join(lines)
+    patched, changed = patch(old, target)
+    assert changed
+    assert ast.dump(ast.parse(patched)) == ast.dump(tree)
+    assert patch(patched, target) == (patched, False)
+    with pytest.raises(ValueError):
+        patch(old + "\ndef unexpected():\n    return 42\n", target)
+    with pytest.raises(ValueError):
+        patch(patched.replace('role="account"', 'role="owner"'), target)
+
+
+def test_account_routes_probe_refuses_missing_or_unprotected_endpoints(monkeypatch):
+    target = (Path(__file__).resolve().parents[1] / "web/api/routes/studio_sso.py").read_text()
+    values = iter(["401", "403"])
+    monkeypatch.setattr(deploy, "run", lambda *args, **kwargs: next(values))
+    deploy.verify_account_routes(object(), target)
+    monkeypatch.setattr(deploy, "run", lambda *args, **kwargs: "404")
+    with pytest.raises(RuntimeError):
+        deploy.verify_account_routes(object(), target)

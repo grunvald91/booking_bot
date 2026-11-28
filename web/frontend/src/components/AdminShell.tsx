@@ -9,8 +9,6 @@ import {
 } from 'lucide-react'
 import { CreateBusinessSheet } from './CreateBusinessSheet'
 import { useTheme } from '../hooks/useTheme'
-import { useAdminBusiness } from '../hooks/useAdminBusiness'
-import { useOpenStudio } from '../hooks/useOpenStudio'
 
 // Нижняя панель: пять пунктов, которые нужны каждый день. Всё остальное —
 // в «Ещё», чтобы любой раздел был доступен с телефона.
@@ -121,8 +119,6 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout, mailAllowed = fal
   const [createOpen, setCreateOpen] = useState(false)
   const moreActive = MORE.some(item => item.to === pathname) || pathname === '/workspace/growth'
   const handleLogout = onLogout
-  const { selectedId } = useAdminBusiness()
-  const { open: openStudio, busy: studioBusy, error: studioError } = useOpenStudio(selectedId)
   return (
     <>
         <nav className="ds-bottomnav">
@@ -140,10 +136,10 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout, mailAllowed = fal
               <span>{label}</span>
             </Link>
           ))}
-          <button type="button" className="ds-bn ds-desk-only" onClick={openStudio} disabled={studioBusy}>
+          <Link to="/workspace/studio-entry" className="ds-bn ds-desk-only">
             <Sparkles size={21} />
             <span>AI Growth OS</span>
-          </button>
+          </Link>
           <button type="button" className="ds-bn ds-desk-only" onClick={() => setCreateOpen(true)}>
             <PlusCircle size={21} />
             <span>Новый бизнес</span>
@@ -169,9 +165,9 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout, mailAllowed = fal
                     <Icon size={20} /><span>{label}</span><ChevronRight size={17} className="ds-more-chev" />
                   </Link>
                 ))}
-                <button type="button" className="ds-more-item" onClick={openStudio} disabled={studioBusy}>
+                <Link to="/workspace/studio-entry" className="ds-more-item" onClick={() => setMoreOpen(false)}>
                   <Sparkles size={20} /><span>Маркетинг — AI Growth OS</span><ChevronRight size={17} className="ds-more-chev" />
-                </button>
+                </Link>
                 <button type="button" className="ds-more-item" onClick={() => { setMoreOpen(false); setCreateOpen(true) }}>
                   <PlusCircle size={20} /><span>Новый бизнес</span><ChevronRight size={17} className="ds-more-chev" />
                 </button>
@@ -186,12 +182,6 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout, mailAllowed = fal
             </div>
           </div>
         )}
-        {studioError && <div role="alert" style={{
-          position: 'fixed', zIndex: 120, left: 16, right: 16, bottom: 88,
-          margin: '0 auto', maxWidth: 480, border: '1px solid var(--s-line)',
-          borderRadius: 14, padding: 12, background: 'var(--s-surface)',
-          color: 'var(--s-danger)', boxShadow: 'var(--sh-pop)', fontSize: 13,
-        }}>{studioError}</div>}
         {createOpen && <CreateBusinessSheet onClose={() => setCreateOpen(false)} />}
     </>
   )

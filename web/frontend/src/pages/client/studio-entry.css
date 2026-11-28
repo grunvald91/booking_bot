@@ -1,118 +1,64 @@
-/* Shared ServGo session, dedicated responsive company selection. */
+/* Direct Studio account entry: a compact status/retry view, not a second company picker. */
 .sg-studio-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
   width: 100%;
-  max-width: 1050px;
-  margin: 12px auto 24px;
-  gap: 18px;
+  max-width: 460px;
+  margin: 24px auto;
 }
-.sg-studio-intro { padding: 18px 0 4px; }
+.sg-studio-businesses {
+  width: 100%;
+  min-width: 0;
+  padding: clamp(18px, 4vw, 28px);
+  border: 1px solid var(--s-line);
+  border-radius: 18px;
+  background: var(--s-surface);
+  color: var(--s-text);
+  box-sizing: border-box;
+}
 .sg-studio-eyebrow {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: .1em;
   color: var(--s-accent);
 }
-.sg-studio-intro h1 {
-  margin: 16px 0 0;
-  max-width: 470px;
-  color: var(--s-text);
-  font-size: clamp(26px, 4vw, 34px);
-  font-weight: 650;
-  line-height: 1.14;
-  letter-spacing: -.045em;
-}
-.sg-studio-intro > p {
-  margin: 14px 0 0;
-  max-width: 480px;
-  font-size: 14px;
-  line-height: 1.55;
-  color: var(--s-muted);
-}
-.sg-studio-intro-mark { display: none; }
-.sg-studio-businesses {
-  width: 100%;
-  min-width: 0;
-  padding: 20px;
-  border: 1px solid var(--s-line);
-  border-radius: 18px;
-  background: var(--s-surface);
-}
-.sg-studio-businesses h2 {
-  font-size: 21px;
+.sg-studio-businesses h1 {
+  margin: 12px 0;
+  font-size: clamp(22px, 4vw, 28px);
   font-weight: 650;
   line-height: 1.2;
   color: var(--s-text);
 }
-.sg-studio-hint {
-  margin: 10px 0 18px;
+.sg-studio-businesses p {
+  margin: 12px 0;
   color: var(--s-muted);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
 }
-.sg-studio-businesses .bf-account-actions { margin: 0 0 16px !important; }
-.sg-studio-businesses .bf-account-row { min-height: 54px; font-size: 14px; }
+.sg-studio-businesses [role="alert"] { color: var(--s-danger); }
+.sg-studio-businesses .bf-account-row {
+  min-height: 48px;
+  width: 100%;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
 .sg-studio-account-link {
   display: inline-flex;
   align-items: center;
-  min-height: 40px;
-  padding: 8px 12px;
-  border: 1px solid var(--s-line);
-  border-radius: 10px;
+  min-height: 44px;
   color: var(--s-text);
-  font-size: 13px;
-  font-weight: 550;
+  font-size: 14px;
   text-decoration: none;
 }
-.sg-studio-account-link:hover { background: var(--s-surface-2); }
-.sg-studio-account-link:focus-visible { outline: 2px solid var(--s-accent); outline-offset: 3px; }
+.sg-studio-account-link:focus-visible {
+  outline: 2px solid var(--s-accent);
+  outline-offset: 3px;
+}
 @media (min-width: 1024px) {
-  .bf-screen--studio-entry { --bf-w: 1050px; background: var(--s-surface); }
   .bf-screen--studio-entry .bf-inner {
     justify-content: center;
     padding-top: 32px;
     padding-bottom: 32px;
   }
-  .sg-studio-layout {
-    grid-template-columns: minmax(0, .96fr) minmax(400px, 1.04fr);
-    align-items: stretch;
-    gap: 24px;
-    margin: auto;
-    min-height: min(540px, calc(100vh - 150px));
-  }
-  .sg-studio-intro {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    position: relative;
-    overflow: hidden;
-    padding: clamp(32px, 4vw, 52px);
-    border-radius: 24px;
-    background: linear-gradient(145deg, #112843, #1c3f70);
-    color: #fff;
-  }
-  .sg-studio-eyebrow { color: #9dbfff; }
-  .sg-studio-intro h1 { color: #fff; font-size: clamp(34px, 3.2vw, 46px); }
-  .sg-studio-intro > p { color: #d0def2; font-size: 16px; }
-  .sg-studio-intro-mark {
-    display: block;
-    margin-top: 42px;
-    color: #abc8ff;
-    opacity: .76;
-  }
-  .sg-studio-businesses {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    padding: clamp(28px, 3.4vw, 46px);
-    border-radius: 24px;
-    box-shadow: 0 16px 58px rgba(17,34,57,.055);
-  }
-  .sg-studio-businesses h2 { font-size: 28px; }
-  .sg-studio-hint { font-size: 14px; }
-  .sg-studio-account-link { min-height: 44px; font-size: 14px; }
 }
