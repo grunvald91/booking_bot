@@ -23,6 +23,7 @@ on:
       - 'bot/**'
       - 'webapp/niches/**'
       - 'web/frontend/**'
+      - 'scripts/deploy_studio_seo_prerequisite.py'
   workflow_dispatch:
     inputs:
       files:
@@ -85,13 +86,13 @@ jobs:
           if [ -n "${MANUAL// /}" ]; then
             CHANGED=$(printf '%s\n' $MANUAL)
           elif [ -n "$BEFORE" ]; then
-            CHANGED=$(git diff --name-only --diff-filter=ACMR "$BEFORE" "$AFTER" -- 'webapp/**' 'web/frontend/**' 'bot/**' || true)
+            CHANGED=$(git diff --name-only --diff-filter=ACMR "$BEFORE" "$AFTER" -- 'webapp/**' 'web/frontend/**' 'bot/**' 'scripts/deploy_studio_seo_prerequisite.py' || true)
           else
-            CHANGED=$(git ls-files 'webapp/**' 'web/frontend/**' 'bot/**')
+            CHANGED=$(git ls-files 'webapp/**' 'web/frontend/**' 'bot/**' 'scripts/deploy_studio_seo_prerequisite.py')
           fi
 
           WEBAPP_FILES=$(printf '%s\n' "$CHANGED" | grep -E '^(webapp/|bot/)' || true)
-          if printf '%s\n' "$CHANGED" | grep -q '^web/frontend/'; then
+          if printf '%s\n' "$CHANGED" | grep -Eq '^(web/frontend/|scripts/deploy_studio_seo_prerequisite\.py$)'; then
             FRONTEND_CHANGED=1
           else
             FRONTEND_CHANGED=0
@@ -179,6 +180,7 @@ jobs:
           # reviewed additive SSO patch here first, so frontend does not race
           # the independently triggered canonical backend workflow.
           python -m scripts.deploy_studio_canonical_sso
+          python -m scripts.deploy_studio_seo_prerequisite
           python scripts/deploy_servgo_frontend_atomic.py
 
       - name: Restart service and verify
