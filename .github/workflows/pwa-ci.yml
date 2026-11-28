@@ -5,6 +5,9 @@ on:
     paths:
       - 'web/frontend/**'
       - 'scripts/check_servgo_login_viewports.py'
+      - 'scripts/deploy_studio_seo_prerequisite.py'
+      - 'tests/test_studio_seo_prerequisite.py'
+      - '.github/workflows/deploy.yml'
       - 'web/api/**'
       - 'deploy/nginx/**'
       - 'scripts/ops/servgo_company_blog_nginx_release.py'
@@ -166,7 +169,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python tests/test_studio_sso.py
-          python -m pytest -q tests/test_studio_canonical_sso_release.py
+          python -m pytest -q tests/test_studio_canonical_sso_release.py tests/test_studio_seo_prerequisite.py
           python -m unittest discover -s tests -p test_studio_identity.py -v
           python -m unittest discover -s tests -p test_studio_auth_login.py -v
           python -m pytest -q tests/test_vk_auth.py tests/test_yandex_auth.py tests/test_email_merge_regression.py
